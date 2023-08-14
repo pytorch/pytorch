@@ -38,7 +38,6 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
-    _get_default_comm_hook,
     _init_buffer_state,
     _init_core_state,
     _init_device_handle,
@@ -177,7 +176,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         same FSDP unit. If enhanced shared parameter support is needed for your
         use case, please ping https://github.com/pytorch/pytorch/issues/77724
 
-    .. note:
+    .. warning::
+        FSDP has some constraints on freezing parameters (i.e. setting
+        ``param.requires_grad=False``). For ``use_orig_params=False``, each
+        FSDP instance must manage parameters that are all frozen or all
+        non-frozen. For ``use_orig_params=True``, FSDP supports mixing frozen
+        and non-frozen, but we recommend not doing so since then the gradient
+        memory usage will be higher than expected (namely, equivalent to not
+        freezing those parameters). This means that ideally, frozen parameters
+        should be isolated into their own ``nn.Module`` s and wrapped
+        separately with FSDP.
+
+    .. note::
         Attempting to run the forward pass of a submodule that is contained in an
         FSDP instance is not supported and will result in errors. This is because the
         submodule's parameters will be sharded, but it itself is not an FSDP instance,
@@ -423,7 +433,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
-            fsdp_kwargs = {
+            root_kwargs = {
                 "process_group": process_group,
                 "sharding_strategy": sharding_strategy,
                 "cpu_offload": cpu_offload,
@@ -441,14 +451,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
-                fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
+                root_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
             _auto_wrap(
                 module,
                 auto_wrap_policy,
                 self._ignored_modules,
                 self._ignored_params,
-                fsdp_kwargs,
+                root_kwargs,
                 FullyShardedDataParallel,
             )
 
@@ -1736,7 +1746,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Rank0 only and CPU only can be specified via :meth:`state_dict_type` to
         avoid OOM.
 
-        For sharded optimizer state_dict, all states are unflattend but sharded.
+        For sharded optimizer state_dict, all states are unflattened but sharded.
         CPU only can be specified via :meth:`state_dict_type` to further save
         memory.
 
@@ -1942,16 +1952,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise AssertionError(
                 "register_comm_hook can only be called on a root instance."
             )
-        for submodule in traversal_utils._get_fsdp_states(self):
-            assert (
-                not submodule._hook_registered
-            ), "communication hook can be only registered once"
-            submodule._hook_registered = True
-            assert submodule._comm_hook == _get_default_comm_hook(
-                self.sharding_strategy
-            ), f"communication hook should be default, but it is {submodule._comm_hook.__name__} instead"
-            submodule._comm_hook_state = state
-            submodule._comm_hook = hook
+        for fsdp_state in traversal_utils._get_fsdp_states(self):
+            if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                raise AssertionError(
+                    f"Communication hook is not supported for hybrid strategies: {fsdp_state.sharding_strategy}"
+                )
+            if fsdp_state._comm_hook is not None:
+                raise AssertionError("A communication hook is already registered")
+            if not callable(hook):
+                raise ValueError(
+                    f"The communication hook must be callable but got {hook}"
+                )
+            fsdp_state._comm_hook = hook
+            fsdp_state._comm_hook_state = state
 
 
 def _get_grad_norm(
