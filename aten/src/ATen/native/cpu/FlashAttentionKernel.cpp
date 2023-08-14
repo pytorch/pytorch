@@ -120,11 +120,15 @@ void cpu_flash_attention(
   const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
 
-  at::Tensor qk = at::empty({num_thread, qSplitSize, kvSplitSize}, query.options().dtype(accumulate_dtype));
-  at::Tensor qk_reduced = at::empty({num_thread, qSplitSize, is_reduced_type ? kvSplitSize : 0}, query.options());
-  at::Tensor qk_max = at::empty({num_thread, qSplitSize}, query.options().dtype(accumulate_dtype));
-  at::Tensor qk_sum = at::empty({num_thread, qSplitSize}, query.options().dtype(accumulate_dtype));
-  at::Tensor dst = at::empty({num_thread, qSplitSize, headSize}, query.options().dtype(accumulate_dtype));
+  // allocate per thread temp buf (accumulate type)
+  int64_t size_per_thread =
+      /* qk     */ qSplitSize * kvSplitSize +
+      /* qk_max */ qSplitSize +
+      /* qk_sum */ qSplitSize +
+      /* dst    */ qSplitSize * headSize;
+
+  at::Tensor buf = at::empty({num_thread, size_per_thread}, query.options().dtype(accumulate_dtype));
+  at::Tensor buf_reduced = at::empty({num_thread, qSplitSize, is_reduced_type ? kvSplitSize : 0}, query.options());
 
   // Data ptrs
   scalar_t* q_data = query.data_ptr<scalar_t>();
@@ -132,24 +136,28 @@ void cpu_flash_attention(
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = output.data_ptr<scalar_t>();
   accum_t* lse_data = is_training ? logsumexp.data_ptr<accum_t>() : nullptr;
-  accum_t* qk_data = qk.data_ptr<accum_t>();
-  scalar_t* qk_reduced_data = is_reduced_type ? qk_reduced.data_ptr<scalar_t>() : nullptr;
-  accum_t* qk_max_data = qk_max.data_ptr<accum_t>();
-  accum_t* qk_sum_data = qk_sum.data_ptr<accum_t>();
-  accum_t* dst_data = dst.data_ptr<accum_t>();
+  accum_t* buf_data = buf.data_ptr<accum_t>();
+  scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
     data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
+    accum_t* buf_ptr = buf_data + ompIdx * size_per_thread;
+    accum_t* qk_data = buf_ptr;
+    accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
+    accum_t* qk_sum_data = qk_max_data + qSplitSize;
+    accum_t* dst_data = qk_sum_data + qSplitSize;
+    scalar_t* qk_reduced_data = is_reduced_type ? buf_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
+
     for (const auto z : c10::irange(begin, end)) {
       (void)z; // Suppress unused variable
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
-      fill_stub(qk_max_data + ompIdx * qSplitSize,
+      fill_stub(qk_max_data,
           -std::numeric_limits<accum_t>::infinity(), qBlockSize);
-      fill_stub(qk_sum_data + ompIdx * qSplitSize,
+      fill_stub(qk_sum_data,
           static_cast<accum_t>(0), qBlockSize);
       int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
@@ -169,13 +177,13 @@ void cpu_flash_attention(
                 m * qStrideM,
             qStrideM,
             static_cast<accum_t>(0),
-            qk_data + ompIdx * qSplitSize * kvSplitSize,
+            qk_data,
             kvBlockSize);
         // Apply causal mask, fill unused with -inf
         if (is_causal && num_keys - n <= kvSplitSize) {
           for (const auto row : c10::irange(qBlockSize)) {
             int64_t last_col = m + row - n;
-            accum_t* row_ptr = qk_data + ompIdx * qSplitSize * kvSplitSize + row * kvBlockSize;
+            accum_t* row_ptr = qk_data + row * kvBlockSize;
             fill_stub(row_ptr + last_col + 1,
                 -std::numeric_limits<accum_t>::infinity(),
                 kvBlockSize - last_col - 1);
@@ -183,40 +191,35 @@ void cpu_flash_attention(
         }
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, sum_old = 0, exp_tmp = 0;
-        accum_t* qk_block = qk_data + ompIdx * qSplitSize * kvSplitSize;
-        scalar_t* qk_reduced_block = is_reduced_type ? qk_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
-        accum_t* dst_block = dst_data + ompIdx * qSplitSize * headSize;
-        accum_t* max_block = qk_max_data + ompIdx * qSplitSize;
-        accum_t* sum_block = qk_sum_data + ompIdx * qSplitSize;
         for (int64_t row = 0; row < qBlockSize; ++row) {
-          sum_old = sum_block[row];
+          sum_old = qk_sum_data[row];
           // max per row
           tmp_max = vec::reduce_all<accum_t>(
             [](Vec& x, Vec& y) { return vec::maximum(x, y); },
-            qk_block + row * kvBlockSize, kvBlockSize);
-          tmp_max = max_block[row] > tmp_max ? max_block[row] : tmp_max;
+            qk_data + row * kvBlockSize, kvBlockSize);
+          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
           // qk <- exp(qk - max)
           vec::map<accum_t>(
             [tmp_max](Vec x) { return (x - Vec(tmp_max)).exp(); },
-            qk_block + row * kvBlockSize, qk_block + row * kvBlockSize, kvBlockSize);
+            qk_data + row * kvBlockSize, qk_data + row * kvBlockSize, kvBlockSize);
           // sum per row
           tmp_sum = vec::reduce_all<accum_t>(
-            [](Vec& x, Vec& y) { return x + y; },  qk_block + row * kvBlockSize, kvBlockSize);
+            [](Vec& x, Vec& y) { return x + y; },  qk_data + row * kvBlockSize, kvBlockSize);
           // exp_tmp <- exp(max[row] - max)
-          exp_tmp = std::exp(max_block[row] - tmp_max);
+          exp_tmp = std::exp(qk_max_data[row] - tmp_max);
           // sum[row] <- sum + exp_tmp * sum[row]
-          sum_block[row] = tmp_sum + exp_tmp * sum_block[row];
+          qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
           // max[row] <- max
-          max_block[row] = tmp_max;
+          qk_max_data[row] = tmp_max;
           // qk <- qk / sum[row]
-          accum_t sum_new = sum_block[row];
+          accum_t sum_new = qk_sum_data[row];
           vec::map<accum_t>(
             [sum_new](Vec x) { return x / Vec(sum_new); },
-            qk_block + row * kvBlockSize, qk_block + row * kvBlockSize, kvBlockSize);
+            qk_data + row * kvBlockSize, qk_data + row * kvBlockSize, kvBlockSize);
           if (is_reduced_type) {
             convert<accum_t, scalar_t>(
-              qk_block + row * kvBlockSize,
-              qk_reduced_block + row * kvBlockSize,
+              qk_data + row * kvBlockSize,
+              qk_reduced_data + row * kvBlockSize,
               kvBlockSize);
           }
           // dst <- dst * sum_old / sum_new * exp_tmp
@@ -225,7 +228,7 @@ void cpu_flash_attention(
             vec::map<accum_t>(
               [sum_cor, exp_tmp](Vec x)
               { return x * Vec(sum_cor) * Vec(exp_tmp); },
-              dst_block + row * headSize, dst_block + row * headSize, headSize);
+              dst_data + row * headSize, dst_data + row * headSize, headSize);
           }
         }
         // Calculate Softmax(q @ k.T) @ v
@@ -239,10 +242,10 @@ void cpu_flash_attention(
             v_data + i * vStrideB + j * vStrideH +
                 n * vStrideN,
             vStrideN,
-            conditional_data_ptr(qk_block, qk_reduced_block),
+            conditional_data_ptr(qk_data, qk_reduced_data),
             kvBlockSize,
             n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1),
-            dst_block,
+            dst_data,
             headSize);
       }
       // reorder MHA output with strides
@@ -250,15 +253,15 @@ void cpu_flash_attention(
         vec::map<scalar_t>(
           [](Vec x) { return x; },
           out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
-          dst_data + ompIdx * qSplitSize * headSize + row * headSize,
+          dst_data + row * headSize,
           headSize);
       }
       // Store logsumexp for backward
       if (is_training) {
         accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
         for (const auto row : c10::irange(qBlockSize)) {
-          lse_ptr[row * lStrideM] = qk_max_data[ompIdx * qSplitSize + row]
-              + std::log(qk_sum_data[ompIdx * qSplitSize + row]);
+          lse_ptr[row * lStrideM] = qk_max_data[row]
+              + std::log(qk_sum_data[row]);
         }
       }
       // Move to the next query
@@ -342,10 +345,20 @@ void cpu_flash_attention_backward(
   const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
 
-  at::Tensor attn = at::empty({num_thread, qSplitSize, kvSplitSize}, query.options().dtype(accumulate_dtype));
-  at::Tensor attn_reduced = at::empty({num_thread, qSplitSize, is_reduced_type ? kvSplitSize : 0}, query.options());
-  at::Tensor grad_attn = at::empty({num_thread, qSplitSize, kvSplitSize}, query.options().dtype(accumulate_dtype));
-  at::Tensor grad_attn_reduced = at::empty({num_thread, qSplitSize, is_reduced_type ? kvSplitSize : 0}, query.options());
+  // allocate per thread temp buf (accumulate type)
+  int64_t size_per_thread =
+      /* attn      */ qSplitSize * kvSplitSize +
+      /* grad_attn */ qSplitSize * kvSplitSize;
+
+  at::Tensor buf = at::empty({num_thread, size_per_thread}, query.options().dtype(accumulate_dtype));
+
+  // allocate per thread temp buf_reduced (scalar type)
+  // buf2 is only needed for bfloat16 and float16
+  int64_t size_per_thread_reduced =
+      /* attn_reduced      */ qSplitSize * kvSplitSize +
+      /* grad_attn_reduced */ qSplitSize * kvSplitSize;
+
+  at::Tensor buf_reduced = at::empty({num_thread, is_reduced_type ? size_per_thread_reduced : 0}, query.options());
 
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
@@ -356,21 +369,22 @@ void cpu_flash_attention_backward(
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = out.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
-  accum_t* attn_data = attn.data_ptr<accum_t>();
-  scalar_t* attn_reduced_data = is_reduced_type ? attn_reduced.data_ptr<scalar_t>() : nullptr;
-  accum_t* grad_attn_data = grad_attn.data_ptr<accum_t>();
-  scalar_t* grad_attn_reduced_data = is_reduced_type ? grad_attn_reduced.data_ptr<scalar_t>() : nullptr;
+  accum_t* buf_data = buf.data_ptr<accum_t>();
+  scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
   at::parallel_for(0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0;
     data_index_init(begin, i, batchSize, j, num_head);
     int ompIdx = at::get_thread_num();
+    accum_t* buf_ptr = buf_data + ompIdx * size_per_thread;
+    accum_t* attn_data = buf_ptr;
+    accum_t* grad_attn_data = attn_data + qSplitSize * kvSplitSize;
+    scalar_t* buf_reduced_ptr = is_reduced_type ? buf_reduced_data + ompIdx * size_per_thread_reduced : nullptr;
+    scalar_t* attn_reduced_data = is_reduced_type ? buf_reduced_ptr : nullptr;
+    scalar_t* grad_attn_reduced_data = is_reduced_type ? attn_reduced_data + qSplitSize * kvSplitSize : nullptr;
+
     at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
     accum_t* dsum_data = dsum.data_ptr<accum_t>();
-    accum_t* attn_block = attn_data + ompIdx * qSplitSize * kvSplitSize;
-    scalar_t* attn_reduced_block = is_reduced_type ? attn_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
-    accum_t* grad_attn_block = grad_attn_data + ompIdx * qSplitSize * kvSplitSize;
-    scalar_t* grad_attn_reduced_block = is_reduced_type ? grad_attn_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
     for (const auto z : c10::irange(begin, end)) {
       (void)z; // Suppress unused variable
       // rowsum of grad_out * out
@@ -403,7 +417,7 @@ void cpu_flash_attention_backward(
                 m * qStrideM,
             qStrideM,
             static_cast<accum_t>(0),
-            attn_block,
+            attn_data,
             kvBlockSize);
           // restore self attention after softmax from logsumexp
           // attn <- exp(attn - normalizer)
@@ -411,23 +425,23 @@ void cpu_flash_attention_backward(
             accum_t normalizer = lse_data[i * lStrideB + j * lStrideH + (m + row) * lStrideM];
             vec::map<accum_t>(
               [normalizer](Vec x) { return (x - Vec(normalizer)).exp(); },
-              attn_block + row * kvBlockSize,
-              attn_block + row * kvBlockSize,
+              attn_data + row * kvBlockSize,
+              attn_data + row * kvBlockSize,
               kvBlockSize);
           }
           // Apply causal mask, filled unused with 0
           if (is_causal && num_keys - n <= kvSplitSize) {
             for (const auto row : c10::irange(qBlockSize)) {
               int64_t last_col = m + row - n;
-              accum_t* row_ptr = attn_block + row * kvBlockSize;
+              accum_t* row_ptr = attn_data + row * kvBlockSize;
               fill_stub(row_ptr + last_col + 1, static_cast<accum_t>(0), kvBlockSize - last_col - 1);
             }
           }
           if (is_reduced_type) {
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
-                attn_block + row * kvBlockSize,
-                attn_reduced_block + row * kvBlockSize,
+                attn_data + row * kvBlockSize,
+                attn_reduced_data + row * kvBlockSize,
                 kvBlockSize);
             }
           }
@@ -442,7 +456,7 @@ void cpu_flash_attention_backward(
             grad_out_data + i * grad_oStrideB + j * grad_oStrideH +
                 m * grad_oStrideM,
             grad_oStrideM,
-            conditional_data_ptr(attn_block, attn_reduced_block),
+            conditional_data_ptr(attn_data, attn_reduced_data),
             kvBlockSize,
             static_cast<accum_t>(1),
             grad_v_data + i * grad_vStrideB + j * grad_vStrideH +
@@ -463,23 +477,23 @@ void cpu_flash_attention_backward(
                 m * grad_oStrideM,
             grad_oStrideM,
             static_cast<accum_t>(0),
-            grad_attn_block,
+            grad_attn_data,
             kvBlockSize);
           // grad_attn <- attn * (grad_attn - dsum)
           for (const auto row : c10::irange(qBlockSize)) {
             accum_t d = *(dsum_data + row);
             vec::map2<accum_t>(
               [d](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(d)); },
-              grad_attn_block + row * kvBlockSize,
-              attn_block + row * kvBlockSize,
-              grad_attn_block + row * kvBlockSize,
+              grad_attn_data + row * kvBlockSize,
+              attn_data + row * kvBlockSize,
+              grad_attn_data + row * kvBlockSize,
               kvBlockSize);
           }
           if (is_reduced_type) {
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
-                grad_attn_block + row * kvBlockSize,
-                grad_attn_reduced_block + row * kvBlockSize,
+                grad_attn_data + row * kvBlockSize,
+                grad_attn_reduced_data + row * kvBlockSize,
                 kvBlockSize);
             }
           }
@@ -494,7 +508,7 @@ void cpu_flash_attention_backward(
             k_data + i * kStrideB + j * kStrideH +
                 n * kStrideN,
             kStrideN,
-            conditional_data_ptr(grad_attn_block, grad_attn_reduced_block),
+            conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
             kvBlockSize,
             static_cast<accum_t>(1),
             grad_q_data + i * grad_qStrideB + j * grad_qStrideH +
@@ -511,7 +525,7 @@ void cpu_flash_attention_backward(
             q_data + i * qStrideB + j * qStrideH +
                 m * qStrideM,
             qStrideM,
-            conditional_data_ptr(grad_attn_block, grad_attn_reduced_block),
+            conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
             kvBlockSize,
             static_cast<accum_t>(1),
             grad_k_data + i * grad_kStrideB + j * grad_kStrideH +
