@@ -124,9 +124,6 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
@@ -173,7 +170,14 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    try:
+        global_cache_dir = parutil.get_dir_path(
+            os.path.join(__package__.replace(".", os.sep), "fb/cache")
+        )
+    except ValueError:
+        global_cache_dir = None
 else:
     global_cache_dir = None
 

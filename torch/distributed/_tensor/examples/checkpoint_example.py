@@ -133,7 +133,7 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
     )
 
 
-def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
+def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:  # type: ignore[empty-body]
     """
     checkpoint save/load models with DTensor parameters
     """

@@ -12277,6 +12277,13 @@ memory_format=torch.contiguous_format) -> Tensor
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -12309,6 +12316,13 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     {input}
 
@@ -12340,6 +12354,13 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
 .. warning::
     If the constructed tensor is "overlapped" (with multiple indices referring to the same element
     in memory) its behavior is undefined.
+
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -12385,6 +12406,13 @@ tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[
 Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
 tensor with no overlaps.  If possible, prefer using this function over
 :func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
+
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -13579,9 +13607,7 @@ add_docstr(
     r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch.Generator` object.
-It is recommended to set a large seed, i.e. a number that has a good balance of 0
-and 1 bits. Avoid having many 0 bits in the seed.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object. Any 32-bit integer is a valid seed.
 
 Arguments:
     seed (int): The desired seed. Value must be within the inclusive range

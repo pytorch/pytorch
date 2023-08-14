@@ -1,7 +1,7 @@
 from typing import Callable
 
 import torch
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.pt2e.quantizer import (
     QuantizationAnnotation,
     SharedQuantizationSpec,
 )

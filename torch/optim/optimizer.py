@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from torch import Tensor
 
 import torch.utils.hooks as hooks
@@ -105,7 +105,10 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
-            significantly more performant. (default: None)"""
+            significantly more performant. Note that the foreach implementation uses
+            ~ sizeof(params) more peak memory than the for-loop version due to the intermediates
+            being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
+            parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
@@ -205,7 +208,7 @@ class Optimizer:
                             "an iterable of Tensors or dicts, but got " +
                             torch.typename(params))
 
-        self.state = defaultdict(dict)
+        self.state: Dict[int, Any] = defaultdict(dict)
         self.param_groups = []
 
         param_groups = list(params)
@@ -252,9 +255,15 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        # If we are compiling, we take the capturable path automatically
-        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
-        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # Note [torch.compile x capturable]
+        # If we are compiling, we try to take the capturable path automatically by
+        # setting the flag to True during tracing. Due to this, we skip all the checks
+        # normally required for determining whether we can use CUDA graphs and
+        # shunt the responsibility to torch.inductor. This saves time during tracing
+        # since the checks are slow without sacrificing UX since inductor will warn
+        # later if CUDA graphs cannot be enabled, e.g.,
+        # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
+        # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
@@ -331,8 +340,8 @@ class Optimizer:
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
-            self.__class__.step = self.profile_hook_step(self.__class__.step)
-            self.__class__.step.hooked = True
+            self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[method-assign]
+            self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
     def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before
@@ -376,6 +385,7 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
+    @torch._disable_dynamo
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -408,26 +418,33 @@ class Optimizer:
         }
 
     @staticmethod
-    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
-                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: Optional[int] = None,
+                                                 param_groups: Optional[List[Dict[Any, Any]]] = None, key=None) -> Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
+        assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
                 fused = pg["fused"] if "fused" in pg else False
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
 
-        if key != "step" or capturable or fused:
+        if key == 'step':
+            if capturable or fused:
+                return value.to(dtype=torch.float32, device=param.device)
+            else:
+                return value
+        else:
             if param.is_floating_point():
                 return value.to(dtype=param.dtype, device=param.device)
-            return value.to(device=param.device)
-        return value
+            else:
+                return value.to(device=param.device)
 
+    @torch._disable_dynamo
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -461,14 +478,14 @@ class Optimizer:
             elif isinstance(value, dict):
                 return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
-                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
+                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
             else:
                 return value
 
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state = defaultdict(dict)
+        state: Dict[Any, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
@@ -484,6 +501,7 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
+    @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True):
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
@@ -504,7 +522,7 @@ class Optimizer:
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
         if foreach:
-            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+            per_device_and_dtype_grads: Dict[Any, Dict[Any, List[Any]]] = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
@@ -538,6 +556,7 @@ class Optimizer:
         """
         raise NotImplementedError
 
+    @torch._disable_dynamo
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
