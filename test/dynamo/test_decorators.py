@@ -266,12 +266,15 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
         )
 
-    def test_mark_static_input(self):
+    def _test_mark_static_input(self, guarded):
         compiles_with_buffers = 0
+        compiles = 0
 
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
+            nonlocal compiles
             compiles_with_buffers += len(gm._buffers) > 0
+            compiles += 1
             return gm
 
         @torch._dynamo.optimize(backend=debug_compiler)
@@ -280,10 +283,25 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.ones(2)
 
-        torch._dynamo.mark_static_input(inp)
+        torch._dynamo.mark_static_input(inp, guard=guarded)
 
         fn(inp)
         self.assertEqual(compiles_with_buffers, 1)
+
+        inp2 = torch.ones(2)
+
+        # if guarded, should trigger another recompile
+        # since it was not marked static, compiles with buffers
+        # should not be incremented
+        fn(inp2)
+        self.assertEqual(compiles_with_buffers, 1)
+        self.assertEqual(compiles, 2 if guarded else 1)
+
+    def test_mark_static_input_guarded(self):
+        self._test_mark_static_input(guarded=True)
+
+    def test_mark_static_input_unguarded(self):
+        self._test_mark_static_input(guarded=False)
 
 
 if __name__ == "__main__":

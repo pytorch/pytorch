@@ -2041,5 +2041,8 @@ def is_guard_failure_reporting_enabled():
     )
 
 
-def is_static_input(t):
-    return isinstance(t, torch.Tensor) and hasattr(t, "_dynamo_static_input")
+def get_static_input_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None
