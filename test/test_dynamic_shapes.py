@@ -424,7 +424,10 @@ class TestPySymInt(TestCase):
         # This doesn't error
         self.assertTrue(expect_true(i0 == 0))
         # This generates a deferred runtime assert
-        self.assertExpectedInline(str(shape_env.deferred_runtime_asserts[i0.node.expr]), """[Eq(i0, 0)]""")
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[Eq(i0, 0)]"""
+        )
         self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
@@ -434,7 +437,10 @@ class TestPySymInt(TestCase):
         s0 = create_symint(shape_env, 5)
         i0 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i0 <= s0))
-        self.assertExpectedInline(str(shape_env.deferred_runtime_asserts[i0.node.expr]), """[i0 <= s0]""")
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[i0 <= s0]"""
+        )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
 
@@ -444,7 +450,10 @@ class TestPySymInt(TestCase):
         i1 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i0 + i1 == 10))
         # Importantly, this is put in i1, not i0!
-        self.assertExpectedInline(str(shape_env.deferred_runtime_asserts[i1.node.expr]), """[Eq(i0 + i1, 10)]""")
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1.node.expr]]),
+            """[Eq(i0 + i1, 10)]"""
+        )
         self.assertTrue(i0 + i1 == 10)
         # NB: We currently don't support deriving that we can substitute
         # i0 + i1 with 10; maybe we should, but this means our rewriting

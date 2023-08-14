@@ -13,7 +13,7 @@ import threading
 import traceback
 from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
@@ -374,6 +374,10 @@ def constrain_range_int(a, *, min, max):
     - During tracing the traced symbol is resolved as a static integer (see
       PR #101655 for more details).
     """
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
 
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
@@ -429,7 +433,10 @@ def constrain_unify(a, b):
 #    true and false result in valid programs).  We will always assume
 #    the condition evaluates true, and so it will never be possible
 #    to trace the false condition when you use it.  For true branching
-#    on unbacked SymInts, you must use torch.cond.
+#    on unbacked SymInts, you must use torch.cond; if you incorrectly
+#    use expect_true in this case, you will make the false branch
+#    unreachable (as we will simply assume that only the true branch
+#    is ever exercised).
 #
 #  - This is inappropriate for situations where you know some other system
 #    invariant guarantees that this property holds, since you don't
@@ -442,9 +449,11 @@ def constrain_unify(a, b):
 # False.  This is quite low level, so we recommend using other functions
 # like check() which enforce this in a more intuitive way.
 #
-# By the way, this name is a nod to the __builtin_expect likely macro,
+# By the way, this name is a nod to the __builtin_expect macro,
 # which is used similarly (but unlike __builtin_expect, you MUST fail
-# in the unlikely branch.)
+# in the unlikely branch.)  (I think expect is a good name; in recent
+# versions of C++, this is replaced with [[likely]], which is weaker
+# and not accurate for this function!)
 def expect_true(a, skip: int = 0):
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
@@ -1488,11 +1497,8 @@ def _lru_cache(fn, maxsize=None):
 @dataclass(frozen=True)
 class RuntimeAssert:
     expr: sympy.Expr
-    msg: str
-    stack: str
-
-    def __repr__(self):
-        return str(self.expr)
+    msg: str = field(repr=False)
+    stack: str = field(repr=False)
 
 
 class ShapeGuardPrinter(StrPrinter):
@@ -2042,6 +2048,9 @@ class ShapeEnv:
         #     latest key, an assert will only show up at the moment when
         #     we can actually codegen it.
         self.deferred_runtime_asserts: Dict[sympy.Symbol, List[RuntimeAssert]] = collections.defaultdict(list)
+        # This exists so we can efficiently invalidate the cache (it's used as
+        # part of the cache key); otherwise we'd have to iterate through
+        # deferred_runtime_asserts to compute its length
         self.num_deferred_runtime_asserts = 0
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
@@ -3023,7 +3032,10 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+            if (
+                vr.lower < (-sys.maxsize - 1) // 2 or
+                (unbacked_only and k in self.var_to_val)
+            ):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
