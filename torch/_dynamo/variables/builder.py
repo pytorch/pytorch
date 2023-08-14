@@ -1281,7 +1281,7 @@ def wrap_fx_proxy_cls(
         ):
             # NB: This will be wrong for ignore_subclass; fix it up later!
             specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else torch.Tensor
+                torch.nn.Parameter if is_parameter else type(initial_example_value)
             )
 
         specialized_props["specialized_value"] = specialized_value
