@@ -28,6 +28,11 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses import (
+    DynamicOutputShapeException,
+    UnsupportedFakeTensorException,
+)
+from torch._subclasses.fake_tensor import DataDependentOutputException
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
@@ -42,7 +47,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import BackendCompilerFailed, format_error_msg_verbose, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -85,6 +90,7 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
@@ -989,6 +995,21 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except (
+            UnsupportedFakeTensorException,
+            DataDependentOutputException,
+            DynamicOutputShapeException,
+        ) as e:
+            msg = (
+                "Backend compiler failed with a fake tensor exception at \n"
+                f"{self.root_tx.format_frame_summary()}"
+                "Falling back to eager for this frame. Please use TORCH_LOGS=graph_breaks to see the full stack trace."
+            )
+            graph_break_msg = format_error_msg_verbose(e, self.root_tx.f_code)
+            graph_breaks_log.debug("%s", graph_break_msg)
+            if not graph_breaks_log.isEnabledFor(logging.DEBUG):
+                log.warning(msg)
+            unimplemented(msg)
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
