@@ -160,8 +160,8 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
-def is_fake(x, fake_mode=None):
-    if isinstance(x, FakeTensor) and (x.fake_mode is fake_mode or fake_mode is None):
+def is_fake(x):
+    if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
         flattened_tensors, _ = type(x).__tensor_flatten__(x)
@@ -171,10 +171,6 @@ def is_fake(x, fake_mode=None):
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
     return False
-
-
-def is_fake_with_fake_mode(x, fake_mode):
-    return is_fake(x, fake_mode)
 
 
 @functools.lru_cache(None)
