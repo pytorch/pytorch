@@ -31,7 +31,7 @@
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
-#include <ATen/native/transformers/hip/flash_attn/fmha_api.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/fmha_api.h>
 // MemoryEfficient Attention Specific Imports
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernel_forward.h>
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernels/cutlassF.h>
