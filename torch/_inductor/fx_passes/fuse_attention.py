@@ -308,8 +308,6 @@ def _sfdp_init():
         device = "cuda"
     else:
         device = "cpu"
-        # TODO: enable CPU fuse attetion rewriting once flash attention is ready
-        return
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds

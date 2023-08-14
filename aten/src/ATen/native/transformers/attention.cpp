@@ -806,13 +806,13 @@ _scaled_dot_product_flash_attention_cpu(
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));
-  at::Tensor cum_seq_q = at::empty({0}, at::kLong);
-  at::Tensor cum_seq_k = at::empty({0}, at::kLong);
+  at::Tensor cum_seq_q = at::empty({}, at::kLong);
+  at::Tensor cum_seq_k = at::empty({}, at::kLong);
   int64_t max_q = 0;
   int64_t max_k = 0;
-  at::Tensor philox_seed = at::empty({0}, at::kLong);
-  at::Tensor philox_offset = at::empty({0}, at::kLong);
-  at::Tensor debug_attn_mask = at::empty({0}, query.options());
+  at::Tensor philox_seed = at::empty({}, at::kLong);
+  at::Tensor philox_offset = at::empty({}, at::kLong);
+  at::Tensor debug_attn_mask = at::empty({}, query.options());
 
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
       max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
