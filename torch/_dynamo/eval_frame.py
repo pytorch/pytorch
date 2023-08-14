@@ -945,13 +945,17 @@ def rewrite_signature(
 
         return matched_elements_positions
 
-    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input, "input")
+    matched_input_elements_positions = produce_matching(
+        flat_args, graph_captured_input, "input"
+    )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
     flat_both = list(graph_captured_output) + flat_args
-    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced, "output")
+    matched_output_elements_positions = produce_matching(
+        flat_both, flat_results_traced, "output"
+    )
 
     new_graph = FlattenInputOutputSignature(
         graph,
