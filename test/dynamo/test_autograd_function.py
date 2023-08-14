@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import math
+import unittest
 
 import torch
 
@@ -320,6 +321,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod

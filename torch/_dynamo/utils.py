@@ -51,7 +51,6 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
-import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -449,6 +448,7 @@ def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,
+        torch.nn.Buffer,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
@@ -844,9 +844,10 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value, local):
-    enum_name = str(value)
-
-    name, val = enum_name.split(".")
+    # enum class can override __str__ method. Use __class__ and name attribute
+    # to extract the class name and key name.
+    name = value.__class__.__name__
+    val = value.name
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
@@ -1071,7 +1072,18 @@ def same(
             log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
-        return (type(ref) is type(res)) and (ref == res).all()
+        return (type(ref) is type(res)) and same(
+            torch.as_tensor(ref),
+            torch.as_tensor(res),
+            fp64_ref,
+            cos_similarity=cos_similarity,
+            tol=tol,
+            equal_nan=equal_nan,
+            exact_dtype=exact_dtype,
+            relax_numpy_equality=relax_numpy_equality,
+            ignore_non_fp=ignore_non_fp,
+            log_error=log_error,
+        )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -1605,9 +1617,9 @@ def nnmodule_has_hooks(
 def to_numpy_helper(value):
     """Convert tensor and torch_np.ndarray to numpy.ndarray."""
     if isinstance(value, torch_np.ndarray):
-        return value.tensor.numpy()
+        return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.numpy()
+        return value.cpu().numpy()
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1695,25 +1707,16 @@ def defake(x):
     return y
 
 
-# NB: The check of utils.checkpoipt is done lazily after TorchPatcher is called so
-# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
-# sitting in a separate function.
-# We also need the original untouched/ not disabled torch utils checkpoint
-# becuase distributed checkpointed wrappers import these utils before
-# TorchDynamo TorchPatcher runs.
-untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
-
-
 def is_utils_checkpoint(obj):
-    return (
-        obj is torch.utils.checkpoint.checkpoint
-        or obj is untouched_torch_utils_checkpoint
-    )
+    # Lazy import to avoid circular dependenices
+    import torch.utils.checkpoint
+
+    return obj is torch.utils.checkpoint.checkpoint
 
 
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
-    from .variables.torch import TorchHigherOrderOperatorVariable
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary sitaution where we have two versions of
     # checkpointing implemetation. We will converge on one and remove the other.
@@ -1721,7 +1724,7 @@ def build_checkpoint_variable(**options):
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return TorchHigherOrderOperatorVariable(
+    return TorchHigherOrderOperatorVariable.make(
         activation_checkpoint_op,
         **options,
     )

@@ -11,9 +11,9 @@ import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 
-from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
+from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 
-from torch.ao.quantization._pt2e.quantizer.utils import (
+from torch.ao.quantization.pt2e.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
     _is_sym_size_node,
@@ -84,7 +84,7 @@ def _get_linear_patterns(input_size: List[int]):
     return [pattern_w_bias, pattern_wo_bias]
 
 
-def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     supported_operators: Dict[str, List[OperatorPatternType]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
@@ -107,7 +107,7 @@ def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternT
     return copy.deepcopy(supported_operators)
 
 
-def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
+def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
         get_symmetric_quantization_config(),
@@ -115,7 +115,7 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
         get_symmetric_quantization_config(is_per_channel=True),
         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
-        ops = supported_symmetric_quantized_operators()
+        ops = _supported_symmetric_quantized_operators()
         for op_string, pattern_list in ops.items():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
@@ -205,8 +205,8 @@ def get_symmetric_quantization_config(
     return quantization_config
 
 
-def get_supported_config_and_operators() -> List[OperatorConfig]:
-    return get_supported_symmetric_config_and_operators()
+def _get_supported_config_and_operators() -> List[OperatorConfig]:
+    return _get_supported_symmetric_config_and_operators()
 
 
 def _is_annotated(nodes: List[Node]):
@@ -225,7 +225,7 @@ def _is_annotated(nodes: List[Node]):
 
 
 class QNNPackQuantizer(Quantizer):
-    supported_config_and_operators = get_supported_config_and_operators()
+    supported_config_and_operators = _get_supported_config_and_operators()
 
     def __init__(self):
         super().__init__()

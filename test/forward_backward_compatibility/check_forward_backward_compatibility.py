@@ -264,7 +264,8 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_scaled_dot_product_attention", datetime.date(2023, 3, 15)),
+    ("aten::_scaled_dot_product_attention", datetime.date(2023, 8, 1)),
+    ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 8, 1)),
     ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 5, 15)),
     ("aten::_scaled_dot_product_efficient_attention", datetime.date(2023, 7, 1)),
     ("aten::_scaled_dot_product_efficient_attention_backward", datetime.date(2023, 7, 1)),
@@ -311,7 +312,8 @@ ALLOW_LIST = [
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-
+    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
+    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

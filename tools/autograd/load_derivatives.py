@@ -69,7 +69,7 @@ def add_view_copy_derivatives(
 
     view_infos = {}
 
-    for _, info_dispatch_dict in infos.items():
+    for info_dispatch_dict in infos.values():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
         view_copy_differentiability_infos = {}

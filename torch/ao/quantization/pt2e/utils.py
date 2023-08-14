@@ -1,17 +1,25 @@
 import torch
 from torch.fx import (
+    Graph,
     GraphModule,
     Node,
 )
+from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 # TODO[jerryzh168]: move this to a more general util function
 from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
-import operator
-from typing import Dict, Optional, Tuple, Callable, Any
 import copy
+import operator
+from typing import Any, Callable, Dict, Optional, Tuple
 
+__all__ = [
+    "fold_bn_weights_into_conv_node",
+    "get_aten_graph_module",
+    "remove_tensor_overload_for_qdq_ops",
+]
 
 def _get_tensor_constant_from_node(node, m):
     if node is None:
@@ -30,7 +38,7 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
             all_args.append(schema.default_value)
     return all_args
 
-def _fold_bn_weights_into_conv_node(
+def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
     conv_bias_node: Optional[Node],
@@ -108,7 +116,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
         conv_node = n
         conv_weight_node = conv_node.args[1]
         conv_bias_node = conv_node.args[2]
-        _fold_bn_weights_into_conv_node(conv_node, conv_weight_node, conv_bias_node, bn_node, m)
+        fold_bn_weights_into_conv_node(conv_node, conv_weight_node, conv_bias_node, bn_node, m)
 
     m.graph.eliminate_dead_code()
     m.recompile()
@@ -174,7 +182,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
 
-def _get_aten_graph_module(
+def get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     **kwargs,
@@ -195,7 +203,7 @@ def _get_aten_graph_module(
     aten_pattern.recompile()
     return aten_pattern
 
-def _remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
+def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
     """ Remove .tensor overload for quantize/dequantize ops so that we can
     use the match_pattern that we get from torchdynamo export to match the output of convert_pt2e
     """
@@ -215,3 +223,70 @@ def _remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
             continue
         if n.target in _MAP:
             n.target = _MAP[n.target]
+
+def _is_dropout_filter(
+    match: "InternalMatch",  # type: ignore[name-defined]
+    original_graph: Graph,
+    pattern_graph: Graph,
+) -> bool:
+    """
+    Match filter for the subgraph rewriter that returns True if the matched
+    graph includes all the ops used in the aten dropout pattern.
+    """
+    ops_to_match = {
+        torch.ops.aten.empty_like.default,
+        torch.ops.aten.bernoulli_.float,
+        torch.ops.aten.div_.Scalar,
+        torch.ops.aten.mul.Tensor,
+    }
+    for n in match.nodes_map.values():
+        if n.target in ops_to_match:
+            ops_to_match.remove(n.target)
+    return len(ops_to_match) == 0
+
+def _replace_dropout_for_eval(m: GraphModule):
+    """
+    Replace the aten training dropout pattern with a noop, intended for eval.
+
+    For models with dropout torch ops (nn.Dropout, F.dropout), calling model.eval()
+    effectively turns these dropout ops into noops. For exported models, however,
+    this is not done automatically, since the aten dropout patterns previously generated
+    for training remain in the graph. Here we rewrite these dropout patterns with noops
+    to avoid incorrectly applying further dropout during eval.
+
+    See https://github.com/pytorch/pytorch/issues/103681.
+    """
+    def dropout_train(x):
+        return F.dropout(x, p=0.5, training=True)
+
+    def dropout_eval(x):
+        return F.dropout(x, p=0.5, training=False)
+
+    example_inputs = (torch.randn(1),)
+    match_pattern = get_aten_graph_module(dropout_train, example_inputs)
+    replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+
+    # Note: The match pattern looks like:
+    #
+    #   empty_like_default = torch.ops.aten.empty_like.default(x)
+    #   bernoulli__float = torch.ops.aten.bernoulli_.float(empty_like_default)
+    #   div__scalar = torch.ops.aten.div_.Scalar(bernoulli__float, 0.5)
+    #   mul_tensor = torch.ops.aten.mul.Tensor(x, div__scalar)
+    #
+    # We need to use `ignore_literals=True` here to handle arbitrary dropout
+    # probability (not just 0.5). However, without a match filter, this would
+    # also match any mul op, since `div__scalar` is also a literal, e.g.:
+    #
+    #   mul_tensor = torch.ops.aten.mul.Tensor(x, 0.8)
+    #
+    # Therefore, we need both `ignore_literals=True` and `_is_dropout_filter`
+    # to make sure we are in fact replacing the dropout pattern.
+
+    replace_pattern_with_filters(
+        m,
+        match_pattern,
+        replacement_pattern,
+        match_filters=[_is_dropout_filter],
+        ignore_literals=True,
+    )
+    m.recompile()

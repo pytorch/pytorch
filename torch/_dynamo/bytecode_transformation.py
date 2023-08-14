@@ -51,6 +51,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
+    positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
@@ -74,6 +75,7 @@ def convert_instruction(i: dis.Instruction):
         i.offset,
         i.starts_line,
         i.is_jump_target,
+        getattr(i, "positions", None),
     )
 
 

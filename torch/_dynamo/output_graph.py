@@ -29,7 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -47,9 +47,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
-    DefaultDeviceSource,
-    DeterministicAlgorithmsSource,
-    GradModeSource,
+    GlobalStateSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -67,6 +65,7 @@ from .utils import (
     graph_break_reasons,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
+    LazyString,
     nnmodule_doc_url_msg,
     nnmodule_has_hooks,
     same,
@@ -84,6 +83,7 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 
 
 class OutputGraphState(NamedTuple):
@@ -231,6 +231,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+
+        # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
+        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -255,14 +260,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
-            DeterministicAlgorithmsSource().make_guard(
-                GuardBuilder.DETERMINISTIC_ALGORITHMS
-            )
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
         )
 
-        self.guards.add(GradModeSource().make_guard(GuardBuilder.GRAD_MODE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
-        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -299,6 +306,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        self.torch_function_enabled = torch._C._is_torch_function_enabled()
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -385,6 +393,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
+
+        global_state["torch_function_enabled"] = (
+            self.set_torch_function_state,
+            self.torch_function_enabled,
+        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
         global_state["autocast_enabled"] = (
             torch.set_autocast_enabled,
@@ -684,7 +697,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         assert reason is not None
 
-        from .eval_frame import disable
+        from .decorators import disable
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
@@ -838,13 +851,38 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def get_graph_sizes_log_str(self, name):
+        graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
+        graph_sizes_str += f"===== {name} =====\n"
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                graph_sizes_str += f"{node.name}: {tuple(size)}\n"
+                concrete_size = []
+                has_symint = False
+                for sz in size:
+                    if isinstance(sz, int):
+                        concrete_size.append(sz)
+                    elif isinstance(sz, torch.SymInt):
+                        has_symint = True
+                        concrete_size.append(sz.node.hint)
+                    else:
+                        break
+                else:
+                    if has_symint:
+                        graph_sizes_str += (
+                            f"{node.name} (concrete): {tuple(concrete_size)}\n"
+                        )
+        return graph_sizes_str
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        from .eval_frame import disable
+        from .decorators import disable
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
@@ -870,6 +908,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+        graph_sizes_log.debug(
+            "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
+        )
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -1019,6 +1060,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
 
+    def set_torch_function_state(self, enabled: bool) -> None:
+        self.torch_function_enabled = enabled
+
 
 class SubgraphTracer(fx.Tracer):
     """
@@ -1041,16 +1085,19 @@ class SubgraphTracer(fx.Tracer):
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
-        # A list of proxies that exist in the graph being traced. We use this
-        # list to determine that, when tracing the body function of a HigherOrderOperator,
-        # if a new proxy is actually a free variable.
-        self.seen_proxies = set({})
-        # A list of previously free variables that we lifted to being inputs of
-        # the graph. If we are tracing a HigherOrderOperator's body_fn, then we
-        # need to keep track of this so we can rewrite the HigherOrderOperator
-        # call using the traced body_fn. This is a OrderedDict (instead of set)
-        # so that we can maintain the order of args for the HigherOrderOperator
-        # call. The values are None.
+        # A dict mapping previously free variables (Proxy objects)
+        # to new Proxy objects that wrap inputs to this subgraph.
+        #
+        # This dict serves two purposes:
+        # - Proxies are associatd with VariableTrackers. If we see
+        # the same VariableTracker twice (and it is a free variable),
+        # then we want to use the same Proxy in the current subgraph to
+        # record the tracing.
+        # - If we are tracing a HigherOrderOperator's body_fn, then we
+        # need to keep track of what free variables were lifted so we can
+        # rewrite the HigherOrderOperator call using the traced body_fn.
+        # This is a OrderedDict so that we can
+        # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
 
     def create_proxy(
@@ -1074,7 +1121,7 @@ class SubgraphTracer(fx.Tracer):
         # 1. We see a free variable that is already tracked by Dynamo.
         # 2. We see a free variable that has not been tracked by Dynamo
         #
-        # In case 1, we call `lift_tracked_freevar_to_input` (below)
+        # In case 1, we call `maybe_lift_tracked_freevar_to_input` (below)
         # which will lift the freevar to be an input of this subgraph
         # and also recursively lift it to be an input on the parent(s).
         #
@@ -1100,21 +1147,8 @@ class SubgraphTracer(fx.Tracer):
             flat_args, tree_spec = pytree.tree_flatten(args)
             new_args = []
             for arg in flat_args:
-                if not isinstance(arg, torch.fx.Proxy):
-                    new_args.append(arg)
-                elif arg in self.seen_proxies:
-                    new_args.append(arg)
-                elif not hasattr(arg, "node"):
-                    new_args.append(arg)
-                elif "saved_tensor_marked" in arg.node.meta:
-                    new_args.append(arg)
-                elif arg.node.name in self.input_name_to_proxy:
-                    new_args.append(self.input_name_to_proxy[arg.node.name])
-                else:
-                    # Create a new input for this arg, and replace the current arg
-                    # with the new arg
-                    new_arg = self.lift_tracked_freevar_to_input(arg)
-                    new_args.append(new_arg)
+                maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
+                new_args.append(maybe_new_arg)
 
             args = pytree.tree_unflatten(new_args, tree_spec)
 
@@ -1151,11 +1185,24 @@ class SubgraphTracer(fx.Tracer):
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
         rv.node.stack_trace = "".join(msgs)
 
-        self.seen_proxies.add(rv)
         return rv
 
-    def create_node(self, *args, **kwargs):
-        node = super().create_node(*args, **kwargs)
+    def create_node(
+        self, op, target, args=None, kwargs=None, name=None, type_expr=None
+    ):
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Node):
+                    continue
+                # Special case for autograd.Function tracing
+                if "saved_tensor_marked" in arg.meta:
+                    continue
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
+
+        node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
@@ -1211,27 +1258,39 @@ class SubgraphTracer(fx.Tracer):
                 self.input_name_to_proxy[name] = proxy
             return proxy
 
-    def is_name_bound(self, name):
-        if name in self.input_name_to_proxy:
-            return True
-        for proxy in self.seen_proxies:
-            if proxy.node.name == name:
-                return True
-        return False
-
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None or not self.is_name_bound(
-            proxy.node.name
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        # Proxys are associated with VariableTracker.
+        # It is possible that we've already lifted the Proxy to be an input.
+        # If that is the case, just return the already lifted Proxy.
+        if proxy in self.lifted_freevars:
+            return self.lifted_freevars[proxy]
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
-        self.lifted_freevars[proxy] = None
-        if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
+        self.lifted_freevars[proxy] = new_proxy
+        if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
+
+    def maybe_lift_tracked_freevar_to_input(self, arg):
+        """
+        If arg is a free variable, then lift it to be an input.
+        Returns the new lifted arg (if arg was a freevar), else the
+        original arg.
+        """
+        if not isinstance(arg, torch.fx.Proxy):
+            return arg
+        elif arg.tracer == self:
+            return arg
+        # Special case for autograd.Function tracing
+        elif "saved_tensor_marked" in arg.node.meta:
+            return arg
+        return self.lift_tracked_freevar_to_input(arg)
 
 
 # NOTE: [HigherOrderOperator tracing design]

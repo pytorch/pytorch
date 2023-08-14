@@ -211,6 +211,30 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
+def skip_op_level_debug_test(reason: str):
+    """Skip tests with op_level_debug enabled.
+
+    Args:
+        reason: The reason for skipping tests with op_level_debug enabled.
+
+    Returns:
+        A decorator for skipping tests with op_level_debug enabled.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.op_level_debug:
+                raise unittest.SkipTest(
+                    f"Skip test with op_level_debug enabled. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
 def skip_in_ci(reason: str):
     """Skip test in CI.
 

@@ -17,8 +17,7 @@ import math  # noqa: F401
 # Testing utils
 from torch import inf
 
-# TODO: include files like this should not set the default dtype
-torch.set_default_dtype(torch.double)
+assert torch.get_default_dtype() == torch.float32
 
 L = 20
 M = 10
@@ -36,7 +35,7 @@ class dont_convert(tuple):
 
 non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.float, device=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
@@ -61,17 +60,9 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         # double check casting
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
-                if arg.tensor.dtype == torch.float:
-                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
-                if arg.tensor.dtype == torch.cfloat:
-                    return conjugate(maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device)))
                 return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
             return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
         elif isinstance(arg, torch.Tensor):
-            if arg.dtype == torch.float:
-                arg = arg.double()
-            if arg.dtype == torch.cfloat:
-                arg = arg.to(torch.cdouble)
             if arg.is_complex() != dtype.is_complex:
                 raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
                                    "which is not supported for now")
