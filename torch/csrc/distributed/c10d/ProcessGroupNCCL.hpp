@@ -112,7 +112,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
  public:
   class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
    public:
-    friend class WorkInfo;
+    friend struct WorkInfo;
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
