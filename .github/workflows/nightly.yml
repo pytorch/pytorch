@@ -40,6 +40,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - name: update-vision-commit-hash
         uses: ./.github/actions/update-commit-hash
         if: ${{ github.event_name == 'schedule' }}
