@@ -13,10 +13,7 @@ from typing import cast, Dict, Optional, Set
 
 try:
     import numpy as np
-
-    HAS_NUMPY = True
 except ModuleNotFoundError:
-    HAS_NUMPY = False
     np = None
 
 import torch
@@ -322,4 +319,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    return HAS_NUMPY and (isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids)
+    return (isinstance(obj, np.ndarray) if np is not None else False) or id(
+        obj
+    ) in _numpy_function_ids
