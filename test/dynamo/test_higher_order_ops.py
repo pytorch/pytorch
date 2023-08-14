@@ -83,6 +83,7 @@ def enable_functorch_capture():
     finally:
         torch._dynamo.config.capture_func_transforms = org_val
 
+
 @contextlib.contextmanager
 def disable_functorch_capture():
     org_val = torch._dynamo.config.capture_func_transforms
