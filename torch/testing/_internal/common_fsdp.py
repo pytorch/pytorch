@@ -339,10 +339,11 @@ class TransformerWithSharedParams(FSDPTestModel):
             else:
                 tformer_pg = group
 
+            m = TransformerWithSharedParams(
+                tformer_pg, cuda_init_mode, add_bn, deterministic
+            )
             fsdp_model = FSDP(
-                TransformerWithSharedParams(
-                    tformer_pg, cuda_init_mode, add_bn, deterministic
-                ),
+                m,
                 fsdp_pg,
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,

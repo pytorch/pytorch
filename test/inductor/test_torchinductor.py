@@ -36,6 +36,7 @@ from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
+    IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -76,6 +77,8 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16]
+
+libfoo = None
 
 
 def run_fw_bw_and_get_code(fn):
@@ -2144,7 +2147,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -2366,6 +2368,12 @@ class CommonTemplate:
             res = opt_mod(x)
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
+
+    def test_adaptive_avg_pool_with_output_size_0(self):
+        m1 = nn.AdaptiveAvgPool1d(0)
+        self.common(m1, (torch.randn(1, 2),))
+        m2 = nn.AdaptiveAvgPool2d(0)
+        self.common(m2, (torch.randn(1, 2, 3),))
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -2668,6 +2676,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(fallback_random=True)
+    def test_randn_with_dtype_and_device(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
+
+        def fn(vectors):
+            rotations_shape = (12, vectors.shape[-1], 1, 64)
+            random_rotations = torch.randn(
+                rotations_shape, device=vectors.device, dtype=vectors.dtype
+            )
+            random_rotations += 1
+            return random_rotations
+
+        self.common(
+            fn,
+            (torch.randn([4, 12, 2, 64]),),
+        )
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -2802,7 +2828,8 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        with torch.no_grad():
+            self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -4756,18 +4783,20 @@ class CommonTemplate:
         )
 
     def test_scatter_reduce2(self):
-        def fn(a, dim, index, b):
-            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+        def fn(a, dim, index, b, reduce):
+            return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
 
-        self.common(
-            fn,
-            [
-                torch.randn(2, 3),
-                0,
-                torch.zeros((2, 3), dtype=torch.int64),
-                torch.randn(2, 3),
-            ],
-        )
+        for reduce in ["sum", "amax"]:
+            self.common(
+                fn,
+                [
+                    torch.randn(2, 3),
+                    0,
+                    torch.zeros((2, 3), dtype=torch.int64),
+                    torch.randn(2, 3),
+                    reduce,
+                ],
+            )
 
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
@@ -5282,7 +5311,6 @@ class CommonTemplate:
             ],
         )
 
-    @skipIfRocm
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5427,7 +5455,7 @@ class CommonTemplate:
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5462,46 +5490,14 @@ class CommonTemplate:
         )
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 2)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-            expected_kernel = 6
+            self.assertEqual(bw_code.count("tl.rand"), 0)
+            expected_kernel = 4
         else:
             expected_kernel = 6
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
-
-    @config.patch(search_autotune_cache=False)
-    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
-    def test_dropout4(self):
-        m = torch.nn.Dropout(0.2)
-
-        @torch._dynamo.optimize_assert("inductor")
-        def run(x):
-            return m(x)
-
-        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
-        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
-        zero_out = (result == 0).sum().item()
-        grad_zero = (inp.grad == 0).sum().item()
-        self.assertEqual(zero_out, grad_zero)
-
-        if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-        else:
-            self.assertEqual(fw_code.count("aten.bernoulli"), 1)
-            self.assertEqual(bw_code.count("aten.bernoulli"), 0)
 
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
@@ -6006,7 +6002,6 @@ class CommonTemplate:
     # test fails
     @expectedFailureCodegenDynamic
     @requires_cuda()
-    @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
@@ -6189,9 +6184,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6589,6 +6582,54 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
+    @patch.object(config.triton, "autotune_pointwise", True)
+    def test_inductor_bucketize_add_autotune(self):
+        """
+        Causes a @pointwise(size_hints) where size_hints is 2D
+        """
+
+        def fn(input, offsets, add_value):
+            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+
+        input = torch.rand((16, 16, 64, 64))
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+        add_value = torch.randint(0, 1024, (16, 16, 64, 64)).to(
+            memory_format=torch.channels_last
+        )
+
+        self.common(fn, (input, boundaries, add_value), check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op(self):
+        import torch.library
+
+        def foo_cpu(x):
+            return 3 * x
+
+        def foo_cuda(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        global libfoo
+        if libfoo is None:
+            libfoo = torch.library.Library("foo", "DEF")
+            libfoo.define("custom(Tensor self) -> Tensor")
+            libfoo.impl("custom", foo_cpu, "CPU")
+            libfoo.impl("custom", foo_cuda, "CUDA")
+            libfoo.impl("custom", foo_meta, "Meta")
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6766,6 +6807,84 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
+        @skipIfRocm  # asserts not implemented in Rocm yet
+        def test_optimize_indexing_assert(self):
+            def has_indirect(code, tl_fn: str):
+                self.assertTrue(
+                    tl_fn in code,
+                    msg=f"{tl_fn} not present:\n{code}",
+                )
+                for line in code.split("\n"):
+                    if tl_fn in line:
+                        stmt = line.split("=")[-1]
+                        # indirect indexing involves a `tmp` variable
+                        self.assertTrue(
+                            "tmp" in stmt,
+                            msg=f"Indirect indexing not present in code:\n{line}",
+                        )
+
+            def has_assert(code, lower: bool, upper: bool):
+                self.assertIn(
+                    "device_assert", code, msg=f"No device asert found:\n{code}"
+                )
+                for line in code.split("\n"):
+                    if "device_assert" in line:
+                        self.assertTrue(
+                            ("0 <= " in line) is lower,
+                            msg=f"Lower bound {'' if lower else 'not '}elided:{line}",
+                        )
+                        self.assertTrue(
+                            (" < " in line) is upper,
+                            msg=f"Upper bound {'' if upper else 'not '}elided:{line}",
+                        )
+
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                s = 1.0 * torch.arange(x.shape[0], device=x.device)
+                return x[s.long()]
+
+            # aten.index
+            for dynamic in (False, True):
+                fn_opt = torch.compile(fn, dynamic=dynamic)
+
+                x = torch.randn(8, device="cuda")
+                code = run_and_get_triton_code(fn_opt, x)
+                self.assertEqual(fn_opt(x), fn(x), msg=f"{dynamic=}")
+
+                # Check that there's indirect indexing...
+                has_indirect(code, tl_fn="tl.load")
+                if not dynamic:
+                    # We elide the assert for static shapes
+                    self.assertNotIn("device_assert", code)
+                else:
+                    # ...but we generate an upper bound for dynamic shapes
+                    has_assert(code, lower=False, upper=True)
+
+            def fn(a, z, b, idx0, idx1):
+                idx2 = torch.arange(a.shape[-1], device=a.device)
+                a.index_put_((z, idx0, idx1, idx2), b, accumulate=True)
+                return a
+
+            # aten.index_put
+            for dynamic in (False, True):
+                fn_opt = torch.compile(fn, dynamic=dynamic)
+                a = torch.randn(1, 32, 32, 4, device="cuda")
+                z = torch.zeros((), dtype=torch.int64, device="cuda")
+                b = torch.randn(33, 1, device="cuda")
+                idx0 = torch.randint(32, (33,), device="cuda").view(33, 1, 1)
+                idx1 = torch.randint(32, (33,), device="cuda").view(33, 1)
+                inps = (a.clone(), z, b, idx0, idx1)
+                code = run_and_get_triton_code(fn_opt, *inps)
+
+                # Correctness
+                out_opt = fn_opt(a.clone(), z, b, idx0, idx1)
+                out = fn(a.clone(), z, b, idx0, idx1)
+                self.assertEqual(out_opt, out, msg=f"{dynamic=}")
+
+                # We have an indirect store via atomic_add
+                has_indirect(code, tl_fn="tl.atomic_add")
+                # We cannot elide he assert in this case
+                has_assert(code, lower=True, upper=True)
+
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
@@ -6939,6 +7058,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
+        @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")

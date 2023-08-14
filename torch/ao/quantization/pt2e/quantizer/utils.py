@@ -1,13 +1,19 @@
 from typing import List
 
 import torch
-from torch.ao.quantization._pt2e.quantizer.quantizer import (
+from torch.ao.quantization.pt2e.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
 )
 from torch.fx import Node
 
+__all__ = [
+    "get_input_act_qspec",
+    "get_output_act_qspec",
+    "get_weight_qspec",
+    "get_bias_qspec",
+]
 
 def get_input_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
