@@ -378,20 +378,11 @@ class DTensorSpec:
 
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
-        # propagation results. We only need to consider the mesh, placements, shape
-        # dtype and stride.
+        # propagation results. We only need to consider the mesh, placements and shape
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
-        # fields to them.
+        # fields to them,
         if self.tensor_meta is not None:
-            return hash(
-                (
-                    self.mesh,
-                    self.placements,
-                    self.tensor_meta.shape,
-                    self.tensor_meta.dtype,
-                    self.tensor_meta.stride,
-                )
-            )
+            return hash((self.mesh, self.placements, self.tensor_meta.shape))
         else:
             return hash((self.mesh, self.placements))
 
