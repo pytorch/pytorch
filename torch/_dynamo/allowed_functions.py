@@ -225,7 +225,9 @@ def _allowed_function_ids():
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(method, (types.MethodDescriptorType, types.WrapperDescriptorType)):
+        if isinstance(
+            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
     for idx in _disallowed_function_ids():
