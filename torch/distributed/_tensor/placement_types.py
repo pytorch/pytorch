@@ -392,6 +392,8 @@ class DTensorSpec:
                     self.tensor_meta.stride,
                 )
             )
+        else:
+            return hash((self.mesh, self.placements))
 
     def __eq__(self, __o: object) -> bool:
         if not (
