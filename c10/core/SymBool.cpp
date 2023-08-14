@@ -24,7 +24,6 @@ SymNode SymBool::wrap_node(const SymNode& base) const {
   }
 }
 
-// See SymInt.cpp's DEFINE_BINARY for a small note
 #define DEFINE_BINARY(API, OP, METHOD, RET)                              \
   RET SymBool::API(const SymBool& sci) const {                           \
     if (auto ma = maybe_as_bool()) {                                     \
@@ -32,7 +31,7 @@ SymNode SymBool::wrap_node(const SymNode& base) const {
         return RET(OP(*ma, *mb));                                        \
       } else {                                                           \
         auto b = sci.toSymNodeImpl();                                    \
-        return RET(b->METHOD(b->wrap_bool(*ma)));                        \
+        return RET(b->wrap_bool(*ma)->METHOD(b));                        \
       }                                                                  \
     } else {                                                             \
       if (auto mb = sci.maybe_as_bool()) {                               \

@@ -39,10 +39,6 @@ bool SymInt::has_hint() const {
   return toSymNodeImplUnowned()->has_hint();
 }
 
-// It is important that we do a->METHOD(a->wrap_int(*mb)) instead of
-// a->wrap_int(*mb)->METHOD(a). The latter will not work in the case of
-// SingletonSymNodeImpl because a->wrap_int(*mb) produces a ConstantSymNodeImpl
-// which doesn't implement any operations.
 #define DEFINE_BINARY(API, OP, METHOD, RET)                          \
   RET SymInt::API(const SymInt& sci) const {                         \
     if (auto ma = maybe_as_int()) {                                  \
@@ -50,7 +46,7 @@ bool SymInt::has_hint() const {
         return RET(OP(*ma, *mb));                                    \
       } else {                                                       \
         auto b = sci.toSymNode();                                    \
-        return RET(b->METHOD(b->wrap_int(*ma)));                     \
+        return RET(b->wrap_int(*ma)->METHOD(b));                     \
       }                                                              \
     } else {                                                         \
       if (auto mb = sci.maybe_as_int()) {                            \

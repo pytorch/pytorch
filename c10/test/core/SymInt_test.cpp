@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
+
+#include <test/cpp/common/support.h
 
 using namespace c10;
 #ifndef C10_MOBILE
@@ -20,5 +23,32 @@ TEST(SymIntTest, ConcreteInts) {
 
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
+}
+
+TEST(SymIntTest, SingletonSymNode) {
+  auto a = c10::SymInt(
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
+  auto b = c10::SymInt(
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
+  auto c = c10::SymInt(
+      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2)));
+  auto d = c10::SymInt(3);
+
+  ASSERT_TRUE(a == a);
+  ASSERT_TRUE(a == b);
+  ASSERT_FALSE(a != a);
+  ASSERT_FALSE(a != b);
+  ASSERT_FALSE(a == c);
+  ASSERT_TRUE(a != c);
+
+  // Tentaively throw an error when comparing with a non-singleton, this is not
+  // necessarily the right behavior.
+  ASSERT_THROWS_WITH(
+      (a == d), "SingletonSymNode can only be compared with SingletonSymNode");
+  ASSERT_THROWS_WITH(
+      (d == a), "SingletonSymNode can only be compared with SingletonSymNode");
+  ASSERT_THROWS_WITH((a >= b), " not supported by SingletonSymNode");
+  ASSERT_THROWS_WITH((a >= d), " not supported by SingletonSymNode");
+  ASSERT_THROWS_WITH((d >= a), "NYI");
 }
 #endif

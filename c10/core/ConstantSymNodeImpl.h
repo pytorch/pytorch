@@ -44,6 +44,21 @@ class ConstantSymNodeImpl : public SymNodeImpl {
   bool has_hint() override {
     return true;
   }
+
+  // Temporary hack to avoid having to implement multiple dispatch for now
+  // Currently even if we have this method, we still raise an error when we get
+  // to SingletonSymNode::eq since comparing with non-singleton is disallowed.
+  // However, we may change that behavior in the future.
+  c10::SymNode eq(const c10::SymNode& other) override {
+    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());
+    return other->eq(c10::SymNode(make_intrusive<ConstantSymNodeImpl<int64_t>>(
+        c10::get<int64_t>(value_))));
+  }
+  c10::SymNode ne(const c10::SymNode& other) override {
+    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());
+    return other->ne(c10::SymNode(make_intrusive<ConstantSymNodeImpl<int64_t>>(
+        c10::get<int64_t>(value_))));
+  }
   std::string str() override {
     if (is_int()) {
       return std::to_string(c10::get<int64_t>(value_));
