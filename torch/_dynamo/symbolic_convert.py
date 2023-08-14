@@ -2479,7 +2479,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         val = self.pop()
         tos = self.stack[-1]
         if isinstance(tos, ListIteratorVariable):
-            subgen = tos
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.push(val)
                 self.instruction_pointer = self.indexof[inst.target]
@@ -2489,14 +2488,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
                 # subgenerator and lines up with this line in Python 3.11
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
-                # The pattern for the link above lines up with the code below. The code for the unreachable
-                # component is left as a hint to future developers looking to implement this.
                 unimplemented("Unreachable sub-generator code")
-                # This will graph break for now - "send" is not supported as we don't have full
-                # generator support - but this is sound to invoke, it will bubble up to the base VariableTracker.
-                # Once we have better VTs for generator, this will work properly.
-                result = tos.call_method(self, "send", val)
-                self.push(result)
-                self.instruction_pointer = self.indexof[inst.target]
         else:
             unimplemented(f"SEND {typestr(tos)}")
