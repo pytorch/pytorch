@@ -214,11 +214,11 @@ class Diagnostic(infra.Diagnostic):
         if self.logger.isEnabledFor(level):
             formatted_message = message % args
             if is_onnx_diagnostics_log_artifact_enabled():
-                # Only log to terminal if artifact is not enabled.
+                # Only log to terminal if artifact is enabled.
                 # See [NOTE: `dynamo_export` diagnostics logging] for details.
-                self.logger.log(level, message, **kwargs)
+                self.logger.log(level, formatted_message, **kwargs)
 
-            self.additional_messages.append(message)
+            self.additional_messages.append(formatted_message)
 
 
 @dataclasses.dataclass
