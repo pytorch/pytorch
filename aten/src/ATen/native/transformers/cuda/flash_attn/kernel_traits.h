@@ -1,28 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * Copyright (c) 2023, Tri Dao.
  ******************************************************************************/
 
 #pragma once
@@ -118,17 +95,20 @@ struct Flash_fwd_kernel_traits : public Base {
         SmemLayoutAtomQ{},
         Shape<Int<kBlockN>, Int<kHeadDim>>{}));
 
+    // This has to be kBlockN and not 8, otherwise we get wrong results for d=128
+    using SmemLayoutAtomVtransposedNoSwizzle = Layout<Shape<Int<kBlockKSmem>, Int<kBlockN>>,
+                                                      Stride<_1, Int<kBlockKSmem>>>;
     using SmemLayoutAtomVtransposed = decltype(
-        composition(Swizzle<kSwizzle, 3, 3>{},
-                    // This has to be kBlockN and not 8, otherwise we get wrong results for d=128
-                    Layout<Shape<Int<kBlockKSmem>, Int<kBlockN>>,
-                           Stride<_1, Int<kBlockKSmem>>>{}));
+        composition(Swizzle<kSwizzle, 3, 3>{}, SmemLayoutAtomVtransposedNoSwizzle{}));
     using SmemLayoutVtransposed = decltype(tile_to_shape(
         SmemLayoutAtomVtransposed{},
         Shape<Int<kHeadDim>, Int<kBlockN>>{}));
     // Maybe the VtransposeNoSwizzle just needs to have the right shape
     // And the strides don't matter?
-    using SmemLayoutVtransposedNoSwizzle = decltype(SmemLayoutVtransposed{}.layout_fn());
+    using SmemLayoutVtransposedNoSwizzle = decltype(tile_to_shape(
+        SmemLayoutAtomVtransposedNoSwizzle{},
+        Shape<Int<kHeadDim>, Int<kBlockN>>{}));
+    // using SmemLayoutVtransposedNoSwizzle = decltype(SmemLayoutVtransposed{}.layout_fn());
 
     using SmemLayoutAtomO = decltype(
         composition(Swizzle<kSwizzle, 3, 3>{},
@@ -250,16 +230,19 @@ struct Flash_bwd_kernel_traits : public Base {
         SmemLayoutAtomKV{},
         make_shape(Int<kBlockN>{}, Int<kHeadDim>{})));
 
+    using SmemLayoutAtomKtransposedNoSwizzle = Layout<Shape<Int<kBlockKSmem>, Int<kBlockN>>,
+                                                      Stride<_1, Int<kBlockKSmem>>>;
     using SmemLayoutAtomKtransposed = decltype(
-        composition(Swizzle<kSwizzle, 3, 3>{},
-                    Layout<Shape<Int<kBlockKSmem>, Int<kBlockN>>,
-                           Stride<_1, Int<kBlockKSmem>>>{}));
+        composition(Swizzle<kSwizzle, 3, 3>{}, SmemLayoutAtomKtransposedNoSwizzle{}));
     using SmemLayoutKtransposed = decltype(tile_to_shape(
         SmemLayoutAtomKtransposed{},
         make_shape(Int<kHeadDim>{}, Int<kBlockN>{})));
     // Maybe the KtransposeNoSwizzle just needs to have the right shape
     // And the strides don't matter?
-    using SmemLayoutKtransposedNoSwizzle = decltype(SmemLayoutKtransposed{}.layout_fn());
+    using SmemLayoutKtransposedNoSwizzle = decltype(tile_to_shape(
+        SmemLayoutAtomKtransposedNoSwizzle{},
+        make_shape(Int<kHeadDim>{}, Int<kBlockN>{})));
+    // using SmemLayoutKtransposedNoSwizzle = decltype(SmemLayoutKtransposed{}.layout_fn());
 
     // TODO: generalize to other values of kBlockN
     // TODO: what should be the Swizzle here? 3 is faster than 1, and 1 is faster than 2
@@ -277,24 +260,30 @@ struct Flash_bwd_kernel_traits : public Base {
     using SmemLayoutPdS = decltype(tile_to_shape(
         SmemLayoutAtomPdS{},
         make_shape(Int<kBlockM>{}, Int<kBlockN>{})));
+    using SmemLayoutAtomPdStransposedNoSwizzle = Layout<Shape<Int<kPBlockN>, Int<kBlockM>>,
+                                                    Stride<_1, Int<kPBlockN>>>;
     using SmemLayoutAtomPdStransposed = decltype(
-        composition(Swizzle<kSwizzlePdS, 3, 3>{},
-                    Layout<Shape<Int<kPBlockN>, Int<kBlockM>>,
-                           Stride<_1, Int<kPBlockN>>>{}));
+        composition(Swizzle<kSwizzlePdS, 3, 3>{}, SmemLayoutAtomPdStransposedNoSwizzle{}));
     using SmemLayoutPdStransposed = decltype(tile_to_shape(
         SmemLayoutAtomPdStransposed{},
         make_shape(Int<kBlockN>{}, Int<kBlockM>{})));
-    using SmemLayoutPdStransposedNoSwizzle = decltype(SmemLayoutPdStransposed{}.layout_fn());
+    using SmemLayoutPdStransposedNoSwizzle = decltype(tile_to_shape(
+        SmemLayoutAtomPdStransposedNoSwizzle{},
+        make_shape(Int<kBlockN>{}, Int<kBlockM>{})));
+    // using SmemLayoutPdStransposedNoSwizzle = decltype(SmemLayoutPdStransposed{}.layout_fn());
     using SmemCopyAtomPdS = Copy_Atom<DefaultCopy, elem_type>;
+    using SmemLayoutAtomQdOtransposedNoSwizzle = Layout<Shape<Int<kBlockKSmem>, Int<kBlockM>>,
+                                                    Stride<_1, Int<kBlockKSmem>>>;
 
     using SmemLayoutAtomQdOtransposed = decltype(
-        composition(Swizzle<kSwizzle, 3, 3>{},
-                    Layout<Shape<Int<kBlockKSmem>, Int<kBlockM>>,
-                           Stride<_1, Int<kBlockKSmem>>>{}));
+        composition(Swizzle<kSwizzle, 3, 3>{}, SmemLayoutAtomQdOtransposedNoSwizzle{}));
     using SmemLayoutQdOtransposed = decltype(tile_to_shape(
         SmemLayoutAtomQdOtransposed{},
         make_shape(Int<kHeadDim>{}, Int<kBlockM>{})));
-    using SmemLayoutQdOtransposedNoSwizzle = decltype(SmemLayoutQdOtransposed{}.layout_fn());
+    using SmemLayoutQdOtransposedNoSwizzle = decltype(tile_to_shape(
+        SmemLayoutAtomQdOtransposedNoSwizzle{},
+        make_shape(Int<kHeadDim>{}, Int<kBlockM>{})));
+    // using SmemLayoutQdOtransposedNoSwizzle = decltype(SmemLayoutQdOtransposed{}.layout_fn());
 
     using SmemLayoutAtomdKV = decltype(
         composition(Swizzle<kSwizzle, 3, 3>{},
