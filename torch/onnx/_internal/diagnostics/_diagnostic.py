@@ -127,7 +127,9 @@ class ExportDiagnosticEngine:
         """
         if options is None:
             options = infra.DiagnosticOptions()
-        context = infra.DiagnosticContext(name, version, options)
+        context: infra.DiagnosticContext[diagnostic_type] = infra.DiagnosticContext(
+            name, version, options
+        )
         self.contexts.append(context)
         return context
 
