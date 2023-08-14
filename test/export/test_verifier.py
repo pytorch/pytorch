@@ -178,8 +178,7 @@ class VerifierTest(TestCase):
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "a",
+                self.a = torch.nn.Buffer(
                     torch.randn(1, 3, 100, 100).to(memory_format=torch.channels_last),
                 )
 

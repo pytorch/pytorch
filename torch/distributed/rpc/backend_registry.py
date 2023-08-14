@@ -242,9 +242,9 @@ def _validate_device_maps(all_names, all_device_counts, all_device_maps, all_dev
 def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
     if not my_devices:
         devices_set: Set[torch.device] = set()
-        for _, map_ in my_device_maps.items():
+        for map_ in my_device_maps.values():
             devices_set.update(map_.keys())
-        for _, map_ in reverse_device_maps.items():
+        for map_ in reverse_device_maps.values():
             devices_set.update(map_.keys())
         devices_set.discard(torch.device("cpu"))
         my_devices = list(devices_set)

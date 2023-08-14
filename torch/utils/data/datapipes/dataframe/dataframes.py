@@ -415,7 +415,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 
 @functional_datapipe('trace_as_dataframe')
-class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):
+class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
     source_datapipe = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes

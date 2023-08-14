@@ -165,6 +165,30 @@ def export(
             for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
                 params_buffers[name] = buffer
 
+
+            # When aot_export lifts the params, we lose the nn_module_stack
+            # and source_fn from the param nodes as they are treated as fresh inputs
+            # Therefore, we manually extract them before calling into aot_export
+            params_buffers_to_node_meta = OrderedDict()
+            for node in gm_torch_level.graph.nodes:
+                target = node.target
+                meta = node.meta
+                if node.op == "call_module":
+                    submodule = getattr(gm_torch_level, target)
+                    if isinstance(submodule, torch.nn.Module):
+                        for name, _ in submodule.named_parameters(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                        for name, _ in submodule.named_buffers(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                # If the call_function uses param as input, we also need to capture the meta for it
+                # This is basically the same flow as torch.fx.traceback.preserve_meta()
+                if node.op == "call_function" and not isinstance(node.target, torch._ops.HigherOrderOperator):
+                    for n in node._input_nodes:
+                        if n.op == "get_attr":
+                            params_buffers_to_node_meta[n.target] = meta
+
             fake_inps = []
             for node in gm_torch_level.graph.nodes:
                 if node.op == "placeholder" and "val" in node.meta:
@@ -236,6 +260,22 @@ def export(
                 for k, v in fake_mode.shape_env.var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
+
+            # After aot_export, set the param/buffer metadata back into placeholders
+            # Technically, users can still construct this data from param names
+            # without relying on this metadata
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    if node.target in export_graph_signature.inputs_to_parameters:
+                        param_name = export_graph_signature.inputs_to_parameters[node.target]
+                        if param_name in params_buffers_to_node_meta:
+                            for k, v in params_buffers_to_node_meta[param_name].items():
+                                node.meta[k] = v
+                    if node.target in export_graph_signature.inputs_to_buffers:
+                        buffer_name = export_graph_signature.inputs_to_buffers[node.target]
+                        if buffer_name in params_buffers_to_node_meta:
+                            for k, v in params_buffers_to_node_meta[buffer_name].items():
+                                node.meta[k] = v
 
             range_constraints, equality_constraints = _process_constraints(
                 gm,

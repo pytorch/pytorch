@@ -376,7 +376,7 @@ class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataP
         self._datapipe_iter = iter(self._datapipe)
         return self
 
-    def __next__(self) -> T_co:
+    def __next__(self) -> T_co:  # type: ignore[type-var]
         assert self._datapipe_iter is not None
         return next(self._datapipe_iter)
 

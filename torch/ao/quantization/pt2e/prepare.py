@@ -19,7 +19,7 @@ from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from typing import Dict, Tuple, Union, Any
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.pt2e.quantizer import (
     QuantizationAnnotation,
     EdgeOrNode,
 )

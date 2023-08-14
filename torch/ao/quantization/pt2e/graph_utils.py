@@ -10,6 +10,12 @@ from torch.fx.passes.utils.source_matcher_utils import (
     SourcePartition,
 )
 
+__all__ = [
+    "find_sequential_partitions",
+    "get_equivalent_types",
+    "update_equivalent_types_dict",
+]
+
 _EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.Conv2d, torch.nn.functional.conv2d},
     {torch.nn.AdaptiveAvgPool2d, torch.nn.functional.adaptive_avg_pool2d},

@@ -298,7 +298,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addr",
     "linalg_householder_product",
     "ormqr",
-    "constant_pad_nd",
     "reflection_pad1d",
     "reflection_pad2d",
     "reflection_pad3d",
@@ -316,7 +315,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad1d",
     "replication_pad2d",
     "replication_pad3d",
-    "take",
     "put",
     "put_",
     "_to_copy",
@@ -963,7 +961,7 @@ def gen_variable_type_func(
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key, _ in fn.info.items():
+                for key in fn.info.keys():
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(
                             f.func.returns, symint=True
