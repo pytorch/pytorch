@@ -655,8 +655,9 @@ if torch._C._has_mkldnn:
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
+            assert len(reshape_1) == 2
             dynamic_shapes = not all(
-                isinstance(x, int) for x in (reshape_1 + reshape_2)
+                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
             )
             if dynamic_shapes:
                 # For dynamic shapes, we are unsafe to compair the shapes for reshape_1 and reshape_2
