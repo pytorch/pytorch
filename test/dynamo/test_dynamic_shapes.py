@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import importlib
 import unittest
 import warnings
 
@@ -70,7 +69,7 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
 
-if importlib.util.find_spec("z3"):
+if TEST_Z3:
     # this only fails when z3 is available
     unittest.expectedFailure(
         # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
