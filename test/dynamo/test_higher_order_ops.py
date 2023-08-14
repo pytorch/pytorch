@@ -75,6 +75,15 @@ def op_count(gm):
 
 
 @contextlib.contextmanager
+def enable_functorch_capture():
+    org_val = torch._dynamo.config.capture_func_transforms
+    torch._dynamo.config.capture_func_transforms = True
+    try:
+        yield
+    finally:
+        torch._dynamo.config.capture_func_transforms = org_val
+
+@contextlib.contextmanager
 def disable_functorch_capture():
     org_val = torch._dynamo.config.capture_func_transforms
     torch._dynamo.config.capture_func_transforms = False
@@ -1558,6 +1567,12 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    def run(self, result=None):
+        # capture_func_transform is False by default,
+        # enable for testing.
+        with enable_functorch_capture():
+            super().run(result)
+
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
