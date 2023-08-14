@@ -363,21 +363,22 @@ void clear_hooks(const at::TensorBase& self) {
   materialize_autograd_meta(self)->hooks_.clear();
 }
 
-void add_post_grad_hook(
+void add_post_acc_grad_hook(
     const at::TensorBase& self,
-    std::unique_ptr<FunctionPreHook> hook) {
+    std::unique_ptr<PostAccumulateGradHook> hook) {
   AutogradMeta* meta = materialize_autograd_meta(self);
-  meta->post_grad_hooks_.push_back(std::move(hook));
+  meta->post_acc_grad_hooks_.push_back(std::move(hook));
 }
 
-std::vector<std::unique_ptr<FunctionPreHook>>& post_grad_hooks(const Variable& self) {
+std::vector<std::unique_ptr<PostAccumulateGradHook>>& post_acc_grad_hooks(
+    const Variable& self) {
   TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
-  return get_autograd_meta(self)->post_grad_hooks_;
+  return get_autograd_meta(self)->post_acc_grad_hooks_;
 }
 
-void clear_post_grad_hooks(const at::TensorBase& self) {
+void clear_post_acc_grad_hooks(const at::TensorBase& self) {
   // This is a little goofy, but usually this should be a no oop
-  materialize_autograd_meta(self)->post_grad_hooks_.clear();
+  materialize_autograd_meta(self)->post_acc_grad_hooks_.clear();
 }
 
 void set_name(const Variable& self, const std::string& name) {

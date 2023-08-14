@@ -30,22 +30,25 @@ namespace autograd {
 
 namespace {
 
-// This function is called in 3 different cases:
+// This function is called in 4 different cases:
 //   1) TensorPreHook
 //   2) PreHook
 //   3) PostHook
+//   4) TensorPostAccGradHook
 //
 // Depending on the case, args and res can hold different types of objects:
 //
 // args:
-// TensorPreHook    (Tensor,)
-// PreHook          ((Tensor, ...),)                (grad_outputs,)
-// PostHook         ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+// TensorPreHook          (Tensor,)
+// PreHook                ((Tensor, ...),)                (grad_outputs,)
+// PostHook               ((Tensor, ...), (Tensor, ...))  (grad_inputs,
+// grad_outputs) TensorPostAccGradHook  ((Tensor), ()) (tensor,)
 //
 // res:
-// TensorPreHook    Tensor
-// PreHook          ((Tensor, ...),)                (grad_outputs,)
-// PostHook         ((Tensor, ...),)                (grad_inputs,)
+// TensorPreHook          Tensor
+// PreHook                ((Tensor, ...),)                (grad_outputs,)
+// PostHook               ((Tensor, ...),)                (grad_inputs,)
+// TensorPostAccGradHook  None
 //
 // This function returns True if any hook returned non-None value, and False
 // otherwise.
@@ -191,6 +194,27 @@ void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
     Py_INCREF(value);
     args.add_post_hook(c10::SafePyObject(value, getPyInterpreter()));
   }
+}
+
+PyFunctionTensorPostAccGradHook::PyFunctionTensorPostAccGradHook(PyObject* dict)
+    : dict(dict) {
+  Py_INCREF(dict);
+}
+
+PyFunctionTensorPostAccGradHook::~PyFunctionTensorPostAccGradHook() {
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
+}
+
+auto PyFunctionTensorPostAccGradHook::operator()(const Variable& tensor)
+    -> void {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr tup(PyTuple_New(1));
+  PyTuple_SET_ITEM(tup.get(), 0, THPVariable_Wrap(tensor));
+  _call_hooks(dict, tup.get());
 }
 
 } // namespace autograd

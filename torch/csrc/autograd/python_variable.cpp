@@ -36,6 +36,7 @@
 
 #include <ATen/ATen.h>
 
+#include <autograd/function_hook.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
@@ -1162,6 +1163,48 @@ int THPVariable_set_backwards_hooks(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject* THPVariable_get_post_accumulate_grad_hooks(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
+  }
+  if (self->post_accumulate_grad_hooks) {
+    Py_INCREF(self->post_accumulate_grad_hooks);
+    return self->post_accumulate_grad_hooks;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set_post_accumulate_grad_hooks(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(
+        self, "_post_accumulate_grad_hooks", obj);
+  }
+  THPUtils_assertRet(
+      -1, obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  if (obj == Py_None) {
+    obj = nullptr;
+  }
+  Py_XINCREF(obj);
+  Py_XDECREF(self->post_accumulate_grad_hooks);
+  self->post_accumulate_grad_hooks = obj;
+  const auto& tensor = THPVariable_Unpack(self);
+  torch::autograd::impl::clear_post_acc_grad_hooks(tensor);
+  if (obj) {
+    torch::autograd::impl::add_post_acc_grad_hook(
+        tensor, std::make_unique<PyFunctionTensorPostAccGradHook>(obj));
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1474,6 +1517,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"_backward_hooks",
      (getter)THPVariable_get_backwards_hooks,
      (setter)THPVariable_set_backwards_hooks,
+     nullptr,
+     nullptr},
+    {"_post_accumulate_grad_hooks",
+     (getter)THPVariable_get_post_accumulate_grad_hooks,
+     (setter)THPVariable_set_post_accumulate_grad_hooks,
      nullptr,
      nullptr},
     {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},

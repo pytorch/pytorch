@@ -196,8 +196,14 @@ def set_tensor_metadata(tensor, metadata):
 
 
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks,
-    post_grad_accumulation_hooks, metadata=None
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    post_accumulate_grad_hooks,
+    metadata=None,
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
@@ -208,7 +214,7 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
-    tensor._post_grad_accumulation_hooks = post_grad_accumulation_hooks
+    tensor._post_accumulate_grad_hooks = post_accumulate_grad_hooks
     return tensor
 
 
@@ -344,7 +350,7 @@ def _rebuild_qtensor(
     quantizer_params,
     requires_grad,
     backward_hooks,
-    post_grad_accumulation_hooks,
+    post_accumulate_grad_hooks,
 ):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
@@ -385,7 +391,7 @@ def _rebuild_qtensor(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
-    tensor._post_grad_accumulation_hooks = post_grad_accumulation_hooks
+    tensor._post_accumulate_grad_hooks = post_accumulate_grad_hooks
     return tensor
 
 

@@ -120,6 +120,23 @@
   - Lint
   - pull
 
+- name: PrimTorch
+  patterns:
+  - aten/src/ATen/native_functions.yaml
+  - aten/src/ATen/native/**
+  - test/**
+  - torch/_meta_registrations.py
+  - torch/_decomp/**
+  - torch/_refs/**
+  - torch/_prims/**
+  - torch/_prims_common/**
+  approved_by:
+  - nkaretnikov
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Linear Algebra
   patterns:
   - aten/src/ATen/native/cuda/linalg/**

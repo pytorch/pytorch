@@ -51,12 +51,12 @@ struct TORCH_API AccumulateGrad : public Node {
     return impl::hooks(variable);
   }
 
-  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_post_grad_hooks() noexcept
-      {
+  std::vector<std::unique_ptr<PostAccumulateGradHook>>&
+  tensor_post_acc_grad_hooks() noexcept {
     // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
     //     it can be destroyed even though the Tensor is still alive (contrary
     //     to all other Nodes). So we must lazily read the Tensor hooks here.
-    return impl::post_grad_hooks(variable);
+    return impl::post_acc_grad_hooks(variable);
   }
 
   // Given a variable with its current grad as variable_grad, accumulates

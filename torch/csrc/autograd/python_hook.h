@@ -34,5 +34,13 @@ struct PyFunctionPostHook : public FunctionPostHook {
   PyObject* dict;
 };
 
+struct PyFunctionTensorPostAccGradHook : public PostAccumulateGradHook {
+  PyFunctionTensorPostAccGradHook(PyObject* dict);
+  ~PyFunctionTensorPostAccGradHook() override;
+  void operator()(const Variable& tensor) override;
+  // fall back to the compiled_args of PostAccumulateGradHook superclass
+  PyObject* dict;
+};
+
 } // namespace autograd
 } // namespace torch

@@ -1323,6 +1323,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.record_stream: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
+        Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
