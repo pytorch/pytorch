@@ -3256,6 +3256,18 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_empty(self):
+        def fn_2(a, b):
+            return torch.cat((a, b))
+
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+            ),
+        )
+
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
             cat_1 = aten.cat.default([arg4_1, slice_7], 1)

@@ -122,7 +122,15 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         return
 
     ndim = tensors[0].meta["example_value"].dim()
-    assert all(ndim == x.meta["example_value"].dim() for x in tensors)
+
+    def is_empty_tensor(x):
+        # special case where torch.cat supports cat'ing with an empty tensor
+        x_shape = x.meta["example_value"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(
+        ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
+    )
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
