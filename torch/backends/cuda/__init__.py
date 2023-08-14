@@ -23,6 +23,7 @@ __all__ = [
     "math_sdp_enabled",
     "enable_math_sdp",
     "sdp_kernel",
+    "ATFPbackend",
 ]
 
 

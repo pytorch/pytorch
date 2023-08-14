@@ -4,6 +4,7 @@ from typing import Optional, Any, Union, Callable
 import torch
 import warnings
 from torch import Tensor
+from torch.backends.ops import atfp_math_enabled, atfp_encoder_enabled, atfp_nested_tensor_enabled
 from .. import functional as F
 from .module import Module
 from .activation import MultiheadAttention
@@ -330,7 +331,9 @@ class TransformerEncoder(Module):
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
-        if not hasattr(self, "use_nested_tensor"):
+        if not atfp_nested_tensor_enabled():
+            why_not_sparsity_fast_path = "AT FastPath backend manager for enable_nested_tensor is False"
+        elif not hasattr(self, "use_nested_tensor"):
             why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
         elif not self.use_nested_tensor:
             why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
@@ -626,7 +629,10 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
-        if not src.dim() == 3:
+        batch_first = self.self_attn.batch_first or src.is_nested
+        if not atfp_encoder_enabled():
+            why_not_sparsity_fast_path = "AT FastPath backend manager has enable_encoder=False"
+        elif not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
             why_not_sparsity_fast_path = "training is enabled"
@@ -698,6 +704,7 @@ class TransformerEncoderLayer(Module):
                     mask_type,
                 )
 
+        assert atfp_math_enabled(), "TransformerEncoderLayer: Fallback math implementation not enabled"
 
         x = src
         if self.norm_first:

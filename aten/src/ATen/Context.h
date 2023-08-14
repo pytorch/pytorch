@@ -165,6 +165,9 @@ class TORCH_API Context {
   void setSDPUseMath(bool);
   bool userEnabledMathSDP() const;
 
+  void assignGlobalCtx(int, bool);
+  bool getGlobalCtx(int);
+
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
@@ -299,6 +302,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
+  int_least64_t flags_global_ctx = 0;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else

@@ -64,5 +64,6 @@ from torch.backends import (
     mkldnn as mkldnn,
     mps as mps,
     openmp as openmp,
+    ops as ops,
     quantized as quantized,
 )

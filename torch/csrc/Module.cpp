@@ -604,6 +604,61 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setGlobalCtx(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "set_global_ctx expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  auto ctx_no = static_cast<int>(THPUtils_unpackLong(arg));
+  THPUtils_assert(
+      ((ctx_no >= 0) && (ctx_no < 64)),
+      "set_global_ctx expects an int, "
+      "but got %d",
+      ctx_no);
+  HANDLE_TH_ERRORS
+  at::globalContext().assignGlobalCtx(ctx_no, true);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_unsetGlobalCtx(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "set_global_ctx expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  auto ctx_no = static_cast<int>(THPUtils_unpackLong(arg));
+  THPUtils_assert(
+      ((ctx_no >= 0) && (ctx_no < 64)),
+      "unset_global_ctx expects an int, "
+      "but got %d",
+      ctx_no);
+  HANDLE_TH_ERRORS
+  at::globalContext().assignGlobalCtx(ctx_no, false);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getGlobalCtx(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "set_global_ctx expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  auto ctx_no = static_cast<int>(THPUtils_unpackLong(arg));
+  THPUtils_assert(
+      ((ctx_no >= 0) && (ctx_no < 64)),
+      "get_global_ctx expects an int, "
+      "but got %d",
+      ctx_no);
+  HANDLE_TH_ERRORS
+  if (at::globalContext().getGlobalCtx(ctx_no))
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1096,6 +1151,9 @@ static PyMethodDef TorchMethods[] = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_set_globaL_ctx", THPModule_setGlobalCtx, METH_O, nullptr},
+    {"_unset_globaL_ctx", THPModule_unsetGlobalCtx, METH_O, nullptr},
+    {"_get_global_ctx", THPModule_getGlobalCtx, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},

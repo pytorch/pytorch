@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
+from torch.backends.ops import atfp_mha_enabled, atfp_math_enabled
 from .linear import NonDynamicallyQuantizableLinear
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
@@ -1129,6 +1130,8 @@ class MultiheadAttention(Module):
 
 
         why_not_fast_path = ''
+        if not atfp_mha_enabled():
+            why_not_fast_path = "AT FastPath backend manager for enable_mha is False"
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
@@ -1207,6 +1210,8 @@ class MultiheadAttention(Module):
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
+
+        assert atfp_math_enabled(), "MultiHeadAttention: Falllback math implementation not enabled"
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property

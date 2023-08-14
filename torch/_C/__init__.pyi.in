@@ -1017,6 +1017,9 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
+def _set_global_ctx(arg: _int) -> None: ...  # THPModule_setGlobalCtx
+def _unset_global_ctx(arg: _int) -> None: ...  # THPModule_unsetGlobalCtx
+def _get_global_ctx(arg: _int) -> _bool: ...  # THPModule_getGlobalCtx
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN

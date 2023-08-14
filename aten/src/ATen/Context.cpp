@@ -117,6 +117,17 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+void Context::assignGlobalCtx(int pos, bool e){
+  if (e)
+    flags_global_ctx |= 1<<pos;
+  else
+    flags_global_ctx &= ~(1<<pos);
+}
+
+bool Context::getGlobalCtx(int pos){
+  return (flags_global_ctx & (1<<pos)) == (1<<pos);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
