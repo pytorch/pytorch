@@ -3556,6 +3556,46 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         ):
             out_graph, _ = torch._dynamo.export(mod, xs)
 
+    def test_param_buffer_safe_from_mutation_simple(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.zeros(5))
+            def forward(self, x):
+                self.buffer1.add_(1)
+                return x.sum() + self.buffer1.sum()
+
+        gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
+        buffers = [(name, buffer) for name, buffer in gm.named_buffers()]
+        self.assertEqual(len(buffers), 1)
+
+        name, buffer = buffers[0]
+        self.assertEqual(name, "L__self___buffer1")
+
+        self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
+
+    def test_param_buffer_safe_from_mutation_recurse(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer2", torch.zeros(5))
+            def forward(self, x):
+                return x.sum() + self.buffer2.sum()
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.zeros(5))
+                self.child = Child()
+            def forward(self, x):
+                self.buffer1.add_(1)
+                self.child.buffer2.add_(2)
+                return x.sum() + self.buffer1.sum() + self.child(x)
+
+        gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
+        for name, buffer in gm.named_buffers():
+            self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

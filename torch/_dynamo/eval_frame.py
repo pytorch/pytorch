@@ -1163,7 +1163,28 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
+
+                # We probably can't do this easily at parameter/buffer registration time
+                # because we need to pass the "symbolic"/"real" mode down to OutputGraph?
+                param_buffer_names_to_real_values = {}
+                for name, parameter in graph.named_parameters(recurse=True):
+                    param_buffer_names_to_real_values[name] = parameter
+                    # Replace param with fake param so that potential mutation is only applied on the fake param
+                    graph.register_parameter(name, fake_mode.from_tensor(parameter, static_shapes=True))
+
+                for name, buffer in graph.named_buffers(recurse=True):
+                    param_buffer_names_to_real_values[name] = buffer
+                    # Replace buffer with fake param so that potential mutation is only applied on the fake buffer
+                    graph.register_buffer(name, fake_mode.from_tensor(buffer, static_shapes=True))
+
                 graph_captured_result = graph(*graph_inputs)
+
+                for name, parameter in graph.named_parameters(recurse=True):
+                    graph.register_parameter(name, param_buffer_names_to_real_values[name])
+
+                for name, buffer in graph.named_buffers(recurse=True):
+                    graph.register_buffer(name, param_buffer_names_to_real_values[name])
+
                 return graph_captured_result
 
             return result_capturing_wrapper
