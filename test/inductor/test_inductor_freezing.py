@@ -280,8 +280,20 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
     def test_folded_conv_bn(self):
-        for use_bias, dtype in itertools.product(
-            [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        class Model(torch.nn.Module):
+            def __init__(self, has_activation):
+                super().__init__()
+                self.conv_bn = ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
+                self.relu6 = torch.nn.ReLU6()
+                self.has_activation = has_activation
+
+            def forward(self, x):
+                if self.has_activation:
+                    return self.relu6(self.conv_bn(x))
+                return self.conv_bn(x)
+
+        for use_bias, dtype, has_activation in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32], [True, False]
         ):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
@@ -289,12 +301,7 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
                 continue
 
-            mod = (
-                ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
-                .eval()
-                .to(self.device)
-                .to(dtype)
-            )
+            mod = Model(has_activation).eval().to(self.device).to(dtype)
 
             x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
 

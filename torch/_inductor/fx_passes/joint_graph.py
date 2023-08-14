@@ -216,30 +216,34 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     return graph
 
 
-@register_graph_pattern(
-    CallFunction(
-        torch.ops.prims.convert_element_type.default,
+if not config.freezing:
+    # For freezing path, the conv+bn folding pattern of mixed dtype(AMP)
+    # depend on this dtype conversion, we disable it and apply this pattern
+    # after conv+bn folding.
+    @register_graph_pattern(
         CallFunction(
             torch.ops.prims.convert_element_type.default,
-            KeywordArg("arg"),
-            KeywordArg("dtype1"),
+            CallFunction(
+                torch.ops.prims.convert_element_type.default,
+                KeywordArg("arg"),
+                KeywordArg("dtype1"),
+            ),
+            KeywordArg("dtype2"),
         ),
-        KeywordArg("dtype2"),
-    ),
-    pass_dict=patterns,
-)
-def pointless_convert(match: Match, arg, dtype1, dtype2):
-    """Remove chain of dtype conversions often created by AMP"""
-    graph = match.graph
-    node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
-    if dtype1 in allowed and dtype2 in allowed:
-        repl = graph.call_function(
-            torch.ops.prims.convert_element_type.default, (arg, dtype2)
-        )
-        repl.meta.update(node.meta)
-        node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
+        pass_dict=patterns,
+    )
+    def pointless_convert(match: Match, arg, dtype1, dtype2):
+        """Remove chain of dtype conversions often created by AMP"""
+        graph = match.graph
+        node = match.output_node()
+        allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
+        if dtype1 in allowed and dtype2 in allowed:
+            repl = graph.call_function(
+                torch.ops.prims.convert_element_type.default, (arg, dtype2)
+            )
+            repl.meta.update(node.meta)
+            node.replace_all_uses_with(repl)
+            match.erase_nodes(graph)
 
 
 @register_graph_pattern(
