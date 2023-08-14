@@ -5,6 +5,7 @@ import torch
 
 import torch.utils._pytree as pytree
 
+from torch._dynamo.utils import clone_input
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.optests import (
@@ -15,7 +16,7 @@ from torch.testing._internal.optests import (
 
 
 def safe_schema_check(op, args, kwargs):
-    args, kwargs = deepcopy_tensors(args, kwargs)
+    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
@@ -27,12 +28,12 @@ def safe_autograd_registration_check(op, args, kwargs):
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
     ):
         return
-    args, kwargs = deepcopy_tensors(args, kwargs)
+    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
     return autograd_registration_check(op, args, kwargs)
 
 
 def safe_fake_check(op, args, kwargs):
-    args, kwargs = deepcopy_tensors(args, kwargs)
+    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
     return fake_check(op, args, kwargs, dynamic_only=False)
 
 
@@ -266,7 +267,7 @@ class OpCheckMode(TorchFunctionMode):
         if ns not in self.namespaces:
             return func(*args, **kwargs)
 
-        args_c, kwargs_c = deepcopy_tensors(args, kwargs)
+        args_c, kwargs_c = pytree.tree_map(clone_input, (args, kwargs))
         # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
@@ -300,13 +301,6 @@ def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):
     if overload_name == "":
         return op.default
     return getattr(op, overload_name)
-
-
-def deepcopy_tensors(args, kwargs):
-    def deepcopy_tensor(x):
-        return x.detach().clone().requires_grad_(x.requires_grad)
-
-    return pytree.tree_map_only(torch.Tensor, deepcopy_tensor, (args, kwargs))
 
 
 def retrieve(failures_dict, qualname, test_name):
