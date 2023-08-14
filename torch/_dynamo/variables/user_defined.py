@@ -563,3 +563,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
+
+
+"""
+class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    
+"""
