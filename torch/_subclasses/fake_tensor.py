@@ -1703,7 +1703,7 @@ class FakeTensorMode(TorchDispatchMode):
                 dynamic_dims is None
             ), "cannot set both static_shapes and dynamic_dims"
             shape_env = None
-        ret = self.fake_tensor_converter(
+        return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
@@ -1713,7 +1713,6 @@ class FakeTensorMode(TorchDispatchMode):
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
         )
-        return ret
 
 
 # NB: returns fake tensors
