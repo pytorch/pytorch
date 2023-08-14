@@ -1225,7 +1225,9 @@ def forward(self, arg0_1, arg1_1):
 
         # All overlap graphs should be the same since we detected real aliasing
         self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
-        self.assertEqual(str(fw_graph_overlap1.code), str(fw_graph_overlap1.code))
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap2.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap1.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap2.code))
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
