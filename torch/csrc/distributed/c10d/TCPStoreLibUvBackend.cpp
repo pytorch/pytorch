@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <deque>
+#include <exception>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -78,6 +79,236 @@ class UvHandle : public c10::intrusive_ptr_target {
   static void on_close(uv_handle_t* uv_handle) {
     auto handle = reclaim(uv_handle);
     handle->onClose();
+  }
+};
+
+class UvTcpSocket : public UvHandle {
+  uv_tcp_t client;
+
+  c10::intrusive_ptr<UvTcpSocket> iptr() {
+    return c10::intrusive_ptr<UvTcpSocket>::reclaim_copy(this);
+  }
+
+  static c10::intrusive_ptr<UvTcpSocket> borrow(uv_stream_t* handle) {
+    auto h = (UvTcpSocket*)uv_handle_get_data((uv_handle_t*)handle);
+    return h->iptr();
+  }
+
+  static void alloc_buffer(
+
+      uv_handle_t* handle,
+      size_t suggested_size,
+      uv_buf_t* buf) {
+    suggested_size = std::min(suggested_size, (size_t)ALLOC_BUFFER_SIZE);
+    buf->base = (char*)malloc(suggested_size);
+    buf->len = suggested_size;
+  }
+
+  static void read_callback(
+      uv_stream_t* client,
+      ssize_t nread,
+      const uv_buf_t* buf) {
+    auto uv_socket = UvTcpSocket::borrow(client);
+
+    if (nread < 0) {
+      C10D_DEBUG(
+          "Read callback failed. code:{} name:{} desc:{}",
+          nread,
+          uv_err_name(nread),
+          uv_strerror(nread));
+      uv_socket->close();
+      return;
+    }
+    if (nread > 0) {
+      try {
+        uv_socket->processBuf(buf, nread);
+      } catch (std::exception& ex) {
+        C10D_INFO("Error processing client message: {}", ex.what());
+        uv_socket->close();
+      }
+    }
+  }
+
+ public:
+  explicit UvTcpSocket(uv_loop_t* loop) {
+    uv_tcp_init(loop, &client);
+  }
+
+  void startRead() {
+    int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
+    if (res) {
+      C10D_INFO(
+          "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
+          (void*)this,
+          res,
+          uv_err_name(res),
+          uv_strerror(res));
+      close();
+    }
+  }
+
+  uv_handle_t* unsafeGetHandle() override {
+    return (uv_handle_t*)&client;
+  }
+
+ protected:
+  uv_stream_t* unsafeGetStream() {
+    return (uv_stream_t*)&client;
+  }
+
+  uv_tcp_t* unsafeGetSocket() {
+    return &client;
+  }
+
+  virtual void processBuf(const uv_buf_t* buf, size_t nread) {
+    TORCH_CHECK(
+        false, "Trying to read from a socket subclass that lacks processBuf");
+  }
+
+  void onClose() override {
+    // TODO use registerClient (and rename it to registerHandle) - this will
+    // significantly simplify things.
+  }
+};
+
+class UvTcpServer : public UvTcpSocket {
+ public:
+  typedef std::function<void(int)> OnConnectCallback;
+  explicit UvTcpServer(uv_loop_t* loop)
+      : UvTcpSocket(loop), onConnectCb(missingOnConnect) {}
+
+  static c10::intrusive_ptr<UvTcpServer> makeWithSocket(
+      uv_loop_t* loop,
+      int socket) {
+    auto res = c10::make_intrusive<UvTcpServer>(loop);
+    res->handleReady();
+    try {
+      int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
+      TORCH_CHECK(
+          uv_res == 0,
+          "Failed to open existing socket. socket:%d code:{} name:{} message:{}",
+          socket,
+          uv_res,
+          uv_err_name(uv_res),
+          uv_strerror(uv_res));
+
+      res->cacheSocketPort();
+    } catch (std::exception& ex) {
+      res->close();
+      throw;
+    }
+
+    return res;
+  }
+
+  void setOnConnectCallback(OnConnectCallback&& callback) {
+    onConnectCb = std::move(callback);
+  }
+
+  static c10::intrusive_ptr<UvTcpServer> makeWithPort(
+      uv_loop_t* loop,
+      uint16_t port,
+      bool useIpv6) {
+    auto res = c10::make_intrusive<UvTcpServer>(loop);
+    res->handleReady();
+    try {
+      struct sockaddr_storage addr;
+      int uv_res;
+      if (useIpv6) {
+        uv_res = uv_ip6_addr("::", port, (struct sockaddr_in6*)&addr);
+      } else {
+        uv_res = uv_ip4_addr("0.0.0.0", port, (struct sockaddr_in*)&addr);
+      }
+      TORCH_CHECK(
+          uv_res == 0,
+          "UV Store addr parsing failure. useIpv6:{} code:{} name:{} message:{}",
+          useIpv6,
+          uv_res,
+          uv_err_name(uv_res),
+          uv_strerror(uv_res));
+
+      uv_res =
+          uv_tcp_bind(res->unsafeGetSocket(), (const struct sockaddr*)&addr, 0);
+      TORCH_CHECK(
+          uv_res == 0,
+          "UV Store bind failed. useIpv6:{} code:{} name:{} message:{}",
+          useIpv6,
+          uv_res,
+          uv_err_name(uv_res),
+          uv_strerror(uv_res));
+
+      uv_res =
+          uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
+      TORCH_CHECK(
+          uv_res == 0,
+          "UV Store listen failed. useIpv6:{} code:{} name:{} message:{}",
+          useIpv6,
+          uv_res,
+          uv_err_name(uv_res),
+          uv_strerror(uv_res));
+
+      res->cacheSocketPort();
+    } catch (std::exception& ex) {
+      res->close();
+      throw;
+    }
+
+    return res;
+  }
+
+  uint16_t port() const {
+    return portNum;
+  }
+
+  void accept(c10::intrusive_ptr<UvTcpSocket> socket) {
+    int res =
+        uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
+    TORCH_CHECK(
+        "Failed to accept socket. code:{} name:{} desc:{}.",
+        res,
+        uv_err_name(res),
+        uv_strerror(res));
+  }
+
+ private:
+  OnConnectCallback onConnectCb;
+  uint16_t portNum;
+
+  c10::intrusive_ptr<UvTcpServer> iptr() {
+    return c10::intrusive_ptr<UvTcpServer>::reclaim_copy(this);
+  }
+
+  static c10::intrusive_ptr<UvTcpServer> borrow(uv_stream_t* handle) {
+    auto h = (UvTcpServer*)uv_handle_get_data((uv_handle_t*)handle);
+    return h->iptr();
+  }
+
+  void cacheSocketPort() {
+    sockaddr_storage addr_s{};
+
+    int addr_len = sizeof(addr_s);
+
+    if (uv_tcp_getsockname(
+            (uv_tcp_t*)unsafeGetStream(),
+            reinterpret_cast<sockaddr*>(&addr_s),
+            &addr_len) != 0) {
+      throw std::runtime_error(
+          "The port number of the socket cannot be retrieved.");
+    }
+
+    if (addr_s.ss_family == AF_INET) {
+      portNum = ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
+    } else {
+      portNum = ntohs(reinterpret_cast<sockaddr_in6*>(&addr_s)->sin6_port);
+    }
+  }
+
+  static void missingOnConnect(int status) {
+    TORCH_CHECK(false, "Socket accepted byt onConnect callback missing");
+  }
+
+  static void on_new_connection(uv_stream_t* server, int status) {
+    borrow(server)->onConnectCb(status);
   }
 };
 
@@ -357,7 +588,7 @@ class LibUVStoreDaemon : public BackgroundThread {
 
  private:
   uv_loop_t loop;
-  uv_tcp_t server;
+  c10::intrusive_ptr<UvTcpServer> tcpServer;
 
   uv_async_t exit_handle;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
@@ -384,56 +615,17 @@ class LibUVStoreDaemon : public BackgroundThread {
   void onConnect(int status);
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
-  bool tryListen(bool use_ipv6);
+  // bool tryListen(bool use_ipv6);
 
   static void print_active_handles(uv_handle_t* handle, void* arg);
 };
 
-class UvClient : public UvHandle {
-  uv_tcp_t client;
+class UvClient : public UvTcpSocket {
   ChunkedStream stream;
   LibUVStoreDaemon* store;
 
-  static c10::intrusive_ptr<UvClient> borrow(uv_stream_t* handle) {
-    auto h = (UvClient*)uv_handle_get_data((uv_handle_t*)handle);
-    return h->iptr();
-  }
-
-  static void read_callback(
-      uv_stream_t* client,
-      ssize_t nread,
-      const uv_buf_t* buf) {
-    auto uv_client = UvClient::borrow(client);
-
-    if (nread < 0) {
-      C10D_DEBUG(
-          "Read callback failed. code:{} name:{} desc:{}",
-          nread,
-          uv_err_name(nread),
-          uv_strerror(nread));
-      uv_client->close();
-      return;
-    }
-    if (nread > 0) {
-      try {
-        uv_client->processBuf(buf, nread);
-      } catch (std::exception& ex) {
-        C10D_INFO("Error processing client message: {}", ex.what());
-        uv_client->close();
-      }
-    }
-  }
-
-  static void alloc_buffer(
-      uv_handle_t* handle,
-      size_t suggested_size,
-      uv_buf_t* buf) {
-    suggested_size = std::min(suggested_size, (size_t)ALLOC_BUFFER_SIZE);
-    buf->base = (char*)malloc(suggested_size);
-    buf->len = suggested_size;
-  }
-
-  void processBuf(const uv_buf_t* buf, size_t nread) {
+ protected:
+  void processBuf(const uv_buf_t* buf, size_t nread) override {
     auto tmp = *buf;
     tmp.len = nread;
     stream.append(tmp);
@@ -722,10 +914,8 @@ class UvClient : public UvHandle {
   }
 
  public:
-  explicit UvClient(uv_loop_t* loop, LibUVStoreDaemon* store) : store(store) {
-    uv_tcp_init(loop, &client);
-    C10D_DEBUG("Accepted new client: {}\n", (void*)this);
-  }
+  explicit UvClient(uv_loop_t* loop, LibUVStoreDaemon* store)
+      : UvTcpSocket(loop), store(store) {}
 
   static c10::intrusive_ptr<UvClient> make(
       uv_loop_t* loop,
@@ -734,25 +924,9 @@ class UvClient : public UvHandle {
     res->handleReady();
     return res;
   }
+
   c10::intrusive_ptr<UvClient> iptr() {
     return c10::intrusive_ptr<UvClient>::reclaim_copy(this);
-  }
-
-  void startRead() {
-    int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
-    if (res) {
-      C10D_INFO(
-          "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
-          (void*)this,
-          res,
-          uv_err_name(res),
-          uv_strerror(res));
-      close();
-    }
-  }
-
-  uv_handle_t* unsafeGetHandle() override {
-    return (uv_handle_t*)&client;
   }
 
  protected:
@@ -763,18 +937,12 @@ class UvClient : public UvHandle {
 
 void LibUVStoreDaemon::onConnect(int status) {
   auto client = UvClient::make(&loop, this);
-
   registerClient(client);
-  int res =
-      uv_accept((uv_stream_t*)&server, (uv_stream_t*)client->unsafeGetHandle());
-  if (res == 0) {
+  try {
+    tcpServer->accept(client);
     client->startRead();
-  } else {
-    C10D_INFO(
-        "Failed to accept client. code:{} name:{} desc:{}.",
-        res,
-        uv_err_name(res),
-        uv_strerror(res));
+  } catch (std::exception& e) {
+    C10D_INFO("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
@@ -785,104 +953,29 @@ void LibUVStoreDaemon::onExitRequest() {
   uv_stop(&loop);
 }
 
-uint16_t LibUVStoreDaemon::get_socket_port(uv_tcp_t* handle) {
-  sockaddr_storage addr_s{};
-
-  int addr_len = sizeof(addr_s);
-
-  if (uv_tcp_getsockname(
-          handle, reinterpret_cast<sockaddr*>(&addr_s), &addr_len) != 0) {
-    throw std::runtime_error(
-        "The port number of the socket cannot be retrieved.");
-  }
-
-  if (addr_s.ss_family == AF_INET) {
-    return ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
-  } else {
-    return ntohs(reinterpret_cast<sockaddr_in6*>(&addr_s)->sin6_port);
-  }
-}
-
 void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
-  uv_handle_set_data((uv_handle_t*)&server, this);
-
   if (opts.masterListenFd.has_value()) {
-    int res = uv_tcp_open(&server, *opts.masterListenFd);
-    TORCH_CHECK(
-        res == 0,
-        "Failed to open an existing socket. code:{} name:{} message:{}",
-        res,
-        uv_err_name(res),
-        uv_strerror(res));
-
-    port_ = get_socket_port(&server);
-    TORCH_CHECK(
-        port_ == opts.port,
-        "listen fd {} is bound to port {}, expected to be bound to port {}",
-        *opts.masterListenFd,
-        port_,
-        opts.port);
-
-    return;
-  }
-
-  if (tryListen(true)) {
-    return;
-  }
-  uv_close((uv_handle_t*)&server, nullptr);
-  uv_run(&loop, UV_RUN_ONCE);
-
-  if (tryListen(false)) {
-    return;
-  }
-  uv_close((uv_handle_t*)&server, nullptr);
-  uv_run(&loop, UV_RUN_ONCE);
-  TORCH_CHECK(false, "failed to init store, no bind possible");
-}
-
-bool LibUVStoreDaemon::tryListen(bool use_ipv6) {
-  int res = uv_tcp_init(&loop, &server);
-  struct sockaddr_storage addr;
-  if (res) {
-    C10D_WARNING(
-        "UV Store init tcp socket. ipv6:{} message:{}",
-        use_ipv6,
-        uv_strerror(res));
-    return false;
-  }
-
-  if (use_ipv6) {
-    res = uv_ip6_addr("::", port_, (struct sockaddr_in6*)&addr);
+    tcpServer = UvTcpServer::makeWithSocket(&loop, *opts.masterListenFd);
   } else {
-    res = uv_ip4_addr("0.0.0.0", port_, (struct sockaddr_in*)&addr);
+    try {
+      tcpServer = UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/true);
+    } catch (std::exception& ex) {
+      C10D_INFO(
+          "Failed to bind to ipv6 address, trying ipv4. Error: {}", ex.what());
+      tcpServer =
+          UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/false);
+    }
   }
-  if (res) {
-    C10D_WARNING(
-        "UV Store addr parsing failure. ipv6:{} message:{}",
-        use_ipv6,
-        uv_strerror(res));
-    return false;
-  }
-  res = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
-  if (res) {
-    C10D_WARNING(
-        "UV Store tcp bind failure. ipv6:{} message:{}",
-        use_ipv6,
-        uv_strerror(res));
-    return false;
-  }
-  res = uv_listen(
-      (uv_stream_t*)&server,
-      DEFAULT_BACKLOG,
-      LibUVStoreDaemon::on_new_connection);
-  if (res) {
-    C10D_WARNING(
-        "UV Store listen failure. ipv6:{} message:{}",
-        use_ipv6,
-        uv_strerror(res));
-  }
-  port_ = get_socket_port(&server);
-  return res == 0;
+  tcpServer->setOnConnectCallback(
+      [this](auto status) { this->onConnect(status); });
+
+  port_ = tcpServer->port();
+  TORCH_CHECK(
+      port_ == opts.port,
+      "listen fd {} is bound to port {}, expected to be bound to port {}",
+      *opts.masterListenFd,
+      port_,
+      opts.port);
 }
 
 LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
@@ -934,7 +1027,7 @@ void LibUVStoreDaemon::run() {
   for (auto it = clients_.begin(); it != clients_.end(); ++it) {
     (*it)->close();
   }
-  uv_close((uv_handle_t*)&server, nullptr);
+  tcpServer->close();
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles after closing clients");
