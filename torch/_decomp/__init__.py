@@ -321,7 +321,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.softplus,
             aten.softplus_backward,
             aten.softshrink,
-            aten.softshrink_backward,
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
