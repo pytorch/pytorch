@@ -443,7 +443,7 @@ class BaseSchedulerNode:
 
                     fake_inputs = [ir_node_to_tensor(input) for input in self.node.inputs]
                     cls = self.node.__class__
-                    output, *_ = cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
+                    cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
                     return flop_counter_mode.get_total_flops() / gpu_flops
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
