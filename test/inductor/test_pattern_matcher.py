@@ -414,6 +414,16 @@ class TestPaternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    def test_remove_pointless_clones(self):
+        @torch.compile(fullgraph=True)
+        def fn(a, b):
+            return torch.mm(a, b).clone()
+
+        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        # clone would create a buf1
+        self.assertIn("return (buf0, )", code[0])
+        self.assertNotIn("async_compile.cpp", code[0])
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:

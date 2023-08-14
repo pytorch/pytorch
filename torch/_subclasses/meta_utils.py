@@ -7,6 +7,10 @@ import torch
 from torch._guards import Source
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    transform_subclass,
+)
 from torch.utils.weak import WeakIdRef
 
 DimList = List
@@ -496,7 +500,6 @@ class MetaConverter:
 
         if (
             type(t) is torch.Tensor
-            or type(t) is torch.nn.Buffer
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
@@ -545,18 +548,26 @@ class MetaConverter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
                     r._is_param = True
-                elif type(t) is torch.nn.Buffer:
-                    # similar to above
-                    r._is_buffer = True
                 return r
         elif torch.overrides.is_tensor_like(t):
-            # Blindly converting tensor subclasses to meta can cause
-            # unpredictable problems; e.g., FX tests will trace meta
-            # tensors into their trace / some subclasses don't correctly
-            # support meta.  Trying to YOLO this is more trouble than it's
-            # worth.
-            self.miss += 1
-            return NotImplemented
+            if is_traceable_wrapper_subclass(t):
+                # convert traceable wrapper subclasses to meta by converting
+                # the underlying tensor to meta
+                out = transform_subclass(
+                    t,
+                    lambda t: self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, source=source
+                    ),
+                )
+                return out
+            else:
+                # Blindly converting tensor subclasses to meta can cause
+                # unpredictable problems; e.g., FX tests will trace meta
+                # tensors into their trace / some subclasses don't correctly
+                # support meta.  Trying to YOLO this is more trouble than it's
+                # worth.
+                self.miss += 1
+                return NotImplemented
         else:
             # non-Tensor types don't count as hit or miss
             return t
