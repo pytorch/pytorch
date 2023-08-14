@@ -1,7 +1,5 @@
-import torch
-
 from . import benchmark
-
+import torch
 
 class RNNEltwise(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, b, hs):
@@ -66,7 +64,6 @@ class RNNEltwise(benchmark.Benchmark):
     def default_configs():
         return [[64, 512]]
 
-
 benchmark.register_benchmark_class(RNNEltwise)
 
 
@@ -79,34 +76,19 @@ class DynamicLSTM(benchmark.DynamicShape, RNNEltwise):
         b, hs = self.rand_shape([self.b, self.hs])
 
         self.input = self.rand(
-            [b, 4 * hs],
-            device=self.device,
-            dtype=self.dtype,
-            requires_grad=self.requires_grad,
+            [b, 4 * hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
         )
         self.hx = self.rand(
-            [b, 4 * hs],
-            device=self.device,
-            dtype=self.dtype,
-            requires_grad=self.requires_grad,
+            [b, 4 * hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
         )
         self.cx = self.rand(
-            [b, hs],
-            device=self.device,
-            dtype=self.dtype,
-            requires_grad=self.requires_grad,
+            [b, hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
         )
         self.b_ih = self.rand(
-            [b, 4 * hs],
-            device=self.device,
-            dtype=self.dtype,
-            requires_grad=self.requires_grad,
+            [b, 4 * hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
         )
         self.b_hh = self.rand(
-            [b, 4 * hs],
-            device=self.device,
-            dtype=self.dtype,
-            requires_grad=self.requires_grad,
+            [b, 4 * hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
         )
         self.inputs = [
             self.input,
@@ -119,6 +101,5 @@ class DynamicLSTM(benchmark.DynamicShape, RNNEltwise):
     @staticmethod
     def module():
         return "dynamic_lstm"
-
 
 benchmark.register_benchmark_class(DynamicLSTM)

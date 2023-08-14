@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 _COMPACT_ERROR_GROUP = False
 
 
-class ErrorAggregator:
+class ErrorAggregator(object):
     """
     Collect and group error messages for report at the end.
 
@@ -47,7 +47,7 @@ class ErrorAggregator:
     ]
 
     def __init__(self, log: Optional[logging.Logger] = None):
-        super().__init__()
+        super(ErrorAggregator, self).__init__()
         self.error_groups = []
         self.bigram_to_group_ids = collections.defaultdict(list)
         self.log = log or logging.getLogger(__name__)
@@ -141,7 +141,7 @@ class ErrorAggregator:
         return sum(map(len, self.error_groups))
 
 
-class ErrorAggregatorDict:
+class ErrorAggregatorDict(object):
     """
     Collect error types and individually group their error messages for a debug report at the end.
 
@@ -152,7 +152,7 @@ class ErrorAggregatorDict:
     """
 
     def __init__(self):
-        super().__init__()
+        super(ErrorAggregatorDict, self).__init__()
         self.aggregator: Dict[str, ErrorAggregator] = dict()
 
     def __getitem__(self, item: str):
@@ -179,7 +179,7 @@ class ErrorAggregatorDict:
             log.exception("%s error from %s", error_type, module)
 
 
-class ExportErrorCsvParser:
+class ExportErrorCsvParser(object):
     """Parses `*_export_error.csv` produced by onnxbench, aggregates errors and produces report.
 
     Two types of aggregations are performed.
@@ -310,7 +310,7 @@ class ExportErrorRow:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
-class ExportErrorParser:
+class ExportErrorParser(object):
     def __init__(self, device: str, model_name: str, batch_size: int):
         self.device = device
         self.model_name = model_name

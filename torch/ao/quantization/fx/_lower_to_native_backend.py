@@ -514,7 +514,7 @@ def _match_static_pattern(
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
         assert i < len(ref_node.args),\
-            f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
+            "Dequantize index %s exceeded reference node's arg length %s" % (i, len(ref_node.args))
         arg = ref_node.args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True
@@ -819,7 +819,7 @@ def _lower_static_weighted_ref_functional(
             if (len(prepack_args) > 6):
                 prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
-            raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
+            raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
             # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
             # They are not needed for compute op (i.e., quantized::linear)
@@ -935,7 +935,7 @@ def _lower_dynamic_weighted_ref_functional(
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
         else:
-            raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
+            raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(func_node):
             packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
 

@@ -4,6 +4,7 @@ import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import MutableMapping, Mapping
+from typing import Dict
 from torch import Tensor
 import collections.abc as _collections_abc
 
@@ -82,7 +83,7 @@ class WeakIdRef(weakref.ref):
 
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    data: dict[WeakIdRef, object]
+    data: Dict[WeakIdRef, object]
 
     def __init__(self, dict=None):
         self.data = {}
@@ -143,7 +144,7 @@ class WeakIdKeyDictionary(MutableMapping):
         return len(self.data) - len(self._pending_removals)
 
     def __repr__(self):
-        return f"<{self.__class__.__name__} at {id(self):#x}>"
+        return "<%s at %#x>" % (self.__class__.__name__, id(self))
 
     def __setitem__(self, key, value):
         self.data[WeakIdRef(key, self._remove)] = value  # CHANGED

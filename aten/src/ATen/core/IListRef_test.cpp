@@ -30,10 +30,15 @@ static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
   static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
   constexpr size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE; i++) {
-    tensors.push_back(at::empty({0}));
-    optional_tensors.emplace_back(tensors[i]);
-    optional_tensors.emplace_back();
+  for (size_t i = 0; i < SIZE * 2; i++) {
+    if (i % 2 == 0) {
+      if (tensors.size() + 1 < i / 2) {
+        tensors.push_back(at::empty({0}));
+      }
+      optional_tensors.emplace_back(tensors[i / 2]);
+    } else {
+      optional_tensors.emplace_back();
+    }
   }
   return optional_tensors;
 }

@@ -129,7 +129,7 @@ def extract_models_from_pr(
     model_list = []
     userbenchmark_list = []
     pr_list = []
-    with open(prbody_file) as pf:
+    with open(prbody_file, "r") as pf:
         lines = (x.strip() for x in pf.read().splitlines())
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_PREFIX), lines))
         if magic_lines:
@@ -157,7 +157,7 @@ def extract_models_from_pr(
 
 def find_torchbench_branch(prbody_file: str) -> str:
     branch_name: str = ""
-    with open(prbody_file) as pf:
+    with open(prbody_file, "r") as pf:
         lines = (x.strip() for x in pf.read().splitlines())
         magic_lines = list(
             filter(lambda x: x.startswith(MAGIC_TORCHBENCH_PREFIX), lines)

@@ -20,7 +20,7 @@ class CodeTemplate:
 
     @staticmethod
     def from_file(filename: str) -> "CodeTemplate":
-        with open(filename) as f:
+        with open(filename, "r") as f:
             return CodeTemplate(f.read(), filename)
 
     def __init__(self, pattern: str, filename: str = "") -> None:

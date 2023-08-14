@@ -28,7 +28,9 @@ def execute(
     elif executor == "strictly_nvfuser":
         return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)
 
-    msg = f"Received unexpected value for 'executor': {executor}. Allowed values are: aten, nvfuser."
+    msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
+        executor
+    )
     raise ValueError(msg)
 
 

@@ -33,7 +33,7 @@ from torch.distributed.fsdp.api import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _Policy
+from torch.distributed.fsdp.wrap import _FSDPPolicy
 
 
 @contract(state_cls=_FSDPState)
@@ -41,7 +41,7 @@ def fully_shard(
     module: nn.Module,
     *,
     process_group: Optional[dist.ProcessGroup] = None,
-    policy: Optional[_Policy] = None,
+    policy: Optional[_FSDPPolicy] = None,
     strategy: Optional[ShardingStrategy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
@@ -59,15 +59,17 @@ def fully_shard(
     """
     torch._C._log_api_usage_once("torch.distributed.fully_shard")
     # Enforce the new auto wrap policy
-    if policy is not None and not isinstance(policy, _Policy):
-        raise ValueError(f"Expects a `_Policy` but got {policy}")
+    if policy is not None and not isinstance(policy, _FSDPPolicy):
+        raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules, ignored_states)
     state = _init_device_handle(state, module, state._ignored_params, device_id)
     _annotate_modules_for_dynamo(module, state._ignored_modules, True)
-    state = _init_process_group_state(state, process_group, strategy, policy)
+    state = _init_process_group_state(
+        state, process_group, ShardingStrategy.FULL_SHARD, policy
+    )
     if policy is not None:
-        root_kwargs = {
+        fsdp_kwargs = {
             "process_group": process_group,
             "strategy": strategy,
             "mixed_precision": mixed_precision,
@@ -80,13 +82,13 @@ def fully_shard(
             "ignored_states": ignored_states,
         }
         if strategy in HYBRID_SHARDING_STRATEGIES:
-            root_kwargs["process_group"] = (state.process_group, state._inter_node_pg)
+            fsdp_kwargs["process_group"] = (state.process_group, state._inter_node_pg)
         _auto_wrap(
             module,
             policy,
             state._ignored_modules,
             state._ignored_params,
-            root_kwargs,
+            fsdp_kwargs,
             fully_shard,
         )
     state = _init_core_state(
@@ -118,7 +120,7 @@ def fully_shard(
     _insert_module_state(module, state)
     for submodule in module.modules():
         if (
-            submodule in state._fully_sharded_module_to_handle
+            submodule in state._fully_sharded_module_to_handles
             and _get_module_state(submodule) is None
         ):
             _insert_module_state(submodule, state)

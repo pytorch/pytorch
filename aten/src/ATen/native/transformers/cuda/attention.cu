@@ -519,16 +519,12 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask, 0.0, false};
+    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
-    // For mem-eff attention this will cause the expand call to error
-    // For now I am going to turn of that path not have to deal with all the annoying
-    // Mask type shape grossness
-    if (!mask.has_value() && no_seq_len_1_nested &&
+    if (no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
@@ -540,6 +536,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
+
       auto y = at::scaled_dot_product_attention(
           chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
 
@@ -715,7 +712,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<at::Tensor>& attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
@@ -737,7 +733,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       q_t,
       k_t,
       v_t,
-      attn_bias,
+      c10::nullopt,
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
@@ -752,7 +748,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -1049,14 +1045,8 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
 
       // assign strides for bias, viewed as
       // (batch_sz, n_heads, n_queries, n_keys)
-      // We make sure to expand prior to calling the kernel
-      const at::Tensor& bias_4d_view = *bias;
-      TORCH_CHECK(bias_4d_view.dim()==4);
-      TORCH_CHECK(bias_4d_view.size(0)==B);
-      TORCH_CHECK(bias_4d_view.size(1)==num_heads);
-      TORCH_CHECK(bias_4d_view.size(2)==M);
-      TORCH_CHECK(bias_4d_view.size(3)==N);
-
+      const at::Tensor bias_4d_view =
+          get_bias_4d_view(*bias, B, num_heads, M, N);
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));

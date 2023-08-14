@@ -388,7 +388,12 @@ public:
       }
     )
   }
-  Vectorized<float> erf() const;
+  Vectorized<float> erf() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_erff4_u10(values.val[0]), Sleef_erff4_u10(values.val[1])),
+      map(std::erf);
+    );
+  }
   Vectorized<float> erfc() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_erfcf4_u15(values.val[0]), Sleef_erfcf4_u15(values.val[1])),
@@ -835,37 +840,6 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
   return Vectorized<float>(r0, r1);
 }
 
-inline Vectorized<float> Vectorized<float>::erf() const{
-    // constants
-    const Vectorized<float> neg_zero_vec(-0.f);
-    const Vectorized<float> one_vec(1.0f);
-    const Vectorized<float> p(0.3275911f);
-    const Vectorized<float> p1(0.254829592f);
-    const Vectorized<float> p2(-0.284496736f);
-    const Vectorized<float> p3(1.421413741f);
-    const Vectorized<float> p4(-1.453152027f);
-    const Vectorized<float> p5(1.061405429f);
-    // sign(x)
-    auto sign_mask = neg_zero_vec & *this;
-    auto abs_vec = this->abs();
-    // t = 1 / (p * abs(x) + 1)
-    auto tmp0 = fmadd(p, abs_vec, one_vec);
-    auto t = one_vec / tmp0;
-    // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
-    auto tmp1 = fmadd(p5, t, p4);
-    auto tmp2 = fmadd(tmp1, t, p3);
-    auto tmp3 = fmadd(tmp2, t, p2);
-    auto r = fmadd(tmp3, t, p1);
-    // - exp(- x * x)
-    auto pow_2 = (*this) * (*this);
-    auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-    auto tmp4 = neg_pow_2.map(std::exp); // This can be swapped for a faster implementation of exp.
-    auto tmp5 = tmp4 ^ neg_zero_vec;
-    // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
-    auto tmp6 = t * tmp5;
-    auto tmp7 = fmadd(tmp6, r, one_vec);
-    return tmp7 ^ sign_mask;
-}
 #endif /* defined(aarch64) */
 
 }}}

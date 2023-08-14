@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 op_add = '+'
 op_sub = '-'
 op_mul = '*'

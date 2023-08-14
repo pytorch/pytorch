@@ -1,12 +1,12 @@
 import torch
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._export.pass_base import _ExportPassBase, ProxyValue
+from torch._export.pass_base import ExportPassBase, ProxyValue
 
 __all__ = ["ConstPropPass"]
 
 
-class ConstPropPass(_ExportPassBase):
+class ConstPropPass(ExportPassBase):
     """
     Performs constant folding and constant propagation.
     """

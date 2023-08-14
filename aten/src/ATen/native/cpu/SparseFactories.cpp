@@ -17,7 +17,7 @@ void _spdiags_kernel_cpu(
     TensorBase& values,
     TensorBase& indices) {
   auto* row_index_write_ptr = indices.data_ptr<int64_t>();
-  auto* col_index_write_ptr = row_index_write_ptr ? row_index_write_ptr + indices.stride(0) : nullptr;
+  auto* col_index_write_ptr = row_index_write_ptr + indices.stride(0);
   const int64_t diagonals_index_stride = diagonals.stride(0);
   const int64_t diagonals_read_stride = diagonals.stride(1);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(

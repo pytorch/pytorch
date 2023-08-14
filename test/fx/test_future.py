@@ -16,7 +16,7 @@ class M1(torch.nn.Module):
 
 # Forward references
 class M2(torch.nn.Module):
-    def forward(self, x: torch.Tensor, a: A) -> torch.Tensor:
+    def forward(self, x: 'torch.Tensor', a: 'A') -> 'torch.Tensor':
         return a(x)
 
 # Non-torch annotation with no internal forward references
@@ -26,7 +26,7 @@ class M3(torch.nn.Module):
 
 # Non-torch annotation with internal forward references
 class M4(torch.nn.Module):
-    def forward(self, x: typing.List[torch.Tensor], a: A) -> torch.Tensor:
+    def forward(self, x: typing.List['torch.Tensor'], a: A) -> 'torch.Tensor':
         return a(x[0])
 
 x = torch.rand(2, 3)

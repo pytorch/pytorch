@@ -1,13 +1,13 @@
-import threading
-import time
 from functools import reduce
+import time
+import threading
 
 import torch
+from torch.distributions import Categorical
 import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
 
 
 OBSERVER_NAME = "observer{}"
@@ -27,7 +27,7 @@ class Policy(nn.Module):
         self.model = nn.Sequential(
             nn.Flatten(1, -1),
             nn.Linear(in_features, out_features),
-            *[nn.Linear(out_features, out_features) for _ in range(nlayers)],
+            * [nn.Linear(out_features, out_features) for _ in range(nlayers)]
         )
         self.dim = 0
 
@@ -75,9 +75,7 @@ class AgentBase:
             batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.batch = batch
-        self.policy = Policy(
-            reduce((lambda x, y: x * y), state_size), nlayers, out_features
-        )
+        self.policy = Policy(reduce((lambda x, y: x * y), state_size), nlayers, out_features)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
 
         self.batch_size = batch_size
@@ -86,9 +84,8 @@ class AgentBase:
 
             self.rewards[ob_info.id] = []
 
-        self.saved_log_probs = (
-            [] if self.batch else {k: [] for k in range(self.batch_size)}
-        )
+        self.saved_log_probs = [] if self.batch else {
+            k: [] for k in range(self.batch_size)}
 
         self.pending_states = self.batch_size
         self.state_size = state_size

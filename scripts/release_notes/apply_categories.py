@@ -2,9 +2,8 @@
 # base commitlist . Useful if you are refactoring any code
 # but want to keep the previous data on categories
 
-import csv
-
 import commitlist
+import csv
 
 category_csv = "results/category_data.csv"
 commitlist_csv = "results/commitlist.csv"

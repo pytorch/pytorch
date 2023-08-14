@@ -20,11 +20,6 @@ struct TORCH_API Error : public Node {
 
   variable_list apply(variable_list&& inputs) override;
 
-  void compiled_args(CompiledNodeArgs& args) override;
-  variable_list apply_with_saved(
-      const variable_list& inputs,
-      SwapSavedVariables& saved) override;
-
   std::string msg;
 };
 
@@ -71,13 +66,6 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward() = default;
 
   variable_list apply(variable_list&& inputs) override;
-
-  void compiled_args(CompiledNodeArgs& args) override {}
-  variable_list apply_with_saved(
-      const variable_list& inputs,
-      SwapSavedVariables& saved) override {
-    return apply(variable_list(inputs));
-  }
 };
 
 struct TORCH_API GraphRoot : public Node {
@@ -94,11 +82,6 @@ struct TORCH_API GraphRoot : public Node {
   variable_list apply(variable_list&& inputs) override {
     return outputs;
   }
-
-  void compiled_args(CompiledNodeArgs& args) override;
-  variable_list apply_with_saved(
-      const variable_list& inputs,
-      SwapSavedVariables& saved) override;
 
   variable_list outputs;
 };

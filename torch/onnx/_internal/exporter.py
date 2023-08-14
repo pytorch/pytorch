@@ -13,13 +13,11 @@ from typing import (
     Callable,
     Dict,
     Final,
-    List,
     Mapping,
     Optional,
     Protocol,
     runtime_checkable,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -70,9 +68,6 @@ class ONNXFakeContext:
 
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode used for tracing model using fake tensors and parameters."""
-
-    state_dict_paths: Optional[Tuple[Union[str, io.BytesIO]]] = None
-    """List of paths of files that contain the model `state_dict`"""
 
 
 class ExportOptions:
@@ -275,24 +270,17 @@ def enable_fake_mode():
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     # This overrides the internal `FakeTensorMode` instance created by `torch._dynamo.export`[1].
-    # It is a good idea to keep them in sync (constructor args) to maintain the same default behavior
+    # Ideally we should keep them in sync to preserve the same default behavior
     # [1] `torch/_dynamo/output_graph.py::InstructionTranslator::OutputGraph.__init__`
-    # Mixed fake/real tensors are only allowed when `torch.onnx.dynamo_export` is not called within `FakeTensorMode`
-    # This is needed because models can create new parameters during `forward(self, *args, **kwargs)` run
     fake_mode = fake_tensor.FakeTensorMode(
-        allow_non_fake_inputs=not torch._guards.detect_fake_mode(),
+        allow_non_fake_inputs=False,
         shape_env=ShapeEnv(
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
     )
-    # The patcher is needed for when user calls `fake_model.load_state_dict(...)` within fake mode
-    patcher_context = patcher.ONNXTorchPatcher()
     fake_context = ONNXFakeContext(fake_mode=fake_mode)
-    with fake_mode, patcher_context:
+    with fake_mode:
         yield fake_context
-    fake_context.state_dict_paths = tuple(
-        patcher_context.paths,
-    )  # type: ignore[assignment]
 
 
 @runtime_checkable
@@ -364,7 +352,6 @@ class ExportOutput:
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
-    _fake_context: Final[Optional[ONNXFakeContext]]
 
     @_beartype.beartype
     def __init__(
@@ -373,13 +360,11 @@ class ExportOutput:
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
-        fake_context: Optional[ONNXFakeContext] = None,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
-        self._fake_context = fake_context
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -392,12 +377,6 @@ class ExportOutput:
         """The diagnostic context associated with the export."""
 
         return self._diagnostic_context
-
-    @property
-    def fake_context(self) -> Optional[ONNXFakeContext]:
-        """The fake context associated with the export."""
-
-        return self._fake_context
 
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
@@ -534,36 +513,29 @@ class ExportOutput:
             serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
-        _model_state_dict_files: List[Union[str, io.BytesIO]] = []
+        _model_state_dict_files = None
         if model_state_dict is not None:
             if isinstance(model_state_dict, dict):
                 model_state_dict_file = io.BytesIO()
                 torch.save(model_state_dict, model_state_dict_file)
                 model_state_dict_file.seek(0)
-                _model_state_dict_files.append(model_state_dict_file)
             else:
                 isinstance(
                     model_state_dict, str
                 ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
-                _model_state_dict_files.append(model_state_dict)
+                model_state_dict_file = model_state_dict  # type: ignore[assignment]
 
-        # Load state from previous model.load_state_dict() call within enable_fake_mode() context
-        if self._fake_context and self._fake_context.state_dict_paths:
-            for path in self._fake_context.state_dict_paths:
-                if path in _model_state_dict_files:
-                    # ignore duplicate
-                    continue
-                try:
-                    extra_state_dict = torch.load(path)
-                    extra_state_dict_file = io.BytesIO()
-                    torch.save(extra_state_dict, extra_state_dict_file)
-                    extra_state_dict_file.seek(0)
-                    _model_state_dict_files.append(extra_state_dict_file)
-                except FileNotFoundError:
-                    # It is ok to ignore transient state_dict file created within context manager
-                    pass
+            ctx = patcher.ONNXTorchPatcher()
+            with ctx:
+                _ = torch.load(model_state_dict_file)
+                _model_state_dict_files = ctx.paths
 
-        if _model_state_dict_files:
+            # Reset the buffer to the beginning before reading it again
+            if isinstance(model_state_dict, dict):
+                for file_obj in ctx.paths:
+                    file_obj.seek(0)  # type: ignore[union-attr]
+
+        if _model_state_dict_files is not None:
             if not isinstance(destination, str):
                 raise RuntimeError(
                     "`destination` must be a string with a path when model_state_dict is specified."
@@ -675,7 +647,6 @@ class Exporter:
             self.options.fx_tracer.input_adapter,
             self.options.fx_tracer.output_adapter,
             self.options.diagnostic_context,
-            self.options.fake_context,
         )
 
     def _assert_fake_tensor_mode(self):
@@ -887,6 +858,14 @@ def pre_export_passes(
     # Insert type casts explicitly where needed.
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
+    # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
+    # The pass added nodes with static shape into original node metadata:
+    # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
+    if options.op_level_debug:
+        module = passes.ShapeInferenceWithFakeTensor(diagnostic_context, module).run(
+            *fx_module_args
+        )
+
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
@@ -896,10 +875,6 @@ def pre_export_passes(
             diagnostic_context, module, original_model
         ).run()
 
-    # This operation should be invoked as the last pre export pass.
-    # See [NOTE: Modularize pass ordering]
-    module = passes.Modularize(diagnostic_context, module).run()
-
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
@@ -908,22 +883,9 @@ def pre_export_passes(
     # Dynamo doesn't support non-tensor inputs.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
 
-    # ONNX does not support complex inputs. During graph building, all complex inputs
-    # are converted to real representation inputs. Here we register this step to
-    # input/output adapter.
-    options.fx_tracer.input_adapter.append_step(
-        io_adapter.ConvertComplexToRealRepresentationInputStep()
-    )
-
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.
     options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
-
-    # Output post-processing steps should happen after `FlattenOutputStep`.
-    options.fx_tracer.output_adapter.append_step(
-        io_adapter.ConvertComplexToRealRepresentationOutputStep()
-    )
-
     return module
 
 

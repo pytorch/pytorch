@@ -164,7 +164,7 @@ class FxNetAccFusionsFinder:
             if node not in self.acc_nodes:
                 continue
 
-            fusion_group: FxNetAccFusionsFinder.FusionGroup = self.FusionGroup(
+            fusion_group: "FxNetAccFusionsFinder.FusionGroup" = self.FusionGroup(
                 top_node_idx=self.nodes.index(node),
                 nodes={node},
                 inputs=set(node.all_input_nodes),

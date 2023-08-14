@@ -1,10 +1,9 @@
-import sys
-import warnings
-from contextlib import contextmanager
-from functools import lru_cache as _lru_cache
 from typing import Any
-
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+import warnings
+import sys
+from functools import lru_cache as _lru_cache
+from contextlib import contextmanager
+from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutation
 
 try:
     import opt_einsum as _opt_einsum  # type: ignore[import]
@@ -12,7 +11,7 @@ except ImportError:
     _opt_einsum = None
 
 
-@_lru_cache
+@_lru_cache()
 def is_available() -> bool:
     r"""Returns a bool indicating if opt_einsum is currently available."""
     return _opt_einsum is not None
@@ -25,12 +24,10 @@ def get_opt_einsum() -> Any:
 
 def _set_enabled(_enabled: bool) -> None:
     if not is_available() and _enabled:
-        raise ValueError(
-            f"opt_einsum is not available, so setting `enabled` to {_enabled} will not reap "
-            "the benefits of calculating an optimal path for einsum. torch.einsum will "
-            "fall back to contracting from left to right. To enable this optimal path "
-            "calculation, please install opt-einsum."
-        )
+        raise ValueError(f'opt_einsum is not available, so setting `enabled` to {_enabled} will not reap '
+                         'the benefits of calculating an optimal path for einsum. torch.einsum will '
+                         'fall back to contracting from left to right. To enable this optimal path '
+                         'calculation, please install opt-einsum.')
     global enabled
     enabled = _enabled
 
@@ -41,21 +38,15 @@ def _get_enabled() -> bool:
 
 def _set_strategy(_strategy: str) -> None:
     if not is_available():
-        raise ValueError(
-            f"opt_einsum is not available, so setting `strategy` to {_strategy} will not be meaningful. "
-            "torch.einsum will bypass path calculation and simply contract from left to right. "
-            "Please install opt_einsum or unset `strategy`."
-        )
+        raise ValueError(f'opt_einsum is not available, so setting `strategy` to {_strategy} will not be meaningful. '
+                         'torch.einsum will bypass path calculation and simply contract from left to right. '
+                         'Please install opt_einsum or unset `strategy`.')
     if not enabled:
-        raise ValueError(
-            f"opt_einsum is not enabled, so setting a `strategy` to {_strategy} will not be meaningful. "
-            "torch.einsum will bypass path calculation and simply contract from left to right. "
-            "Please set `enabled` to `True` as well or unset `strategy`."
-        )
-    if _strategy not in ["auto", "greedy", "optimal"]:
-        raise ValueError(
-            f"`strategy` must be one of the following: [auto, greedy, optimal] but is {_strategy}"
-        )
+        raise ValueError(f'opt_einsum is not enabled, so setting a `strategy` to {_strategy} will not be meaningful. '
+                         'torch.einsum will bypass path calculation and simply contract from left to right. '
+                         'Please set `enabled` to `True` as well or unset `strategy`.')
+    if _strategy not in ['auto', 'greedy', 'optimal']:
+        raise ValueError(f'`strategy` must be one of the following: [auto, greedy, optimal] but is {_strategy}')
     global strategy
     strategy = _strategy
 
@@ -89,7 +80,6 @@ def flags(enabled=None, strategy=None):
 #
 #   torch.backends.opt_einsum.enabled = True
 
-
 class OptEinsumModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
@@ -101,10 +91,9 @@ class OptEinsumModule(PropModule):
     if is_available():
         strategy = ContextProp(_get_strategy, _set_strategy)
 
-
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = OptEinsumModule(sys.modules[__name__], __name__)
 
 enabled = True if is_available() else False
-strategy = "auto" if is_available() else None
+strategy = 'auto' if is_available() else None

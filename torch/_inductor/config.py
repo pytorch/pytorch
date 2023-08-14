@@ -48,20 +48,11 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
-# enable pattern match with group fusion (using fbgemm)
-group_fusion = False
-
-# enable pattern match with batch fusion (using torch op)
-batch_fusion = False
-
 # enable reordering pass
 reordering = True
 
-# AOTInductor output path
-# If an absolute path is specified, the generated lib files will be stored under the directory;
-# If a relative path is specified, it will be used as a subdirectory under the default caching path;
-# If not specified, a temp directory will be created under the default caching path
-aot_inductor_output_path = ""
+# inductor engine name
+dll_name = "inductor_engine.so"
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -71,14 +62,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
-
-# Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton.
-# ATen: default Pytorch ATen kernels.
-# Triton: Triton templates defined in torch inductor.
-max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
-).upper()
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -190,12 +173,9 @@ if is_fbcode():
     from libfb.py import parutil
 
     try:
-        if __package__:
-            global_cache_dir = parutil.get_dir_path(
-                os.path.join(__package__.replace(".", os.sep), "fb/cache")
-            )
-        else:
-            global_cache_dir = parutil.get_dir_path("fb/cache")
+        global_cache_dir = parutil.get_dir_path(
+            os.path.join(__package__.replace(".", os.sep), "fb/cache")
+        )
     except ValueError:
         global_cache_dir = None
 else:
@@ -413,7 +393,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+    graph_diagram = False
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

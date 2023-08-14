@@ -16,7 +16,7 @@ def redirect_argv(new_argv):
 
 def compiled_with_cuda(sysinfo):
     if sysinfo.cuda_compiled_version:
-        return f'compiled w/ CUDA {sysinfo.cuda_compiled_version}'
+        return 'compiled w/ CUDA {}'.format(sysinfo.cuda_compiled_version)
     return 'not compiled w/ CUDA'
 
 
@@ -59,7 +59,7 @@ def run_env_analysis():
         'debug_str': debug_str,
         'pytorch_version': info.torch_version,
         'cuda_compiled': compiled_with_cuda(info),
-        'py_version': f'{sys.version_info[0]}.{sys.version_info[1]}',
+        'py_version': '{}.{}'.format(sys.version_info[0], sys.version_info[1]),
         'cuda_runtime': cuda_avail,
         'pip_version': pip_version,
         'pip_list_output': pip_list_output,
@@ -138,7 +138,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
 
     result = {
         'mode': mode,
-        'description': f'top {topk} events sorted by {sortby}',
+        'description': 'top {} events sorted by {}'.format(topk, sortby),
         'output': torch.autograd.profiler_util._build_table(topk_events),
         'cuda_warning': cuda_warning
     }

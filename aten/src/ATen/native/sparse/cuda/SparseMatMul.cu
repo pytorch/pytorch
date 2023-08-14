@@ -235,9 +235,9 @@ struct CusparseMatrixMultiplyOp {
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
     csrMatrixRef<scalar_t> C(
-      dC_columns,
-      dC_csrOffsets,
-      dC_values,
+      nullptr,
+      nullptr,
+      nullptr,
       /*nnz*/0,
       {A_num_rows, B_num_cols}
     );

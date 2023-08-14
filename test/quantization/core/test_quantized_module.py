@@ -1073,7 +1073,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg=f"LayerNorm module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
 
     def test_group_norm(self):
         """Tests the correctness of the groupnorm module.
@@ -1103,7 +1104,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg=f"GroupNorm module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
+                         msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
 
     def test_instance_norm(self):
         """Tests the correctness of the instancenorm{n}d modules.
@@ -1143,7 +1145,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
             self.assertEqual(
                 qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                msg=f"InstanceNorm module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
+                msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
+                .format(qY_ref, qY))
 
     def _test_activation_module_impl(self, name, float_module_class, quantized_module_class, extra_kwargs):
         """Tests the correctness of the ELU module.
@@ -1170,7 +1173,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         quant_mod = quantized_module_class(y_scale, y_zero_point, **extra_kwargs)
         qY = quant_mod(qX)
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg=f"{name} module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
+                         msg="{} module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(name, qY_ref, qY))
 
     def _test_leaky_relu_serialization(self):
         scale_original = 10.0 / 256
@@ -1367,7 +1371,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg=f"ChannelShuffle module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
+                         msg="ChannelShuffle module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
 
     @skipIfNoONEDNN
     def test_linear_leaky_relu(self):
@@ -1700,12 +1705,12 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
-                key_name1 = f'weight_ih_l{layer}{suffix}'
-                key_name2 = f'weight_hh_l{layer}{suffix}'
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
                 weight_keys.append(key_name1)
                 weight_keys.append(key_name2)
-                key_name1 = f'bias_ih_l{layer}{suffix}'
-                key_name2 = f'bias_hh_l{layer}{suffix}'
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
                 bias_keys.append(key_name1)
                 bias_keys.append(key_name2)
 

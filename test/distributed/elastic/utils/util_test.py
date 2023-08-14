@@ -56,7 +56,7 @@ class StoreUtilTest(TestCase):
 
     def test_synchronize(self):
         store_mock = mock.MagicMock()
-        data = b"data0"
+        data = "data0".encode(encoding="UTF-8")
         store_util.synchronize(store_mock, data, 0, 3, key_prefix="torchelastic/test")
         actual_set_call_args = store_mock.set.call_args_list
         # omit empty kwargs

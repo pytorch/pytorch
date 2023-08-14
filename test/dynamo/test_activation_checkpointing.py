@@ -331,36 +331,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_cuda()
-    def test_symints_location(self):
-        def gn(x, y):
-            return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, x, y)
-
-        backend = "aot_eager"
-        cnt = CompileCounterWithBackend(backend)
-        opt_fn = torch.compile(fn, backend=cnt)
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        args = (x, y)
-        expected = fn(*args)
-        result = opt_fn(*args)
-
-        x = torch.randn(5, 5, requires_grad=True)
-        y = torch.randn(5, 5, requires_grad=True)
-        args = (x, y)
-        expected = fn(*args)
-        result = opt_fn(*args)
-
-        self.assertEqual(result.shape, expected.shape)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(len(cnt.graphs), 2)
-        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
-        self.assertEqual(len(wrap_node.args), 3)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

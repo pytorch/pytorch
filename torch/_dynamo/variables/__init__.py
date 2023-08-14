@@ -6,7 +6,6 @@ from .ctx_manager import (
     CUDAStreamContextVariable,
     CUDAStreamVariable,
     DeterministicAlgorithmsVariable,
-    DisabledSavedTensorsHooksVariable,
     GradModeVariable,
     WithExitFunctionVariable,
 )

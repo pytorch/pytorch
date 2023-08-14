@@ -145,10 +145,14 @@ def convert_tests(testcases, sets=1):
             failed += 1
 
     print(
-        f"Collect {len(testcases)} test cases from PyTorch repo, failed to export {failed} cases."
+        "Collect {} test cases from PyTorch repo, failed to export {} cases.".format(
+            len(testcases), failed
+        )
     )
     print(
-        f"PyTorch converted cases are stored in {onnx_test_common.pytorch_converted_dir}."
+        "PyTorch converted cases are stored in {}.".format(
+            onnx_test_common.pytorch_converted_dir
+        )
     )
     print_stats(FunctionalModule_nums, nn_module)
 

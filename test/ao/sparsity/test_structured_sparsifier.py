@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 import copy
 import logging
@@ -10,7 +11,6 @@ from torch.ao.pruning._experimental.pruner import (
     LSTMSaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
-    FPGMPruner
 )
 from torch.nn.utils import parametrize
 
@@ -917,125 +917,3 @@ class TestBaseStructuredSparsifier(TestCase):
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
         assert out_expected.shape == out_pruned.shape
-
-class TestFPGMPruner(TestCase):
-    """
-    Test case for the implementation of paper:
-    `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
-    """
-    class SimpleConvFPGM(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.conv2d1 = nn.Conv2d(in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False)
-            # Manually set the filter weights for demonstration purposes
-            """
-            Three filters' weight are manually set to values 3.0, 2.0, and 0.1.
-            Different from the norm-based decision that prunes filter with value 0.1,
-            FPGM will prune the one with value 2.0.
-            """
-            weights = torch.tensor([3.0, 2.0, 0.1])  # Weight weights for each filter
-            weights = weights[:, None, None, None]  # broadcasting
-            self.conv2d1.weight.data.copy_(torch.ones(self.conv2d1.weight.shape) * weights)
-
-            # Second Convolutional Layer
-            self.conv2d2 = nn.Conv2d(in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False)
-            weights = torch.tensor([6.0, 7.0, 0.4, 0.5])
-            weights = weights[:, None, None, None]
-            self.conv2d2.weight.data.copy_(torch.ones(self.conv2d2.weight.shape) * weights)
-
-        def forward(self, x):
-            x = self.conv2d1(x)
-            x = self.conv2d2(x)
-            return x
-
-    def test_compute_distance(self, device="cpu"):
-        """Test the distance computation function"""
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
-        pruner = FPGMPruner(0.3)
-        dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
-
-        # compute the distance matrix using torch.cdist
-        flattened_filters = torch.Tensor([
-            [3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000],
-            [2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000],
-            [0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000]
-        ])
-
-        """
-        Expected distance matrix should have the following values:
-            [0.0000, 3.0000, 8.7000],
-            [3.0000, 0.0000, 5.7000],
-            [8.7000, 5.7000, 0.0000],
-        the distance should therefore be:
-            [11.7000, 8.7000, 14.4000]
-        """
-        expected_dist_matrix_conv1 = torch.cdist(flattened_filters, flattened_filters, p=2)
-        expected_dist_conv1 = torch.sum(torch.abs(expected_dist_matrix_conv1), 1)
-        assert torch.isclose(dist_conv1, expected_dist_conv1, rtol=1e-05, atol=1e-07).all()
-
-    def _test_update_mask_on_single_layer(self, expected_conv1, device):
-        """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
-        # test pruning with one layer of conv2d
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
-        x = torch.ones((1, 1, 32, 32), device=device)
-        pruner = FPGMPruner(0.3)
-        config = [{"tensor_fqn": "conv2d1.weight"}]
-        pruner.prepare(model, config)
-        pruner.enable_mask_update = True
-        pruner.step()
-        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False,\
-            "do not prune the least-norm filter"
-
-        # fusion step
-        pruned_model = pruner.prune()
-
-        pruned_y = pruned_model(x)
-        # assert shapes
-        expected_conv1 = expected_conv1.to(device)
-        assert pruned_y.shape == (1, 4, 32, 32)
-        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
-        assert pruned_model.conv2d2.weight.shape == (4, 2, 3, 3), "conv2d2 should have input channel pruned"
-        # assert value
-        assert torch.isclose(pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07).all()
-
-    def _test_update_mask_on_multiple_layer(self, expected_conv1, expected_conv2, device):
-        # the second setting
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
-        x = torch.ones((1, 1, 32, 32), device=device)
-        pruner = FPGMPruner(0.3)
-        config = [
-            {"tensor_fqn": "conv2d1.weight"},
-            {"tensor_fqn": "conv2d2.weight", "sparsity_level": 0.5}
-        ]
-        pruner.prepare(model, config)
-        pruner.enable_mask_update = True
-        pruner.step()
-        # Get the masks for the two least-norm filters
-        mask1 = pruner.groups[0]['module'].parametrizations.weight[0].mask[-1]
-        mask2 = pruner.groups[0]['module'].parametrizations.weight[0].mask[-2]
-        # Check if either of the least-norm filters is not pruned
-        assert mask1.item() is not False or mask2.item() is not False, "Do not prune all least-norm filters"
-
-        # fusion step
-        pruned_model = pruner.prune()
-        pruned_y = pruned_model(x)
-        # assert shapes
-        expected_conv1 = expected_conv1.to(device)
-        expected_conv2 = expected_conv2.to(device)
-        assert pruned_y.shape == (1, 2, 32, 32)
-        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
-        assert pruned_model.conv2d2.weight.shape == expected_conv2.shape
-        # assert values
-        assert torch.isclose(pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07).all()
-        assert torch.isclose(pruned_model.conv2d2.weight, expected_conv2, rtol=1e-05, atol=1e-07).all()
-
-    def test_update_mask(self):
-        weights = torch.tensor([3.0, 0.1])
-        expected_conv1 = torch.ones((2, 1, 3, 3)) * weights[:, None, None, None]
-
-        weights = torch.tensor([7.0, 0.4])
-        expected_conv2 = torch.ones((2, 2, 3, 3)) * weights[:, None, None, None]
-
-        for device in DEVICES:
-            self._test_update_mask_on_single_layer(expected_conv1, device)
-            self._test_update_mask_on_multiple_layer(expected_conv1, expected_conv2, device)

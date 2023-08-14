@@ -4,7 +4,7 @@ from unittest import main, mock, TestCase
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from test_trymerge import mocked_gh_graphql
 from trymerge import GitHubPR
-from tryrebase import additional_rebase_failure_info, rebase_ghstack_onto, rebase_onto
+from tryrebase import rebase_ghstack_onto, rebase_onto
 
 
 def mocked_rev_parse(branch: str) -> str:
@@ -151,18 +151,6 @@ class TestRebase(TestCase):
             rebase_onto(pr, repo, MAIN_BRANCH)
         with self.assertRaisesRegex(Exception, "same sha as the target branch"):
             rebase_ghstack_onto(pr, repo, MAIN_BRANCH)
-
-    def test_additional_rebase_failure_info(self) -> None:
-        error = (
-            "Command `git -C /Users/csl/zzzzzzzz/pytorch push --dry-run -f "
-            "https://github.com/Lightning-Sandbox/pytorch.git pull/106089/head:fix/spaces` returned non-zero exit code 128\n"
-            "```\n"
-            "remote: Permission to Lightning-Sandbox/pytorch.git denied to clee2000.\n"
-            "fatal: unable to access 'https://github.com/Lightning-Sandbox/pytorch.git/': The requested URL returned error: 403\n"
-            "```"
-        )
-        additional_msg = additional_rebase_failure_info(Exception(error))
-        self.assertTrue("This is likely because" in additional_msg)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ jobs:
           - docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
           - docker-image-name: pytorch-linux-focal-py3.8-gcc7
           - docker-image-name: pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks
-          - docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+          - docker-image-name: pytorch-linux-focal-py3-clang7-asan
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
           - docker-image-name: pytorch-linux-focal-linter
     env:
@@ -70,11 +70,12 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
-          push: true
+          skip_push: false
+          force_push: true
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -108,4 +109,5 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
+
         if: always()

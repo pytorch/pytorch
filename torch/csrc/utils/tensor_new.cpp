@@ -837,7 +837,7 @@ class CheckSparseTensorInvariantsContext {
 };
 
 static Tensor sparse_compressed_tensor_ctor_worker(
-    const std::string& name,
+    std::string name,
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PythonArgs& r,

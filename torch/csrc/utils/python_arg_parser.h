@@ -137,7 +137,7 @@ struct ParsedArgs {
 
 struct PYBIND11_EXPORT PythonArgParser {
   explicit PythonArgParser(
-      const std::vector<std::string>& fmts,
+      std::vector<std::string> fmts,
       bool traceable = false);
 
   // meant only for `torch` functions.

@@ -76,14 +76,14 @@ class WorkerInfo:
 
     def __setattr__(self, key, val):
         if self.__initialized:
-            raise RuntimeError(f"Cannot assign attributes to {self.__class__.__name__} objects")
+            raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super().__setattr__(key, val)
 
     def __repr__(self):
         items = []
         for k in self.__keys:
-            items.append(f'{k}={getattr(self, k)}')
-        return f"{self.__class__.__name__}({', '.join(items)})"
+            items.append('{}={}'.format(k, getattr(self, k)))
+        return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
 def get_worker_info() -> Optional[WorkerInfo]:
@@ -252,7 +252,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, auto_collation, collate_fn, drop_last)
         except Exception:
             init_exception = ExceptionWrapper(
-                where=f"in DataLoader worker process {worker_id}")
+                where="in DataLoader worker process {}".format(worker_id))
 
         # When using Iterable mode, some worker can exit earlier than others due
         # to the IterableDataset behaving differently for different workers.
@@ -318,7 +318,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                         # `ExceptionWrapper` does the correct thing.
                         # See NOTE [ Python Traceback Reference Cycle Problem ]
                         data = ExceptionWrapper(
-                            where=f"in DataLoader worker process {worker_id}")
+                            where="in DataLoader worker process {}".format(worker_id))
             data_queue.put((idx, data))
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:

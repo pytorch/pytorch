@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestUpgraderModelGeneration(TestCase):
     def test_all_modules(self):
-        for a_module in ALL_MODULES.keys():
+        for a_module, expect_operator in ALL_MODULES.items():
             module_name = type(a_module).__name__
             self.assertTrue(
                 isinstance(a_module, torch.nn.Module),

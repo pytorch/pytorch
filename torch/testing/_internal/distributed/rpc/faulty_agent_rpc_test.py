@@ -70,7 +70,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_rank = dst if dst is not None else (self.rank + 1) % self.world_size
-        dst_worker = f"worker{dst_rank}"
+        dst_worker = "worker{}".format(dst_rank)
         # Since we fail python_remote_call messages synchronously, the future
         # corresponding to this remote call will be marked with an error when
         # this function returns.
@@ -100,7 +100,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
         # test the case where rpc.remote() message creation is completely dropped.
         dst_rank = dst if dst is not None else (self.rank + 1) % self.world_size
-        dst_worker = f"worker{dst_rank}"
+        dst_worker = "worker{}".format(dst_rank)
         # Since we fail python_remote_call messages synchronously, the future
         # corresponding to this remote call will be marked with an error when
         # this function returns.
@@ -143,7 +143,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # Test the case where remote message is eventually processed on the owner,
         # but the future on the creator times out before the response comes back.
         dst_rank = dst if dst is not None else (self.rank + 1) % self.world_size
-        dst_worker = f"worker{dst_rank}"
+        dst_worker = "worker{}".format(dst_rank)
         # 10 ms timeout
         rref = rpc.remote(dst_worker, func, args=args, timeout=0.001)
         # Future corresponding to the remote creation should time out.
@@ -233,7 +233,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
             return
 
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = f"worker{dst_rank}"
+        dst_worker = "worker{}".format(dst_rank)
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )

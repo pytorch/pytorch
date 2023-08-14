@@ -109,7 +109,7 @@ class ErrorHandler:
         """
         Dumps parent error file from child process's root cause error and error code.
         """
-        with open(rootcause_error_file) as fp:
+        with open(rootcause_error_file, "r") as fp:
             rootcause_error = json.load(fp)
             # Override error code since the child process cannot capture the error code if it
             # is terminated by signals like SIGSEGV.
@@ -144,7 +144,7 @@ class ErrorHandler:
     def _rm(self, my_error_file):
         if os.path.isfile(my_error_file):
             # Log the contents of the original file.
-            with open(my_error_file) as fp:
+            with open(my_error_file, "r") as fp:
                 try:
                     original = json.dumps(json.load(fp), indent=2)
                     log.warning(

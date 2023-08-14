@@ -284,9 +284,6 @@ aten::_foreach_round_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
-aten::_foreach_sign
-aten::_foreach_sign.out
-aten::_foreach_sign_
 aten::_foreach_sin
 aten::_foreach_sin.out
 aten::_foreach_sin_
@@ -717,6 +714,8 @@ aten::dequantize.tensors_out
 aten::detach_
 aten::detach_copy
 aten::detach_copy.out
+aten::dist
+aten::dist.out
 aten::embedding_renorm
 aten::embedding_renorm.out
 aten::embedding_renorm_
@@ -952,6 +951,8 @@ aten::multi_margin_loss_backward
 aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward
 aten::multilabel_margin_loss_backward.grad_input
+aten::multilabel_margin_loss_forward
+aten::multilabel_margin_loss_forward.output
 aten::multinomial
 aten::multinomial.out
 aten::nanmedian
@@ -963,6 +964,8 @@ aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
 aten::native_norm.ScalarOpt_dim_dtype_out
 aten::native_norm.out
+aten::nll_loss2d_forward
+aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
 aten::nonzero_static
