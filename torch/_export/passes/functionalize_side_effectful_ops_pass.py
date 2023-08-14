@@ -91,4 +91,4 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
         assert self._dep_token is not None
 
-        return super().output(results=(*results, self._dep_token), meta=meta)
+        return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

@@ -16,6 +16,7 @@ import os
 import re
 import time
 import urllib.parse
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
@@ -26,6 +27,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_fetch_json_list,
+    gh_fetch_merge_base,
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
@@ -706,7 +708,26 @@ class GitHubPR:
         return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_merge_base(self) -> str:
-        return cast(str, self.info["baseRefOid"])
+        if self.merge_base:
+            return self.merge_base
+
+        last_commit_oid = self.last_commit()["oid"]
+        # NB: We could use self.base_ref() here for regular PR, however, that doesn't
+        # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
+        # so let's just use main instead
+        self.merge_base = gh_fetch_merge_base(
+            self.org, self.project, last_commit_oid, "main"
+        )
+
+        # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
+        # points to the base ref associated with the PR or, in other words, the head of main
+        # when the PR is created or rebased. This is not necessarily the merge base commit,
+        # but it could serve as a fallback in most cases and it's readily available as part
+        # of the PR info
+        if not self.merge_base:
+            self.merge_base = cast(str, self.info["baseRefOid"])
+
+        return self.merge_base
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -1486,6 +1507,26 @@ where
         return []
 
 
+REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
+
+
+def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
+    return re.sub(REMOVE_JOB_NAME_SUFFIX_REGEX, replacement, name)
+
+
+def is_broken_trunk(
+    head_job: Optional[Dict[str, Any]], base_jobs: Optional[Dict[str, Dict[str, Any]]]
+) -> bool:
+    if not head_job or not base_jobs:
+        return False
+
+    return any(
+        head_job["conclusion"] == base_job["conclusion"]
+        and head_job["failure_captures"] == base_job["failure_captures"]
+        for base_job in base_jobs.values()
+    )
+
+
 def get_classifications(
     checks: Dict[str, JobCheckState],
     head_sha: str,
@@ -1493,17 +1534,23 @@ def get_classifications(
     flaky_rules: List[FlakyRule],
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
-    head_sha_jobs: Dict[str, Dict[str, Any]] = {}
-    merge_base_jobs: Dict[str, Dict[str, Any]] = {}
+    # Group by job name without shard id and suffix to correctly identify broken
+    # trunk failures, i.e. linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)
+    head_sha_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    merge_base_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
     if merge_base is not None:
 
-        def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
-            if key not in d:
-                d[key] = val
+        def insert(
+            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+        ) -> None:
+            key_no_suffix = remove_job_name_suffix(key)
+            if key not in d[key_no_suffix]:
+                d[key_no_suffix][key] = val
                 return
-            if d[key]["id"] < val["id"]:
-                d[key] = val
+
+            if d[key_no_suffix][key]["id"] < val["id"]:
+                d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
@@ -1537,14 +1584,11 @@ def get_classifications(
                 check.title,
             )
             continue
-        head_sha_job = head_sha_jobs.get(name)
-        merge_base_job = merge_base_jobs.get(name)
-        if (
-            head_sha_job is not None
-            and merge_base_job is not None
-            and head_sha_job["conclusion"] == merge_base_job["conclusion"]
-            and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
-        ):
+
+        name_no_suffix = remove_job_name_suffix(name)
+        head_sha_job = head_sha_jobs.get(name_no_suffix, {}).get(name)
+
+        if is_broken_trunk(head_sha_job, merge_base_jobs.get(name_no_suffix)):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,

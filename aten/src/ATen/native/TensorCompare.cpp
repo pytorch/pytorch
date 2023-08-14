@@ -415,7 +415,7 @@ Tensor _functional_assert_async_msg_cpu(
   c10::string_view assert_msg,
   const Tensor& dep_token) {
   _assert_async_msg_cpu(self, assert_msg);
-  return dep_token;
+  return dep_token.clone();
 }
 
 

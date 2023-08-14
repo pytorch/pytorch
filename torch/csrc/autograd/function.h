@@ -730,6 +730,21 @@ edge_list collect_next_edges(Variables&&... variables) {
   make.apply(std::forward<Variables>(variables)...);
   return std::move(make.next_edges);
 }
+
+struct TypeAndSize {
+  TypeAndSize() : options(at::TensorOptions()) {}
+  /* implicit */
+  TypeAndSize(const at::Tensor& t)
+      : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
+
+  at::Tensor zeros() {
+    return at::zeros_symint(sym_sizes, options);
+  }
+
+  std::vector<c10::SymInt> sym_sizes;
+  at::TensorOptions options;
+};
+
 } // namespace autograd
 } // namespace torch
 

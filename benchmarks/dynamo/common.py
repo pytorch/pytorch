@@ -30,6 +30,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
+import torch._export
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -405,7 +406,7 @@ def summarize_graph_break(filename):
         df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
 
 
-def print_summary(filename):
+def print_summary(filename, print_dataframe=False):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
@@ -414,13 +415,18 @@ def print_summary(filename):
             if tag == "0.0000":
                 continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
-            print_summary_table(data[data.tag == tag])
+            print_summary_table(data[data.tag == tag], print_dataframe=print_dataframe)
     else:
-        print_summary_table(data)
+        print_summary_table(data, print_dataframe=print_dataframe)
     summarize_graph_break(filename)
 
 
-def print_summary_table(data):
+def print_summary_table(data, print_dataframe=False):
+    if print_dataframe:
+        pd.options.display.max_rows = 1000
+        pd.options.display.max_columns = 1000
+        pd.options.display.width = 2000
+        print(data)
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
@@ -1953,8 +1959,24 @@ class BenchmarkRunner:
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                if self.args.export:
+                    # TB and TIMM use list example_inputs
+                    # HF use dict example_inputs
+                    if isinstance(example_inputs, dict):
+                        raise RuntimeError(
+                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
+                        )
+                    # apply export on module directly
+                    # no need for n iterations
+                    # the logic should be the same to self.model_iter_fn (forward_pass)
+                    with self.autocast():
+                        optimized_model_iter_fn = optimize_ctx(
+                            model_copy, example_inputs
+                        )
+                        new_result = optimized_model_iter_fn(*example_inputs)
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2518,6 +2540,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-dataframe-summary",
+        action="store_true",
+        help="print dataframe result used for calculating accuracy",
+    )
+    parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
@@ -2602,6 +2629,13 @@ def parse_args(args=None):
         default=1,
         help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
     )
+
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_true",
+        help="Disable translation validation for accuracy builds.",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2659,6 +2693,11 @@ def parse_args(args=None):
         "--inductor",
         action="store_true",
         help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
+        "--export",
+        action="store_true",
+        help="Measure pass rate with export",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -2782,6 +2821,10 @@ def run(runner, args, original_dir=None):
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
+
+            # Set translation validation on by default on CI accuracy runs.
+            torch._dynamo.config.translation_validation = True
+
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -2848,12 +2891,6 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             torch._dynamo.config.automatic_dynamic_shapes = True
-        if args.only is not None and args.only.endswith("_generate"):
-            log.warning(
-                "Disabling cudagraphs for autoregressive generation (reenable if selective cudagraphs implemented)"
-            )
-            args.disable_cudagraphs = True
-            torch._inductor.config.triton.cudagraphs = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2976,6 +3013,10 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.export:
+        optimize_ctx = torch._export.export
+        experiment = speedup_experiment
+        output_filename = "export.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
@@ -3041,9 +3082,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = (
-            not args.disable_cudagraphs and not args.dynamic_shapes
-        )
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
@@ -3081,6 +3120,10 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "profile"
         else:
             args.profiler_trace_name = args.profiler_trace_name
+
+    if args.no_translation_validation:
+        # Overwrite 'translation_validation' config, if specified.
+        torch._dynamo.config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
@@ -3265,7 +3308,7 @@ def run(runner, args, original_dir=None):
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
                 write_csv("infra_error")
-        print_summary(output_filename)
+        print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):

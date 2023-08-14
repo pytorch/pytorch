@@ -18,8 +18,6 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
-aten::_addmm_activation
-aten::_addmm_activation.out
 aten::_aminmax
 aten::_aminmax.dim
 aten::_aminmax.dim_out
@@ -38,7 +36,6 @@ aten::_cdist_forward
 aten::_cdist_forward.out
 aten::_cholesky_solve_helper
 aten::_cholesky_solve_helper.out
-aten::_chunk_grad_outputs_efficient_attention
 aten::_coalesce
 aten::_coalesce.out
 aten::_coalesced
@@ -472,6 +469,7 @@ aten::_sparse_mask_projection
 aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
+aten::_sparse_semi_structured_linear
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
@@ -490,7 +488,6 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
-aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -528,6 +525,7 @@ aten::_to_sparse_csc
 aten::_to_sparse_csc.out
 aten::_to_sparse_csr
 aten::_to_sparse_csr.out
+aten::_to_sparse_semi_structured
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
 aten::_transformer_encoder_layer_fwd
@@ -949,8 +947,6 @@ aten::mps_convolution_backward
 aten::mps_convolution_backward.out
 aten::mps_convolution_transpose_backward
 aten::mps_convolution_transpose_backward.out
-aten::multi_margin_loss
-aten::multi_margin_loss.out
 aten::multi_margin_loss_backward
 aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward

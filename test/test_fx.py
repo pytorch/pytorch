@@ -244,6 +244,14 @@ class TestFX(JitTestCase):
         x = torch.randn(5, 3)
         torch.testing.assert_close(new_instance(x), torch.relu(x))
 
+    def test_informative_co_filename(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a):
+                return a * 2
+
+        gm = symbolic_trace(MyModule())
+        self.assertIn(os.path.basename(__file__), gm.forward.__code__.co_filename)
+
     def test_custom_import(self):
         graph = torch.fx.Graph()
         a = graph.placeholder('x')
@@ -809,7 +817,7 @@ class TestFX(JitTestCase):
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.lin = torch.nn.Linear(d_hid, d_hid)
-                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
+                self.buffer = torch.nn.Buffer(torch.randn(bs + 100, d_hid))
 
             def forward(self, x):
                 x = torch.mm(x, self.mm_param)
@@ -2652,7 +2660,7 @@ class TestFX(JitTestCase):
         class GetItemBase(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('pe', torch.randn(8, 8))
+                self.pe = torch.nn.Buffer(torch.randn(8, 8))
 
         class GetItem1(GetItemBase):
             def forward(self, x):
@@ -3018,7 +3026,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
-                self.register_buffer("buf", torch.randn(2, 3))
+                self.buf = torch.nn.Buffer(torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -3188,7 +3196,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.register_buffer('buffer', torch.ones(1))
+                self.buffer = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 return self.l1(x) + self.buffer

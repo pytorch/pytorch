@@ -393,7 +393,9 @@ def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
-    return sympy.Symbol(name, integer=True, positive=True)
+    # NOTE: shape symbols are positive (> 0), but index variables are only
+    # non-negative (>= 0).
+    return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
@@ -700,9 +702,10 @@ def run_and_get_code(fn, *args, **kwargs):
 
 def run_and_get_triton_code(fn, *args, **kwargs):
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
+    # Can have two outputs if backwards was eagerly compiled
     assert (
-        len(source_codes) == 1
-    ), f"expected exactly one code output got {len(source_codes)}"
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1156,3 +1159,105 @@ def red_text(msg):
 
 def blue_text(msg):
     return _color_text(msg, "blue")
+
+
+PYTHON_TYPE_TO_SCHEMA_TYPE = {
+    torch.dtype: "int",
+    torch.device: "Device",
+    bool: "bool",
+}
+
+
+def may_get_optional_schema_type(schema_type, is_optional_arg):
+    return f"Optional[{schema_type}]" if is_optional_arg else schema_type
+
+
+def type_match(arg, arg_type, is_optional_arg):
+    if isinstance(arg, immutable_list):
+        if all(
+            isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
+            for x in arg
+        ):
+            may_optional_schema_type = may_get_optional_schema_type(
+                "List[int]", is_optional_arg
+            )
+            return may_optional_schema_type == str(arg_type)
+        else:
+            # TODO: add support here
+            return False
+
+    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
+        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+        may_optional_schema_type = may_get_optional_schema_type(
+            schema_type, is_optional_arg
+        )
+        return may_optional_schema_type == str(arg_type)
+
+    # TODO: add support here
+    return False
+
+
+# torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
+def schema_match(schema, args, kwargs):
+    min_args = 0
+    max_pos_args = 0
+    for argument in schema.arguments:
+        if not argument.has_default_value():
+            min_args += 1
+        if not argument.kwarg_only:
+            max_pos_args += 1
+
+    nargs = len(args)
+    remaining_kwargs = len(kwargs)
+    arg_pos = 0
+
+    def args_error_message(nargs, max_pos_args, min_args):
+        if min_args != max_pos_args:
+            return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
+        else:
+            return f"takes {max_pos_args} positional arguments but {nargs} were given"
+
+    def is_optional(arg):
+        return "Optional" in str(arg.type)
+
+    assert len(args) <= max_pos_args, args_error_message(
+        len(args), max_pos_args, min_args
+    )
+
+    for argument in schema.arguments:
+        obj = None
+        is_kwd = False
+        if arg_pos < nargs:
+            if argument.kwarg_only:
+                return False
+            obj = args[arg_pos]
+        elif kwargs:
+            if argument.name in kwargs:
+                obj = kwargs[argument.name]
+                is_kwd = True
+
+        if obj is None and not is_optional(argument):
+            return False
+
+        if obj is not None:
+            expected_type = argument.type
+            if not type_match(obj, expected_type, is_optional(argument)):
+                return False
+
+        if not is_kwd:
+            arg_pos += 1
+        elif (obj is None and is_optional(argument)) or obj is not None:
+            remaining_kwargs -= 1
+
+    if remaining_kwargs > 0:
+        return False
+
+    return True
+
+
+def try_find_schema(schemas, args, kwargs):
+    for schema in schemas:
+        if schema_match(schema, args, kwargs):
+            return schema
+
+    return None

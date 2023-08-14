@@ -277,7 +277,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(input, expected_result)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
@@ -303,7 +303,6 @@ class TestScatterGather(TestCase):
 
             out = input.scatter_add(0, idx, src)
             out2 = input2.scatter_add(0, idx2, src)
-
             self.assertEqual(out, out2)
 
             for reduce in ["sum", "prod", "mean", "amax", "amin"]:
