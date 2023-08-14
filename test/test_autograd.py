@@ -889,6 +889,62 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(ValueError, "Expected allow_unused to be True or not passed when"):
             torch.autograd.grad(y, x, allow_unused=False, materialize_grads=True)
 
+    def test_post_accumulate_grad_hook(self):
+        def setup_optim_in_bwd(model):
+            optims = {}
+            handles = []
+
+            def optim_step_hook(param):
+                optims[param].step()
+                optims[param].zero_grad()
+
+            for p in model.parameters():
+                optims[p] = torch.optim.Adam([p])
+                handles.append(p.register_post_accumulate_grad_hook(optim_step_hook))
+
+            return handles
+
+        model = torch.nn.Linear(3, 2)
+        input = torch.rand(2, 3)
+        handles = setup_optim_in_bwd(model)
+
+        # make a copy for reference
+        model_copy = deepcopy(model)
+        optim_copy = torch.optim.Adam(model_copy.parameters())
+
+        iters = 5
+
+        for _ in range(iters):
+            loss = model(input).sum()
+            loss.backward()
+
+            loss_copy = model_copy(input).sum()
+            loss_copy.backward()
+            optim_copy.step()
+            optim_copy.zero_grad()
+
+        params_copy = []  # freeze a copy of the params to compare later
+        for p_reference, p in zip(model_copy.parameters(), model.parameters()):
+            self.assertEqual(p_reference, p)
+            params_copy.append(p_reference.clone().detach())
+
+        # After removing the handle, the model should no longer update.
+        for h in handles:
+            h.remove()
+
+        for _ in range(iters):
+            loss = model(input).sum()
+            loss.backward()
+
+            loss_copy = model_copy(input).sum()
+            loss_copy.backward()
+            optim_copy.step()
+            optim_copy.zero_grad()
+
+        for p_static, p_reference, p in zip(params_copy, model_copy.parameters(), model.parameters()):
+            self.assertEqual(p_static, p)
+            self.assertNotEqual(p_reference, p)
+
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
         class MyHookClass:
