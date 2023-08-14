@@ -51,6 +51,7 @@ runs:
         PIN_FOLDER: ${{ inputs.pin-folder }}
         UPDATEBOT_TOKEN: ${{ inputs.updatebot-token }}
         PYTORCHBOT_TOKEN: ${{ inputs.pytorchbot-token }}
+        NEW_BRANCH_NAME: update-${{ inputs.repo-name }}-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
       run: |
         # put this here instead of the script to prevent accidentally changing the config when running the script locally
         git config --global user.name "PyTorch UpdateBot"
