@@ -703,22 +703,28 @@ def use_standard_sys_dir_headers():
 
 @functools.lru_cache(None)
 def is_conda_llvm_openmp_installed():
-    command = "conda list llvm-openmp --json"
-    output = subprocess.check_output(command.split()).decode('utf8')
-    return len(json.loads(output)) > 0
+    try:
+        command = "conda list llvm-openmp --json"
+        output = subprocess.check_output(command.split()).decode('utf8')
+        return len(json.loads(output)) > 0
+    except subprocess.SubprocessError:
+        return False
 
 
 @functools.lru_cache(None)
 def homebrew_ibomp():
-    # check if `brew` is installed
-    subprocess.check_output(["which", "brew"])
-    # get the location of `libomp` if it is installed
-    # this is the location that `libomp` **would** be installed
-    # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
-    libomp_path = subprocess.check_output(["brew", "--prefix", "libomp"]).decode("utf8").strip()
-    # check if `libomp` is installed
-    omp_available = os.path.exists(libomp_path)
-    return omp_available, libomp_path
+    try:
+        # check if `brew` is installed
+        subprocess.check_output(["which", "brew"])
+        # get the location of `libomp` if it is installed
+        # this is the location that `libomp` **would** be installed
+        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
+        libomp_path = subprocess.check_output(["brew", "--prefix", "libomp"]).decode("utf8").strip()
+        # check if `libomp` is installed
+        omp_available = os.path.exists(libomp_path)
+        return omp_available, libomp_path
+    except subprocess.SubprocessError:
+        return False, ''
 
 
 def get_include_and_linking_paths(
@@ -820,13 +826,10 @@ def get_include_and_linking_paths(
 
             # next, try to use openmp from `brew install libomp`
             if not omp_available:
-                try:
-                    omp_available, libomp_path = homebrew_ibomp()
-                    if omp_available:
-                        ipaths.append(os.path.join(libomp_path, "include"))
-                        lpaths.append(os.path.join(libomp_path, "lib"))
-                except subprocess.SubprocessError:
-                    pass
+                omp_available, libomp_path = homebrew_ibomp()
+                if omp_available:
+                    ipaths.append(os.path.join(libomp_path, "include"))
+                    lpaths.append(os.path.join(libomp_path, "lib"))
 
             # if openmp is still not available, we let the compiler to have a try,
             # and raise error together with instructions at compilation error later
