@@ -399,11 +399,9 @@ class StreamContextVariable(ContextWrappingVariable):
         # stream passed from outside of traced function
         else:
             stream = self.target_values[0].value
-            # TODO: here could be a problem because ipex._C cannot be called
-            # and torch._C does not contain any xpu function
             tx.output.create_proxy(
                 "call_function",
-                getattr(torch._C, '_' + str(self.device) + '_setStream'),
+                getattr(getattr(torch, self.device), '_set_stream'),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
