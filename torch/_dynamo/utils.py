@@ -1283,8 +1283,8 @@ def get_fake_value(node, tx):
     Run the computation represented by `node` using fake tensors and return the result.
     """
     from .exc import (
-        TorchRuntimeError,
         unimplemented,
+        unimplemented_with_warning,
         Unsupported,
         UserError,
         UserErrorType,
@@ -1356,7 +1356,12 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+        msg = (
+            "Unable to propagate fake values through the operator. "
+            "One possible reason could be bad meta kernel implementation. "
+        )
+        unimplemented_with_warning(e, tx.f_code, msg)
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
