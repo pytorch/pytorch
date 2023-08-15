@@ -11,7 +11,7 @@ from .decorators import (
     graph_break,
     mark_dynamic,
     mark_static,
-    mark_static_input,
+    mark_static_address,
     maybe_mark_dynamic,
     run,
 )
@@ -36,7 +36,7 @@ __all__ = [
     "mark_dynamic",
     "maybe_mark_dynamic",
     "mark_static",
-    "mark_static_input",
+    "mark_static_address",
     "optimize",
     "optimize_assert",
     "export",

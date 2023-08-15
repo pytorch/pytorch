@@ -237,7 +237,7 @@ def mark_static(t, index=None):
 
 
 @forbid_in_graph
-def mark_static_input(t, guard=True):
+def mark_static_address(t, guard=True):
     """
     Marks an input tensor whose data_ptr will not change across multiple calls
     to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
