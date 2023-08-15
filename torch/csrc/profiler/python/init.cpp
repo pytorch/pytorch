@@ -460,15 +460,16 @@ void initManualPythonBindings(PyObject* module) {
   };
 
   static PyTypeObject RecordFunctionFast_Type = {
-      PyVarObject_HEAD_INIT(NULL, 0).tp_name =
-          "torch._C._profiler_manual.RecordFunctionFast",
-      .tp_basicsize = sizeof(RecordFunctionFast),
-      .tp_dealloc = (destructor)RecordFunctionFast_dealloc,
-      .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-      .tp_methods = RecordFunctionFast_methods,
-      .tp_init = RecordFunctionFast_init,
-      .tp_new = RecordFunctionFast_new,
-  };
+      PyVarObject_HEAD_INIT(NULL, 0)};
+
+  RecordFunctionFast_Type.tp_name =
+      "torch._C._profiler_manual.RecordFunctionFast",
+  RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
+  RecordFunctionFast_Type.tp_dealloc = (destructor)RecordFunctionFast_dealloc;
+  RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+  RecordFunctionFast_Type.tp_methods = RecordFunctionFast_methods;
+  RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
+  RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
 
   if (PyType_Ready(&RecordFunctionFast_Type) < 0) {
     throw python_error();
