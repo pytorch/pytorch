@@ -10,26 +10,7 @@
 #include <cusparse.h>
 #include <cstdint>
 
-#if !AT_CUSPARSELT_ENABLED()
-
-namespace at::native {
-
-at::Tensor _cslt_compress(const Tensor& sparse_input){
-    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
-}
-
-at::Tensor _cslt_sparse_mm(
-    const Tensor& compressed_A,
-    const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    bool transpose_result)
-{
-    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
-}
-
-} // namespace at::native
-
-#else // No cuSPARSELt support, throw error if these functions are called.
+#if AT_CUSPARSELT_ENABLED()
 
 #include <cusparseLt.h>
 
@@ -258,6 +239,25 @@ at::Tensor _cslt_sparse_mm(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
   return res;
+}
+
+} // namespace at::native
+
+#else // No cuSPARSELt support, throw error if these functions are called.
+
+namespace at::native {
+
+at::Tensor _cslt_compress(const Tensor& sparse_input){
+    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+}
+
+at::Tensor _cslt_sparse_mm(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const c10::optional<Tensor>& bias_opt,
+    bool transpose_result)
+{
+    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
 }
 
 } // namespace at::native
