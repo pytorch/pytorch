@@ -156,11 +156,6 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Return true if the device is of PrivateUse1 type.
-  bool is_privateuse1() const noexcept {
-    return type_ == DeviceType::PrivateUse1;
-  }
-
   /// Return true if the device supports arbitrary strides.
   bool supports_as_strided() const noexcept {
     return type_ != DeviceType::IPU && type_ != DeviceType::XLA &&
