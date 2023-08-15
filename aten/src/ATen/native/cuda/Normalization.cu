@@ -211,7 +211,7 @@ Tensor batch_norm_elementwise_backward_train(
     auto weight_nd = weight.defined() ? as_nd(weight) :
         at::scalar_tensor(1.0, input.options().dtype(mean.scalar_type()));
 
-    Tensor grad_input = Tensor grad_input = at::empty(input.sizes(), grad_out.options()).to(input.suggest_memory_format());
+    Tensor grad_input = at::empty(input.sizes(), grad_out.options()).to(input.suggest_memory_format());
     auto iter = TensorIteratorConfig()
         .add_output(grad_input)
         .add_input(grad_out)
