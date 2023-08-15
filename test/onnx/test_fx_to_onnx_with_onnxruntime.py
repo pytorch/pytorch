@@ -782,62 +782,21 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
-    # @pytorch_test_common.skip_dynamic_fx_test(
-    #     "FakeTensor exporting is not supported by dynamic axes."
-    # )
-    # def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2_other(self):
-    #     model_name = "sshleifer/tiny-gpt2"
-
-    #     def create_model() -> nn.Module:
-    #         return transformers.AutoModel.from_pretrained(model_name)
-
-    #     def create_args():
-    #         tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-    #         kwargs = tokenizer("Hello world!", return_tensors="pt")
-    #         input_ids = kwargs["input_ids"]
-    #         attention_mask = kwargs["attention_mask"]
-    #         return input_ids, None, attention_mask
-
-    #     def create_pytorch_only_extra_kwargs():
-    #         return {"return_dict": False}
-
-    #     self._test_fx_symbolic_tracer_large_scale_exporter(
-    #         "tiny_gpt2",
-    #         create_model,
-    #         create_args,
-    #         create_pytorch_only_extra_kwargs,
-    #     )
-
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
-        from transformers.models.gpt2.configuration_gpt2 import GPT2Config
-        from transformers.models.gpt2.modeling_gpt2 import GPT2Model
-
-        device = "cpu"
-        config = GPT2Config(
-            num_hidden_layers=4,
-            vocab_size=8096,
-            hidden_size=16,
-            intermediate_size=16,
-            max_position_embeddings=512,
-            num_attention_heads=2,
-            hidden_dropout_prob=0.0,
-            attention_dropout_prob=0.0,
-        )
-        batch, seq = 2, 128
+        model_name = "sshleifer/tiny-gpt2"
 
         def create_model() -> nn.Module:
-            return GPT2Model(config).to(device).eval()
+            return transformers.AutoModel.from_pretrained(model_name)
 
         def create_args():
-            input_ids = torch.randint(0, 8096, (batch, seq)).to(device)
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool).to(device)
-            position_ids = torch.arange(0, seq, dtype=torch.long).to(device)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-            # TODO(titaiwang): initializers are not given to the model
-            return input_ids, None, attention_mask, None, position_ids
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
 
         def create_pytorch_only_extra_kwargs():
             return {"return_dict": False}
@@ -852,7 +811,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
 def _parameterized_class_attrs_and_values_with_fake_options():
     input_values = []
-    input_values.extend(itertools.product((False,), (False,), (False,), (True, False)))
+    input_values.extend(
+        itertools.product((True, False), (True, False), (True, False), (True, False))
+    )
     return {
         "attrs": [
             "op_level_debug",
@@ -1012,38 +973,20 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_large_scale_exporter_with_tiny_gpt2(self):
-        from transformers.models.gpt2.configuration_gpt2 import GPT2Config
-        from transformers.models.gpt2.modeling_gpt2 import GPT2Model
-
-        device = "cpu"
-        config = GPT2Config(
-            num_hidden_layers=4,
-            vocab_size=8096,
-            hidden_size=16,
-            intermediate_size=16,
-            max_position_embeddings=512,
-            num_attention_heads=2,
-            hidden_dropout_prob=0.0,
-            attention_dropout_prob=0.0,
-        )
-        batch, seq = 2, 128
+        model_name = "sshleifer/tiny-gpt2"
 
         def create_model() -> nn.Module:
-            return GPT2Model(config).to(device).eval()
+            return transformers.AutoModel.from_pretrained(model_name)
 
         def create_args():
-            input_ids = torch.randint(0, 8096, (batch, seq)).to(device)
-            return (input_ids,)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
 
         def create_kwargs():
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool).to(device)
-            position_ids = torch.arange(0, seq, dtype=torch.long).to(device)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-            return {
-                "attention_mask": attention_mask,
-                "position_ids": position_ids,
-                "return_dict": False,
-            }
+            return {"return_dict": False}
 
         self._test_fake_tensor_mode_exporter(
             "tiny_gpt2",

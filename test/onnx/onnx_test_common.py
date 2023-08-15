@@ -385,6 +385,7 @@ def run_ort(
         raise AssertionError(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
+
     ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     return session.run(None, ort_input)
 

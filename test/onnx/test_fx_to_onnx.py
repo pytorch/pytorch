@@ -406,39 +406,79 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     fake_model, real_x, export_options=export_options
                 )
 
-    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+    def test_fake_tensor_mode_huggingface_gpt2(self):
+        from transformers import GPT2Config, GPT2Model  # type: ignore[import]
 
-        model_name = "bigscience/bloom-560m"
+        config = GPT2Config()
+        batch, seq = 4, 256
+
         with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModel.from_pretrained(model_name)
+            model = GPT2Model(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
-                model, **inputs, export_options=export_options
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
             )
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    def test_fake_tensor_mode_huggingface_open_llama_3b_v2(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+    def test_fake_tensor_mode_huggingface_bigscience_bloom(self):
+        from transformers import BloomConfig, BloomModel  # type: ignore[import]
 
-        model_name = "openlm-research/open_llama_3b_v2"
+        config = BloomConfig()
+        batch, seq = 4, 256
+
         with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModel.from_pretrained(model_name)
+            model = BloomModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
-                model, **inputs, export_options=export_options
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
             )
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    # SymFloat in attribute
+    def test_fake_tensor_mode_huggingface_open_llama(self):
+        from transformers import OpenLlamaConfig, OpenLlamaModel  # type: ignore[import]
+
+        config = OpenLlamaConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = OpenLlamaModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    # TODO: From Config/Model
+    @pytorch_test_common.xfail(
+        "SymFloat in OnnxFUnction attribute is not supported yet."
+    )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
         from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
@@ -455,55 +495,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    # AssertionError: Mutating module attribute seq_len_cached during export.
-    @pytorch_test_common.xfail(
-        "AssertionError: Mutating module attribute seq_len_cached during export."
-        "self.seq_len_cached = seq_len"
-    )
-    def test_fake_tensor_mode_huggingface_tiiuae_falcon_7b(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
-
-        model_name = "tiiuae/falcon-7b"
-        with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModel.from_pretrained(model_name)
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
-                model,
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                export_options=export_options,
-            )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
-
-    # torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment.
-    # Please use functorch.experimental.control_flow.cond to explicitly capture the control flow
-    @pytorch_test_common.xfail(
-        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment."
-        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow."
-        "if attention_mask is not None and attention_mask[:, 0].sum() != attention_mask.shape[0] and self.training:"
-    )
-    def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
-        from transformers import (  # type: ignore[import]
-            AutoModelForCausalLM,
-            AutoTokenizer,
-        )
-
-        model_name = "mosaicml/mpt-7b"
-        with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModelForCausalLM.from_pretrained(model_name)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
-                model, **inputs, export_options=export_options
-            )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
-
+    # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_google_flan_t5_small(self):
         from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
@@ -528,6 +520,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
+    # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_openai_whisper_tiny(self):
         from datasets import load_dataset  # type: ignore[import]
         from transformers import (  # type: ignore[import]
@@ -555,6 +548,55 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 input_features,
                 decoder_input_ids=decoder_input_ids,
                 export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.xfail(
+        "AssertionError: Mutating module attribute seq_len_cached during export."
+        "self.seq_len_cached = seq_len"
+    )
+    def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
+        from transformers import FalconConfig, FalconModel  # type: ignore[import]
+
+        config = FalconConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = FalconModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.xfail(
+        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment."
+        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow."
+        "if attention_mask is not None and attention_mask[:, 0].sum() != attention_mask.shape[0] and self.training:"
+    )
+    def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
+        from transformers import (  # type: ignore[import]
+            AutoModelForCausalLM,
+            AutoTokenizer,
+        )
+
+        model_name = "mosaicml/mpt-7b"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+            model = AutoModelForCausalLM.from_pretrained(model_name)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, **inputs, export_options=export_options
             )
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
