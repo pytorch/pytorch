@@ -1,15 +1,11 @@
 # Owner(s): ["module: inductor"]
-import contextlib
-from unittest.mock import patch
 
-import functorch
 
 import torch
-import torch._inductor.config as config
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
+from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -47,8 +43,10 @@ class TestCase(TorchTestCase):
     device = DEVICE
 
     """
-    Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent, stronger comparisons may fail flakily dependending on the machine specs running the test.
-    atol and rtol must be provided explicitly with each call, since TestCase::precision and TestCase::rel_tol are not always utilized
+    Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent,
+    stronger comparisons may fail dependending on the host's specs.
+
+    atol/rtol must be provided explicitly with each call, since precision/rel_tol overrides are not always utilized
     """
 
     def assertZero(self, x: float):
