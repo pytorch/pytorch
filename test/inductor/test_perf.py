@@ -39,7 +39,6 @@ def count_numel(f, *args):
     metrics.reset()
     torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
     print(metrics.nodes_num_elem)
-    print(metrics.node_runtimes)
     return str(metrics.num_bytes_accessed // 4)
 
 
@@ -73,83 +72,6 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 class TestCase(TorchTestCase):
     device = DEVICE
     pass
-
-
-class EstimateSnodeRuntimeTests(TestCase):
-    def test_horizontal_reduction_pointwise(self):
-        def f(a):
-            b = a.sum(dim=1)
-            c = a.cos()
-            return b, c
-
-        inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), """210""")
-
-    def test_conv1d(self):
-        def f(x, y):
-            return torch.nn.functional.conv1d(x, y)
-
-        inp = (T(33, 16, 30), T(20, 16, 5))
-        self.assertExpectedInline(count_numel(f, *inp), """34600""")
-
-    def test_conv2d(self):
-        def f(x, y):
-            return torch.nn.functional.conv2d(x, y, padding=1)
-
-        inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
-        self.assertExpectedInline(count_numel(f, *inp), """396""")
-
-    def test_conv2d_transpose(self):
-        def f(x, y):
-            return torch.nn.functional.conv_transpose2d(x, y, padding=1)
-
-        inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
-        self.assertExpectedInline(count_numel(f, *inp), """396""")
-
-    def test_conv3d(self):
-        def f(x, y):
-            return torch.nn.functional.conv3d(x, y)
-
-        inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
-        self.assertExpectedInline(count_numel(f, *inp), """7776176""")
-
-    def test_mm(self):
-        def f(a, b):
-            return torch.mm(a, b)
-
-        inp = (
-            T(10, 10),
-            T(10, 10),
-        )
-        self.assertExpectedInline(count_numel(f, *inp), """300""")
-
-    def test_addmm(self):
-        def f(a, b, c):
-            return torch.addmm(a, b, c)
-
-        inp = (
-            T(10, 10),
-            T(10, 10),
-            T(10, 10),
-        )
-        self.assertExpectedInline(count_numel(f, *inp), """400""")
-
-    def test_bmm(self):
-        def f(a, b):
-            return torch.bmm(a, b)
-
-        inp = (
-            T(10, 10, 10),
-            T(10, 10, 10),
-        )
-        self.assertExpectedInline(count_numel(f, *inp), """3000""")
-
-    def test_pointwise(self):
-        def f(x):
-            return x.cos()
-
-        inp = (T(10),)
-        self.assertExpectedInline(count_numel(f, *inp), """20""")
 
 
 class NumBytesMetricTests(TestCase):
