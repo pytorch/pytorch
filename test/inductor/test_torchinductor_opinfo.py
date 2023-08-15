@@ -491,7 +491,11 @@ class TestInductorOpInfo(TestCase):
     @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     @torch._inductor.config.patch(
-        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+        {
+            "implicit_fallbacks": False,
+            "triton.autotune_pointwise": False,
+            "fallback_random": True,
+        }
     )
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
