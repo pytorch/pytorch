@@ -266,7 +266,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
         )
 
-    def _test_mark_static_input(self, guarded):
+    def _test_mark_static_address(self, guarded):
         compiles_with_buffers = 0
         compiles = 0
 
@@ -283,7 +283,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.ones(2)
 
-        torch._dynamo.mark_static_input(inp, guard=guarded)
+        torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
         self.assertEqual(compiles_with_buffers, 1)
@@ -297,11 +297,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiles_with_buffers, 1)
         self.assertEqual(compiles, 2 if guarded else 1)
 
-    def test_mark_static_input_guarded(self):
-        self._test_mark_static_input(guarded=True)
+    def test_mark_static_address_guarded(self):
+        self._test_mark_static_address(guarded=True)
 
-    def test_mark_static_input_unguarded(self):
-        self._test_mark_static_input(guarded=False)
+    def test_mark_static_address_unguarded(self):
+        self._test_mark_static_address(guarded=False)
 
 
 if __name__ == "__main__":

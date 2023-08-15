@@ -65,7 +65,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_instruction_source_311,
-    get_static_input_type,
+    get_static_address_type,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -608,8 +608,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
-            if get_static_input_type(target) == "guarded":
-                options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
+            if get_static_address_type(target) == "guarded":
+                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None

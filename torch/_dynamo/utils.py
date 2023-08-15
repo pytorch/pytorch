@@ -2041,7 +2041,7 @@ def is_guard_failure_reporting_enabled():
     )
 
 
-def get_static_input_type(t):
+def get_static_address_type(t):
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 

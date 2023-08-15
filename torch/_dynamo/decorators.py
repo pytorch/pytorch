@@ -243,11 +243,13 @@ def mark_static_address(t, guard=True):
     to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
     is not needed for this input. The data_ptr will be guarded if guard=True.
     """
-    if isinstance(t, torch.Tensor):
-        if guard:
-            t._dynamo_static_input_type = "guarded"
-        else:
-            t._dynamo_static_input_type = "unguarded"
+    if not isinstance(t, torch.Tensor):
+        raise ValueError("mark_static_address expects a tensor")
+
+    if guard:
+        t._dynamo_static_input_type = "guarded"
+    else:
+        t._dynamo_static_input_type = "unguarded"
 
 
 # Note: it's preferable to not make `import torch` eagerly import other libs.
