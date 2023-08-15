@@ -19,7 +19,7 @@ from torch._C._distributed_c10d import (
     Store,
     ReduceOp,
 )
-from torch.distributed.distributed_c10d import _CollOp, P2POp
+from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -236,33 +236,14 @@ class Collective:
 
 
 class ProcessLocalGroup(dist.ProcessGroup):
-    _pg_lock = threading.Lock()
-    _pg_list = []
-    _count = 0
-    _ready = False
-
     _coll_lock = threading.Lock()
     _cur_coll_on_pgs = {}
 
     _terminate = threading.Event()
 
     @classmethod
-    def _register(cls, pg):
-        with cls._pg_lock:
-            while len(cls._pg_list) <= pg._rank:
-                cls._pg_list.append(None)
-            cls._pg_list[pg._rank] = pg
-            cls._count += 1
-            if cls._count == pg._world_size:
-                cls._ready = True
-
-    @classmethod
     def _start_coll(cls, collective, pg):
         with cls._coll_lock:
-            if not cls._ready:
-                raise Exception(
-                    f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
-                )
             # pg_name is unique, we use that to record the mapping between pg and collective
             if pg.pg_name not in cls._cur_coll_on_pgs:
                 cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
@@ -365,8 +346,6 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self._world = weakref.ref(world)
         self._ctx = torch.autograd.set_multithreading_enabled(False)
 
-        ProcessLocalGroup._register(self)
-
     def size(self):
         return self._world_size
 
@@ -385,7 +364,21 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
 
 def _create_threaded_pg(prefix_store, rank, world_size, timeout):
-    return ProcessLocalGroup(rank, world_size)
+    pg = ProcessLocalGroup(rank, world_size)
+    # https://github.com/pytorch/pytorch/pull/103033 changed store based barrier to optional
+    # When device mesh involves sub groups while store based barrier is not enabled in c10d,
+    # even though threaded pg actual collectives are assumed to be single threaded,
+    # different threads may be initializing different groups,
+    # leading to race conditions.
+    # For example, if we have a mesh of [[0, 1], [2, 3]], the sub groups
+    # (dim 0 and 1) would be initialized in different threads independently.
+    # In this case we can no longer rely on class or global variables
+    # but have to rely on store based barrier to make sure each group
+    # is ready separately before we can invoke collectives in any of the groups.
+
+    # the prefix store is already per group so we pass an empty name here
+    _store_based_barrier(rank, prefix_store, "", world_size, timeout)
+    return pg
 
 
 dist.Backend.register_backend("threaded", _create_threaded_pg)
