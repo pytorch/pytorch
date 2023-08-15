@@ -10,10 +10,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
-import parameterized
+import parameterized  # type: ignore[import]
 import pytorch_test_common
 import torch
 import torch.onnx
+import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
@@ -26,7 +27,7 @@ from torch.onnx._internal.fx import (
 from torch.testing._internal import common_utils
 
 try:
-    import torchvision
+    import torchvision  # type: ignore[import]
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -554,13 +555,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    def test_gpt2_tiny(self):
-        from transformers.models.gpt2.configuration_gpt2 import GPT2Config
-        from transformers.models.gpt2.modeling_gpt2 import GPT2Model
-
-        device = "cpu"
+    def test_gpt2_tiny_from_config(self):
         # Model
-        config = GPT2Config(
+        config = transformers.GPT2Config(
             num_hidden_layers=4,
             vocab_size=8096,
             hidden_size=16,
@@ -570,24 +567,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             hidden_dropout_prob=0.0,
             attention_dropout_prob=0.0,
         )
-        model = GPT2Model(config).to(device).eval()
+        model = transformers.GPT2Model(config).eval()
 
         # Encoded inputs
         batch, seq = 2, 128
-        input_ids = torch.randint(0, 8096, (batch, seq)).to(device)
-        attention_mask = torch.ones(batch, seq, dtype=torch.bool).to(device)
-        position_ids = torch.arange(0, seq, dtype=torch.long).to(device)
+        input_ids = torch.randint(0, 8096, (batch, seq))
+        attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+        position_ids = torch.arange(0, seq, dtype=torch.long)
         position_ids = position_ids.unsqueeze(0).view(-1, seq)
 
         # Another encoded inputs to test dynamic shapes
         another_batch, another_seq = 3, 256
-        another_input_ids = torch.randint(0, 8096, (another_batch, another_seq)).to(
-            device
-        )
+        another_input_ids = torch.randint(0, 8096, (another_batch, another_seq))
         another_attention_mask = torch.ones(
             another_batch, another_seq, dtype=torch.bool
-        ).to(device)
-        another_position_ids = torch.arange(0, another_seq, dtype=torch.long).to(device)
+        )
+        another_position_ids = torch.arange(0, another_seq, dtype=torch.long)
         another_position_ids = another_position_ids.unsqueeze(0).view(-1, another_seq)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
@@ -672,8 +667,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             with ctx, ftm:
                 # Toy model with parameters and buffers as FakeTensor's.
                 fake_model = create_model()
-                model_state_dict = torch.load(tmp_file.name)
-                fake_model.load_state_dict(model_state_dict)
+                fake_model.load_state_dict(torch.load(tmp_file.name))
                 # Toy inputs as FakeTensor's.
                 fake_args = create_args()
                 # Export ONNX model without initializers while ctx.paths records

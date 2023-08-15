@@ -6,6 +6,7 @@ import tempfile
 import onnx
 import pytorch_test_common
 import torch
+import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
@@ -407,13 +408,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 )
 
     def test_fake_tensor_mode_huggingface_gpt2(self):
-        from transformers import GPT2Config, GPT2Model  # type: ignore[import]
-
-        config = GPT2Config()
+        config = transformers.GPT2Config()
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = GPT2Model(config).eval()
+            model = transformers.GPT2Model(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
             position_ids = torch.arange(0, seq, dtype=torch.long)
@@ -431,13 +430,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     def test_fake_tensor_mode_huggingface_bigscience_bloom(self):
-        from transformers import BloomConfig, BloomModel  # type: ignore[import]
-
-        config = BloomConfig()
+        config = transformers.BloomConfig()
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = BloomModel(config).eval()
+            model = transformers.BloomModel(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
 
@@ -452,13 +449,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     def test_fake_tensor_mode_huggingface_open_llama(self):
-        from transformers import OpenLlamaConfig, OpenLlamaModel  # type: ignore[import]
-
-        config = OpenLlamaConfig()
+        config = transformers.OpenLlamaConfig()
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = OpenLlamaModel(config).eval()
+            model = transformers.OpenLlamaModel(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
             position_ids = torch.arange(0, seq, dtype=torch.long)
@@ -480,13 +475,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         "SymFloat in OnnxFUnction attribute is not supported yet."
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
-
         model_name = "databricks/dolly-v2-3b"
         with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
             inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
@@ -497,12 +490,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_google_flan_t5_small(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
-
         model_name = "google/flan-t5-small"
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = AutoModel.from_pretrained(model_name)
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
             decoder_input_ids = tokenizer(
                 "Studies show that", return_tensors="pt"
@@ -523,16 +514,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_openai_whisper_tiny(self):
         from datasets import load_dataset  # type: ignore[import]
-        from transformers import (  # type: ignore[import]
-            AutoModel,
-            WhisperConfig,
-            WhisperProcessor,
-        )
 
         model_name = "openai/whisper-tiny"
         with torch.onnx.enable_fake_mode() as fake_context:
-            config = WhisperConfig.from_pretrained(model_name)
-            processor = WhisperProcessor.from_pretrained(model_name)
+            config = transformers.WhisperConfig.from_pretrained(model_name)
+            processor = transformers.WhisperProcessor.from_pretrained(model_name)
             ds = load_dataset(
                 "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
             )
@@ -541,7 +527,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             ).input_features
             decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
 
-            model = AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name)
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
                 model,
@@ -557,13 +543,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         "self.seq_len_cached = seq_len"
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
-        from transformers import FalconConfig, FalconModel  # type: ignore[import]
-
-        config = FalconConfig()
+        config = transformers.FalconConfig()
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = FalconModel(config).eval()
+            model = transformers.FalconModel(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
 
@@ -583,16 +567,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         "if attention_mask is not None and attention_mask[:, 0].sum() != attention_mask.shape[0] and self.training:"
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
-        from transformers import (  # type: ignore[import]
-            AutoModelForCausalLM,
-            AutoTokenizer,
-        )
-
         model_name = "mosaicml/mpt-7b"
         with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name, trust_remote_code=True
+            )
             inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModelForCausalLM.from_pretrained(model_name)
+            model = transformers.AutoModelForCausalLM.from_pretrained(
+                model_name, trust_remote_code=True
+            )
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
