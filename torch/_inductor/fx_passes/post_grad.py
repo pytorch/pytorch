@@ -2,6 +2,9 @@ import functools
 import itertools
 import logging
 import operator
+from typing import List, Optional, Union
+
+from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -149,7 +152,31 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+
+
+"""
+    torch.mm(mat1, mat2.to(mat2_dtype))
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("mat2"),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=(
+        lambda match: (config.use_mixed_mm or config.force_mixed_mm)
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+    ),  # needs cuda
+)
+def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
@@ -225,7 +252,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size = None
+    new_size: Optional[Union[List[Expr], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -242,6 +269,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         offsets_start.append(new_size[dim] - shape[dim])
         offsets_end.append(new_size[dim])
 
+    assert new_size is not None
     dtype = functools.reduce(
         torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
     )

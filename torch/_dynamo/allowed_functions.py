@@ -8,7 +8,10 @@ import math
 import operator
 import types
 import warnings
+
 from typing import cast, Dict, Optional, Set
+
+import numpy as np
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -16,7 +19,7 @@ from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import HAS_NUMPY, is_safe_constant, np, NP_SUPPORTED_MODULES
+from .utils import is_safe_constant, NP_SUPPORTED_MODULES
 
 """
 A note on allowed functions:
@@ -194,8 +197,14 @@ def _allowed_function_ids():
 
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
-                # We want to trace through `grad`
-                if obj in (torch.func.grad, deprecated_func.grad):
+
+                # We want to trace through `grad` and `vmap`
+                if obj in (
+                    torch.func.grad,
+                    deprecated_func.grad,
+                    torch.func.vmap,
+                    deprecated_func.vmap,
+                ):
                     continue
 
                 if isinstance(obj, types.ModuleType):
@@ -253,16 +262,15 @@ def _builtin_function_ids():
 @make_function_id_set
 def _numpy_function_ids():
     rv = dict()
-    if HAS_NUMPY:
-        for mod in NP_SUPPORTED_MODULES:
-            rv.update(
-                {
-                    id(v): f"{mod.__name__}.{k}"
-                    for k, v in mod.__dict__.items()
-                    if callable(v)
-                    and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-                }
-            )
+    for mod in NP_SUPPORTED_MODULES:
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
     return rv
 
 
@@ -307,7 +315,4 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    if HAS_NUMPY:
-        return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
-    else:
-        return False
+    return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
