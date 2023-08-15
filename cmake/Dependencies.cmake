@@ -115,7 +115,9 @@ if(USE_ASAN OR USE_TSAN)
   endif()
   if(USE_TSAN)
     if(TARGET Sanitizer::thread)
-      list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::thread)
+      # ThreadSanitizer requires all code to be compiled with -fsanitize=thread,
+      # So we use public linking.
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::thread)
     else()
       message(WARNING "Not TSAN found. Suppress this warning with -DUSE_TSAN=OFF.")
       caffe2_update_option(USE_TSAN OFF)
