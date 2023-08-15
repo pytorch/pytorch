@@ -1116,6 +1116,23 @@ def forward(self, primals_1, primals_2):
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
 
+    # https://github.com/pytorch/pytorch/issues/106456
+    def test_input_mutation_noncontiguous(self):
+        def f(a):
+            a.mul_(2)
+            return a + 1
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            # create a non-contiguous view to pass as an input to the compiler
+            inp = x[:, 0]
+            return [base], [inp]
+
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
         # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
