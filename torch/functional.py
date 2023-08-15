@@ -139,7 +139,7 @@ def broadcast_shapes(*shapes):
 
 
 def split(
-    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
+    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0, drop_remainder: bool = 0
 ) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
@@ -157,6 +157,9 @@ def split(
         split_size_or_sections (int) or (list(int)): size of a single chunk or
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
+        drop_remainder (bool):
+            If the length of the dimension is not perfectly divisible,
+            drop the remaining elements from the returned arrays.
 
     Example::
 
@@ -179,15 +182,24 @@ def split(
                  [4, 5],
                  [6, 7],
                  [8, 9]]))
+        >>> torch.split(a, 2, drop_remainder=True)
+        (tensor([[0, 1],
+                 [2, 3]]),
+         tensor([[4, 5],
+                 [6, 7]]))
+        >>> torch.split(a, [1, 2], drop_remainder=True)
+        (tensor([[0, 1]]),
+         tensor([[2, 3],
+                 [4, 5]]))
     """
     if has_torch_function_unary(tensor):
         return handle_torch_function(
-            split, (tensor,), tensor, split_size_or_sections, dim=dim)
+            split, (tensor,), tensor, split_size_or_sections, dim=dim, drop_remainder=drop_remainder)
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
     # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
-    return tensor.split(split_size_or_sections, dim)
+    return tensor.split(split_size_or_sections, dim, drop_remainder=drop_remainder)
 
 
 def einsum(*args: Any) -> Tensor:

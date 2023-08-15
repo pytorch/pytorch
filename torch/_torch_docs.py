@@ -1925,7 +1925,7 @@ Example::
 add_docstr(
     torch.chunk,
     r"""
-chunk(input, chunks, dim=0) -> List of Tensors
+chunk(input, chunks, dim=0, redistribute=False, drop_remainder=False) -> List of Tensors
 
 Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
@@ -1950,6 +1950,15 @@ Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
+    redistribute (bool, optional):
+        Spread the elements evenly across the chunks/splits if the length of the dimension
+        is not perfectly divisible by the number of chunks or split size. 
+
+        The length of returned tensors differs by at most one element.
+
+    drop_remainder (bool, optional):
+        If the length of the dimension is not perfectly divisible, drop the remaining elements
+        from the returned arrays.
 
 Example:
     >>> torch.arange(11).chunk(6)
@@ -1970,8 +1979,22 @@ Example:
     (tensor([0, 1, 2]),
      tensor([3, 4, 5]),
      tensor([6, 7, 8]),
-     tensor([ 9, 10, 11]),
+     tensor([9, 10, 11]),
      tensor([12]))
+    >>> torch.arange(13).chunk(6,redistribute=True)
+    (tensor([0, 1, 2]),
+     tensor([3, 4]),
+     tensor([5, 6]),
+     tensor([7, 8]),
+     tensor([9, 10]),
+     tensor([11, 12]))
+    >>> torch.arange(13).chunk(6,drop_remainder=True)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10, 11]))
 """,
 )
 

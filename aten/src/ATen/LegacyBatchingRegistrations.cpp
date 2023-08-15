@@ -190,10 +190,10 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
+std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim, bool redistribute, bool drop_remainder) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::chunk(self_physical.tensor(), chunks, dim_physical);
+  auto result = at::chunk(self_physical.tensor(), chunks, dim_physical, redistribute, drop_remainder);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
@@ -429,18 +429,18 @@ Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
+std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim, bool drop_remainder) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::split(self_physical.tensor(), split_size, dim_physical);
+  auto result = at::split(self_physical.tensor(), split_size, dim_physical, drop_remainder);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
 
-std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim, bool drop_remainder) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::split_with_sizes(self_physical.tensor(), split_sizes, dim_physical);
+  auto result = at::split_with_sizes(self_physical.tensor(), split_sizes, dim_physical, drop_remainder);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }

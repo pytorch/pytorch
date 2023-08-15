@@ -67,7 +67,7 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
   return *last_dim;
 }
 
-std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int64_t dim) {
+std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int64_t dim, bool redistribute, bool drop_remainder) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "chunk() cannot be applied to a 0-dim tensor.");
@@ -114,7 +114,8 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
 std::vector<Tensor> split_with_sizes_nested(
     const Tensor& self,
     c10::IntArrayRef split_sizes,
-    int64_t dim) {
+    int64_t dim,
+    bool drop_remainder) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "split_with_sizes() cannot be applied to a 0-dim tensor.");
@@ -134,9 +135,15 @@ std::vector<Tensor> split_with_sizes_nested(
   }
   auto self_impl = get_nested_tensor_impl(self);
   auto self_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
-  TORCH_CHECK(total_size == self_size,
-          "split_with_sizes expects split_sizes to sum exactly to ", self_size,
-          " (input tensor's size at dimension ", dim, "), but got split_sizes=", split_sizes);
+  if (!drop_remainder) {
+    TORCH_CHECK(total_size == self_size,
+            "split_with_sizes expects split_sizes to sum exactly to ", self_size,
+            " (input tensor's size at dimension ", dim, "), but got split_sizes=", split_sizes);
+  } else {
+    TORCH_CHECK(total_size == self_size,
+      "split_with_sizes expects split_sizes to sum less or equal to to ", self_size,
+      " (input tensor's size at dimension ", dim, "), but got split_sizes=", split_sizes);
+  }
 
   int64_t n_tensors = self.size(0);
   std::vector<Tensor> splits(num_splits);

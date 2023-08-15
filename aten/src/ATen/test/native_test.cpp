@@ -28,6 +28,16 @@ void TestSplit(TensorOptions T, Tensor& t) {
   auto splitNs = at::split(t, 1, 0);
   requireEqualTensorList(splitMethod, splitNs);
 
+  auto splitWithDrop = t.split(2, 0, /*drop_remainder=*/true);
+  ASSERT_EQ(splitWithDrop.size(), 1);
+  ASSERT_EQ(splitWithDrop[0].size(0), 2);
+
+  auto splitWithSizesDrop = t.split(
+      c10::IntArrayRef{ 1, 1 }, 0, /*drop_remainder=*/true);
+  ASSERT_EQ(splitWithSizesDrop.size(), 2);
+  ASSERT_EQ(splitWithSizesDrop[0].size(0), 1);
+  ASSERT_EQ(splitWithSizesDrop[1].size(0), 1);
+
   // test rebuilding with cat
   ASSERT_EQUAL(at::cat(splitMethod, 0), t);
 }
@@ -41,6 +51,59 @@ void TestChunk(TensorOptions T, Tensor& t) {
 
   // test rebuilding with cat
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
+}
+
+// helper function for TestChunkOptions
+void _verify_chunk_result(
+    const std::vector<int>& expected_chunk_sizes,
+    const std::vector<Tensor>& chunks) {
+  ASSERT_EQ(expected_chunk_sizes.size(), chunks.size());
+  int n = 0;
+  for (int i = 0; i < chunks.size(); i++) {
+    ASSERT_EQ(expected_chunk_sizes[i], chunks[i].size(0));
+    for (int j = 0; j < chunks[i].size(0); j++)
+      ASSERT_EQ(n++, chunks[i].slice(0, j, j+1).item());
+  }
+}
+
+void TestChunkOptions() {
+  std::vector<std::vector<int>> expected_chunk_sizes = {
+    {1,1,1,1},
+    {0},
+    {1,1,1,1,0},
+    {0,0,0,0,0},
+
+    {2,2,2},
+    {1,1,1,1,1},
+    {2,1,1,1,1},
+    {1,1,1,1,1},
+
+    {2,2,2,2},
+    {1,1,1,1,1},
+    {2,2,2,1,1},
+    {1,1,1,1,1},
+
+    {2,2,2,2,2},
+    {2,2,2,2,2},
+    {2,2,2,2,2},
+    {2,2,2,2,2},
+
+    {3,3,3,3},
+    {2,2,2,2,2},
+    {3,3,2,2,2},
+    {2,2,2,2,2},
+  };
+  int test_index = 0;
+  for (int i = 4; i < 13; i += 2) {
+    auto chunk_orig_alt = at::arange(i).chunk(5, 0, /*redistribute=*/false, /*drop_remainder=*/false);
+    auto chunk_orig_alt_d = at::arange(i).chunk(5, 0, /*redistribute=*/false, /*drop_remainder=*/true);
+    auto chunk_redist = at::arange(i).chunk(5, 0, /*redistribute=*/true, /*drop_remainder=*/false);
+    auto chunk_redist_d = at::arange(i).chunk(5, 0, /*redistribute=*/true, /*drop_remainder=*/true);
+    _verify_chunk_result(expected_chunk_sizes[test_index++], chunk_orig_alt);
+    _verify_chunk_result(expected_chunk_sizes[test_index++], chunk_orig_alt_d);
+    _verify_chunk_result(expected_chunk_sizes[test_index++], chunk_redist);
+    _verify_chunk_result(expected_chunk_sizes[test_index++], chunk_redist_d);
+  }
 }
 
 typedef Tensor StackFunc (TensorList, int64_t);
@@ -245,6 +308,7 @@ void test(TensorOptions T, TensorOptions AccT) {
   auto t = randn({3, 3}, T);
   TestSplit(T, t);
   TestChunk(T, t);
+  TestChunkOptions();
   TestStack(T, t);
   TestSize(T, t);
   TestMatmul(T, t, AccT);

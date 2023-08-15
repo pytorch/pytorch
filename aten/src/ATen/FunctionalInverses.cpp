@@ -188,8 +188,9 @@ Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const T
     return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
 }
 
-Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
+Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim, bool drop_remainder) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
+    // If the remainder of the split was dropped with drop_remainder, the inverse will not re-add the dropped slice.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
     // on top of the base tensor.
     // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
@@ -202,7 +203,8 @@ Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const T
     return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
-Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim, bool drop_remainder) {
+    // If the remainder of the split was dropped with drop_remainder, the inverse will not re-add the dropped slice.
     dim = at::maybe_wrap_dim(dim, base.dim());
     auto dim_size = base.sym_size(dim);
     c10::SymInt start = 0;

@@ -924,25 +924,47 @@ Tensor block_diag(TensorList tensors) {
   return result;
 }
 
-std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim, bool redistribute, bool drop_remainder) {
   TORCH_CHECK(self.dim() > 0,
            "chunk expects at least a 1-dimensional tensor");
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  const auto dim_size = self.sym_size(dim);
-  auto split_size = (dim_size + chunks - 1) / chunks;
+  const auto dim_size = self.sym_size(dim) - (!drop_remainder ? 0 : self.sym_size(dim) % chunks);
+  auto split_size = (dim_size + (!drop_remainder ? chunks - 1 : 0)) / chunks;
+  auto split_mod = self.sym_size(dim) % chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
   if (split_size == 0 && dim_size == 0) {
+    if (drop_remainder && !redistribute) {
+      chunks = 1;
+    }
     std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
-    return self.split_with_sizes_symint(split_sizes, dim);
+    return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
   } else {
-    return self.split_symint(std::move(split_size), dim);
+    if (drop_remainder && split_mod > 0) {
+      return self
+          .slice(dim, c10::nullopt, dim_size.expect_int())
+          .split_symint(std::move(split_size), dim);
+    } else if (!redistribute || split_mod == 0) {
+      return self.split_symint(std::move(split_size), dim);
+    } else {
+      // Case when redistribute=true and there are > 0 elements to redistribute.
+      split_size = dim_size / chunks;
+      auto limit = split_mod * (split_size+1);
+      auto result = self
+          .slice(dim, c10::nullopt, limit.expect_int())
+          .split(split_size.expect_int() + 1); // split_mod chunks
+      auto second_part = self
+          .slice(dim, limit.expect_int(), c10::nullopt)
+          .split(split_size.expect_int()); // chunks-split_mod chunks
+      result.insert(result.end(), second_part.begin(), second_part.end());
+      return result;
+    }
   }
 }
 
@@ -2565,20 +2587,25 @@ Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, 
   return grad_input;
 }
 
-std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
-  const auto num_splits = get_num_splits(self, split_size, dim);
+std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim, bool drop_remainder) {
+  const auto num_splits = get_num_splits(self, split_size, dim, drop_remainder);
   std::vector<Tensor> splits(num_splits);
-  int64_t last_split_size = split_size - (split_size * num_splits - self.size(dim));
+  int64_t last_split_size = !drop_remainder ? split_size - (split_size * num_splits - self.size(dim)) : 0;
 
   for (const auto i : c10::irange(num_splits)) {
-    auto length = i < num_splits - 1 ? split_size : last_split_size;
+    int64_t length;
+    if (!drop_remainder) {
+      length = i < num_splits - 1 ? split_size : last_split_size;
+    } else {
+      length = split_size;
+    }
     splits[i] = self.narrow(dim, i * split_size, length);
   }
   return splits;
 }
 
-std::vector<Tensor> split_symint(const Tensor& self, c10::SymIntArrayRef sizes, int64_t dim) {
-  return at::split_with_sizes_symint(self, sizes, dim);
+std::vector<Tensor> split_symint(const Tensor& self, c10::SymIntArrayRef sizes, int64_t dim, bool drop_remainder) {
+  return at::split_with_sizes_symint(self, sizes, dim, drop_remainder);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -2614,7 +2641,7 @@ std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
   return at::tensor_split(self, split_size, 2);
 }
 
-std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim, bool drop_remainder) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   const int64_t dim_size = self.size(dim);
   const int64_t num_splits = split_sizes.size();
@@ -2630,9 +2657,15 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
     splits.push_back(at::native::slice(self, dim, start_idx, start_idx + length, 1));
     start_idx += length;
   }
-  TORCH_CHECK(start_idx == dim_size,
-           "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
-           " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
+  if (!drop_remainder) {
+    TORCH_CHECK(start_idx == dim_size,
+             "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
+             " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
+  } else {
+    TORCH_CHECK(start_idx <= dim_size,
+      "split_with_sizes expects split_sizes to sum less or equal than ", dim_size,
+      " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
+  }
   return splits;
 }
 
@@ -4000,8 +4033,8 @@ at::Tensor lift_fresh(const at::Tensor& self) {
 }
 
 // Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)
-void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
-  auto tmp = self.split(split_size, dim);
+void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, bool drop_remainder, at::TensorList  out) {
+  auto tmp = self.split(split_size, dim, drop_remainder);
 
   TORCH_CHECK(out.size() == tmp.size(), "split_copy_Tensor_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
@@ -4009,8 +4042,8 @@ void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t 
   }
 }
 
-void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
-  auto tmp = self.split_with_sizes(split_sizes, dim);
+void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, bool drop_remainder, at::TensorList  out) {
+  auto tmp = self.split_with_sizes(split_sizes, dim, drop_remainder);
 
   TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {

@@ -857,11 +857,11 @@ class Tensor(torch._C.TensorBase):
 
         return Resize.apply(self, tensor.size())
 
-    def split(self, split_size, dim=0):
+    def split(self, split_size, dim=0, drop_remainder=False):
         r"""See :func:`torch.split`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
-                Tensor.split, (self,), self, split_size, dim=dim
+                Tensor.split, (self,), self, split_size, dim=dim, drop_remainder=drop_remainder
             )
         if isinstance(split_size, Tensor):
             try:
@@ -870,9 +870,9 @@ class Tensor(torch._C.TensorBase):
                 pass
 
         if isinstance(split_size, (int, torch.SymInt)):
-            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
+            return torch._VF.split(self, split_size, dim, drop_remainder)  # type: ignore[attr-defined]
         else:
-            return torch._VF.split_with_sizes(self, split_size, dim)
+            return torch._VF.split_with_sizes(self, split_size, dim, drop_remainder)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
