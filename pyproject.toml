@@ -29,7 +29,7 @@ ignore = [
     "B007", "B008", "B017",
     "B018", # Useless expression
     "B019", "B020",
-    "B023", "B024", "B026",
+    "B023", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
     "B904",
     "E402",
