@@ -357,7 +357,10 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
+        # TODO(ycao): ExportedProgram.transform() forbids changes to number
+        # of inputs/outputs for now. When it supports that better, change this
+        # back to using ExportedProgram.transform()
+        gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
