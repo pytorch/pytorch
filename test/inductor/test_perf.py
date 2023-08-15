@@ -132,7 +132,7 @@ class EstimateSnodeRuntimeTests(TestCase):
             T(10, 10),
             T(10, 10),
         )
-        count_numel(f, *inp)
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     def test_bmm(self):
         def f(a, b):
@@ -142,18 +142,7 @@ class EstimateSnodeRuntimeTests(TestCase):
             T(10, 10, 10),
             T(10, 10, 10),
         )
-        count_numel(f, *inp)
-
-    def test_baddbmm(self):
-        def f(a, b, c):
-            return torch.baddbmm(a, b, c)
-
-        inp = (
-            T(10, 10, 10),
-            T(10, 10, 10),
-            T(10, 10, 10),
-        )
-        count_numel(f, *inp)
+        self.assertExpectedInline(count_numel(f, *inp), """3000""")
 
     def test_pointwise(self):
         def f(x):

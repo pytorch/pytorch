@@ -73,7 +73,6 @@ kernel_name_to_op = {
     "extern_kernels.mm": torch.ops.aten.mm,
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
-    "extern_kernels.baddbmm": torch.ops.aten.baddbmm,
 }
 
 
