@@ -1399,7 +1399,6 @@ def create_functionalized_graph(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
-                    assert has_same_metadata(inpt_new, inpt_old)
                     inpt_old.copy_(inpt_new)
 
         return pytree.tree_map(from_fun, f_outs)
@@ -2488,8 +2487,12 @@ def create_runtime_wrapper(
                 # We can't just check of original_inpt.storage_size != updated_inpt.storage_size,
                 # Because the original_inpt might be a view of some larger tensor,
                 # and updated_inpt is always densely packed.
-                if not trace_joint and original_inpt.storage().size() != updated_inpt.storage().size():
-                    original_inpt.resize_(updated_inpt.size())
+                if not trace_joint and original_inpt.untyped_storage().size() != updated_inpt.untyped_storage().size():
+                    # It actually isn't enough just to see if the storage sizes are different between old and new inputs.
+                    # If the original input was a slice into some larger storage, the same will not be true for the updated input.
+                    # So before doing the resize_(), we **also** check that functionalization detected a metadata mutation.
+                    if meta.mutates_metadata:
+                        original_inpt.resize_(updated_inpt.size())
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
