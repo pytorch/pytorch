@@ -212,10 +212,14 @@ def cat(tensors, dim=0):
         # just drop the 'empty' inputs so they don't confuse the logic below.
         return len(x.shape) > 1 or x.shape[0] > 0
 
-    tensors = list(filter(non_empty_tensor, tensors))
+    filtered_tensors = list(filter(non_empty_tensor, tensors))
 
-    if len(tensors) == 1:
+    if len(filtered_tensors) == 1:
         return tensors[0].clone()
+    elif len(filtered_tensors) > 1 and len(filtered_tensors) < len(tensors):
+        # on the first call, when we remove empty tensors, we redispatch recursively
+        return aten.cat.default(filtered_tensors, dim)
+    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 

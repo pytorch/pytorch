@@ -3257,8 +3257,8 @@ class CommonTemplate:
         )
 
     def test_cat_empty(self):
-        def fn_2(a, b):
-            return torch.cat((a, b))
+        def fn_2(*tensors):
+            return torch.cat(tensors)
 
         self.common(
             fn_2,
@@ -3266,6 +3266,18 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
                 torch.ones([0]),
             ),
+        )
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
+        self.common(
+            fn_2,
+            (torch.ones([0]),),
         )
 
     def test_cat_upcasting(self):
