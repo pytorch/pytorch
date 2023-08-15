@@ -427,6 +427,7 @@ class BaseSchedulerNode:
         # TODO(xmfan): figure out how to get hardware specs
         try:
             from triton.testing import get_dram_gbps
+
             gpu_memory_bandwidth = get_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
         except Exception:
@@ -438,10 +439,15 @@ class BaseSchedulerNode:
             # if there is a resolved op, dry-run using fake mode and record flop count
             if op is not None:
                 from torch.utils.flop_counter import FlopCounterMode
-                with V.graph.fake_mode, FlopCounterMode(display=False) as flop_counter_mode:
+
+                with V.graph.fake_mode, FlopCounterMode(
+                    display=False
+                ) as flop_counter_mode:
                     from .ir import ir_node_to_tensor
 
-                    fake_inputs = [ir_node_to_tensor(input) for input in self.node.inputs]
+                    fake_inputs = [
+                        ir_node_to_tensor(input) for input in self.node.inputs
+                    ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
                     return flop_counter_mode.get_total_flops() / gpu_flops
