@@ -2771,7 +2771,6 @@ aot_autograd_failures = {
     xfail('quantile'),
     xfail('nanquantile'),
     xfail('narrow'),
-    xfail('index_reduce'),
     xfail('istft'),
     xfail('linalg.eig'),
     xfail('scatter_reduce', 'prod'),
@@ -2840,7 +2839,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
