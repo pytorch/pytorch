@@ -429,49 +429,37 @@ inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) 
   //  set_extra_state responsibility to clean it up. It will be deleled during
   //  the reset_code/skip, when the set_extra_state is called with
   //  NULL/SKIP_CODE.
+
+  // Invariant - Dont set the extra state for the extra state that is already on
+  // the code object. Otherwise, we will first free up the old extra state
+  // (which is also the new extra state) and write something invalid on the
+  // scratch space.
+  ExtraState* old_extra_state = get_extra_state(code);
+  CHECK(old_extra_state == NULL || old_extra_state == SKIP_CODE || old_extra_state != extra_state);
   destroy_extra_state(code);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
-static ExtraState* create_extra_state(
-    CacheEntry* cache_entry,
-    FrameState* frame_state) {
-  // Creates a new extra state with the given cache_entry and frame_state.
-  // It steals the reference for both cache_entry and frame_state.
-
-  // Ownership contract
-  // args
-  //  - cache_entry: Steals
-  //  - frame_state: Steals
-  // return
-  //  - ExtraState: Transfers ownership of the new object. Owning reference.
-  ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
-  DEBUG_NULL_CHECK(extra_state);
-  extra_state->cache_entry = cache_entry;
-  extra_state->frame_state = frame_state;
-  return extra_state;
-}
-
-
-inline static void create_and_set_extra_state(
-    PyCodeObject* code,
-    CacheEntry* cache_entry,
-    FrameState* frame_state) {
+inline static ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Creates a new extra state and put it on the extra scrach space of the code
   // object.
 
   // Ownership contract
   // args
   //  - code: Borrowed
-  //  - cache_entry: Stolen
-  //  - frame_state: Stolen
+  // return:
+  //   - extra_state: New reference.
   // These references are then further passed to set_extra_state which becomes
   // the final owner of these references.
 
   // Invariant - Extra state should not have been set before, therefore it should be NULL.
   CHECK(get_extra_state(code) == NULL);
-  ExtraState* extra_state = create_extra_state(cache_entry, frame_state);
+  ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
+  DEBUG_NULL_CHECK(extra_state);
+  extra_state->cache_entry = NULL;
+  extra_state->frame_state = PyDict_New();
   set_extra_state(code, extra_state);
+  return extra_state;
 }
 
 /* Extra state helper functions ends */
@@ -828,13 +816,13 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
+
+  if (extra == NULL) {
+    extra = init_and_set_extra_state(frame->f_code);
+  }
+
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
-  if (frame_state == NULL) {
-    // frame_state becomes a new reference. It gets cleaned up by
-    // set_extra_state or skip later.
-    frame_state = PyDict_New();
-  }
 
   // TODO(jansel): investigate directly using the "fast" representation
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
@@ -907,24 +895,17 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
     CacheEntry* new_cache_entry = create_cache_entry(cache_entry, result);
     Py_DECREF(result);
-    if (extra == NULL) {
-      // Create a new extra state as this is the first time we see this code object.
-      create_and_set_extra_state(frame->f_code, new_cache_entry, frame_state);
-    } else {
-      // Update the existing cache_entry on the extra scratch space.
-      extra->cache_entry = new_cache_entry;
-    }
+    // Update the existing cache_entry on the extra object. This extra object is
+    // sitting on the extra scratch space, we are just changing the cache_entry
+    // ptr. As a result, extra now becomes the owner of CacheEntry object. This
+    // will be cleaned up when set_extra_state is called.
+    extra->cache_entry = new_cache_entry;
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, new_cache_entry->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
-    if (extra == NULL) {
-      // frame_state is PyDict if extra is NULL, so clean it up. If the extra is
-      // not None, then set_extra_state will clean it up.
-      Py_DECREF(frame_state);
-    }
     set_extra_state(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
