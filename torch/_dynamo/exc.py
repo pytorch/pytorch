@@ -163,8 +163,7 @@ def unimplemented_with_warning(e, code, msg):
     # this function to log the message and the stack trace.
     graph_break_msg = format_error_msg_verbose(e, code)
     graph_breaks_log.debug("%s", graph_break_msg)
-    if not graph_breaks_log.isEnabledFor(logging.DEBUG):
-        log.warning(msg)
+    log.warning(msg)
     raise unimplemented(msg) from e
 
 

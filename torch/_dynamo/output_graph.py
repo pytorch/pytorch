@@ -1008,7 +1008,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             msg = (
                 "Backend compiler failed with a fake tensor exception at \n"
                 f"{self.root_tx.format_frame_summary()}"
-                "Falling back to eager for this frame. Please use TORCH_LOGS=graph_breaks to see the full stack trace."
+                "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
