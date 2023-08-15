@@ -8,7 +8,6 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <ATen/ATen.h>
-#include <torch/extension.h>
 
 #include "flash_fwd_runner_gfx90a_hip.h"
 #include "flash_bwd_runner_gfx90a_hip.h"
@@ -571,17 +570,6 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     }
     return { dq, dk, dv, softmax_d };
 }
-
-
-#ifdef BUILD_PYTHON_PACKAGE
-    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-        m.doc() = "Fused Multi-head Self-attention";
-        m.def("fwd", &mha_fwd, "Forward pass");
-        m.def("bwd", &mha_bwd, "Backward pass");
-        // m.def("fwd_block", &mha_fwd_block, "Forward pass (blocksparse)");
-        // m.def("bwd_block", &mha_bwd_block, "Backward pass (blocksparse)");
-    }
-#endif
 
 #ifndef BUILD_PYTHON_PACKAGE
 //main function to test with the API
