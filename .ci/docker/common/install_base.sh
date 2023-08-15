@@ -61,6 +61,8 @@ install_ubuntu() {
     libc6-dbg \
     ${maybe_libiomp_dev} \
     libyaml-dev \
+    libxml2-dev \
+    libxslt-dev \
     libz-dev \
     libjpeg-dev \
     libasound2-dev \

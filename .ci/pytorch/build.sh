@@ -173,6 +173,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   unset USE_LLVM
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-clang*-tsan* ]]; then
+  export LDSHARED="clang --shared"
+  export USE_CUDA=0
+  export USE_TSAN=1
+  export USE_MKLDNN=0
+  unset USE_LLVM
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
