@@ -215,12 +215,8 @@ class AllocateLine(MemoryPlanningLine):
         line = self.wrapper.make_buffer_allocation(self.node)
         # if self has attribution named user_streams, it is used by multiple streams
         if hasattr(self, "user_streams"):
-            need_cuda_event = False
-            if len(self.user_streams) > 1:
-                # TODO: need to double check. saw this print in some models.
-                print(f"findhao-> buffer {self.node.get_name()} is used by multiple streams")
-                pass
-            elif len(self.user_streams) == 1:
+            # the redundant stream_id have been removed when user_streams is set
+            if len(self.user_streams) == 1:
                 if self.user_streams[0] != 0:
                     if V.graph.cpp_wrapper:
                         code.writeline(f"at::Tensor {self.node.get_name()};")
@@ -236,30 +232,36 @@ class AllocateLine(MemoryPlanningLine):
                         code.writeline(line)
                         code.writeline(f"torch.cuda.set_stream(stream0_raw)")
                     return
-            for user_stream in self.user_streams:
-                if user_stream != 0:
-                    need_cuda_event = True
-                    break
-            if need_cuda_event:
+                else:
+                    code.writeline(line)
+            elif len(self.user_streams) > 1:
+                # assign the empty_strided to the first user_stream
+                assign_stream = self.user_streams[0]
                 event_name = f"event_allocate_{self.node.get_name()}"
                 if V.graph.cpp_wrapper:
                     code.writeline(f"cudaEvent_t {event_name};")
                     code.writeline(f"cudaEventCreate(&{event_name});")
+                    if assign_stream != 0:
+                        code.writeline(f"at::cuda::setCurrentCUDAStream(stream{assign_stream});")
                     code.writeline(line)
-                    code.writeline(f"cudaEventRecord({event_name}, stream0);")
-                    for user_stream in self.user_streams:
-                        if user_stream != 0:
-                            code.writeline(f"cudaStreamWaitEvent(stream{user_stream}, {event_name}, 0);")
+                    if assign_stream != 0:
+                        code.writeline(f"at::cuda::setCurrentCUDAStream(stream0);")
+                    code.writeline(f"cudaEventRecord({event_name}, stream{assign_stream});")
+                    for user_stream in self.user_streams[1:]:
+                        code.writeline(f"cudaStreamWaitEvent(stream{user_stream}, {event_name}, 0);")
                 else:
                     code.writeline(f"{event_name} = torch.cuda.Event()")
+                    if assign_stream != 0:
+                        code.writeline(f"torch.cuda.set_stream(stream{assign_stream}_raw)")
                     code.writeline(line)
+                    if assign_stream != 0:
+                        code.writeline(f"torch.cuda.set_stream(stream0_raw)")
                     # TODO(yueming): need to double check
-                    code.writeline(f"{event_name}.record(stream0_raw)")
-                    for user_stream in self.user_streams:
-                        if user_stream != 0:
-                            code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+                    code.writeline(f"{event_name}.record(stream{assign_stream}_raw)")
+                    for user_stream in self.user_streams[1:]:
+                        code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
             else:
-                code.writeline(line)
+                raise AssertionError(f"invalid user_streams: {self.user_streams}")
         else:
             code.writeline(line)
 
