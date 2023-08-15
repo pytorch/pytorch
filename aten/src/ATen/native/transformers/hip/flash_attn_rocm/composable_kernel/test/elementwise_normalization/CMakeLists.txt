@@ -1,7 +1,0 @@
-add_custom_target(test_elementwise_normalization)
-
-add_gtest_executable(test_elementwise_layernorm_fp16 test_elementwise_layernorm_fp16.cpp)
-
-target_link_libraries(test_elementwise_layernorm_fp16 PRIVATE utility device_elementwise_normalization_instance)
-
-add_dependencies(test_elementwise_normalization test_elementwise_layernorm_fp16)

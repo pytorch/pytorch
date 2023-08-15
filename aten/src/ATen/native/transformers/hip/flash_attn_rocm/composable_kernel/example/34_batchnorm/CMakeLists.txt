@@ -1,3 +1,0 @@
-add_example_executable(example_batchnorm_forward_training batchnorm_forward_training_nhwc.cpp)
-add_example_executable(example_batchnorm_forward_inferring batchnorm_forward_inferring_nhwc.cpp)
-add_example_executable(example_batchnorm_backward batchnorm_backward_nhwc.cpp)

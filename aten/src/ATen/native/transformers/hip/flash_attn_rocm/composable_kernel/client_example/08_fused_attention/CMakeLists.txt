@@ -1,2 +1,0 @@
-add_executable(client_fused_attention fused_attention.cpp)
-target_link_libraries(client_fused_attention PRIVATE composable_kernel::device_operations)

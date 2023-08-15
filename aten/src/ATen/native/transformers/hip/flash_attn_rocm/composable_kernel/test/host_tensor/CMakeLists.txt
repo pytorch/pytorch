@@ -1,2 +1,0 @@
-add_gtest_executable(test_host_tensor test_host_tensor.cpp)
-target_link_libraries(test_host_tensor PRIVATE utility)

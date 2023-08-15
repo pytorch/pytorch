@@ -1,3 +1,0 @@
-add_test_executable(test_grouped_gemm_fp16 grouped_gemm_fp16.cpp)
-target_link_libraries(test_grouped_gemm_fp16 PRIVATE utility)
-target_link_libraries(test_grouped_gemm_fp16 PRIVATE device_grouped_gemm_instance)

@@ -1,4 +1,0 @@
-add_gtest_executable(test_batchnorm_fwd_rank_4 batchnorm_fwd_rank_4.cpp)
-add_gtest_executable(test_batchnorm_bwd_rank_4 batchnorm_bwd_rank_4.cpp)
-target_link_libraries(test_batchnorm_fwd_rank_4 PRIVATE utility device_batchnorm_instance)
-target_link_libraries(test_batchnorm_bwd_rank_4 PRIVATE utility device_batchnorm_instance)
