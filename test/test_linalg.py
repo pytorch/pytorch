@@ -5655,26 +5655,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 return x_int8.t(), x_float.t()
             return x_int8, x_float
 
-        def _test(m, k, n, transpose_a, transpose_b, test_equal=True):
+        def _test(m, k, n, transpose_a, transpose_b):
             a_int8, a_float = genf_int_float(m, k, transpose_a)
             b_int8, b_float = genf_int_float(k, n, transpose_b)
             c_int32 = torch._int_mm(a_int8, b_int8)
             self.assertTrue(c_int32.dtype is torch.int32)
             self.assertEqual(c_int32.device, torch.device(device))
-            if test_equal:
-                self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
-            else:
-                self.assertNotEqual(c_int32.float(), torch.mm(a_float, b_float))
+            self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
             c_int32_result = c_int32.new_empty(c_int32.size())
             # Checking out variant
             torch._int_mm(a_int8, b_int8, out=c_int32_result)
-            if test_equal:
-                self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
-            else:
-                self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+            self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         for use_transpose_a, use_transpose_b in itertools.product([True, False], [True, False]):
-            _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+            _test(17, k, n, use_transpose_a, use_transpose_b)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
