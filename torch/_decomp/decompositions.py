@@ -1200,6 +1200,25 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     return torch.split(self, split_sizes, dim)
 
 
+@aten.tensor_split.tensor_indices_or_sections.py_impl(DispatchKey.CompositeImplicitAutograd)
+def tensor_split_tensor_indices_or_sections_py_impl(
+    self: Tensor,
+    tensor_indices_or_sections: Tensor,
+    dim: int = 0,
+) -> List[Tensor]:
+    split_dim = tensor_indices_or_sections.dim()
+    assert split_dim == 1 or split_dim == 0, (
+        f"tensor_split expected tensor_indices_or_sections to be a zero-dimensional or "
+        "one-dimensional tensor, but got a tensor with {split_dim} dims"
+    )
+    if split_dim == 0:
+        sections = tensor_indices_or_sections.item()
+        return self.tensor_split(sections, dim)
+    else:
+        indices = [i.item() for i in tensor_indices_or_sections]
+        return self.tensor_split(indices, dim)
+
+
 # TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
 @out_wrapper()

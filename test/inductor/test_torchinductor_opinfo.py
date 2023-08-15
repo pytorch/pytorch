@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -231,7 +232,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("scatter_reduce", "prod"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "uniform": {f16},
     "view_as_complex": {f16},
@@ -310,7 +310,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
     "tanh": {f16},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
 }
@@ -569,7 +568,8 @@ class TestInductorOpInfo(TestCase):
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
                 with mode:
-                    fn(*args, **kwargs)
+                    with enable_python_dispatcher():
+                        fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
                 return False
