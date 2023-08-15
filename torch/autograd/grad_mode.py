@@ -4,7 +4,7 @@ import torch
 
 from torch.utils._contextlib import (
     _DecoratorContextManager,
-    _NoParamDecoratorContextManager
+    _NoParamDecoratorContextManager,
 )
 
 __all__ = [
