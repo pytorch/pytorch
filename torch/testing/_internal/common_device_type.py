@@ -15,16 +15,10 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-<<<<<<< HEAD
     NATIVE_DEVICES, skipIfTorchDynamo, TEST_PRIVATEUSE1
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version, \
     TEST_CUDA
-=======
-    NATIVE_DEVICES, skipIfTorchDynamo
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
-    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 try:
@@ -1241,7 +1235,6 @@ class dtypesIfPRIVATEUSE1(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
 
-<<<<<<< HEAD
 class dtypesIfCUDAAndPRIVATEUSE1(dtypes):
 
     def __init__(self, *args):
@@ -1250,8 +1243,6 @@ class dtypesIfCUDAAndPRIVATEUSE1(dtypes):
         elif TEST_PRIVATEUSE1:
             super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
 
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)
 
