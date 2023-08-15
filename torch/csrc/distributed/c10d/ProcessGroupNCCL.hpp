@@ -42,8 +42,6 @@ constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 // This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
 constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
-constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 // NoHandling: do not handle asynchronous NCCL errors
@@ -112,8 +110,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
  public:
   class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
    public:
-    friend struct WorkInfo;
-
     // Constructor takes a list of CUDA devices
     WorkNCCL(
         const std::vector<at::Device>& devices,
@@ -122,8 +118,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         uint64_t seq,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
-        bool desyncDebug = false,
-        bool enableTiming = false);
+        bool desyncDebug = false);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -163,8 +158,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
-    float getDuration() const override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -478,10 +471,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
-  void registerOnCompletionHook(
-      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
-  void waitForPendingWorks() override;
-
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
@@ -604,8 +593,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout.
   void workCleanupLoop();
 
-  void runHookLoop();
-
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -678,13 +665,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
-  std::thread onCompletionHookThread_;
-
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
-
-  // Whether there are hooks pending to be fired
-  std::atomic<bool> hasPendingHooks_;
 
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
@@ -694,14 +676,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
-
-  // Mutex to Guard workMetaList_
-  std::mutex completedWorkListMutex_;
-
-  // Condition Variable for watchdog thread sleep
-  std::condition_variable completedWorkListCV_;
-
-  std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
@@ -755,11 +729,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
-
-  // Whether or not to create start CUDAEvent and enable timing for start
-  // and end events. Note that enableTiming_ is always true if desyncDebug_
-  // is set to true.
-  bool enableTiming_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
