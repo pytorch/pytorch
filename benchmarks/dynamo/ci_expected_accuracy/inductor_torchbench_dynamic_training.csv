@@ -1,4 +1,5 @@
 name,accuracy,graph_breaks
+torchrec_dlrm,infra_error,0
 BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
@@ -10,15 +11,16 @@ basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
 clip,pass,8
 dcgan,pass,8
+dlrm,pass,8
 drq,pass,7
-fastNLP_Bert,pass,13
+fastNLP_Bert,pass,12
 functorch_dp_cifar10,pass,8
 functorch_maml_omniglot,pass,8
 hf_Albert,pass,7
 hf_Bart,pass,7
 hf_DistilBert,pass,7
 hf_GPT2,pass,7
-hf_Reformer,pass,43
+hf_Reformer,pass,27
 hf_T5_large,pass_due_to_skip,0
 hf_Whisper,pass,7
 lennard_jones,pass,8
