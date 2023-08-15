@@ -467,6 +467,13 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
+@functools.lru_cache(None)
+def is_apple_clang():
+    cxx = cpp_compiler()
+    version_string = subprocess.check_output([cxx, "--version"]).decode('utf8')
+    return 'Apple' in version_string.splitlines()[0]
+
+
 class VecISA:
     _bit_width: int
     _macro: str
@@ -693,6 +700,26 @@ def use_standard_sys_dir_headers():
         return ""
 
 
+@functools.lru_cache(None)
+def is_conda_llvm_openmp_installed():
+    command = "conda list llvm-openmp --json"
+    output = subprocess.check_output(command.split()).decode('utf8')
+    return len(json.loads(output)) > 0
+
+
+@functools.lru_cache(None)
+def homebrew_ibomp():
+    # check if `brew` is installed
+    subprocess.check_output(["which", "brew"])
+    # get the location of `libomp` if it is installed
+    # this is the location that `libomp` **would** be installed
+    # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
+    libomp_path = subprocess.check_output(["brew", "--prefix", "libomp"]).decode("utf8").strip()
+    # check if `libomp` is installed
+    omp_available = os.path.exists(libomp_path)
+    return omp_available, libomp_path
+
+
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
@@ -761,10 +788,8 @@ def get_include_and_linking_paths(
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
         if sys.platform == "darwin":
-            cxx = cpp_compiler()
-            version_string = subprocess.check_output([cxx, "--version"]).decode('utf8')
             # only Apple builtin compilers (Apple Clang++) require openmp
-            omp_available = 'Apple' not in version_string.splitlines()[0]
+            omp_available = not is_apple_clang()
 
             libs = [] if omp_available else ["omp"]
 
@@ -778,9 +803,7 @@ def get_include_and_linking_paths(
 
             # prefer to use openmp from `conda install llvm-openmp`
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
-                command = "conda list llvm-openmp --json"
-                output = subprocess.check_output(command.split()).decode('utf8')
-                omp_available = len(json.loads(output)) > 0
+                omp_available = is_conda_llvm_openmp_installed()
                 if omp_available:
                     conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
                     ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
@@ -794,14 +817,7 @@ def get_include_and_linking_paths(
             # next, try to use openmp from `brew install libomp`
             if not omp_available:
                 try:
-                    # check if `brew` is installed
-                    subprocess.check_output(["which", "brew"])
-                    # get the location of `libomp` if it is installed
-                    # this is the location that `libomp` **would** be installed
-                    # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
-                    libomp_path = subprocess.check_output(["brew", "--prefix", "libomp"]).decode("utf8").strip()
-                    # check if `libomp` is installed
-                    omp_available = os.path.exists(libomp_path)
+                    omp_available, libomp_path = homebrew_ibomp()
                     if omp_available:
                         ipaths.append(os.path.join(libomp_path, "include"))
                         lpaths.append(os.path.join(libomp_path, "lib"))
