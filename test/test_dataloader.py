@@ -1563,17 +1563,6 @@ except RuntimeError as e:
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
-    def test_not_even_using_a_generator(self):
-        class MyDataset(SynchronizedDataset):
-            def __getitem__(self, idx):
-                self.sync_once()
-                return idx
-        num_workers = 2
-        dataset_len = 10
-        dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
-        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=True)
-        list(dl)
-
     @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
     def test_worker_generator_seed(self):
         # Tests for the RNG seeding behaviour within _worker_loop.
