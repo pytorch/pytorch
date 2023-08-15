@@ -321,7 +321,12 @@ typedef struct {
 static CacheEntry* create_cache_entry(
     CacheEntry* next,
     PyObject* guarded_code) {
-  // Onwership contract - Returns a new reference
+  // Ownership contract
+  // args
+  //   - next: steals
+  //   - guarded_code: Borrowed
+  //  return
+  //   - CacheEntry*: new reference.
   CacheEntry* e = (CacheEntry*)malloc(sizeof(CacheEntry));
   DEBUG_NULL_CHECK(e);
   e->check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
@@ -353,7 +358,7 @@ inline static CacheEntry* extract_cache_entry(ExtraState* extra_state) {
   // args
   //  - extra_state: Borrowed
   // return
-  //  - CacheEntry: Borrowed. set_extra_state is the owner.
+  //  - CacheEntry: Borrowed.
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
@@ -368,7 +373,7 @@ inline static FrameState* extract_frame_state(ExtraState* extra_state) {
   // args
   //  - extra_state: Borrowed
   // return
-  //  - extra_state->frame_state: Borrowed. set_extra_state is the owner.
+  //  - extra_state->frame_state: Borrowed.
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
@@ -401,10 +406,11 @@ inline static void destroy_extra_state(void* obj) {
   // Developer note - You should not call this function directly. This is called
   // directly inside set_extra_state. If you are in a situation trying to call
   // this function, consider if set_extra_state should be called.
+
   ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
-    CacheEntry* cache_entry = extract_cache_entry(extra);
-    FrameState* frame_state = extract_frame_state(extra);
+    CacheEntry* cache_entry = extra->cache_entry;
+    FrameState* frame_state = extra->frame_state;
     destroy_cache_entry(cache_entry);
     Py_XDECREF(frame_state);
     free(extra);
@@ -436,8 +442,8 @@ static ExtraState* create_extra_state(
 
   // Ownership contract
   // args
-  //  - cache_entry: Borrowed
-  //  - frame_state: Borrowed
+  //  - cache_entry: Steals
+  //  - frame_state: Steals
   // return
   //  - ExtraState: Transfers ownership of the new object. Owning reference.
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
@@ -457,6 +463,7 @@ inline static void create_and_set_extra_state(
 
   // Ownership contract
   // args
+  //  - code: Borrowed
   //  - cache_entry: Stolen
   //  - frame_state: Stolen
   // These references are then further passed to set_extra_state which becomes
@@ -466,23 +473,6 @@ inline static void create_and_set_extra_state(
   CHECK(get_extra_state(code) == NULL);
   ExtraState* extra_state = create_extra_state(cache_entry, frame_state);
   set_extra_state(code, extra_state);
-}
-
-inline static void override_cache_entry_on_extra(
-    ExtraState* extra,
-    CacheEntry* new_cache_entry) {
-  // We dont need to set the extra scratch space again. Extra on the scratch
-  // space contains a pointer to the cache entry, we are just pointing the
-  // cache_entry to the new location.
-
-  // Ownership contract
-  // args
-  //  - extra: Borrowed
-  // return - None - set_extra_state is the owner of extra.
-
-  // Invariant - Extra state should have been set before, therefore it should not be NULL.
-  NULL_CHECK(extra);
-  extra->cache_entry = new_cache_entry;
 }
 
 /* Extra state helper functions ends */
@@ -612,7 +602,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
         e->next = old_cache_entry;
 
         // Override the extra state to reflect the updated cache line.
-        override_cache_entry_on_extra(extra, e);
+        extra->cache_entry = e;
     }
     return (PyObject*)e->code;
   }
@@ -923,7 +913,7 @@ static PyObject* _custom_eval_frame(
       create_and_set_extra_state(frame->f_code, new_cache_entry, frame_state);
     } else {
       // Update the existing cache_entry on the extra scratch space.
-      override_cache_entry_on_extra(extra, new_cache_entry);
+      extra->cache_entry = new_cache_entry;
     }
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
