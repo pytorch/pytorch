@@ -11,7 +11,6 @@
 #include <vector>
 #include <iostream>
 #include <ATen/ATen.h>
-#include <torch/extension.h>
 #include <ATen/hip/HIPContext.h>
 #include <ATen/hip/HIPGeneratorImpl.h>
 #include <c10/hip/HIPGuard.h>
