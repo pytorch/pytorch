@@ -135,6 +135,7 @@ class TestDoBench(TestCase):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
     @parametrize("dynamic", (False, True))
+<<<<<<< HEAD
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
         """
         Make sure autotuning mm_plus_mm with zero-size input works without crashes.
@@ -153,6 +154,8 @@ class TestDoBench(TestCase):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
 
     @parametrize("dynamic", (False, True))
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_max_autotune_regular_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -169,6 +172,7 @@ class TestDoBench(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @parametrize("dynamic", (False, True))
+<<<<<<< HEAD
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
         """
         Make sure autotuning mm with zero-size input works without crashes.
@@ -185,6 +189,8 @@ class TestDoBench(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @parametrize("dynamic", (False, True))
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_max_autotune_addmm(self, dynamic):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -199,6 +205,7 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+<<<<<<< HEAD
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
         """
@@ -214,6 +221,8 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
             return torch.cat(

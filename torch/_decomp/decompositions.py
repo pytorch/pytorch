@@ -288,6 +288,7 @@ def _prelu_kernel_backward(
     return (input_grad, weight_grad)
 
 
+<<<<<<< HEAD
 @register_decomposition(aten.rrelu_with_noise)
 @aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
 @pw_cast_for_opmath
@@ -325,6 +326,8 @@ def rrelu_with_noise_(
     return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @register_decomposition(aten.rrelu_with_noise_backward)
 @pw_cast_for_opmath
 def rrelu_with_noise_backward(

@@ -7,7 +7,10 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
+<<<<<<< HEAD
 from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -167,7 +170,11 @@ class Shard(Placement):
         )
 
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
+<<<<<<< HEAD
         mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
+=======
+        mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
         # Only unpad if the local_tensor was padded on the dimension.
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
@@ -312,7 +319,11 @@ class Replicate(Placement):
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
         tensor = tensor.contiguous()
+<<<<<<< HEAD
         mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim)
+=======
+        mesh.broadcast(tensor, mesh_dim=mesh_dim)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         return tensor
 
 

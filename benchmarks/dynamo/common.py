@@ -28,12 +28,19 @@ import numpy as np
 import pandas as pd
 import psutil
 import torch
+<<<<<<< HEAD
+=======
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.fx._pytree as fx_pytree
+<<<<<<< HEAD
 import torch.multiprocessing as mp
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
@@ -95,6 +102,11 @@ CI_SKIP[CI("eager", training=False)] = [
     "hf_BigBird",  # fail_accuracy
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
+<<<<<<< HEAD
+=======
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
@@ -168,6 +180,11 @@ CI_SKIP[CI("aot_eager", training=True)] = [
 CI_SKIP[CI("inductor", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
+<<<<<<< HEAD
+=======
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     "demucs",  # OOM
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -219,6 +236,11 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "pyhpc_turbulent_kinetic_energy",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
+<<<<<<< HEAD
+=======
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     # Huggingface
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
@@ -233,6 +255,10 @@ CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
+<<<<<<< HEAD
+=======
+    "dlrm",  # Fails on CI - unable to repro locally
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
@@ -253,6 +279,10 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
     # https://github.com/pytorch/pytorch/issues/103760
+<<<<<<< HEAD
+=======
+    "dlrm",
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     "hf_T5_generate",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
@@ -261,7 +291,10 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     "llama",  # AssertionError: cannot compute free_symbols of True
+<<<<<<< HEAD
     "torchrec_dlrm",  # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -289,6 +322,11 @@ CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
     "hrnet_w18",  # Stack issue in fx
+<<<<<<< HEAD
+=======
+    # TorchBench
+    "dlrm",  # symbolic shapes error
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
@@ -302,7 +340,10 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # It iterates over the batch, which is dynamic, and dynamo chokes
     # We should be able to graphbreak there.
     "doctr_det_predictor",
+<<<<<<< HEAD
     "dlrm",
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 }
 
 
@@ -1671,7 +1712,13 @@ def maybe_fresh_cache(fn, is_cold_start):
 
 
 @contextmanager
+<<<<<<< HEAD
 def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789"):
+=======
+def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_size=1):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     try:
         if should_init_distributed:
             torch.cuda.set_device(rank)
@@ -1914,6 +1961,7 @@ class BenchmarkRunner:
         )
         return start, end
 
+<<<<<<< HEAD
     def deepcopy_and_maybe_ddp(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
@@ -1968,6 +2016,8 @@ class BenchmarkRunner:
                 torch._inductor.config.triton.cudagraphs = False
         return model
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
     ):
@@ -2009,11 +2059,39 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
+<<<<<<< HEAD
+=======
+        def deepcopy_and_maybe_ddp(model):
+            model = self.deepcopy_model(model)
+            if self.args.ddp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use DDP without a distributed enabled build"
+                from torch.nn.parallel import DistributedDataParallel as DDP
+
+                model = DDP(model, find_unused_parameters=True)
+            elif self.args.fsdp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use FSDP without a distributed enabled build"
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+                model = FSDP(model, use_orig_params=True)
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
+            return model
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
             model_fp64, inputs_fp64 = cast_to_fp64(
+<<<<<<< HEAD
                 self.deepcopy_and_maybe_ddp(model),
+=======
+                deepcopy_and_maybe_ddp(model),
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 clone_inputs(example_inputs),
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
@@ -2038,7 +2116,11 @@ class BenchmarkRunner:
             # Get results of native pytorch
             reset_rng_state()
             try:
+<<<<<<< HEAD
                 model_copy = self.deepcopy_and_maybe_ddp(model)
+=======
+                model_copy = deepcopy_and_maybe_ddp(model)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2055,7 +2137,11 @@ class BenchmarkRunner:
             # Rerun native pytorch
             reset_rng_state()
             try:
+<<<<<<< HEAD
                 model_copy = self.deepcopy_and_maybe_ddp(model)
+=======
+                model_copy = deepcopy_and_maybe_ddp(model)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2097,7 +2183,11 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
+<<<<<<< HEAD
                 model_copy = self.deepcopy_and_maybe_ddp(model)
+=======
+                model_copy = deepcopy_and_maybe_ddp(model)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export:
                     # TB and TIMM use list example_inputs
@@ -2293,10 +2383,13 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+<<<<<<< HEAD
 
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2618,11 +2711,14 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
+<<<<<<< HEAD
         "--multiprocess",
         action="store_true",
         help="Create n processes based on the number of devices (distributed use case).",
     )
     parser.add_argument(
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         "--ddp",
         action="store_true",
         help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
@@ -2967,6 +3063,7 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
+<<<<<<< HEAD
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
@@ -2980,6 +3077,8 @@ def process_entry(rank, runner, original_dir, args):
         )(runner, args, original_dir)
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
@@ -3002,6 +3101,7 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
+<<<<<<< HEAD
     device_count = torch.cuda.device_count()
     args.use_distributed = (args.ddp or args.fsdp) and args.only
     if args.multiprocess:
@@ -3016,6 +3116,14 @@ def main(runner, original_dir=None):
         # single process path just uses the main process
         args.world_size = 1
         process_entry(0, runner, original_dir, args)
+=======
+    with maybe_init_distributed(
+        (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
+    ):
+        return maybe_fresh_cache(
+            run, (args.cold_start_latency and args.only) or args.ci
+        )(runner, args, original_dir)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 def run(runner, args, original_dir=None):
@@ -3397,6 +3505,7 @@ def run(runner, args, original_dir=None):
                                 part=args.part,
                             )
                         else:
+<<<<<<< HEAD
                             if args.fsdp:
                                 # Always load model on cpu for fsdp
                                 # When initializing FSDP, we will use the cuda device if args.cuda is set
@@ -3419,6 +3528,17 @@ def run(runner, args, original_dir=None):
                                 ) = runner.load_model(
                                     device, model_name, batch_size=batch_size
                                 )
+=======
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device, model_name, batch_size=batch_size
+                            )
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 except NotImplementedError as e:
                     print(e)
                     import traceback

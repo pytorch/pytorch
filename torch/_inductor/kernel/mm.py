@@ -1,7 +1,10 @@
 import logging
 
 import torch
+<<<<<<< HEAD
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -30,9 +33,12 @@ mm_template = TritonTemplate(
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
+<<<<<<< HEAD
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}
@@ -66,8 +72,11 @@ mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
+<<<<<<< HEAD
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
@@ -112,7 +121,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+<<<<<<< HEAD
     if m * n != 0 and use_triton_template(layout):
+=======
+    if use_triton_template(layout):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -132,7 +145,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
+<<<<<<< HEAD
     if m * n != 0 and use_triton_template(layout, enable_int32=True):
+=======
+    if use_triton_template(layout, enable_int32=True):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
         for config in int8_mm_configs(m, n, k):
@@ -150,7 +167,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+<<<<<<< HEAD
     if m * n == 0 or not use_triton_template(layout):
+=======
+    if not use_triton_template(layout):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         choices = (
             [
                 aten_addmm.bind(
@@ -205,6 +226,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
     )
+<<<<<<< HEAD
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
@@ -228,3 +250,5 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             **mm_options(config, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

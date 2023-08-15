@@ -269,8 +269,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "tag_activation_checkpoint",
         ):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
+<<<<<<< HEAD
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1099,6 +1102,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             ),
             example_value=example_value,
         )
+<<<<<<< HEAD
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1119,3 +1123,5 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=None,
         )
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

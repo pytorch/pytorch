@@ -178,6 +178,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+<<<<<<< HEAD
 @register_decomposition([aten.bmm])
 def bmm(self, batch2):
     if self.device == "cpu":
@@ -205,6 +206,8 @@ def mm(self, input2):
     return NotImplemented
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
     if len(tensors) == 1:

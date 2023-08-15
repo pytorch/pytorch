@@ -4,6 +4,7 @@ from typing import List, Union
 
 import torch
 
+<<<<<<< HEAD
 # TODO: Remove after https://github.com/huggingface/safetensors/pull/318
 try:
     # safetensors is not an exporter requirement, but needed for some huggingface models
@@ -15,6 +16,8 @@ try:
 except ImportError:
     has_safetensors_and_transformers = False
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 class ONNXTorchPatcher:
     """Context manager to temporarily patch PyTorch during FX-to-ONNX export.
@@ -36,9 +39,12 @@ class ONNXTorchPatcher:
     torch.fx._symbolic_trace._wrapped_methods_to_patch:
         This list is extended with (torch.Tensor, "__getitem__") so that
         weight[x, :, y] becomes exportable with torch.fx.symbolic_trace.
+<<<<<<< HEAD
     safetensors.torch.load_file:
         This function is patached to allow safetensors to be loaded within
         FakeTensorMode. Remove after https://github.com/huggingface/safetensors/pull/318
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     Search for ONNXTorchPatcher in test_fx_to_onnx_with_onnxruntime.py for
     example usage.
@@ -91,6 +97,7 @@ class ONNXTorchPatcher:
         self.torch_load_wrapper = torch_load_wrapper
         self.torch__util_rebuild_tensor_wrapper = torch__util__rebuild_tensor_wrapper
 
+<<<<<<< HEAD
         if has_safetensors_and_transformers:
 
             def safetensors_load_file_wrapper(filename, device="cpu"):
@@ -118,6 +125,8 @@ class ONNXTorchPatcher:
                 transformers.modeling_utils.safe_load_file
             )
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def __enter__(self):
         torch.load = self.torch_load_wrapper
         torch._utils._rebuild_tensor = self.torch__util_rebuild_tensor_wrapper
@@ -138,20 +147,26 @@ class ONNXTorchPatcher:
             desired_wrapped_methods.append((torch.Tensor, "__getitem__"))
         torch.fx._symbolic_trace._wrapped_methods_to_patch = desired_wrapped_methods
 
+<<<<<<< HEAD
         if has_safetensors_and_transformers:
             safetensors.torch.load_file = self.safetensors_torch_load_file_wrapper
             transformers.modeling_utils.safe_load_file = (
                 self.safetensors_torch_load_file_wrapper
             )
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def __exit__(self, exc_type, exc_value, traceback):
         torch.load = self.torch_load
         torch._utils._rebuild_tensor = self.torch__util_rebuild_tensor
         torch.fx._symbolic_trace._wrapped_methods_to_patch = (
             self.torch_fx__symbolic_trace__wrapped_methods_to_patch
         )
+<<<<<<< HEAD
         if has_safetensors_and_transformers:
             safetensors.torch.load_file = self.safetensors_torch_load_file
             transformers.modeling_utils.safe_load_file = (
                 self.transformers_modeling_utils_safe_load_file
             )
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

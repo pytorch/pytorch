@@ -394,6 +394,7 @@ class TestParsePrevTests(unittest.TestCase):
         "tools.testing.test_selections._get_modified_tests",
         return_value={"test2", "test4"},
     )
+<<<<<<< HEAD
     def test_get_reordered_tests(
         self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
     ) -> None:
@@ -416,6 +417,26 @@ class TestParsePrevTests(unittest.TestCase):
 
         self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
         self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
+=======
+    @mock.patch(
+        "tools.testing.test_selections._get_file_rating_tests", return_value=["test1"]
+    )
+    def test_get_reordered_tests(
+        self,
+        mock_get_prev_failing_tests: Any,
+        mock_get_modified_tests: Any,
+        mock_get_file_rating_tests: Any,
+    ) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+
+        expected_prioritized_tests = ["test4", "test2", "test1"]
+        expected_remaining_tests = {"test3", "test5"}
+
+        prioritized_tests, remaining_tests = get_reordered_tests(tests)
+
+        self.assertListEqual(expected_prioritized_tests, prioritized_tests)
+        self.assertSetEqual(expected_remaining_tests, set(remaining_tests))
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def test_compute_prioritization_time_savings_with_multiple_threads(self) -> None:
         tests = [

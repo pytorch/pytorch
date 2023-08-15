@@ -8,12 +8,19 @@ import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter, io_adapter
+<<<<<<< HEAD
+=======
+from torch.onnx._internal.diagnostics import infra
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.onnx._internal.exporter import (
     ExportOutputSerializer,
     ProtobufExportOutputSerializer,
     ResolvedExportOptions,
 )
+<<<<<<< HEAD
 from torch.onnx._internal.fx import diagnostics
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from torch.testing._internal import common_utils
 
@@ -144,7 +151,11 @@ class TestDynamoExportAPI(common_utils.TestCase):
             onnx.ModelProto(),
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
+<<<<<<< HEAD
             diagnostics.DiagnosticContext("test", "1.0"),
+=======
+            infra.DiagnosticContext("test", "1.0"),
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             fake_context=None,
         )
         with self.assertRaises(roar.BeartypeException):

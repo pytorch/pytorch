@@ -212,6 +212,7 @@ class RangeConstraint:
 
 
 @dataclass
+<<<<<<< HEAD
 class ModuleCallSignature:
     inputs: List[Argument]
     outputs: List[Argument]
@@ -232,6 +233,12 @@ class GraphModule:
     # TODO(zhxchen17) Merge call_spec into call graph.
     call_spec: CallSpec
     module_call_graph: List[ModuleCallEntry]
+=======
+class GraphModule:
+    graph: Graph
+    signature: GraphSignature
+    call_spec: CallSpec
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 @dataclass

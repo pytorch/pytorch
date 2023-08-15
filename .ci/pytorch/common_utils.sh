@@ -158,6 +158,7 @@ function install_torchvision() {
   fi
 }
 
+<<<<<<< HEAD
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
@@ -171,6 +172,8 @@ function install_torchrec_and_fbgemm() {
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 function install_numpy_pytorch_interop() {
   local commit
   commit=$(get_pinned_commit numpy_pytorch_interop)

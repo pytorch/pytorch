@@ -19,7 +19,10 @@ from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 log = logging.getLogger(__name__)
 
 
@@ -801,6 +804,7 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
+<<<<<<< HEAD
         a_first = sum(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
@@ -810,6 +814,17 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
         if a_first > b_first:
             return -1
         if b_first > a_first:
+=======
+        a_first = all(
+            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
+        b_first = all(
+            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
+        if a_first and not b_first:
+            return -1
+        if b_first and not a_first:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             return 1
 
         # otherwise contiguous
@@ -1159,8 +1174,15 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2):
                         possible_fusions.append(key)
+<<<<<<< HEAD
                     elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
                         node2, node1
+=======
+                    elif (
+                        node2.is_template()
+                        or node2.is_foreach()
+                        and self.can_fuse(node2, node1)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
@@ -1433,7 +1455,11 @@ class Scheduler:
         for name in names_to_remove:
             if name in V.kernel.args.inplace_buffers:
                 buf = V.kernel.args.inplace_buffers[name]
+<<<<<<< HEAD
                 if isinstance(buf, str) and buf.startswith("REMOVED"):
+=======
+                if buf == "REMOVED":
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                     continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
@@ -1452,10 +1478,14 @@ class Scheduler:
 
     def remove_inplace_buffer(self, name):
         log.debug("removing_inplace_buffer(%r)", name)
+<<<<<<< HEAD
         inner_name = V.kernel.args.inplace_buffers[name].inner_name
         V.kernel.args.inplace_buffers[name] = inner_name.replace(
             "in_out_ptr", "REMOVED"
         )
+=======
+        V.kernel.args.inplace_buffers[name] = "REMOVED"
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         V.graph.removed_buffers.add(name)
 
     def flush(self):

@@ -40,7 +40,11 @@ def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.S
     )
 
 
+<<<<<<< HEAD
 class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
+=======
+class ExportDiagnostic(infra.Diagnostic):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     """Base class for all export diagnostics.
 
     This class is used to represent all export diagnostics. It is a subclass of
@@ -77,6 +81,12 @@ class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
         self.with_stack(stack)
         return stack
 
+<<<<<<< HEAD
+=======
+    def record_fx_graphmodule(self, gm: torch.fx.GraphModule) -> None:
+        self.with_graph(infra.Graph(gm.print_readable(False), gm.__class__.__name__))
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 class ExportDiagnosticEngine:
     """PyTorch ONNX Export diagnostic engine.
@@ -177,9 +187,13 @@ def create_export_diagnostic_context() -> (
         _context == engine.background_context
     ), "Export context is already set. Nested export is not supported."
     _context = engine.create_diagnostic_context(
+<<<<<<< HEAD
         "torch.onnx.export",
         torch.__version__,
         diagnostic_type=TorchScriptOnnxExportDiagnostic,
+=======
+        "torch.onnx.export", torch.__version__, diagnostic_type=ExportDiagnostic
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     )
     try:
         yield _context
@@ -193,14 +207,22 @@ def diagnose(
     message: Optional[str] = None,
     frames_to_skip: int = 2,
     **kwargs,
+<<<<<<< HEAD
 ) -> TorchScriptOnnxExportDiagnostic:
+=======
+) -> ExportDiagnostic:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     """Creates a diagnostic and record it in the global diagnostic context.
 
     This is a wrapper around `context.log` that uses the global diagnostic
     context.
     """
     # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
+<<<<<<< HEAD
     diagnostic = TorchScriptOnnxExportDiagnostic(
+=======
+    diagnostic = ExportDiagnostic(
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )
     export_context().log(diagnostic)

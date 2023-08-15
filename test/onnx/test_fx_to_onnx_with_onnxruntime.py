@@ -997,6 +997,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
+<<<<<<< HEAD
     @pytorch_test_common.xfail(
         "ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB"
         "[ONNXRuntimeError] : Status Message: Indices vs updates dimensions differs at position=1 0 vs 3"
@@ -1031,6 +1032,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 if __name__ == "__main__":
     common_utils.run_tests()

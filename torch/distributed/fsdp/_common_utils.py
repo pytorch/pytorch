@@ -392,6 +392,7 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
+<<<<<<< HEAD
                         if (
                             not torch.distributed._functional_collectives.is_torchdynamo_compiling()
                         ):
@@ -402,6 +403,14 @@ def _apply_to_modules(
                                 f"prefix = {prefix}, "
                                 f"submodule_name = {submodule_name}"
                             )
+=======
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when using DMP with FSDP. "
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                         new_prefix = prefix
                     elif submodule_name == "module":
                         warnings.warn(
@@ -515,6 +524,7 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     # FIXME record_stream doesn't work with non-cuda tensors
     if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
         return
+<<<<<<< HEAD
 
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
         # Don't no dispatch under torch compile like this
@@ -528,6 +538,9 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
         # If Dynamo is able to answer "are there any torch dispatch modes" active (it should answer False),
         # a better version of this would just be to check if there are any modes before disabling dispatch.
         # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
+=======
+    with no_dispatch():
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         tensor.record_stream(stream)
 
 

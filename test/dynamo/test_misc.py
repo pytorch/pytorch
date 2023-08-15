@@ -6565,6 +6565,7 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+<<<<<<< HEAD
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
@@ -6606,6 +6607,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

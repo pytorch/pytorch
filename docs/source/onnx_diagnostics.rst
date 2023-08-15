@@ -28,5 +28,9 @@ Diagnostic Rules
 API Reference
 -------------
 
+<<<<<<< HEAD
 .. autoclass:: torch.onnx._internal.diagnostics.TorchScriptOnnxExportDiagnostic
+=======
+.. autoclass:: torch.onnx._internal.diagnostics.ExportDiagnostic
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     :members:

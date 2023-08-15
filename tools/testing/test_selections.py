@@ -3,16 +3,36 @@ import json
 import math
 import os
 import subprocess
+<<<<<<< HEAD
 from pathlib import Path
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+=======
+from collections import defaultdict
+from pathlib import Path
+
+from typing import Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from warnings import warn
 
 from tools.shared.logging_utils import duration_to_str, pluralize
 
+<<<<<<< HEAD
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.stats.upload_stats_lib import emit_metric
 
+=======
+from tools.stats.import_test_stats import (
+    get_disabled_tests,
+    get_slow_tests,
+    get_test_file_ratings,
+    TEST_FILE_RATINGS_FILE,
+)
+from tools.stats.upload_stats_lib import emit_metric
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
@@ -81,8 +101,13 @@ def get_with_pytest_shard(
 ) -> List[ShardedTest]:
     sharded_tests: List[ShardedTest] = []
     for test in tests:
+<<<<<<< HEAD
         duration = test_file_times[test]
         if duration > THRESHOLD:
+=======
+        duration = test_file_times.get(test, None)
+        if duration and duration > THRESHOLD:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -98,6 +123,7 @@ def calculate_shards(
     tests: List[str],
     test_file_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
+<<<<<<< HEAD
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
 
@@ -112,6 +138,26 @@ def calculate_shards(
 
     sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
     for test in sorted_tests:
+=======
+    sort_by_time: bool = True,
+) -> List[Tuple[float, List[ShardedTest]]]:
+    must_serial = must_serial or (lambda x: True)
+
+    known_tests = tests
+    unknown_tests = []
+
+    if sort_by_time:
+        known_tests = [x for x in tests if x in test_file_times]
+        unknown_tests = [x for x in tests if x not in known_tests]
+
+    known_tests = get_with_pytest_shard(known_tests, test_file_times)
+
+    if sort_by_time:
+        known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
+
+    sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
+    for test in known_tests:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         if must_serial(test.name):
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.serial.append(test)
@@ -127,7 +173,11 @@ def calculate_shards(
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 
+<<<<<<< HEAD
 def _query_changed_test_files() -> List[str]:
+=======
+def _query_changed_files() -> List[str]:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     merge_base = (
         subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
@@ -186,7 +236,11 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
 
 def _get_modified_tests() -> Set[str]:
     try:
+<<<<<<< HEAD
         changed_files = _query_changed_test_files()
+=======
+        changed_files = _query_changed_files()
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     except Exception as e:
         warn(f"Can't query changed test files due to {e}")
         # If unable to get changed files from git, quit without doing any sorting
@@ -271,13 +325,40 @@ def log_time_savings(
     return max_time_savings_sec
 
 
+<<<<<<< HEAD
 def get_reordered_tests(
     tests: List[ShardedTest],
 ) -> Tuple[List[ShardedTest], List[ShardedTest]]:
+=======
+def _get_file_rating_tests() -> List[str]:
+    path = REPO_ROOT / "test" / TEST_FILE_RATINGS_FILE
+    if not os.path.exists(path):
+        print(f"could not find path {path}")
+        return []
+    with open(path) as f:
+        test_file_ratings = cast(Dict[str, Dict[str, float]], json.load(f))
+    try:
+        changed_files = _query_changed_files()
+    except Exception as e:
+        warn(f"Can't query changed test files due to {e}")
+        return []
+    ratings: Dict[str, float] = defaultdict(float)
+    for file in changed_files:
+        for test_file, score in test_file_ratings.get(file, {}).items():
+            ratings[test_file] += score
+    prioritize = sorted(ratings, key=lambda x: ratings[x])
+    return prioritize
+
+
+def get_reordered_tests(
+    tests: List[str],
+) -> Tuple[List[str], List[str]]:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     """
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
     """
+<<<<<<< HEAD
 
     def print_tests(tests: Set[str], test_group_description: str) -> None:
         if not tests:
@@ -329,10 +410,51 @@ def get_reordered_tests(
         print(f"The Rest: {remaining_test_names}")
     else:
         print("Didn't find any tests to prioritize")
+=======
+    prioritized_tests: List[str] = []
+
+    def add_tests(
+        tests_to_add: Union[List[str], Set[str]], test_group_description: str
+    ) -> None:
+        if not tests_to_add:
+            return
+
+        print(f"{test_group_description}:")
+        for test in tests_to_add:
+            if test in tests:
+                print(f"  {test}")
+                if test not in prioritized_tests:
+                    prioritized_tests.append(test)
+
+    add_tests(
+        _get_previously_failing_tests(),
+        "If run, these tests will prioritized because they previously failed",
+    )
+
+    add_tests(
+        _get_modified_tests(),
+        "If run, these tests will be prioritized because they were modified",
+    )
+
+    add_tests(
+        _get_file_rating_tests(),
+        "If run, these tests will be preioritized for an experiment in TD",
+    )
+
+    prioritized_tests = [x for x in prioritized_tests if x in tests]
+    the_rest = [x for x in tests if x not in prioritized_tests]
+
+    if prioritized_tests:
+        test_cnt_str = pluralize(len(tests), "test")
+        print(
+            f"Reordering tests: Prioritizing {len(prioritized_tests)} of {test_cnt_str}"
+        )
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     emit_metric(
         "test_reordering_prioritized_tests",
         {
+<<<<<<< HEAD
             "prioritized_test_cnt": len(bring_to_front),
             "total_test_cnt": len(tests),
             "prioritized_tests": prioritized_test_names,
@@ -341,8 +463,22 @@ def get_reordered_tests(
     )
 
     return (bring_to_front, the_rest)
+=======
+            "prioritized_test_cnt": len(prioritized_tests),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_tests,
+            "remaining_tests": the_rest,
+        },
+    )
+
+    return (prioritized_tests, the_rest)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 def get_test_case_configs(dirpath: str) -> None:
     get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)
+<<<<<<< HEAD
+=======
+    get_test_file_ratings(dirpath=dirpath)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

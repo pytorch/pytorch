@@ -5,7 +5,10 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from numpy.testing import assert_array_equal
+<<<<<<< HEAD
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
@@ -247,6 +250,7 @@ class DTensorTest(DTensorTestBase):
             self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
 
     @with_comms
+<<<<<<< HEAD
     def test_dtensor_async_output(self):
         # Tests that if the output of some dtensor operations  isn't used in any compute,
         # the output should be an AsyncCollectiveTensor (representing the fact that
@@ -288,6 +292,8 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(out_data, ref)
 
     @with_comms
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_from_local_then_to_local(self):
         # this test ensure end to end from torch.Tensor -> dist tensor -> torch.Tensor works
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))

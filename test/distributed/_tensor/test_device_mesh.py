@@ -4,11 +4,14 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+<<<<<<< HEAD
 from torch.distributed._tensor._collective_utils import (
     mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
 )
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Shard
 
@@ -166,7 +169,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_broadcast_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
+<<<<<<< HEAD
         mesh_broadcast(local_tensor, mesh, mesh_dim=0)
+=======
+        mesh.broadcast(local_tensor, mesh_dim=0)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         self.assertEqual(local_tensor, torch.zeros(3, 3))
 
     @with_comms
@@ -184,7 +191,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             recv_tensor = torch.empty_like(splitted_list[mesh.get_rank()])
             # scatter on dim > 0 would generate non-contiguous tensor, verify that works
+<<<<<<< HEAD
             mesh_scatter(recv_tensor, splitted_list, mesh, mesh_dim=0)
+=======
+            mesh.scatter(recv_tensor, splitted_list, mesh_dim=0)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             self.assertEqual(recv_tensor, splitted_list[mesh.get_rank()])
 
     @with_comms
@@ -213,7 +224,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
 
             scattered_tensor = torch.empty_like(padded_tensor_list[my_rank])
+<<<<<<< HEAD
             mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
+=======
+            device_mesh.scatter(scattered_tensor, padded_tensor_list, mesh_dim=0)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
             if pad_sizes[my_rank] != 0:
                 scattered_tensor = shard_placement._unpad_tensor(
@@ -344,7 +359,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
             ]
             cloned_local_tensor = local_tensor.clone()
+<<<<<<< HEAD
             mesh_broadcast(cloned_local_tensor, mesh, mesh_dim=dim)
+=======
+            mesh.broadcast(cloned_local_tensor, mesh_dim=dim)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             res_num = global_ranks[0]
             self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
@@ -367,7 +386,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             received_tensor = torch.empty_like(
                 scattered_tensors[mesh.get_coordinate()[dim]]
             )
+<<<<<<< HEAD
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
+=======
+            mesh.scatter(received_tensor, scattered_tensors, mesh_dim=dim)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
 
     @with_comms
@@ -391,7 +414,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 for idx in range(len(input_tensor_list))
             ]
             # scatter on dim > 0 would generate non-contiguous tensor, verify that works
+<<<<<<< HEAD
             mesh_all_to_all(output_tensor_list, input_tensor_list, mesh, mesh_dim=0)
+=======
+            mesh.all_to_all(output_tensor_list, input_tensor_list, mesh_dim=0)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
             expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
 
@@ -427,9 +454,13 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                     for idx in range(len(input_tensor_list))
                 ]
                 # scatter on dim > 0 would generate non-contiguous tensor, verify that works
+<<<<<<< HEAD
                 mesh_all_to_all(
                     output_tensor_list, input_tensor_list, mesh, mesh_dim=dim
                 )
+=======
+                mesh.all_to_all(output_tensor_list, input_tensor_list, mesh_dim=dim)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
                 expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
                 self.assertEqual(output_tensor, expected_tensor)

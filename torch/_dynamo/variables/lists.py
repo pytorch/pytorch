@@ -31,7 +31,10 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+<<<<<<< HEAD
             collections.deque: DequeVariable,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         }[obj]
 
     def __init__(
@@ -437,6 +440,7 @@ class DequeVariable(CommonListMethodsVariable):
                 DequeVariable(list(items), regen_guards=False, **options),
             )
             return result
+<<<<<<< HEAD
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
             return tx.replace_all(
@@ -447,6 +451,8 @@ class DequeVariable(CommonListMethodsVariable):
                     **options,
                 ),
             )
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         else:
             return super().call_method(tx, name, args, kwargs)
 

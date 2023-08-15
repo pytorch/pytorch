@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: jit"]
 
 import os
+<<<<<<< HEAD
 import re
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import sys
 import types
 import typing
@@ -9,7 +12,10 @@ import typing_extensions
 from typing import List, Dict, Optional, Tuple
 
 import torch
+<<<<<<< HEAD
 import torch.jit.frontend
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import torch.nn as nn
 from torch import Tensor
 from torch.testing import FileCheck
@@ -540,6 +546,7 @@ class TestRecursiveScript(JitTestCase):
 
         sm = torch.jit.script(p)
 
+<<<<<<< HEAD
     def test_prepare_scriptable_escape_hatch(self):
         class NonJitableClass:
             def __call__(self, int1, int2, *args):
@@ -572,6 +579,8 @@ class TestRecursiveScript(JitTestCase):
         ):
             jit_obj(1, 2, 3, 4)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_attributes(self):
         @torch.jit.script
         class Inner2:

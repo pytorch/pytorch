@@ -64,10 +64,13 @@ def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+<<<<<<< HEAD
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load

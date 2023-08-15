@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import cProfile
+<<<<<<< HEAD
 import dataclasses
 import functools
 import itertools
@@ -8,6 +9,12 @@ import logging
 import os
 import os.path
 import pickle
+=======
+import functools
+import itertools
+import logging
+import os.path
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import pstats
 import shutil
 import subprocess
@@ -22,9 +29,14 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
+<<<<<<< HEAD
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 from torch.utils._pytree import tree_map
+=======
+from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.tools_common import legalize_graph
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
@@ -391,6 +403,7 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+<<<<<<< HEAD
 
 
 @dataclasses.dataclass
@@ -469,3 +482,5 @@ def load_args_and_run_compile_fx_inner(path):
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

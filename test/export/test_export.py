@@ -111,6 +111,7 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+<<<<<<< HEAD
     def test_export_preserve_signature(self):
         class NestedChild(torch.nn.Module):
             def forward(self, zx, y):
@@ -160,6 +161,8 @@ class TestExport(TestCase):
         # unflattened.foo.nested = NestedChild()
         # self.compare_outputs(export_module, unflattened, inps)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
             y = x.nonzero()

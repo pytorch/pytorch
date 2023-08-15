@@ -145,11 +145,18 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
 }
 
+<<<<<<< HEAD
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
 ) | {
     _module_dir(torch) + "_export/wrappers.py",
 }
+=======
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 # torch.func: need to allow this file to be able to look at functorch transforms
 FILENAME_ALLOWLIST |= {

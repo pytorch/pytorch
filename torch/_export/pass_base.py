@@ -256,12 +256,16 @@ class _ExportPassBase(PassBase):
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
+<<<<<<< HEAD
 
         name = None
         if isinstance(target, torch._ops.OpOverload):
             name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
 
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
+=======
+        res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         res_proxy.node.meta.update(meta.data)
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)

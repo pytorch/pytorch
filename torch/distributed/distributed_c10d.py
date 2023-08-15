@@ -555,7 +555,11 @@ class group(metaclass=_WorldMeta):
     pass
 
 class GroupMember(metaclass=_WorldMeta):
+<<<<<<< HEAD
     NON_GROUP_MEMBER = -100
+=======
+    NON_GROUP_MEMBER = object()
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 # Default process group state
@@ -982,7 +986,11 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
+<<<<<<< HEAD
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
+=======
+    pg_store = _world.pg_map.get(pg, None)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     assert pg_store is not None
     return pg_store[0]
 

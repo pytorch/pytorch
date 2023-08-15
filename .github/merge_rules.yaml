@@ -120,6 +120,7 @@
   - Lint
   - pull
 
+<<<<<<< HEAD
 - name: PrimTorch
   patterns:
   - aten/src/ATen/native_functions.yaml
@@ -137,6 +138,8 @@
   - Lint
   - pull
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 - name: Linear Algebra
   patterns:
   - aten/src/ATen/native/cuda/linalg/**

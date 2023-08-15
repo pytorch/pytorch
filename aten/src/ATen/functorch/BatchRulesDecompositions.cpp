@@ -271,7 +271,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
   OP_DECOMPOSE(_test_check_tensor);
+<<<<<<< HEAD
   m.impl("tile", native::tile_symint);
+=======
+  OP_DECOMPOSE(tile);
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
   OP_DECOMPOSE2(trapezoid, x);
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);

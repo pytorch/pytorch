@@ -24,8 +24,11 @@ from torch._dynamo import (
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph
+<<<<<<< HEAD
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -296,6 +299,7 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
 ):
+<<<<<<< HEAD
     """
     Inductor API that compiles a single graph.
 
@@ -321,6 +325,11 @@ def compile_fx_inner(
             layout_opt=layout_opt,
         )
 
+=======
+    if dynamo_utils.count_calls(gm.graph) == 0:
+        return make_boxed_func(gm.forward)
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     if cudagraphs is None:
         cudagraphs = BoxedBool(config.triton.cudagraphs)
 

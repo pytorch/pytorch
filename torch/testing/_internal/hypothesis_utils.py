@@ -189,7 +189,11 @@ Generates:
         (If `qparams` arg is None), returns None.
 """
 @st.composite
+<<<<<<< HEAD
 def tensor(draw, shapes=None, elements=None, qparams=None):
+=======
+def tensor(draw, shapes=None, elements=None, qparams=None, dtype=np.float32):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     if isinstance(shapes, SearchStrategy):
         _shape = draw(shapes)
     else:
@@ -197,7 +201,11 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     if qparams is None:
         if elements is None:
             elements = floats(-1e6, 1e6, allow_nan=False, width=32)
+<<<<<<< HEAD
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+=======
+        X = draw(stnp.arrays(dtype=dtype, elements=elements, shape=_shape))
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
@@ -205,7 +213,11 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         min_value, max_value = _get_valid_min_max(qparams)
         elements = floats(min_value, max_value, allow_infinity=False,
                           allow_nan=False, width=32)
+<<<<<<< HEAD
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+=======
+    X = draw(stnp.arrays(dtype=dtype, elements=elements, shape=_shape))
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)

@@ -62,6 +62,7 @@ class TestPassInfra(TestCase):
         mod = M()
         _ = export(mod, (torch.tensor(True), x, y)).transform(_ExportPassBase())
 
+<<<<<<< HEAD
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
         # during transformation
@@ -96,6 +97,8 @@ class TestPassInfra(TestCase):
         for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
             self.assertEqual(before_node.name, after_node.name)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 if __name__ == '__main__':
     run_tests()

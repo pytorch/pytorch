@@ -53,6 +53,7 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
+<<<<<<< HEAD
     def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
         torch._dynamo.reset()
         counters.clear()
@@ -153,6 +154,8 @@ class TestPaternMatcher(TestCase):
         )
         self._test_mixed_impl(fn, args, False, False)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a

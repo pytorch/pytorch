@@ -29,8 +29,12 @@ def _get_module_state(module: nn.Module) -> Optional[_State]:
     if isinstance(module, _State):
         return cast(_State, module)
     else:
+<<<<<<< HEAD
         # https://github.com/pytorch/pytorch/issues/107054
         if module in _module_state_mapping:
             return _module_state_mapping[module]
         else:
             return None
+=======
+        return _module_state_mapping.get(module, None)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

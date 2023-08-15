@@ -426,10 +426,13 @@ def gen_headers(
                     backend_indices=backend_indices,
                     native_function_decl_gen=dest.compute_native_function_declaration,
                 ),
+<<<<<<< HEAD
                 "headers": [
                     "#include <ATen/ATen.h>",
                     "#include <torch/torch.h>",
                 ],
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             },
         )
         aten_headers.append('#include "CustomOpsNativeFunctions.h"')
@@ -448,6 +451,7 @@ def gen_headers(
             ),
         },
     )
+<<<<<<< HEAD
     headers = {
         "headers": [
             "#include <executorch/runtime/core/exec_aten/exec_aten.h> // at::Tensor etc.",
@@ -468,6 +472,18 @@ def gen_headers(
                 },
                 **headers,
             ),
+=======
+    if use_aten_lib:
+        cpu_fm.write(
+            "NativeFunctions.h",
+            lambda: {
+                "nativeFunctions_declarations": get_native_function_declarations(
+                    grouped_native_functions=native_functions,
+                    backend_indices=backend_indices,
+                    native_function_decl_gen=dest.compute_native_function_declaration,
+                ),
+            },
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         )
     else:
         ns_grouped_kernels = get_ns_grouped_kernels(
@@ -477,6 +493,7 @@ def gen_headers(
         )
         cpu_fm.write(
             "NativeFunctions.h",
+<<<<<<< HEAD
             lambda: dict(
                 {
                     "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
@@ -485,6 +502,13 @@ def gen_headers(
                 },
                 **headers,
             ),
+=======
+            lambda: {
+                "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
+                    ns_grouped_kernels=ns_grouped_kernels,
+                ),
+            },
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         )
 
 

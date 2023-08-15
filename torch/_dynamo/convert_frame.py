@@ -5,12 +5,20 @@ import os
 import random
 import types
 import weakref
+<<<<<<< HEAD
 from typing import Any, Callable, Dict, List, Optional, Set
+=======
+from typing import Dict, Optional, Set
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 import torch
 import torch._logging
 from torch._guards import tracing
+<<<<<<< HEAD
 from torch._utils_internal import log_compilation_event, signpost_event
+=======
+from torch._utils_internal import signpost_event
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -24,7 +32,10 @@ from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
+<<<<<<< HEAD
     Instruction,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
@@ -46,11 +57,17 @@ from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
     CleanupManager,
+<<<<<<< HEAD
     CompilationMetrics,
     counters,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
+=======
+    counters,
+    dynamo_timed,
+    format_bytecode,
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     gen_record_file_name,
     guard_failures,
     increment_frame,
@@ -377,7 +394,10 @@ def convert_frame_assert(
             export,
             export_constraints,
             hooks,
+<<<<<<< HEAD
             cache_size,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             frame,
             frame_state=frame_state,
         )
@@ -386,6 +406,10 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
+<<<<<<< HEAD
+=======
+@dynamo_timed(phase_name="entire_frame_compile")
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -396,14 +420,22 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
+<<<<<<< HEAD
     cache_size: int,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
+<<<<<<< HEAD
     fail_reason: Optional[str] = None
+=======
+
+    # from .utils import print_once;  print_once(code.co_filename)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def transform(instructions, code_options):
         nonlocal output
@@ -434,6 +466,7 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+<<<<<<< HEAD
     @dynamo_timed(phase_name="entire_frame_compile")
     def compile_inner(
         code: types.CodeType,
@@ -442,6 +475,9 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
+=======
+    try:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         for attempt in itertools.count():
             try:
                 out_code = transform_code_object(code, transform)
@@ -531,10 +567,13 @@ def _compile(
 
         output.local_scope.clear()
         return guarded_code
+<<<<<<< HEAD
 
     try:
         guarded_code = compile_inner(code, one_graph, hooks, transform)
         return guarded_code
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     except (
         Unsupported,
         TorchRuntimeError,
@@ -543,6 +582,7 @@ def _compile(
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
     ) as e:
+<<<<<<< HEAD
         fail_reason = str(e)
         exception_handler(e, code, frame, export=export)
         raise
@@ -591,6 +631,13 @@ def _compile(
             fail_reason,
         )
         log_compilation_event(metrics)
+=======
+        exception_handler(e, code, frame, export=export)
+        raise
+    except Exception as e:
+        exception_handler(e, code, frame, export=export)
+        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
@@ -659,9 +706,13 @@ def replay(filename):
             compiler_fn=eager,
             one_graph=False,
             export=False,
+<<<<<<< HEAD
             export_constraints=None,
             hooks=Hooks(),
             cache_size=0,
+=======
+            hooks=Hooks(),
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             frame=None,
         )
     except Exception:

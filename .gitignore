@@ -19,6 +19,10 @@ coverage.xml
 **/.pytorch-disabled-tests.json
 **/.pytorch-slow-tests.json
 **/.pytorch-test-times.json
+<<<<<<< HEAD
+=======
+**/.pytorch-test-file-ratings.json
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 */*.pyc
 */*.so*
 */**/__pycache__

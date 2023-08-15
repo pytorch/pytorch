@@ -1771,6 +1771,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+<<<<<<< HEAD
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
@@ -1799,6 +1800,8 @@ class CommonTemplate:
                 check_lowp=True,
             )
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")

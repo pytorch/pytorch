@@ -4,7 +4,10 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import io
+<<<<<<< HEAD
 import logging
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import typing
 import unittest
 from typing import AbstractSet, Protocol, Tuple
@@ -13,9 +16,14 @@ import torch
 from torch.onnx import errors
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
+<<<<<<< HEAD
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.fx import diagnostics as fx_diagnostics
 from torch.testing._internal import common_utils, logging_utils
+=======
+from torch.onnx._internal.diagnostics.infra import sarif
+from torch.testing._internal import common_utils
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 class _SarifLogBuilder(Protocol):
@@ -45,6 +53,7 @@ def _assert_has_diagnostics(
         )
 
 
+<<<<<<< HEAD
 @dataclasses.dataclass
 class _RuleCollectionForTest(infra.RuleCollection):
     rule_without_message_args: infra.Rule = dataclasses.field(
@@ -56,6 +65,8 @@ class _RuleCollectionForTest(infra.RuleCollection):
     )
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @contextlib.contextmanager
 def assert_all_diagnostics(
     test_suite: unittest.TestCase,
@@ -125,6 +136,7 @@ def assert_diagnostic(
     return assert_all_diagnostics(test_suite, sarif_log_builder, {(rule, level)})
 
 
+<<<<<<< HEAD
 class TestDynamoOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the Dynamo ONNX export code."""
 
@@ -212,6 +224,10 @@ class TestDynamoOnnxDiagnostics(common_utils.TestCase):
 
 class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the TorchScript ONNX export code."""
+=======
+class TestOnnxDiagnostics(common_utils.TestCase):
+    """Test cases for diagnostics emitted by the ONNX export code."""
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def setUp(self):
         engine = diagnostics.engine
@@ -221,7 +237,11 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
 
     def _trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp(
         self,
+<<<<<<< HEAD
     ) -> diagnostics.TorchScriptOnnxExportDiagnostic:
+=======
+    ) -> diagnostics.ExportDiagnostic:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         class CustomAdd(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
@@ -245,9 +265,13 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
                 diagnostic.rule == rule
                 and diagnostic.level == diagnostics.levels.WARNING
             ):
+<<<<<<< HEAD
                 return typing.cast(
                     diagnostics.TorchScriptOnnxExportDiagnostic, diagnostic
                 )
+=======
+                return typing.cast(diagnostics.ExportDiagnostic, diagnostic)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         raise AssertionError("No diagnostic found.")
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
@@ -303,7 +327,11 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
             diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
+<<<<<<< HEAD
         diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
+=======
+        diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy
@@ -332,7 +360,21 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
         )
 
 
+<<<<<<< HEAD
 @common_utils.instantiate_parametrized_tests
+=======
+@dataclasses.dataclass
+class _RuleCollectionForTest(infra.RuleCollection):
+    rule_without_message_args: infra.Rule = dataclasses.field(
+        default=infra.Rule(
+            "1",
+            "rule-without-message-args",
+            message_default_template="rule message",
+        )
+    )
+
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 class TestDiagnosticsInfra(common_utils.TestCase):
     """Test cases for diagnostics infra."""
 
@@ -378,6 +420,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             )
             self.context.log(diagnostic2)
 
+<<<<<<< HEAD
     def test_diagnostic_log_is_not_emitted_when_level_less_than_diagnostic_options_verbosity_level(
         self,
     ):
@@ -563,6 +606,8 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             self.assertIn("ValueError: original exception", diagnostic_message)
             self.assertIn("Traceback (most recent call last):", diagnostic_message)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
             self.context.log_and_raise_if_error(
@@ -581,7 +626,11 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 diagnostic = infra.Diagnostic(
                     self.rules.rule_without_message_args, infra.Level.ERROR
                 )
+<<<<<<< HEAD
                 diagnostic.log_source_exception(logging.ERROR, e)
+=======
+                diagnostic = diagnostic.with_source_exception(e)
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 self.context.log_and_raise_if_error(diagnostic)
 
     def test_diagnostic_context_raises_if_diagnostic_is_warning_and_warnings_as_errors_is_true(

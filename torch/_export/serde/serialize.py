@@ -9,7 +9,11 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
+<<<<<<< HEAD
 from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+=======
+from typing import cast, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 import sympy
 
@@ -32,8 +36,11 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     Layout,
     MemoryFormat,
+<<<<<<< HEAD
     ModuleCallEntry,
     ModuleCallSignature,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     NamedArgument,
     Node,
     OptionalTensorArgument,
@@ -330,6 +337,7 @@ class GraphState:
 
 
 class GraphModuleSerializer:
+<<<<<<< HEAD
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
@@ -340,6 +348,12 @@ class GraphModuleSerializer:
         self.graph_signature = graph_signature
         self.call_spec = call_spec
         self.module_call_graph = module_call_graph
+=======
+    def __init__(self, graph_signature: ep.ExportGraphSignature, call_spec: ep.CallSpec):
+        self.graph_state = GraphState()
+        self.graph_signature = graph_signature
+        self.call_spec = call_spec
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     @contextmanager
     def save_graph_state(self):
@@ -596,6 +610,7 @@ class GraphModuleSerializer:
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
         return SymBoolArgument.create(as_name=name)
 
+<<<<<<< HEAD
     def serialize_module_call_signature(self, module_call_signature: ep.ModuleCallSignature) -> ModuleCallSignature:
         def serialize_argument(x: ep.ArgumentSpec) -> Argument:
             if x.kind == ep.ArgumentKind.Tensor:
@@ -620,6 +635,8 @@ class GraphModuleSerializer:
             ) for entry in module_call_graph
         ]
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def serialize_outputs(self, node: torch.fx.Node) -> List[Argument]:
         """For a given node, return the dataclass representing its output values.
 
@@ -720,7 +737,10 @@ class GraphModuleSerializer:
             graph=graph,
             signature=serialize_signature(self.graph_signature),
             call_spec=serialize_call_spec(self.call_spec),
+<<<<<<< HEAD
             module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         )
 
 
@@ -736,8 +756,12 @@ class ExportedProgramSerializer:
         serialized_graph_module = (
             GraphModuleSerializer(
                 exported_program.graph_signature,
+<<<<<<< HEAD
                 exported_program.call_spec,
                 exported_program.module_call_graph
+=======
+                exported_program.call_spec
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             ).serialize(exported_program.graph_module)
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
@@ -924,7 +948,11 @@ class GraphModuleDeserializer:
         self,
         serialized_graph_module: GraphModule,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
+<<<<<<< HEAD
     ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, List[ep.ModuleCallEntry], Dict[str, sympy.Symbol]]:
+=======
+    ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, Dict[str, sympy.Symbol]]:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         self.shape_env = symbolic_shapes.ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(shape_env=self.shape_env)
         self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
@@ -934,8 +962,12 @@ class GraphModuleDeserializer:
 
         sig = deserialize_signature(serialized_graph_module.signature)
         call_spec = deserialize_call_spec(serialized_graph_module.call_spec)
+<<<<<<< HEAD
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
         return torch.fx.GraphModule(self.module, self.graph), sig, call_spec, module_call_graph, self.symbol_name_to_symbol
+=======
+        return torch.fx.GraphModule(self.module, self.graph), sig, call_spec, self.symbol_name_to_symbol
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
@@ -1139,6 +1171,7 @@ class GraphModuleDeserializer:
 
         return ret
 
+<<<<<<< HEAD
     def deserialize_module_call_signature(self, module_call_signature: ModuleCallSignature) -> ep.ModuleCallSignature:
         def deserialize_argument(x: Argument) -> ep.ArgumentSpec:
             if x.as_tensor is not None:
@@ -1165,6 +1198,8 @@ class GraphModuleDeserializer:
             ) for entry in module_call_graph
         ]
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 class ExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
@@ -1195,7 +1230,11 @@ class ExportedProgramDeserializer:
             for k, v in serialized_exported_program.range_constraints.items()
         }
 
+<<<<<<< HEAD
         graph_module, sig, call_spec, module_call_graph, symbol_name_to_symbol = (
+=======
+        graph_module, sig, call_spec, symbol_name_to_symbol = (
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             GraphModuleDeserializer()
             .deserialize(
                 serialized_exported_program.graph_module,
@@ -1221,7 +1260,10 @@ class ExportedProgramDeserializer:
             state_dict,
             range_constraints,
             equality_constraints,
+<<<<<<< HEAD
             module_call_graph,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         )
         return upgrader.upgrade(exported_program)
 

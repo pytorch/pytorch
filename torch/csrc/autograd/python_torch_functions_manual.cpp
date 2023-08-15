@@ -333,11 +333,14 @@ static PyObject* THPVariable_asarray(
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
+<<<<<<< HEAD
   if (r.has_torch_function()) {
     return handle_torch_function(
         r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
   if (r.idx == 0) {
     auto obj = r.pyobject(0);
     auto dtype = r.scalartypeOptional(1);

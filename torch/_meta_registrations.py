@@ -29,7 +29,11 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
+<<<<<<< HEAD
 from torch._refs import _broadcast_shapes, _maybe_broadcast
+=======
+from torch._refs import _broadcast_shapes
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
@@ -2956,6 +2960,32 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
+<<<<<<< HEAD
+=======
+@register_meta([aten._foreach_clamp.default])
+def meta__foreach_clamp(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
+    )
+    return [torch.empty_like(t) for t in self]
+
+
+@register_meta([aten._foreach_clamp_.default])
+def meta__foreach_clamp_(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
+    )
+
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
@@ -5472,6 +5502,7 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+<<<<<<< HEAD
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
@@ -5543,6 +5574,8 @@ _create_binary_float_meta_func(
 )
 
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

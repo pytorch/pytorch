@@ -3,7 +3,10 @@ from __future__ import annotations
 import dataclasses
 
 import functools
+<<<<<<< HEAD
 import logging
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from typing import Any, Optional
 
@@ -14,9 +17,20 @@ import torch
 import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
+<<<<<<< HEAD
 from torch.onnx._internal.diagnostics.infra import decorator, formatter
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 
+=======
+from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
+
+from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
+
+# NOTE: Symbolic shapes could be a calculation of values, such as
+# Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
+# so we need to relax the length limit.
+_LENGTH_LIMIT: int = 120
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 # NOTE: The following limits are for the number of items to display in diagnostics for
 # a list, tuple or dict. The limit is picked such that common useful scenarios such as
 # operator arguments are covered, while preventing excessive processing loads on considerably
@@ -27,6 +41,7 @@ _CONTAINER_ITEM_LIMIT: int = 10
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
 # cannot be put there.
 
+<<<<<<< HEAD
 # [NOTE: `dynamo_export` diagnostics logging]
 # The 'dynamo_export' diagnostics leverages the PT2 artifact logger to handle the verbosity
 # level of logs that are recorded in each SARIF log diagnostic. In addition to SARIF log,
@@ -46,6 +61,8 @@ def is_onnx_diagnostics_log_artifact_enabled() -> bool:
         _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
     )
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 @functools.singledispatch
 def _format_argument(obj: Any) -> str:
@@ -54,7 +71,31 @@ def _format_argument(obj: Any) -> str:
 
 def format_argument(obj: Any) -> str:
     formatter = _format_argument.dispatch(type(obj))
+<<<<<<< HEAD
     return formatter(obj)
+=======
+    result_str = formatter(obj)
+
+    result_str_lines = result_str.splitlines()
+    for line in result_str_lines:
+        if len(line) > _LENGTH_LIMIT:
+            # TODO(bowbao): group diagnostics.
+            #   Related fields of sarif.Result: occurance_count, fingerprints.
+            #   Do a final process to group results before outputing sarif log.
+            diag = infra.Diagnostic(
+                *diagnostics.rules.arg_format_too_verbose.format(
+                    level=infra.levels.WARNING,
+                    length=len(result_str),
+                    length_limit=_LENGTH_LIMIT,
+                    argument_type=type(obj),
+                    formatter_type=type(format_argument),
+                )
+            )
+            diag.with_location(utils.function_location(formatter))
+            diagnostics.export_context().log(diag)
+
+    return result_str
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 # NOTE: EDITING BELOW? READ THIS FIRST!
@@ -199,6 +240,7 @@ def _stringify_shape(shape: Optional[torch.Size]) -> str:
     return f"[{', '.join(str(x) for x in shape)}]"
 
 
+<<<<<<< HEAD
 rules = diagnostics.rules
 levels = diagnostics.levels
 RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
@@ -241,6 +283,20 @@ diagnose_call = functools.partial(
     format_argument=format_argument,
 )
 
+=======
+diagnose_call = functools.partial(
+    decorator.diagnose_call,
+    diagnostic_type=diagnostics.ExportDiagnostic,
+    format_argument=format_argument,
+)
+
+rules = diagnostics.rules
+levels = diagnostics.levels
+DiagnosticContext = infra.DiagnosticContext
+Diagnostic = infra.Diagnostic
+RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 @dataclasses.dataclass
 class UnsupportedFxNodeDiagnostic(Diagnostic):

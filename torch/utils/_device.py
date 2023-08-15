@@ -51,7 +51,10 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
+<<<<<<< HEAD
         torch.asarray,
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     }
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp

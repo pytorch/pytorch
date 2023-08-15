@@ -302,9 +302,12 @@ class IRNode:
     def get_numel(self):
         return sympy_product(self.get_size())
 
+<<<<<<< HEAD
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def realize(self):
         """
         If the IRNode refers to data which has not been materialized (e.g.,
@@ -389,6 +392,12 @@ class Loops(IRNode):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
+<<<<<<< HEAD
+=======
+    def is_zero_elements(self):
+        return any(r == 0 for r in self.ranges)
+
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -404,6 +413,7 @@ class Loops(IRNode):
                 ).reads
 
 
+<<<<<<< HEAD
 def nop_loader_fn(idx, *, dtype):
     if dtype.is_floating_point:
         return ops.constant(float("nan"), dtype)
@@ -417,6 +427,10 @@ class Pointwise(Loops):
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.dtype)
 
+=======
+class Pointwise(Loops):
+    def make_loader(self):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         return self.inner_fn
 
     def get_reduction_size(self):
@@ -426,8 +440,12 @@ class Pointwise(Loops):
         return None
 
     def store_output(self, output_name, indexer, vars):
+<<<<<<< HEAD
         loader = self.make_loader()
         return ops.store(output_name, indexer(vars), loader(vars))
+=======
+        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -455,11 +473,18 @@ class Scatter(Pointwise):
         )
 
     def store_output(self, output_name, indexer, vars):
+<<<<<<< HEAD
         loader = self.make_loader()
         return ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
             loader(vars),
+=======
+        return ops.store(
+            output_name,
+            indexer(self.output_indexer(vars)),
+            self.inner_fn(vars),
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             mode=self.scatter_mode,
         )
 
@@ -2101,6 +2126,7 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
+<<<<<<< HEAD
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
@@ -2109,6 +2135,9 @@ class Buffer(IRNode):
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.get_dtype())
 
+=======
+    def make_loader(self):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         def loader(index):
             indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
@@ -2986,11 +3015,15 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
+<<<<<<< HEAD
         kernel_name = getattr(self, "kernel", None)
         lines = [
             f"kernel={kernel_name!r}",
         ]
         lines += [
+=======
+        lines = [
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             f"{field.name}={getattr(self, field.name)}"
             for field in dataclasses.fields(self)
         ]

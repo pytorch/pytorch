@@ -7,8 +7,11 @@ import contextlib
 import dataclasses
 import gzip
 
+<<<<<<< HEAD
 import logging
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
 
 from torch.onnx._internal.diagnostics import infra
@@ -18,7 +21,10 @@ from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_versio
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
+<<<<<<< HEAD
 diagnostic_logger: logging.Logger = logging.getLogger(__name__)
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 @dataclasses.dataclass
@@ -32,6 +38,7 @@ class Diagnostic:
     thread_flow_locations: List[infra.ThreadFlowLocation] = dataclasses.field(
         default_factory=list
     )
+<<<<<<< HEAD
     additional_messages: List[str] = dataclasses.field(default_factory=list)
     tags: List[infra.Tag] = dataclasses.field(default_factory=list)
     source_exception: Optional[Exception] = None
@@ -40,6 +47,12 @@ class Diagnostic:
     """The logger for this diagnostic. Defaults to 'diagnostic_logger' which has the same
     log level setting with `DiagnosticOptions.verbosity_level`."""
     _current_log_section_depth: int = 0
+=======
+    additional_message: Optional[str] = None
+    tags: List[infra.Tag] = dataclasses.field(default_factory=list)
+    source_exception: Optional[Exception] = None
+    """The exception that caused this diagnostic to be created."""
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def __post_init__(self) -> None:
         pass
@@ -47,10 +60,16 @@ class Diagnostic:
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
         message = self.message or self.rule.message_default_template
+<<<<<<< HEAD
         if self.additional_messages:
             additional_message = "\n".join(self.additional_messages)
             message_markdown = (
                 f"{message}\n\n## Additional Message:\n\n{additional_message}"
+=======
+        if self.additional_message:
+            message_markdown = (
+                f"{message}\n\n## Additional Message:\n\n{self.additional_message}"
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             )
         else:
             message_markdown = message
@@ -104,6 +123,7 @@ class Diagnostic:
         self.graphs.append(graph)
         return self
 
+<<<<<<< HEAD
     @contextlib.contextmanager
     def log_section(
         self, level: int, message: str, *args, **kwargs
@@ -217,6 +237,20 @@ class Diagnostic:
         self.source_exception = exception
         with self.log_section(level, "Exception log"):
             self.log(level, "%s", formatter.lazy_format_exception(exception))
+=======
+    def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
+        """Adds an additional message to the diagnostic."""
+        if self.additional_message is None:
+            self.additional_message = message
+        else:
+            self.additional_message = f"{self.additional_message}\n{message}"
+        return self
+
+    def with_source_exception(self: _Diagnostic, exception: Exception) -> _Diagnostic:
+        """Adds the source exception to the diagnostic."""
+        self.source_exception = exception
+        return self
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def record_python_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current Python call stack."""
@@ -272,6 +306,7 @@ class DiagnosticContext:
     _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
         init=False, default_factory=list
     )
+<<<<<<< HEAD
     _previous_log_level: int = dataclasses.field(init=False, default=logging.WARNING)
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
 
@@ -282,13 +317,24 @@ class DiagnosticContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.logger.setLevel(self._previous_log_level)
+=======
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         return None
 
     def sarif(self) -> sarif.Run:
         """Returns the SARIF Run object."""
         unique_rules = {diagnostic.rule for diagnostic in self.diagnostics}
         return sarif.Run(
+<<<<<<< HEAD
             sarif.Tool(
+=======
+            tool=sarif.Tool(
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 driver=sarif.ToolComponent(
                     name=self.name,
                     version=self.version,
@@ -319,11 +365,17 @@ class DiagnosticContext:
                 f.write(self.to_json())
 
     def log(self, diagnostic: Diagnostic) -> None:
+<<<<<<< HEAD
         """Logs a diagnostic.
 
         This method should be used only after all the necessary information for the diagnostic
         has been collected.
 
+=======
+        """Adds a diagnostic to the context.
+
+        Use this method to add diagnostics that are not created by the context.
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         Args:
             diagnostic: The diagnostic to add.
         """
@@ -336,6 +388,7 @@ class DiagnosticContext:
         self.diagnostics.append(diagnostic)
 
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
+<<<<<<< HEAD
         """Logs a diagnostic and raises an exception if it is an error.
 
         Use this method for logging non inflight diagnostics where diagnostic level is not known or
@@ -349,6 +402,8 @@ class DiagnosticContext:
         Args:
             diagnostic: The diagnostic to add.
         """
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
             if diagnostic.source_exception is not None:

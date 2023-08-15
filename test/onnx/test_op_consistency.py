@@ -246,7 +246,11 @@ def _get_test_class_name(cls, num, params_dict) -> str:
             "name": f"TestOnnxModelOutputConsistency_opset{opset}",
             "opset_version": opset,
         }
+<<<<<<< HEAD
         for opset in onnx_test_common.TESTED_OPSETS
+=======
+        for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     ],
     class_name_func=_get_test_class_name,
 )
@@ -307,7 +311,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     self.run_test(model, inputs, rtol=rtol, atol=atol)
 
 
+<<<<<<< HEAD
 for opset in onnx_test_common.TESTED_OPSETS:
+=======
+for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS:
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
     onnx_test_common.add_decorate_info(

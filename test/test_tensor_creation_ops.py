@@ -9,7 +9,10 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+<<<<<<< HEAD
 from typing import Any, Dict, List, Tuple
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -21,7 +24,11 @@ from torch.testing._internal.common_device_type import (
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
+<<<<<<< HEAD
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
+=======
+    all_types_and_complex_and, all_types_and, floating_and_complex_types,
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
     float_to_corresponding_complex_type_map
 )
@@ -514,7 +521,10 @@ class TestTensorCreation(TestCase):
         a = torch.cat([w[:2], w[4:6]])
         b = torch.cat([w[:2], w[4:6]], out=w[6:10])
         self.assertEqual(a, b)
+<<<<<<< HEAD
         self.assertEqual(a, w[6:10])
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         self.assertEqual(w[:6], y.view(-1)[:6])
 
         # Case:
@@ -543,6 +553,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(y, expected_y)
             self.assertEqual(x, expected_x)
 
+<<<<<<< HEAD
     @dtypes(*all_types_and_complex())
     def test_cat_out_fast_path_dim0_dim1(self, device, dtype):
         x = torch.zeros((0), device=device, dtype=dtype)
@@ -605,6 +616,8 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(c.grad, expected_c_grad)
                 self.assertEqual(d.grad, expected_d_grad)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
         y = torch.randn(x.shape)
@@ -4031,6 +4044,7 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
 
+<<<<<<< HEAD
     def test_default_device(self, device):
         original = torch.arange(5)
 
@@ -4052,6 +4066,8 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
+=======
+>>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
