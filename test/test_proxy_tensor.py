@@ -1181,7 +1181,7 @@ def forward(self, a_1):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
-                constrain_range(s, min=2)  # TODO: better as constrain_as_size
+                constrain_as_size(s)
             return torch.split(values, sizes)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
@@ -1196,6 +1196,9 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
+    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1, min = None, max = None)
+    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2, min = None, max = None)
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
