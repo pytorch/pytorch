@@ -4,7 +4,7 @@ from tools.stats.upload_metrics import emit_metric
 
 from tools.testing.target_determination.heuristics import (
     HEURISTICS,
-    TestPrioritizations,
+    TestPrioritizations as TestPrioritizations,
 )
 
 
