@@ -137,4 +137,45 @@ class PyProcessGroup : public ProcessGroup {
   }
 };
 
+class TORCH_PYTHON_API PythonOnCompletionHook {
+ public:
+  // Wraps a py::object hook and acquires Python GIL in dtor before
+  // destructing the hook object.
+  PythonOnCompletionHook(py::object hook) : hook_(std::move(hook)) {}
+
+  ~PythonOnCompletionHook() {
+    py::gil_scoped_acquire ag;
+    hook_.dec_ref();
+    // Explicitly set hook_ to nullptr to prevent py::object's dtor
+    // to decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    hook_.ptr() = nullptr;
+  }
+
+  void operator()(std::shared_ptr<WorkInfo> workInfo) const {
+    std::exception_ptr eptr;
+    {
+      py::gil_scoped_acquire acquire;
+      try {
+        hook_(workInfo);
+      } catch (py::error_already_set& e) {
+        // py::error_already_set requires GIL to destruct, take
+        // special care.
+        eptr = std::make_exception_ptr(std::runtime_error(e.what()));
+        e.restore();
+        PyErr_Clear();
+      } catch (std::exception& e) {
+        eptr = std::current_exception();
+      }
+    }
+    // No more Python-related stuff at this point, i.e., this
+    // exception can be captured and handled by PG backend.
+    if (eptr)
+      std::rethrow_exception(eptr);
+  }
+
+ private:
+  py::object hook_;
+};
+
 } // namespace c10d
