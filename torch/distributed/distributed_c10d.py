@@ -2773,7 +2773,6 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
 
     """
-    print("calling allgather!!")
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     _ensure_all_tensors_same_dtype(tensor_list, tensor)
@@ -2851,7 +2850,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         The Gloo backend does not support this API.
 
     """
-    # print("calling all_gather_into_tensor!!")
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
     if _rank_not_in_group(group):
@@ -2880,8 +2878,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else:
             return None
 
-    # print(f"{output_tensor=}")
-    # print(f"{input_tensor=}")
     work = group._allgather_base(output_tensor, input_tensor)
 
     if async_op:
