@@ -193,7 +193,7 @@ struct FunctionSignature {
       PyObject* args,
       PyObject* kwargs,
       PyObject* dst[],
-      std::vector<py::handle>& overloaded_args,
+      std::vector<PyObject*>& overloaded_args,
       bool raise_exception);
 
   std::string toString() const;
@@ -210,12 +210,12 @@ struct FunctionSignature {
 
 // PythonArgs contains bound Python arguments for an actual invocation
 // along with references to the matched signature.
-struct PYBIND11_EXPORT PythonArgs {
+struct PythonArgs {
   PythonArgs(
       bool traceable,
       const FunctionSignature& signature,
       PyObject** args,
-      std::vector<py::handle> overloaded_args)
+      std::vector<PyObject*> overloaded_args)
       : idx(signature.index),
         traceable(traceable),
         signature(signature),
@@ -226,7 +226,7 @@ struct PYBIND11_EXPORT PythonArgs {
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -314,7 +314,7 @@ struct FunctionParameter {
 
   bool check(
       PyObject* obj,
-      std::vector<py::handle>& overloaded_args,
+      std::vector<PyObject*>& overloaded_args,
       int argnum,
       int64_t* failed_idx = nullptr);
 
@@ -1211,7 +1211,7 @@ auto handle_torch_function(
 enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
 auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
-    at::ArrayRef<py::handle> overloaded_args,
+    at::ArrayRef<PyObject*> overloaded_args,
     PyObject* args,
     PyObject* kwargs,
     const char* func_name,
@@ -1248,7 +1248,7 @@ auto handle_torch_function_indexing(
  */
 bool is_tensor_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args);
+    std::vector<PyObject*>* overloaded_args);
 
 /*
  * Check if the input obj is Tensor List or Tensor Tuple type. First check
@@ -1264,7 +1264,7 @@ bool is_tensor_and_append_overloaded(
  */
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     int argnum,
     bool throw_error);
 
@@ -1277,7 +1277,7 @@ bool is_tensor_list_and_append_overloaded(
  * 'obj': the input tensor that is overloaded
  */
 void append_overloaded_tensor(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj);
 
 /* Given an argument that is definitely a type and is definitely overloaded,
@@ -1289,7 +1289,7 @@ void append_overloaded_tensor(
  * 'obj': the input class that has a __torch_dispatch__ classmethod.
  */
 void append_overloaded_type(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj);
 
 } // namespace torch
