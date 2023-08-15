@@ -7,7 +7,7 @@ import torch._C._onednn as llga
 from torch.fx import Node
 
 
-class LlgaGraph:
+class OnednnGraph:
     def __init__(self):
         self.graph = llga.graph(llga.engine.cpu)
         self.engine = llga.engine(llga.engine.cpu, 0)

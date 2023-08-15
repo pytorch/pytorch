@@ -8,7 +8,7 @@ import torch
 import torch._C._onednn as llga
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.decomposition import select_decomp_table
-from torch.csrc.jit.codegen.onednn.llga_graph import LlgaGraph
+from torch.csrc.jit.codegen.onednn.onednn_graph import OnednnGraph
 from torch.fx import Graph, GraphModule, Node, subgraph_rewriter
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
@@ -55,7 +55,7 @@ onednn_graph_intensive_ops = [
 
 
 def get_filtered_partitions(
-    onednn_graph: LlgaGraph, allowed_ops=onednn_graph_intensive_ops
+    onednn_graph: OnednnGraph, allowed_ops=onednn_graph_intensive_ops
 ):
     """
     Get onednn Graph partitions which include at least one op which is in allowed_ops.
@@ -63,7 +63,7 @@ def get_filtered_partitions(
     i.e. defined in onednn_graph_intensive_ops and known to have performant onednn code.
 
     Args:
-        ``onednn_graph``: The LlgaGraph containing lowered ops to partition
+        ``onednn_graph``: The OnednnGraph containing lowered ops to partition
         ``allowed_ops``: The list of aten.ops which will allow a partition to be lowered
 
     Returns:
@@ -99,10 +99,10 @@ def allocate_empty_aten_from_desc(desc: llga.logical_tensor) -> torch.Tensor:
     return torch.empty_strided(desc.get_dims(), desc.get_strides())
 
 
-class OnednnGraphPartitionModule(torch.nn.Module):
+class OnednnGraphPartitionModule:
     def __init__(
         self,
-        onednn_graph: LlgaGraph,
+        onednn_graph: OnednnGraph,
         partition: llga.partition,
         input_order_data: List = None,
         name="",
@@ -169,7 +169,9 @@ class OnednnGraphPartitionModule(torch.nn.Module):
 
         if not self.input_onednn_tensors:
             self.input_onednn_tensors = [
-                llga.tensor(input_desc, self.onednn_graph.engine, input_tensor.data_ptr())
+                llga.tensor(
+                    input_desc, self.onednn_graph.engine, input_tensor.data_ptr()
+                )
                 for input_desc, input_tensor in zip(self.input_descs, input_tensors)
             ]
         else:
@@ -184,8 +186,12 @@ class OnednnGraphPartitionModule(torch.nn.Module):
 
         if not self.output_onednn_tensors:
             self.output_onednn_tensors = [
-                llga.tensor(output_desc, self.onednn_graph.engine, self.output_tensor.data_ptr())
-                for output_desc, self.output_tensor in zip(self.output_descs, self.output_tensors)
+                llga.tensor(
+                    output_desc, self.onednn_graph.engine, self.output_tensor.data_ptr()
+                )
+                for output_desc, self.output_tensor in zip(
+                    self.output_descs, self.output_tensors
+                )
             ]
 
         assert not any(
@@ -194,14 +200,20 @@ class OnednnGraphPartitionModule(torch.nn.Module):
 
         with record_function(f"onednn_fuse_{self.__name__}"):
             self.kernel.execute(
-                self.onednn_graph.stream, self.input_onednn_tensors, self.output_onednn_tensors
+                self.onednn_graph.stream,
+                self.input_onednn_tensors,
+                self.output_onednn_tensors,
             )
         # TODO: It seems like this fix and also the return statements of def call_function should be handled differently.
-        return self.output_tensors[0] if len(self.output_tensors) == 1 else self.output_tensors
+        return (
+            self.output_tensors[0]
+            if len(self.output_tensors) == 1
+            else self.output_tensors
+        )
 
 
-def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
-    onednn_graph = LlgaGraph()
+def build_onednn_graph(gm: GraphModule) -> OnednnGraph:
+    onednn_graph = OnednnGraph()
 
     graph_input_nodes = list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))
 
@@ -297,7 +309,7 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
     return onednn_graph
 
 
-def fuse_graph(gm: GraphModule, onednn_graph: LlgaGraph) -> GraphModule:
+def fuse_graph(gm: GraphModule, onednn_graph: OnednnGraph) -> GraphModule:
     supported_partitions, node_lists = get_filtered_partitions(onednn_graph)
 
     if len(node_lists) == 0:
