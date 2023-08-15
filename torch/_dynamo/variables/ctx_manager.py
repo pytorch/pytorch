@@ -473,3 +473,51 @@ class WithExitFunctionVariable(VariableTracker):
                 ]
             )
         return output
+
+
+class SdpKernelVariable(ContextWrappingVariable):
+    """represents torch.backends.cuda.sdp_kernel()"""
+
+    # _guards_singleton = {Guard("", GuardSource.GLOBAL)} # what other guard should come here?
+
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        var = SdpKernelVariable(
+            target_values=[target_value[0], target_value[1], target_value[2]],
+            initial_values=[torch.backends.cuda.flash_sdp_enabled(), torch.backends.cuda.math_sdp_enabled(), torch.backends.cuda.mem_efficient_sdp_enabled()],
+            **kwargs,
+        )
+        var._call_func(tx, target_value)
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        # self.guards = self.guards | self._guards_singleton
+
+    def enter(self, tx):
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def _call_func(self, tx, values):
+        assert len(values) == 3
+        tx.output.create_node(
+            "call_function", torch.backends.cuda.enable_flash_sdp, (values[0],), {}
+        ),
+        torch.backends.cuda.enable_flash_sdp(values[0])
+
+        tx.output.create_node(
+            "call_function", torch.backends.cuda.enable_math_sdp, (values[1],), {}
+        ),
+        torch.backends.cuda.enable_math_sdp(values[1])
+
+        tx.output.create_node(
+            "call_function", torch.backends.cuda.enable_mem_efficient_sdp, (values[2],), {}
+        ),
+        torch.backends.cuda.enable_mem_efficient_sdp(values[2])
+
+    def module_name(self):
+        return "torch.backends.cuda"
+
+    def fn_name(self):
+        return "sdp_kernel"

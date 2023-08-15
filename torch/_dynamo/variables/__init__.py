@@ -8,6 +8,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     GradModeVariable,
+    SdpKernelVariable,
     WithExitFunctionVariable,
 )
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
@@ -83,6 +84,7 @@ __all__ = [
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
+    "SdpKernelVariable",
     "SliceVariable",
     "SuperVariable",
     "TensorVariable",
