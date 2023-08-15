@@ -610,7 +610,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     ):
         with self.context:
             with self.assertRaises(TypeError):
-                self.context.log("I thought I should put a message here.")
+                # The method expects 'Diagnostic' or its subclasses as arguments.
+                # Passing any other type will trigger a TypeError.
+                self.context.log("This is a str message.")
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
