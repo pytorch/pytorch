@@ -40,7 +40,7 @@ def run(model, optim):
     losses = []
     inp = torch.randn((2, 3), device="cuda")
 
-    for _ in range(1):
+    for _ in range(4):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
         torch.storage.resize_count_and_loc = {}
@@ -78,9 +78,11 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    # eager = main(compiled=False)
-    # print("EAGER:", eager)
+    eager = main(compiled=False)
+    print("EAGER:", eager)
     # exit(0)
-    # time.sleep(2)
+    print("--------------------")
+    time.sleep(5)
+    print("--------------------")
     compiled = main(compiled=True)
     print("COMPILED:", compiled)
