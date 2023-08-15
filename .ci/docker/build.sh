@@ -46,9 +46,7 @@ if [[ "$image" == *xla* ]]; then
   exit 0
 fi
 
-if [[ "$image" == *-bionic* ]]; then
-  UBUNTU_VERSION=18.04
-elif [[ "$image" == *-focal* ]]; then
+if [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
 elif [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
@@ -88,7 +86,7 @@ _UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
     CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -102,7 +100,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
+  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -117,7 +115,7 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -131,7 +129,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
+  pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -145,7 +143,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-    pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks)
+    pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -193,9 +191,9 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-bionic-py3.8-clang9)
+  pytorch-linux-focal-py3.8-clang10)
     ANACONDA_PYTHON_VERSION=3.8
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -204,9 +202,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-py3.11-clang9)
+  pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -215,7 +213,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-py3.8-gcc9)
+  pytorch-linux-focal-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
@@ -257,9 +255,9 @@ case "$image" in
     TRITON=yes
     DOCS=yes
     ;;
-    pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks)
+    pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -287,6 +285,17 @@ case "$image" in
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
+    ;;
+  pytorch-linux-jammy-py3.8-gcc11)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=11
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    DOCS=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.

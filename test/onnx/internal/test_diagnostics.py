@@ -209,6 +209,20 @@ class TestDynamoOnnxDiagnostics(common_utils.TestCase):
             with self.assertLogs(diagnostic.logger, level=logging.INFO):
                 diagnostic.info("message")
 
+    def test_diagnostic_log_emit_correctly_formatted_string(self):
+        verbosity_level = logging.INFO
+        self.diagnostic_context.options.verbosity_level = verbosity_level
+        with self.diagnostic_context:
+            diagnostic = fx_diagnostics.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+            diagnostic.log(
+                logging.INFO,
+                "%s",
+                formatter.LazyString(lambda x, y: f"{x} {y}", "hello", "world"),
+            )
+            self.assertIn("hello world", diagnostic.additional_messages)
+
 
 class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the TorchScript ONNX export code."""
@@ -521,6 +535,20 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 1,
                 "expensive_formatting_function should only be evaluated once after being wrapped under LazyString",
             )
+
+    def test_diagnostic_log_emit_correctly_formatted_string(self):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+            diagnostic.log(
+                logging.INFO,
+                "%s",
+                formatter.LazyString(lambda x, y: f"{x} {y}", "hello", "world"),
+            )
+            self.assertIn("hello world", diagnostic.additional_messages)
 
     def test_diagnostic_nested_log_section_emits_messages_with_correct_section_title_indentation(
         self,
