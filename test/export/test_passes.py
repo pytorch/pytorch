@@ -250,7 +250,7 @@ class TestPasses(TestCase):
         mod = M()
         ep = export(mod, (x,))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
             ep(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
@@ -278,10 +278,10 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 4)
         self.assertEqual(num_scalar_tensor, 4)
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.tensor([1, 1, 0, 0, 0]))
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
@@ -357,11 +357,14 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
+        # TODO(ycao): ExportedProgram.transform() forbids changes to number
+        # of inputs/outputs for now. When it supports that better, change this
+        # back to using ExportedProgram.transform()
+        gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             gm(torch.tensor([20]))
 
