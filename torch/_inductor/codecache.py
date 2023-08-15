@@ -20,6 +20,7 @@ import sysconfig
 import tempfile
 import threading
 import types
+import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -791,15 +792,18 @@ def get_include_and_linking_paths(
             # only Apple builtin compilers (Apple Clang++) require openmp
             omp_available = not is_apple_clang()
 
-            libs = [] if omp_available else ["omp"]
-
             # check the `OMP_PREFIX` environment first
-            if not omp_available and os.getenv("OMP_PREFIX") is not None:
+            if os.getenv("OMP_PREFIX") is not None:
                 header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
-                omp_available = os.path.exists(header_path)
-                if omp_available:
+                valid_env = os.path.exists(header_path)
+                if valid_env:
                     ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
                     lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                else:
+                    warnings.warn("environment variable `OMP_PREFIX` is invalid.")
+                omp_available = omp_available or valid_env
+
+            libs = [] if omp_available else ["omp"]
 
             # prefer to use openmp from `conda install llvm-openmp`
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
