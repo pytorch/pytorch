@@ -4,10 +4,10 @@ import weakref
 from typing import ContextManager, List, Optional
 
 import torch
-from torch._C._functorch import (
-    _unwrap_functional_tensor,
-    _wrap_functional_tensor,
-    current_level,
+from torch._C._functorch import current_level, peek_interpreter_stack
+from torch._functorch.eager_transforms import (
+    _unwrap_all_tensors_from_functional,
+    _wrap_all_tensors_to_functional,
 )
 from torch._guards import Source
 
@@ -512,12 +512,20 @@ class MetaConverter:
         ):
             if torch._is_functional_tensor(t):
                 reapply_views = torch._C._functionalization_reapply_views_tls()
-                unwrap_t = _unwrap_functional_tensor(t, reapply_views)
-                with torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack():
+                unwrap_t = _unwrap_all_tensors_from_functional(
+                    t, reapply_views=reapply_views
+                )
+                st = peek_interpreter_stack()
+                pop_st_ctx = (
+                    torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
+                    if st is not None
+                    else contextlib.nullcontext()
+                )
+                with pop_st_ctx:
                     fake_t = self.meta_tensor(
                         unwrap_t, shape_env=shape_env, callback=callback, source=source
                     )
-                return _wrap_functional_tensor(fake_t, current_level())
+                return _wrap_all_tensors_to_functional(fake_t, current_level())
             elif t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
