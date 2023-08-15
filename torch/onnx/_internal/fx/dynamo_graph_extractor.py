@@ -64,10 +64,7 @@ class _PyTreeExtensionContext:
         Raises:
             AssertionError: If the custom python type is already registered.
         """
-        if (
-            class_type not in pytree.SUPPORTED_NODES
-            and class_type not in self._extensions
-        ):
+        if class_type in pytree.SUPPORTED_NODES or class_type in self._extensions:
             # PyTree node already registered.
             # E.g., `huggingface/transformer` registers `ModelOutput` as PyTree node after
             # https://github.com/huggingface/transformers/pull/25358.
