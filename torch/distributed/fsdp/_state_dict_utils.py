@@ -632,12 +632,17 @@ def _sharded_pre_load_state_dict_hook(
                 device=device,
             )
             if local_tensor.is_cpu:
+                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
+                # Convert to CPU so all_gather can work.
+                tensor_dev = tensor.device
+                tensor = tensor.cpu()
                 tensor_list = list(
                     torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
                 )
                 dist.all_gather(
                     tensor_list, local_tensor, group=fsdp_state.process_group
                 )
+                tensor.to(tensor_dev)
             else:
                 dist.all_gather_into_tensor(
                     tensor, local_tensor, group=fsdp_state.process_group

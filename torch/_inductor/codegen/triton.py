@@ -474,8 +474,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        left = ops.where(ops.lt("0", x), 1, 0)
-        right = ops.where(ops.lt(x, "0"), 1, 0)
+        def to_int(s):
+            return f"{s}.to(tl.int8)"
+
+        left = to_int(ops.lt("0", x))
+        right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 

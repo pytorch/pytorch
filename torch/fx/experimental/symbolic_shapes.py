@@ -2072,6 +2072,10 @@ class ShapeEnv:
 
         return self.fx_node_cache[node_key]
 
+    def remove_fx_node(self, node: Optional[torch.fx.Node]) -> None:
+        if _translation_validation_enabled() and node is not None:
+            self.graph.erase_node(node)
+
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
 
@@ -3168,119 +3172,144 @@ class ShapeEnv:
         #
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
+        node = None
         if (
                 _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
             if concrete_val is sympy.true:
-                self.create_fx_call_function(torch._assert, (fx_node,))
+                node = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
                 neg = self.create_fx_call_function(operator.not_, (fx_node,))
-                self.create_fx_call_function(torch._assert, (neg,))
+                node = self.create_fx_call_function(torch._assert, (neg,))
             else:
                 eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-                self.create_fx_call_function(torch._assert, (eql,))
+                node = self.create_fx_call_function(torch._assert, (eql,))
 
-        if len(orig_expr.free_symbols) == 0:
-            self.log.debug("eval %s [trivial]", orig_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert orig_expr == hint, f"{orig_expr} != {hint}"
-            return orig_expr
+        # After creating the FX node corresponding to orig_expr, we must make sure that
+        # no error will be raised until the end of this function.
+        #
+        # Reason: the translation validation may become invalid otherwise.
+        #
+        # If an error is raised before the end of this function, we remove the FX node
+        # inserted, and re-raise the error.
+        guard = None
+        tb = None
 
-        expr = orig_expr
+        try:
+            if len(orig_expr.free_symbols) == 0:
+                self.log.debug("eval %s [trivial]", orig_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert orig_expr == hint, f"{orig_expr} != {hint}"
+                return orig_expr
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert static_expr == hint, f"{static_expr} != {hint}"
-            return static_expr
+            expr = orig_expr
 
-        if not (expr.free_symbols <= self.var_to_val.keys()):
-            # TODO: dedupe this with _maybe_evaluate_static
-            # Attempt to eliminate the unbacked SymInt
-            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-            if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
-            expr = new_expr
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert static_expr == hint, f"{static_expr} != {hint}"
+                return static_expr
 
-        if self.frozen:
-            self.counter["ignored_backward_guard"] += 1
-            signpost_event(
-                "dynamic",
-                "evaluate_expr_frozen",
-                {
-                    **self.co_fields,
-                    "ignored_guard": f"{expr} == {concrete_val}",
-                    # no version = original state (this signpost is expected)
-                    # version 2 = dynamic backwards is eagerly compiled
-                    "version": 2,
-                },
-            )
-            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+            if not (expr.free_symbols <= self.var_to_val.keys()):
+                # TODO: dedupe this with _maybe_evaluate_static
+                # Attempt to eliminate the unbacked SymInt
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                expr = new_expr
 
-        if isinstance(expr, (sympy.Eq, sympy.Ne)):
-            self._maybe_guard_eq(expr, bool(concrete_val))
-            # TODO: If we successfully eliminate a symbol via equality, it
-            # is not actually necessary to save a guard for the equality,
-            # as we will implicitly generate a guard when we match that
-            # input against the symbol
-        elif isinstance(concrete_val, sympy.Integer):
-            # WARNING: we cannot actually do simplifications on guards
-            # on floating point values, because Sympy generally does not
-            # think expressions on integers can ever be equal to floating
-            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-            # very clear algebraic laws that hold for floating point, such
-            # simplifications are error prone anyway, so be sure not to
-            # maybe_guard_eq in those cases.
-            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
-
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
-        else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
-
-        if not self._suppress_guards_tls():
-            tb = traceback.extract_stack()[:-1]
-            stack = ''.join(traceback.format_list(tb))
-            guard = ShapeGuard(g, stack)
-            self.guards.append(guard)
-            self.refine_ranges(guard)
-            if self.log.isEnabledFor(logging.INFO):
-                for frame in reversed(tb):
-                    if frame.filename not in uninteresting_files():
-                        break
-
-                # NB: this stack is truncated, but it's fine because the main
-                # stack_info will give you the rest of the info you need
-                maybe_user_loc = ""
-                user_tb = TracingContext.extract_stack()
-                if user_tb:
-                    maybe_user_loc = " at " + format_frame(user_tb[-1])
-
-                is_debug = self.log.isEnabledFor(logging.DEBUG)
-                maybe_extra_debug = ""
-                if is_debug and user_tb:
-                    maybe_extra_debug = (
-                        '\nUser Stack (most recent call last):\n' +
-                        '  (snipped, see stack below for prefix)\n' +
-                        ''.join(traceback.format_list(user_tb))
-                    )
-                self.log.info(
-                    "eval %s [guard added]%s (%s)%s",
-                    g,
-                    maybe_user_loc,
-                    format_frame(frame),
-                    maybe_extra_debug,
-                    stack_info=is_debug,
+            if self.frozen:
+                self.counter["ignored_backward_guard"] += 1
+                signpost_event(
+                    "dynamic",
+                    "evaluate_expr_frozen",
+                    {
+                        **self.co_fields,
+                        "ignored_guard": f"{expr} == {concrete_val}",
+                        # no version = original state (this signpost is expected)
+                        # version 2 = dynamic backwards is eagerly compiled
+                        "version": 2,
+                    },
                 )
+                log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+
+            if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    expr = sympy.Not(expr)
+
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                self._maybe_guard_eq(expr, bool(concrete_val))
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol
+            elif isinstance(concrete_val, sympy.Integer):
+                # WARNING: we cannot actually do simplifications on guards
+                # on floating point values, because Sympy generally does not
+                # think expressions on integers can ever be equal to floating
+                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+                # very clear algebraic laws that hold for floating point, such
+                # simplifications are error prone anyway, so be sure not to
+                # maybe_guard_eq in those cases.
+                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+
+            if concrete_val is sympy.true:
+                g = expr
+            elif concrete_val is sympy.false:
+                g = sympy.Not(expr)
+            else:
+                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            if not self._suppress_guards_tls():
+                tb = traceback.extract_stack()[:-1]
+                stack = ''.join(traceback.format_list(tb))
+                guard = ShapeGuard(g, stack)
+                self.guards.append(guard)
+        except Exception:
+            self.remove_fx_node(node)
+            raise
         else:
-            self.log.debug("eval %s [guard suppressed]", g)
+            if not self._suppress_guards_tls():
+                assert guard is not None
+                assert tb is not None
+
+                self.refine_ranges(guard)
+
+                if self.log.isEnabledFor(logging.INFO):
+                    for frame in reversed(tb):
+                        if frame.filename not in uninteresting_files():
+                            break
+
+                    # NB: this stack is truncated, but it's fine because the main
+                    # stack_info will give you the rest of the info you need
+                    maybe_user_loc = ""
+                    user_tb = TracingContext.extract_stack()
+                    if user_tb:
+                        maybe_user_loc = " at " + format_frame(user_tb[-1])
+
+                    is_debug = self.log.isEnabledFor(logging.DEBUG)
+                    maybe_extra_debug = ""
+                    if is_debug and user_tb:
+                        maybe_extra_debug = (
+                            '\nUser Stack (most recent call last):\n' +
+                            '  (snipped, see stack below for prefix)\n' +
+                            ''.join(traceback.format_list(user_tb))
+                        )
+                    self.log.info(
+                        "eval %s [guard added]%s (%s)%s",
+                        g,
+                        maybe_user_loc,
+                        format_frame(frame),
+                        maybe_extra_debug,
+                        stack_info=is_debug,
+                    )
+            else:
+                self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
 
