@@ -652,7 +652,7 @@ The eigenvalues are returned in ascending order.
              Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
              If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
              or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
-             try linear algebra operators with other supported backends.
+             try other supported backends.
 
 .. seealso::
 
