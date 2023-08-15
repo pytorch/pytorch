@@ -1210,27 +1210,25 @@ void initJITBindings(PyObject* module) {
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
       SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
-      // Intentionally don't set file line, as the
-      // Python backtrace matters more here
       .def(
           "guard_int",
-          [](c10::SymNode a) {
-            return a->guard_int(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_int(file, line);
           })
       .def(
           "guard_bool",
-          [](c10::SymNode a) {
-            return a->guard_bool(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_bool(file, line);
           })
       .def(
           "guard_float",
-          [](c10::SymNode a) {
-            return a->guard_float(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_float(file, line);
           })
       .def(
           "expect_true",
-          [](c10::SymNode a) {
-            return a->expect_true(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_true(file, line);
           })
       .def(
           "has_hint",
