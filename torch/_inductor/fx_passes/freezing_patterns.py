@@ -170,32 +170,6 @@ def addmm_patterns_init():
     )
 
 
-@register_graph_pattern(
-    CallFunction(
-        torch.ops.prims.convert_element_type.default,
-        CallFunction(
-            torch.ops.prims.convert_element_type.default,
-            KeywordArg("arg"),
-            KeywordArg("dtype1"),
-        ),
-        KeywordArg("dtype2"),
-    ),
-    pass_dict=pass_patterns[0],
-)
-def pointless_convert(match: Match, arg, dtype1, dtype2):
-    """Remove chain of dtype conversions often created by AMP"""
-    graph = match.graph
-    node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
-    if dtype1 in allowed and dtype2 in allowed:
-        repl = graph.call_function(
-            torch.ops.prims.convert_element_type.default, (arg, dtype2)
-        )
-        repl.meta.update(node.meta)
-        node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
-
-
 def same_dtype(match):
     return match.output_node().args[0].meta["val"].dtype == match.kwargs["dtype"]
 
