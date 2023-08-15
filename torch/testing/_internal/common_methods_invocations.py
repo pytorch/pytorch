@@ -8552,8 +8552,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
 
-<<<<<<< HEAD
-=======
 class foreach_clamp_sample_func(foreach_inputs_sample_func):
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
@@ -8594,7 +8592,6 @@ class foreach_clamp_sample_func(foreach_inputs_sample_func):
             yield SampleInput(input, *args, **kwargs)
 
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
     def __init__(
@@ -8929,8 +8926,6 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
     ),
     ForeachFuncInfo(
-<<<<<<< HEAD
-=======
         "clamp",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -8940,7 +8935,6 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
     ),
     ForeachFuncInfo(
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         "clamp_min",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),

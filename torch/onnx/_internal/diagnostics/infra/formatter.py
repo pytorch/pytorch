@@ -3,10 +3,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
-<<<<<<< HEAD
-import traceback
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from torch.onnx._internal import _beartype
@@ -23,38 +19,6 @@ _SarifClass = Union[
 ]
 
 
-<<<<<<< HEAD
-class LazyString:
-    """A class to lazily evaluate a string.
-
-    Adopted from `torch._dynamo.utils.LazyString`.
-    """
-
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
-
-
-def lazy_format_exception(exception: Exception) -> LazyString:
-    return LazyString(
-        lambda: "\n".join(
-            (
-                "```",
-                *traceback.format_exception(
-                    type(exception), exception, exception.__traceback__
-                ),
-                "```",
-            )
-        ),
-    )
-
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @_beartype.beartype
 def snake_case_to_camel_case(s: str) -> str:
     splits = s.split("_")

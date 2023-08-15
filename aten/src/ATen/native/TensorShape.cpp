@@ -549,24 +549,6 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
-<<<<<<< HEAD
-static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
-  auto outBytes = out.nbytes();
-  char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
-  size_t totalBytes = 0;
-  for (const Tensor& input : inputs) {
-    TORCH_CHECK(outBytes >= totalBytes);
-    if (input.nbytes() > 0) {
-      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
-    }
-    totalBytes += input.nbytes();
-  }
-  TORCH_CHECK(outBytes == totalBytes);
-}
-
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -600,27 +582,10 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 =======
   // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  ScalarType dtype = materialized[valid].get().scalar_type();
-  bool serial_dtype = at::isFloatingType(dtype);
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-  if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
-    cat_serial_stub(kCPU, result, materialized, dim);
-    return;
-  }
-
-  int64_t offset = 0;
-  if (all_same_sizes_and_stride && result.is_contiguous(memory_format) &&
-      all_same_dtype) {
-    const Tensor& source_slice = materialized[valid];
-    auto slice_dim_size = source_slice.sizes()[dim];
-    auto result_slice = result.narrow(dim, 0, slice_dim_size);
-    auto result_slice_data = result_slice.data_ptr();
-    auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .resize_outputs(false)
-      .add_output(result_slice)
       .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();

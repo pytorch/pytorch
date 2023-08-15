@@ -235,11 +235,6 @@ extra_random_decomps = get_decompositions(
         aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
-<<<<<<< HEAD
-        aten.rrelu_with_noise,
-        aten.rrelu_with_noise_,
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         aten.uniform_,
     ]
 )

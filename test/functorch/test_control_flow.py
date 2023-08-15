@@ -543,11 +543,7 @@ class TestControlFlowTraced(TestCase):
                 try:
                     func_args = pytree.tree_map(to_fun, args)
                     func_kwargs = pytree.tree_map(to_fun, kwargs)
-<<<<<<< HEAD
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
-=======
                     return pytree.tree_map(from_fun, func(*args, **kwargs))
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 finally:
                     torch._disable_functionalization()
             return wrapper

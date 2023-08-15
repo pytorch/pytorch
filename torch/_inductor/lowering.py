@@ -223,11 +223,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-<<<<<<< HEAD
-        assert len(args) <= 2
-=======
         assert len(args) <= 3
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -4432,13 +4428,8 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-<<<<<<< HEAD
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
-=======
 clamp_min = register_lowering(aten.clamp_min)(maximum)
 clamp_max = register_lowering(aten.clamp_max)(minimum)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 neg = register_pointwise(aten.neg)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
@@ -4487,8 +4478,6 @@ register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 
 
-<<<<<<< HEAD
-=======
 def _clamp_impl(v, min=None, max=None):
     if min is not None:
         v = clamp_min(v, min)
@@ -4500,7 +4489,6 @@ def _clamp_impl(v, min=None, max=None):
 register_foreach_pointwise(aten._foreach_clamp, _clamp_impl)
 
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):

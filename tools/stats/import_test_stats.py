@@ -19,11 +19,8 @@ IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
-<<<<<<< HEAD
-=======
 TEST_FILE_RATINGS_FILE = ".pytorch-test-file-ratings.json"
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -121,8 +118,6 @@ def get_disabled_tests(
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
         return {}
-<<<<<<< HEAD
-=======
 
 
 def get_test_file_ratings(
@@ -134,4 +129,3 @@ def get_test_file_ratings(
     except Exception:
         print("Couldn't download test file ratings file, not reordering...")
         return {}
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

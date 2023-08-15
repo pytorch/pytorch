@@ -2,10 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
-<<<<<<< HEAD
-=======
 #include <c10/util/Optional.h>
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,10 +20,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
-<<<<<<< HEAD
-=======
 #include <ATen/ops/_foreach_clamp_native.h>
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_div_native.h>
@@ -416,8 +410,6 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   return result;
 }
 
-<<<<<<< HEAD
-=======
 std::vector<Tensor> foreach_tensor_clamp_scalar_kernel_slow(
     TensorList self,
     const optional<Scalar>& min,
@@ -447,5 +439,4 @@ void foreach_tensor_clamp_scalar_kernel_slow_(
   }
 }
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 } // namespace at::native

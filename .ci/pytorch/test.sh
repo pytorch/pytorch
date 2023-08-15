@@ -1028,14 +1028,6 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-<<<<<<< HEAD
-    # Do this after checkout_install_torchbench to ensure we clobber any
-    # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
-      install_torchrec_and_fbgemm
-    fi
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then

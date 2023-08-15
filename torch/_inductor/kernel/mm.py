@@ -1,10 +1,6 @@
 import logging
 
 import torch
-<<<<<<< HEAD
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -37,12 +33,6 @@ mm_template = TritonTemplate(
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
     pid = tl.program_id(0)

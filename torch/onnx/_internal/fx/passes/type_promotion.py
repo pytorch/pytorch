@@ -1260,11 +1260,7 @@ def get_type_promotion_rule(
         )
         return None
 
-<<<<<<< HEAD
-    diagnostic.info("Found type promotion rule: %s", rule)
-=======
     diagnostic.with_additional_message(f"Found type promotion rule: {rule}")
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     return rule
 
 
@@ -1440,18 +1436,9 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                     )
                     node.replace_all_uses_with(output_cast_node)
                     output_cast_node.args = (node,)
-<<<<<<< HEAD
-                    diagnostic.info(
-                        "Node '%s' output dtype becomes %s due to op math. "
-                        "Cast back to %s.",
-                        node,
-                        new_node_val.dtype,
-                        expected_out_dtype,
-=======
                     diagnostic.with_additional_message(
                         f"Node '{node}' output dtype becomes {new_node_val.dtype} due to op math. "
                         f"Cast back to {expected_out_dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                     )
 
         elif fx_type_utils.is_torch_symbolic_type(node_val):
@@ -1475,14 +1462,8 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
     ) -> torch.fx.node.Argument:
         """Promote fx_arg to dtype if necessary."""
         if dtype is None:
-<<<<<<< HEAD
-            diagnostic.info(
-                "Argument %s is not promoted. Not mentioned by type promotion rule.",
-                fx_arg,
-=======
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is not promoted. Not mentioned by type promotion rule."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             )
             return fx_arg
 
@@ -1493,16 +1474,8 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                     # Promote tensor to dtype.
                     graph = node.graph
                     with graph.inserting_before(node):
-<<<<<<< HEAD
-                        diagnostic.info(
-                            "Argument %s(%s) is promoted to %s.",
-                            fx_arg,
-                            old_dtype,
-                            dtype,
-=======
                         diagnostic.with_additional_message(
                             f"Argument {fx_arg}({old_dtype}) is promoted to {dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                         )
                         return self._create_node(
                             graph,
@@ -1511,37 +1484,18 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                             (fx_arg,),
                             {"dtype": dtype},
                         )
-<<<<<<< HEAD
-                diagnostic.info(
-                    "Argument %s is not promoted. Already %s.", fx_arg, dtype
-=======
                 diagnostic.with_additional_message(
                     f"Argument {fx_arg} is not promoted. Already {dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 )
-                return fx_arg
-            elif fx_type_utils.is_torch_symbolic_type(arg_val):
-                arg_type = type(arg_val)
-                equivalent_dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
                     arg_type
                 )
-                assert equivalent_dtype is not None, f"Unexpected arg_type: {arg_type}"
                 if equivalent_dtype != dtype:
                     # Promote Sym number to tensor of dtype.
                     graph = node.graph
                     with graph.inserting_before(node):
-<<<<<<< HEAD
-                        diagnostic.info(
-                            "Argument %s(Scalar of equivalent dtype: %s) "
-                            "is promoted to %s.",
-                            fx_arg,
-                            equivalent_dtype,
-                            dtype,
-=======
                         diagnostic.with_additional_message(
                             f"Argument {fx_arg}(Scalar of equivalent dtype: {equivalent_dtype}) "
                             f"is promoted to {dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                         )
                         return self._create_node(
                             graph,
@@ -1550,38 +1504,19 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                             (fx_arg,),
                             {"dtype": dtype},
                         )
-<<<<<<< HEAD
-                diagnostic.info(
-                    "Argument %s is not promoted. Already %s.", fx_arg, dtype
-=======
                 diagnostic.with_additional_message(
                     f"Argument {fx_arg} is not promoted. Already {dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 )
                 return fx_arg
-        elif (
-            equivalent_dtype := fx_type_utils.from_scalar_type_to_torch_dtype(
-                type(fx_arg)
-            )
         ) is not None:
             if equivalent_dtype != dtype:
-                # Promote number to tensor of dtype.
                 # The op should have overload that supports tensor for this arg, otherwise
                 # the type promotion rule should not suggest promoting this arg.
                 graph = node.graph
                 with graph.inserting_before(node):
-<<<<<<< HEAD
-                    diagnostic.info(
-                        "Argument %s(Scalar of equivalent dtype: %s) "
-                        "is promoted to %s.",
-                        fx_arg,
-                        equivalent_dtype,
-                        dtype,
-=======
                     diagnostic.with_additional_message(
                         f"Argument {fx_arg}(Scalar of equivalent dtype: {equivalent_dtype}) "
                         f"is promoted to {dtype}."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                     )
                     return self._create_node(
                         graph,
@@ -1590,13 +1525,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                         (fx_arg,),
                         {"dtype": dtype},
                     )
-<<<<<<< HEAD
-            diagnostic.info("Argument %s is not promoted. Already %s.", fx_arg, dtype)
-            return fx_arg
-        elif isinstance(fx_arg, (tuple, list)):
-            diagnostic.info(
-                "Argument %s is a tuple/list. Promoting each element.", fx_arg
-=======
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is not promoted. Already {dtype}."
             )
@@ -1604,7 +1532,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         elif isinstance(fx_arg, (tuple, list)):
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is a tuple/list. Promoting each element."
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             )
             return type(fx_arg)(
                 self._maybe_promote_arg(diagnostic, node, fx_arg_elem, dtype)

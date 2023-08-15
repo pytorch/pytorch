@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import inspect
-<<<<<<< HEAD
-import logging
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import operator
 import re
 import types
@@ -400,14 +396,9 @@ class FxOnnxInterpreter:
             diagnostic = self.diagnostic_context.inflight_diagnostic(
                 rule=diagnostics.rules.fx_node_to_onnx
             )
-<<<<<<< HEAD
-            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
-                diagnostic.info("```\n%s\n```", node_stack_trace)
-=======
             diagnostic.with_additional_message(
                 f"### PyTorch source information\n```\n{node_stack_trace}\n```"
             )
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)

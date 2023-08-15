@@ -322,14 +322,8 @@ def _make_prim(
 
 class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
-<<<<<<< HEAD
-    INT_TO_FLOAT = (2,)
-    ALWAYS_BOOL = (3,)
-    COMPLEX_TO_FLOAT = (4,)
-=======
     ALWAYS_BOOL = (2,)
     COMPLEX_TO_FLOAT = (3,)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 # TODO: implement dtype validation here, too, or on the corresponding refs
@@ -401,12 +395,6 @@ def _elementwise_meta(
             dtype = dtype
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
-<<<<<<< HEAD
-        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
-            if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
-                dtype = torch.get_default_dtype()
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)

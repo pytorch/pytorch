@@ -211,33 +211,6 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
-<<<<<<< HEAD
-def skip_load_checkpoint_after_model_creation(reason: str):
-    """Skip loading checkpoint right after model initialization.
-
-    Args:
-        reason: The reason for skipping dynamic exporting test.
-
-    Returns:
-        A decorator for skipping dynamic exporting test.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if self.load_checkpoint_during_init:
-                raise unittest.SkipTest(
-                    f"Skip loading checkpoint during model initialization for FX tests. {reason}"
-                )
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 def skip_op_level_debug_test(reason: str):
     """Skip tests with op_level_debug enabled.
 

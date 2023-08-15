@@ -3,25 +3,12 @@ from __future__ import annotations
 import dataclasses
 
 import functools
-<<<<<<< HEAD
-import logging
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-
-from typing import Any, Optional
-
-import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
-<<<<<<< HEAD
-from torch.onnx._internal.diagnostics.infra import decorator, formatter
-from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
-
-=======
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
@@ -30,7 +17,6 @@ from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 # Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
 # so we need to relax the length limit.
 _LENGTH_LIMIT: int = 120
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 # NOTE: The following limits are for the number of items to display in diagnostics for
 # a list, tuple or dict. The limit is picked such that common useful scenarios such as
 # operator arguments are covered, while preventing excessive processing loads on considerably
@@ -41,28 +27,6 @@ _CONTAINER_ITEM_LIMIT: int = 10
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
 # cannot be put there.
 
-<<<<<<< HEAD
-# [NOTE: `dynamo_export` diagnostics logging]
-# The 'dynamo_export' diagnostics leverages the PT2 artifact logger to handle the verbosity
-# level of logs that are recorded in each SARIF log diagnostic. In addition to SARIF log,
-# terminal logging is by default disabled. Terminal logging can be activated by setting
-# the environment variable `TORCH_LOGS="onnx_diagnostics"`. When the environment variable
-# is set, it also fixes logging level to `logging.DEBUG`, overriding the verbosity level
-# specified in the diagnostic options.
-# See `torch/_logging/__init__.py` for more on PT2 logging.
-_ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME = "onnx_diagnostics"
-diagnostic_logger = torch._logging.getArtifactLogger(
-    "torch.onnx", _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
-)
-
-
-def is_onnx_diagnostics_log_artifact_enabled() -> bool:
-    return torch._logging._internal.log_state.is_artifact_enabled(
-        _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
-    )
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 @functools.singledispatch
 def _format_argument(obj: Any) -> str:
@@ -71,9 +35,6 @@ def _format_argument(obj: Any) -> str:
 
 def format_argument(obj: Any) -> str:
     formatter = _format_argument.dispatch(type(obj))
-<<<<<<< HEAD
-    return formatter(obj)
-=======
     result_str = formatter(obj)
 
     result_str_lines = result_str.splitlines()
@@ -95,7 +56,6 @@ def format_argument(obj: Any) -> str:
             diagnostics.export_context().log(diag)
 
     return result_str
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 # NOTE: EDITING BELOW? READ THIS FIRST!
@@ -240,50 +200,6 @@ def _stringify_shape(shape: Optional[torch.Size]) -> str:
     return f"[{', '.join(str(x) for x in shape)}]"
 
 
-<<<<<<< HEAD
-rules = diagnostics.rules
-levels = diagnostics.levels
-RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
-LazyString = formatter.LazyString
-DiagnosticOptions = infra.DiagnosticOptions
-
-
-@dataclasses.dataclass
-class Diagnostic(infra.Diagnostic):
-    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
-
-    def log(self, level: int, message: str, *args, **kwargs) -> None:
-        if self.logger.isEnabledFor(level):
-            formatted_message = message % args
-            if is_onnx_diagnostics_log_artifact_enabled():
-                # Only log to terminal if artifact is not enabled.
-                # See [NOTE: `dynamo_export` diagnostics logging] for details.
-                self.logger.log(level, message, **kwargs)
-
-            self.additional_messages.append(message)
-
-
-@dataclasses.dataclass
-class DiagnosticContext(infra.DiagnosticContext):
-    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
-
-    def __enter__(self):
-        self._previous_log_level = self.logger.level
-        # Adjust the logger level based on `options.verbosity_level` and the environment
-        # variable `TORCH_LOGS`. See [NOTE: `dynamo_export` diagnostics logging] for details.
-        if not is_onnx_diagnostics_log_artifact_enabled():
-            return super().__enter__()
-        else:
-            return self
-
-
-diagnose_call = functools.partial(
-    decorator.diagnose_call,
-    diagnostic_type=Diagnostic,
-    format_argument=format_argument,
-)
-
-=======
 diagnose_call = functools.partial(
     decorator.diagnose_call,
     diagnostic_type=diagnostics.ExportDiagnostic,
@@ -296,7 +212,6 @@ DiagnosticContext = infra.DiagnosticContext
 Diagnostic = infra.Diagnostic
 RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 @dataclasses.dataclass
 class UnsupportedFxNodeDiagnostic(Diagnostic):

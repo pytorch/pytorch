@@ -6,10 +6,6 @@ import contextlib
 import difflib
 
 import io
-<<<<<<< HEAD
-import logging
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import sys
 
 from typing import Any, Callable, Optional, Tuple
@@ -223,52 +219,12 @@ class Transform(abc.ABC):
             rule=diagnostics.rules.fx_pass
         )
         # Gather graph information before transform.
-<<<<<<< HEAD
-        graph_diff_log_level = logging.DEBUG
-        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
-            # Cannot use LazyString because the graph may have been mutated at evaluation time.
-            old_readable_graph = self.module.print_readable(print_output=False)
-            old_tabular = maybe_fx_graph_tabular(self.module.graph)
-        else:
-            # Set to empty string to avoid unbound warning. This value should never be
-            # used since the log level is not enabled.
-            old_readable_graph = ""
-            old_tabular = ""
-=======
         old_readable_graph = self.module.print_readable(print_output=False)
         old_tabular = maybe_fx_graph_tabular(self.module.graph)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
         module = self._run(*args, **kwargs)
 
         # Gather graph information after transform.
-<<<<<<< HEAD
-        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
-            new_readable_graph = module.print_readable(print_output=False)
-            new_tabular = maybe_fx_graph_tabular(module.graph)
-
-            with diagnostic.log_section(graph_diff_log_level, "Graph diff:"):
-                diagnostic.log(
-                    graph_diff_log_level,
-                    "```\n%s\n```",
-                    diagnostics.LazyString(
-                        _unified_diff, old_readable_graph, new_readable_graph
-                    ),
-                )
-
-            with diagnostic.log_section(graph_diff_log_level, "Tabular diff:"):
-                if old_tabular is None or new_tabular is None:
-                    diagnostic.log(
-                        graph_diff_log_level,
-                        "Tabular diff is not available because `tabulate` is not installed.",
-                    )
-                else:
-                    diagnostic.log(
-                        graph_diff_log_level,
-                        "```\n%s\n```",
-                        diagnostics.LazyString(_unified_diff, old_tabular, new_tabular),
-                    )
-=======
         new_readable_graph = module.print_readable(print_output=False)
         new_tabular = maybe_fx_graph_tabular(module.graph)
 
@@ -284,7 +240,6 @@ class Transform(abc.ABC):
             diagnostic.with_additional_message(
                 f"### Tabular diff:\n```\n{tabular_diff}\n```"
             )
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
         return module
 

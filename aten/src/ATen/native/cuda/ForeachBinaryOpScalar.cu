@@ -1,14 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
-<<<<<<< HEAD
-#include <ATen/native/BinaryOps.h>
-#include <ATen/native/ForeachUtils.h>
-=======
 #include <ATen/NumericUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/TensorCompare.h>
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 
@@ -18,10 +13,7 @@
 #include <ATen/ops/_foreach_add_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
-<<<<<<< HEAD
-=======
 #include <ATen/ops/_foreach_clamp_native.h>
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 #include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
@@ -253,8 +245,6 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(
 FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_max, minimum, false);
 FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, false);
 
-<<<<<<< HEAD
-=======
 namespace {
 template <typename T>
 __forceinline__ C10_DEVICE T clamp(
@@ -414,5 +404,4 @@ void foreach_tensor_clamp_scalar_kernel_cuda_(
             get_clamp_kind(min, max));
       });
 }
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 } // namespace at::native

@@ -4,10 +4,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import io
-<<<<<<< HEAD
-import logging
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 import typing
 import unittest
 from typing import AbstractSet, Protocol, Tuple
@@ -16,14 +12,8 @@ import torch
 from torch.onnx import errors
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
-<<<<<<< HEAD
-from torch.onnx._internal.diagnostics.infra import formatter, sarif
-from torch.onnx._internal.fx import diagnostics as fx_diagnostics
-from torch.testing._internal import common_utils, logging_utils
-=======
 from torch.onnx._internal.diagnostics.infra import sarif
 from torch.testing._internal import common_utils
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 
 class _SarifLogBuilder(Protocol):
@@ -53,20 +43,6 @@ def _assert_has_diagnostics(
         )
 
 
-<<<<<<< HEAD
-@dataclasses.dataclass
-class _RuleCollectionForTest(infra.RuleCollection):
-    rule_without_message_args: infra.Rule = dataclasses.field(
-        default=infra.Rule(
-            "1",
-            "rule-without-message-args",
-            message_default_template="rule message",
-        )
-    )
-
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @contextlib.contextmanager
 def assert_all_diagnostics(
     test_suite: unittest.TestCase,
@@ -136,98 +112,8 @@ def assert_diagnostic(
     return assert_all_diagnostics(test_suite, sarif_log_builder, {(rule, level)})
 
 
-<<<<<<< HEAD
-class TestDynamoOnnxDiagnostics(common_utils.TestCase):
-    """Test cases for diagnostics emitted by the Dynamo ONNX export code."""
-
-    def setUp(self):
-        self.diagnostic_context = fx_diagnostics.DiagnosticContext("dynamo_export", "")
-        self.rules = _RuleCollectionForTest()
-        return super().setUp()
-
-    def test_log_is_recorded_in_sarif_additional_messages_according_to_diagnostic_options_verbosity_level(
-        self,
-    ):
-        logging_levels = [
-            logging.DEBUG,
-            logging.INFO,
-            logging.WARNING,
-            logging.ERROR,
-        ]
-        for verbosity_level in logging_levels:
-            self.diagnostic_context.options.verbosity_level = verbosity_level
-            with self.diagnostic_context:
-                diagnostic = fx_diagnostics.Diagnostic(
-                    self.rules.rule_without_message_args, infra.Level.NONE
-                )
-                additional_messages_count = len(diagnostic.additional_messages)
-                for log_level in logging_levels:
-                    diagnostic.log(level=log_level, message="log message")
-                    if log_level >= verbosity_level:
-                        self.assertGreater(
-                            len(diagnostic.additional_messages),
-                            additional_messages_count,
-                            f"Additional message should be recorded when log level is {log_level} "
-                            f"and verbosity level is {verbosity_level}",
-                        )
-                    else:
-                        self.assertEqual(
-                            len(diagnostic.additional_messages),
-                            additional_messages_count,
-                            f"Additional message should not be recorded when log level is "
-                            f"{log_level} and verbosity level is {verbosity_level}",
-                        )
-
-    def test_torch_logs_environment_variable_precedes_diagnostic_options_verbosity_level(
-        self,
-    ):
-        self.diagnostic_context.options.verbosity_level = logging.ERROR
-        with logging_utils.log_settings("onnx_diagnostics"), self.diagnostic_context:
-            diagnostic = fx_diagnostics.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NONE
-            )
-            additional_messages_count = len(diagnostic.additional_messages)
-            diagnostic.debug("message")
-            self.assertGreater(
-                len(diagnostic.additional_messages), additional_messages_count
-            )
-
-    def test_log_is_not_emitted_to_terminal_when_log_artifact_is_not_enabled(self):
-        self.diagnostic_context.options.verbosity_level = logging.INFO
-        with self.diagnostic_context:
-            diagnostic = fx_diagnostics.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NONE
-            )
-
-            with self.assertLogs(
-                diagnostic.logger, level=logging.INFO
-            ) as assert_log_context:
-                diagnostic.info("message")
-                # NOTE: self.assertNoLogs only exist >= Python 3.10
-                # Add this dummy log such that we can pass self.assertLogs, and inspect
-                # assert_log_context.records to check if the log we don't want is not emitted.
-                diagnostic.logger.log(logging.ERROR, "dummy message")
-
-            self.assertEqual(len(assert_log_context.records), 1)
-
-    def test_log_is_emitted_to_terminal_when_log_artifact_is_enabled(self):
-        self.diagnostic_context.options.verbosity_level = logging.INFO
-
-        with logging_utils.log_settings("onnx_diagnostics"), self.diagnostic_context:
-            diagnostic = fx_diagnostics.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NONE
-            )
-
-            with self.assertLogs(diagnostic.logger, level=logging.INFO):
-                diagnostic.info("message")
-
-
-class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
-    """Test cases for diagnostics emitted by the TorchScript ONNX export code."""
-=======
 class TestOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the ONNX export code."""
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     def setUp(self):
         engine = diagnostics.engine
@@ -237,11 +123,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
 
     def _trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp(
         self,
-<<<<<<< HEAD
-    ) -> diagnostics.TorchScriptOnnxExportDiagnostic:
-=======
     ) -> diagnostics.ExportDiagnostic:
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         class CustomAdd(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
@@ -265,13 +147,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
                 diagnostic.rule == rule
                 and diagnostic.level == diagnostics.levels.WARNING
             ):
-<<<<<<< HEAD
-                return typing.cast(
-                    diagnostics.TorchScriptOnnxExportDiagnostic, diagnostic
-                )
-=======
                 return typing.cast(diagnostics.ExportDiagnostic, diagnostic)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         raise AssertionError("No diagnostic found.")
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
@@ -327,11 +203,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
-<<<<<<< HEAD
-        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
-=======
         diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy
@@ -360,9 +232,6 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         )
 
 
-<<<<<<< HEAD
-@common_utils.instantiate_parametrized_tests
-=======
 @dataclasses.dataclass
 class _RuleCollectionForTest(infra.RuleCollection):
     rule_without_message_args: infra.Rule = dataclasses.field(
@@ -374,7 +243,6 @@ class _RuleCollectionForTest(infra.RuleCollection):
     )
 
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 class TestDiagnosticsInfra(common_utils.TestCase):
     """Test cases for diagnostics infra."""
 
@@ -420,194 +288,6 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             )
             self.context.log(diagnostic2)
 
-<<<<<<< HEAD
-    def test_diagnostic_log_is_not_emitted_when_level_less_than_diagnostic_options_verbosity_level(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            with self.assertLogs(
-                diagnostic.logger, level=verbosity_level
-            ) as assert_log_context:
-                diagnostic.log(logging.DEBUG, "debug message")
-                # NOTE: self.assertNoLogs only exist >= Python 3.10
-                # Add this dummy log such that we can pass self.assertLogs, and inspect
-                # assert_log_context.records to check if the log level is correct.
-                diagnostic.log(logging.INFO, "info message")
-
-        for record in assert_log_context.records:
-            self.assertGreaterEqual(record.levelno, logging.INFO)
-        self.assertFalse(
-            any(
-                message.find("debug message") >= 0
-                for message in diagnostic.additional_messages
-            )
-        )
-
-    def test_diagnostic_log_is_emitted_when_level_not_less_than_diagnostic_options_verbosity_level(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            level_message_pairs = [
-                (logging.INFO, "info message"),
-                (logging.WARNING, "warning message"),
-                (logging.ERROR, "error message"),
-            ]
-
-            for level, message in level_message_pairs:
-                with self.assertLogs(diagnostic.logger, level=verbosity_level):
-                    diagnostic.log(level, message)
-
-            self.assertTrue(
-                any(
-                    message.find(message) >= 0
-                    for message in diagnostic.additional_messages
-                )
-            )
-
-    @common_utils.parametrize(
-        "log_api, log_level",
-        [
-            ("debug", logging.DEBUG),
-            ("info", logging.INFO),
-            ("warning", logging.WARNING),
-            ("error", logging.ERROR),
-        ],
-    )
-    def test_diagnostic_log_is_emitted_according_to_api_level_and_diagnostic_options_verbosity_level(
-        self, log_api: str, log_level: int
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            message = "log message"
-            with self.assertLogs(
-                diagnostic.logger, level=verbosity_level
-            ) as assert_log_context:
-                getattr(diagnostic, log_api)(message)
-                # NOTE: self.assertNoLogs only exist >= Python 3.10
-                # Add this dummy log such that we can pass self.assertLogs, and inspect
-                # assert_log_context.records to check if the log level is correct.
-                diagnostic.log(logging.ERROR, "dummy message")
-
-            for record in assert_log_context.records:
-                self.assertGreaterEqual(record.levelno, logging.INFO)
-
-            if log_level >= verbosity_level:
-                self.assertIn(message, diagnostic.additional_messages)
-            else:
-                self.assertNotIn(message, diagnostic.additional_messages)
-
-    def test_diagnostic_log_lazy_string_is_not_evaluated_when_level_less_than_diagnostic_options_verbosity_level(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            reference_val = 0
-
-            def expensive_formatting_function() -> str:
-                # Modify the reference_val to reflect this function is evaluated
-                nonlocal reference_val
-                reference_val += 1
-                return f"expensive formatting {reference_val}"
-
-            # `expensive_formatting_function` should NOT be evaluated.
-            diagnostic.debug("%s", formatter.LazyString(expensive_formatting_function))
-            self.assertEqual(
-                reference_val,
-                0,
-                "expensive_formatting_function should not be evaluated after being wrapped under LazyString",
-            )
-
-    def test_diagnostic_log_lazy_string_is_evaluated_once_when_level_not_less_than_diagnostic_options_verbosity_level(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            reference_val = 0
-
-            def expensive_formatting_function() -> str:
-                # Modify the reference_val to reflect this function is evaluated
-                nonlocal reference_val
-                reference_val += 1
-                return f"expensive formatting {reference_val}"
-
-            # `expensive_formatting_function` should NOT be evaluated.
-            diagnostic.info("%s", formatter.LazyString(expensive_formatting_function))
-            self.assertEqual(
-                reference_val,
-                1,
-                "expensive_formatting_function should only be evaluated once after being wrapped under LazyString",
-            )
-
-    def test_diagnostic_nested_log_section_emits_messages_with_correct_section_title_indentation(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            diagnostic = infra.Diagnostic(
-                self.rules.rule_without_message_args, infra.Level.NOTE
-            )
-
-            with diagnostic.log_section(logging.INFO, "My Section"):
-                diagnostic.log(logging.INFO, "My Message")
-                with diagnostic.log_section(logging.INFO, "My Subsection"):
-                    diagnostic.log(logging.INFO, "My Submessage")
-
-            with diagnostic.log_section(logging.INFO, "My Section 2"):
-                diagnostic.log(logging.INFO, "My Message 2")
-
-            self.assertIn("## My Section", diagnostic.additional_messages)
-            self.assertIn("### My Subsection", diagnostic.additional_messages)
-            self.assertIn("## My Section 2", diagnostic.additional_messages)
-
-    def test_diagnostic_log_source_exception_emits_exception_traceback_and_error_message(
-        self,
-    ):
-        verbosity_level = logging.INFO
-        self.context.options.verbosity_level = verbosity_level
-        with self.context:
-            try:
-                raise ValueError("original exception")
-            except ValueError as e:
-                diagnostic = infra.Diagnostic(
-                    self.rules.rule_without_message_args, infra.Level.NOTE
-                )
-                diagnostic.log_source_exception(logging.ERROR, e)
-
-            diagnostic_message = "\n".join(diagnostic.additional_messages)
-
-            self.assertIn("ValueError: original exception", diagnostic_message)
-            self.assertIn("Traceback (most recent call last):", diagnostic_message)
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
             self.context.log_and_raise_if_error(
@@ -626,11 +306,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 diagnostic = infra.Diagnostic(
                     self.rules.rule_without_message_args, infra.Level.ERROR
                 )
-<<<<<<< HEAD
-                diagnostic.log_source_exception(logging.ERROR, e)
-=======
                 diagnostic = diagnostic.with_source_exception(e)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                 self.context.log_and_raise_if_error(diagnostic)
 
     def test_diagnostic_context_raises_if_diagnostic_is_warning_and_warnings_as_errors_is_true(

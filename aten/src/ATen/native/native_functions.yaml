@@ -5780,15 +5780,8 @@
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
-<<<<<<< HEAD
-- func: tile(Tensor self, SymInt[] dims) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: tile_symint
-=======
 - func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
@@ -10126,8 +10119,6 @@
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
   autogen: _foreach_div.ScalarList_out
 
-<<<<<<< HEAD
-=======
 # TODO(crcrpar): Think of adding overloads for `TensorList`s and `ScalarList`s
 # ref: https://github.com/pytorch/pytorch/issues/106931
 - func: _foreach_clamp(Tensor[] self, Scalar? min=None, Scalar? max=None) -> Tensor[]
@@ -10147,7 +10138,6 @@
     CUDA: foreach_tensor_clamp_scalar_kernel_cuda_
   autogen: _foreach_clamp.out
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 - func: _foreach_clamp_max.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function

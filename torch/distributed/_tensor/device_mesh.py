@@ -9,26 +9,18 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-<<<<<<< HEAD
-    get_rank,
-    get_world_size,
-=======
     all_to_all,
     broadcast,
     get_global_rank,
     get_rank,
     get_world_size,
     GroupMember,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     init_process_group,
     is_initialized,
     new_group,
     ProcessGroup,
-<<<<<<< HEAD
-=======
     scatter,
     Work,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 )
 
 
@@ -283,8 +275,6 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
-<<<<<<< HEAD
-=======
 
     def scatter(
         self,
@@ -420,4 +410,3 @@ class DeviceMesh:
                 async_op=async_op,
             )
         return work
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

@@ -54,20 +54,6 @@ if TYPE_CHECKING:
         registration as torchlib_registry,
     )
 
-<<<<<<< HEAD
-    from torch.onnx._internal.fx import diagnostics
-else:
-    try:
-        # beartype needs this import due to runtime type checking.
-        # This cannot be normally imported at top level due to
-        # https://github.com/pytorch/pytorch/issues/103764
-        from torch.onnx._internal.fx import diagnostics
-    except ImportError:
-        # The error will be handled elsewhere when the exporter is used.
-        pass
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
 through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
@@ -332,11 +318,7 @@ class ResolvedExportOptions(ExportOptions):
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
-<<<<<<< HEAD
-    diagnostic_context: diagnostics.DiagnosticContext
-=======
     diagnostic_context: infra.DiagnosticContext
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     """The diagnostics context for the export. Responsible for recording diagnostics,
     logging diagnostics, and generating the SARIF log."""
 
@@ -368,14 +350,7 @@ class ResolvedExportOptions(ExportOptions):
                 return fallback
 
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-<<<<<<< HEAD
-            from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
-                diagnostics,
-                dynamo_graph_extractor,
-            )
-=======
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
@@ -388,14 +363,8 @@ class ResolvedExportOptions(ExportOptions):
             #   - Add a shim and make it noop if onnxscript is not available.
             #   - Try local import and raise.
             # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
-<<<<<<< HEAD
-            self.diagnostic_context = diagnostics.DiagnosticContext(
-                "torch.onnx.dynamo_export",
-                torch.__version__,
-=======
             self.diagnostic_context = infra.DiagnosticContext(
                 "torch.onnx.dynamo_export", torch.__version__
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
@@ -563,11 +532,7 @@ class ExportOutput:
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
-<<<<<<< HEAD
-    _diagnostic_context: Final[diagnostics.DiagnosticContext]
-=======
     _diagnostic_context: Final[infra.DiagnosticContext]
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     _fake_context: Final[Optional[ONNXFakeContext]]
 
     @_beartype.beartype
@@ -576,11 +541,7 @@ class ExportOutput:
         model_proto: onnx.ModelProto,  # type: ignore[name-defined]
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
-<<<<<<< HEAD
-        diagnostic_context: diagnostics.DiagnosticContext,
-=======
         diagnostic_context: infra.DiagnosticContext,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         fake_context: Optional[ONNXFakeContext] = None,
     ):
         self._model_proto = model_proto
@@ -600,11 +561,7 @@ class ExportOutput:
     def diagnostic_context(self) -> diagnostics.DiagnosticContext:
 =======
     def diagnostic_context(self) -> infra.DiagnosticContext:
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-        """The diagnostic context associated with the export."""
-
         return self._diagnostic_context
-
     @property
     def fake_context(self) -> Optional[ONNXFakeContext]:
         """The fake context associated with the export."""

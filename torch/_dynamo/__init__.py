@@ -24,9 +24,6 @@ from .eval_frame import (
     reset_code,
 )
 from .external_utils import is_compiling
-<<<<<<< HEAD
-from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
-=======
 from .utils import (
     compilation_metrics,
     graph_break_reasons,
@@ -34,7 +31,6 @@ from .utils import (
     orig_code_map,
     reset_frame_count,
 )
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 __all__ = [
     "allow_in_graph",
@@ -75,9 +71,6 @@ def reset() -> None:
     if hasattr(eval_frame.most_recent_backend, "reset"):
         eval_frame.most_recent_backend.reset()
     eval_frame.most_recent_backend = None
-<<<<<<< HEAD
-=======
     compilation_metrics.clear()
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()

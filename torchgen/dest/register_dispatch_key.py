@@ -577,10 +577,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = ""
 
         def gen_set_output_function(name: str, maybe_create_proxy: bool) -> str:
-<<<<<<< HEAD
-=======
             maybe_star = "*" if k is SchemaKind.functional else ""
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
@@ -588,11 +585,7 @@ void set_output_{name}(
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
     if (!names.empty()) {{
-<<<<<<< HEAD
-      namedinference::propagate_names(outputs_[output_idx], names);
-=======
       namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
@@ -628,11 +621,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             create_proxy = """
 auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
 if (C10_UNLIKELY(maybe_proxy.has_value())) {
-<<<<<<< HEAD
-    proxy_outputs_[output_idx] = std::move(maybe_proxy).value();
-=======
     proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 }
 """
         else:
@@ -694,19 +683,6 @@ resize_out(out, sizes, strides, options);
         generate_super: bool,
     ) -> str:
         if k is SchemaKind.functional:
-<<<<<<< HEAD
-            output_type = "Tensor"
-            output_value = "outputs_[output_idx]"
-            proxy_field = ""
-        elif k is SchemaKind.inplace:
-            output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
-        elif k is SchemaKind.out:
-            output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
-=======
             output_type = "c10::ExclusivelyOwned<Tensor>"
             output_value = "*outputs_[output_idx]"
             proxy_field = ""
@@ -718,7 +694,6 @@ resize_out(out, sizes, strides, options);
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
             proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
@@ -911,12 +886,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if k is SchemaKind.out:
                     expr = f"op.maybe_get_output({i})"
                 else:
-<<<<<<< HEAD
-                    expr = f"op.outputs_[{i}]"
-=======
                     maybe_star = "*" if k is SchemaKind.functional else ""
                     expr = f"{maybe_star}op.outputs_[{i}]"
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
                 context.append(
                     Expr(
@@ -971,28 +942,17 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             if k is SchemaKind.out or k is SchemaKind.inplace:
                 for i in range(len(f.func.returns)):
                     sig_body.append(
-<<<<<<< HEAD
-                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(*op.proxy_outputs_[{i}]);"
-=======
                         f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);"
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                     )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
             if k is SchemaKind.functional:
                 if len(f.func.returns) == 1:
-<<<<<<< HEAD
-                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
-                else:
-                    moved = ", ".join(
-                        f"std::move(op.outputs_[{i}])"
-=======
                     ret_expr = "std::move(op.outputs_[0]).take()"  # small optimization
                 else:
                     moved = ", ".join(
                         f"std::move(op.outputs_[{i}]).take()"
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
                         for i in range(len(f.func.returns))
                     )
                     ret_expr = f"std::make_tuple({moved})"

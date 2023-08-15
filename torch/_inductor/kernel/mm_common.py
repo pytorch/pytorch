@@ -98,11 +98,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-<<<<<<< HEAD
-def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
-=======
 def mm_options(config, sym_k, layout):
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     """
     Common options to matmul triton templates.
     """
@@ -116,14 +112,6 @@ def mm_options(config, sym_k, layout):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
-<<<<<<< HEAD
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-        num_stages=config.num_stages,
-        num_warps=config.num_warps,
-        **config.kwargs,
-    )
 
 
 def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):

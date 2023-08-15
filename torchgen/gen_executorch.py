@@ -426,13 +426,6 @@ def gen_headers(
                     backend_indices=backend_indices,
                     native_function_decl_gen=dest.compute_native_function_declaration,
                 ),
-<<<<<<< HEAD
-                "headers": [
-                    "#include <ATen/ATen.h>",
-                    "#include <torch/torch.h>",
-                ],
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             },
         )
         aten_headers.append('#include "CustomOpsNativeFunctions.h"')
@@ -458,28 +451,6 @@ def gen_headers(
             "#include <executorch/codegen/macros.h> // TORCH_API",
             "#include <executorch/runtime/kernel/kernel_runtime_context.h>",
         ],
-    }
-    if use_aten_lib:
-        cpu_fm.write(
-            "NativeFunctions.h",
-            lambda: dict(
-                {
-                    "nativeFunctions_declarations": get_native_function_declarations(
-                        grouped_native_functions=native_functions,
-                        backend_indices=backend_indices,
-                        native_function_decl_gen=dest.compute_native_function_declaration,
-                    ),
-                },
-                **headers,
-            ),
-=======
-    if use_aten_lib:
-        cpu_fm.write(
-            "NativeFunctions.h",
-            lambda: {
-                "nativeFunctions_declarations": get_native_function_declarations(
-                    grouped_native_functions=native_functions,
-                    backend_indices=backend_indices,
                     native_function_decl_gen=dest.compute_native_function_declaration,
                 ),
             },
@@ -490,25 +461,13 @@ def gen_headers(
             native_functions=native_functions,
             kernel_index=kernel_index,
             native_function_decl_gen=compute_native_function_declaration,  # type: ignore[arg-type]
-        )
         cpu_fm.write(
             "NativeFunctions.h",
-<<<<<<< HEAD
-            lambda: dict(
-                {
-                    "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
-                        ns_grouped_kernels=ns_grouped_kernels,
-                    ),
-                },
-                **headers,
-            ),
-=======
             lambda: {
                 "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
                     ns_grouped_kernels=ns_grouped_kernels,
                 ),
             },
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         )
 
 
@@ -523,33 +482,11 @@ def gen_custom_ops(
     dispatch_key = DispatchKey.CPU
     (
         anonymous_definition,
-        static_init_dispatch_registrations,
-    ) = gen_custom_ops_registration(
-        native_functions=native_functions,
-        selector=selector,
-        kernel_index=kernel_index,
-        rocm=rocm,
-    )
-    cpu_fm.write_with_template(
-        f"Register{dispatch_key}CustomOps.cpp",
-        "RegisterDispatchKeyCustomOps.cpp",
-        lambda: {
-            "ops_headers": '#include "CustomOpsNativeFunctions.h"',
-            "DispatchKey": dispatch_key,
-            "dispatch_namespace": dispatch_key.lower(),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": anonymous_definition,
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-        },
-    )
-    cpu_fm.write_with_template(
-        f"Register{dispatch_key}Stub.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
         lambda: {
             "ops_headers": "",
             "DispatchKey": dispatch_key,
             "dispatch_namespace": dispatch_key.lower(),
-            "dispatch_namespaced_definitions": "",
             "dispatch_anonymous_definitions": list(
                 mapMaybe(ComputeNativeFunctionStub(), native_functions)
             ),

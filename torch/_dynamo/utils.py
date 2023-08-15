@@ -63,16 +63,8 @@ nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
-<<<<<<< HEAD
-# profiling compilation time by function
-compilation_time_metrics = collections.OrderedDict()
-
-# profiling compilation time by frame phase
-frame_phase_timing = collections.OrderedDict()
-=======
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 timer_counter = itertools.count()
 
@@ -109,28 +101,18 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-<<<<<<< HEAD
-=======
 frame_phase_timing = collections.OrderedDict()
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 curr_frame = 0
 
 
-# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def increment_frame():
     global curr_frame
     curr_frame = curr_frame + 1
-
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
-<<<<<<< HEAD
-    compilation_time_metrics.clear()
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     curr_frame = 0
 
 
@@ -166,11 +148,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-<<<<<<< HEAD
-# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
-=======
 # By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 # where the key is the functions name.
 # For example:
 #
@@ -190,23 +168,14 @@ def dynamo_timed(original_function=None, phase_name=None):
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-<<<<<<< HEAD
-            if key not in compilation_time_metrics:
-                compilation_time_metrics[key] = []
-=======
             if key not in compilation_metrics:
                 compilation_metrics[key] = []
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-<<<<<<< HEAD
-            compilation_time_metrics[key].append(time_spent)
-=======
             # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
             compilation_metrics[key].append(time_spent)
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
@@ -245,13 +214,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-<<<<<<< HEAD
-            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_time_metrics
-=======
             (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
             for k in compilation_metrics
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -259,15 +223,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-<<<<<<< HEAD
-            for v in compilation_time_metrics.values()
-        ]
-        headers = list(compilation_time_metrics.keys())
-=======
             for v in compilation_metrics.values()
         ]
         headers = list(compilation_metrics.keys())
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         return headers, values
 
 
@@ -519,25 +477,6 @@ def proxy_args_kwargs(args, kwargs):
 
 
 @dataclasses.dataclass
-<<<<<<< HEAD
-class CompilationMetrics:
-    frame_key: str
-    co_name: str
-    co_filename: str
-    co_firstlineno: int
-    cache_size: int
-    guard_count: Optional[int]
-    graph_op_count: Optional[int]
-    graph_node_count: Optional[int]
-    graph_input_count: Optional[int]
-    entire_frame_compile_time_s: Optional[float]
-    backend_compile_time_s: Optional[float]
-    fail_reason: Optional[str]
-
-
-@dataclasses.dataclass
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 class CleanupHook:
     """Remove a global variable when hook is called"""
 

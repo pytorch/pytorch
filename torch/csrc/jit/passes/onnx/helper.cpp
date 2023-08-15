@@ -88,13 +88,10 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       return at::kComplexDouble;
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
-<<<<<<< HEAD
-=======
     case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E5M2:
       return at::kFloat8_e5m2;
     case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN:
       return at::kFloat8_e4m3fn;
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     default:
       TORCH_CHECK(
           false,

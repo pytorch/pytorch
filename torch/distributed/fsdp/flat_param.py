@@ -27,10 +27,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-<<<<<<< HEAD
-=======
 from torch.distributed._tensor import DTensor
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -1800,11 +1797,6 @@ class FlatParamHandle:
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
         views = self._get_unflat_views()
-<<<<<<< HEAD
-        from torch.distributed._tensor import DTensor
-
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, flat_param._param_infos)
         ):

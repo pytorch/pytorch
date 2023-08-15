@@ -31,11 +31,8 @@ ScalarName = Literal[
     "QUInt8",
     "QInt32",
     "BFloat16",
-<<<<<<< HEAD
-=======
     "Float8E5M2",
     "Float8E4M3FN",
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     "Undefined",
 ]
 
@@ -56,11 +53,8 @@ TorchName = Literal[
     "quint8",
     "qint32",
     "bfloat16",
-<<<<<<< HEAD
-=======
     "float8_e5m2",
     "float8_e4m3fn",
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 ]
 
 
@@ -100,13 +94,9 @@ class JitScalarType(enum.IntEnum):
     QUINT8 = enum.auto()  # 13
     QINT32 = enum.auto()  # 14
     BFLOAT16 = enum.auto()  # 15
-<<<<<<< HEAD
-    UNDEFINED = enum.auto()  # 16
-=======
     FLOAT8E5M2 = enum.auto()  # 16
     FLOAT8E4M3FN = enum.auto()  # 17
     UNDEFINED = enum.auto()  # 18
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
     @classmethod
     @_beartype.beartype
@@ -292,11 +282,8 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.QUINT8: "QUInt8",
     JitScalarType.QINT32: "QInt32",
     JitScalarType.BFLOAT16: "BFloat16",
-<<<<<<< HEAD
-=======
     JitScalarType.FLOAT8E5M2: "Float8E5M2",
     JitScalarType.FLOAT8E4M3FN: "Float8E4M3FN",
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
     JitScalarType.UNDEFINED: "Undefined",
 }
 
@@ -321,11 +308,8 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.QUINT8: "quint8",
     JitScalarType.QINT32: "qint32",
     JitScalarType.BFLOAT16: "bfloat16",
-<<<<<<< HEAD
-=======
     JitScalarType.FLOAT8E5M2: "float8_e5m2",
     JitScalarType.FLOAT8E4M3FN: "float8_e4m3fn",
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 }
 
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
@@ -350,11 +334,8 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
     JitScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
     JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
-<<<<<<< HEAD
-=======
     JitScalarType.FLOAT8E5M2: _C_onnx.TensorProtoDataType.FLOAT8E5M2,
     JitScalarType.FLOAT8E4M3FN: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 }
 
 # source of truth is
@@ -376,11 +357,8 @@ _SCALAR_TYPE_TO_DTYPE = {
     JitScalarType.QUINT8: torch.quint8,
     JitScalarType.QINT32: torch.qint32,
     JitScalarType.BFLOAT16: torch.bfloat16,
-<<<<<<< HEAD
-=======
     JitScalarType.FLOAT8E5M2: torch.float8_e5m2,
     JitScalarType.FLOAT8E4M3FN: torch.float8_e4m3fn,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}

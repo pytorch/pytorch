@@ -1,8 +1,4 @@
 name,accuracy,graph_breaks
-<<<<<<< HEAD
-torchrec_dlrm,pass,8
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
@@ -14,14 +10,6 @@ basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
 clip,pass,8
 dcgan,pass,8
-<<<<<<< HEAD
-dlrm,pass,8
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-drq,pass,7
-fastNLP_Bert,pass,12
-functorch_dp_cifar10,pass,8
-functorch_maml_omniglot,pass,8
 hf_Albert,pass,7
 hf_Bart,pass,7
 hf_DistilBert,pass,7

@@ -29,15 +29,6 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-<<<<<<< HEAD
-from torch._refs import _broadcast_shapes, _maybe_broadcast
-=======
-from torch._refs import _broadcast_shapes
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-from torch.fx.experimental.symbolic_shapes import constrain_range
-from torch.utils._pytree import tree_map
-
-
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
@@ -2960,8 +2951,6 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
-<<<<<<< HEAD
-=======
 @register_meta([aten._foreach_clamp.default])
 def meta__foreach_clamp(self, min, max):
     torch._check(
@@ -2985,7 +2974,6 @@ def meta__foreach_clamp_(self, min, max):
     )
 
 
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,

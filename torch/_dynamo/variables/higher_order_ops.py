@@ -269,11 +269,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "tag_activation_checkpoint",
         ):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
-<<<<<<< HEAD
-        elif value.__name__ == "_export_tracepoint":
-            return ExportTracepointHigherOrderVariable(value, source, **kwargs)
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1102,26 +1097,3 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             ),
             example_value=example_value,
         )
-<<<<<<< HEAD
-
-
-class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
-        p_args = tuple(arg.as_proxy() for arg in args)
-        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=p_args,
-                kwargs=p_kwargs,
-            ),
-            example_value=None,
-        )
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947

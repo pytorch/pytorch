@@ -9,10 +9,6 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
-<<<<<<< HEAD
-from typing import Any, Dict, List, Tuple
-=======
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -28,11 +24,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
 =======
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
-    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
-    float_to_corresponding_complex_type_map
 )
-
 from torch.utils.dlpack import to_dlpack
 
 # TODO: replace with make_tensor

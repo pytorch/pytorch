@@ -48,11 +48,7 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
 MAX_ONNX_OPSET_VERSION = (
-<<<<<<< HEAD
-    _constants.ONNX_MAX_OPSET - 1
-=======
     _constants.ONNX_MAX_OPSET - 2
->>>>>>> aca461ede2729d856f3dbcaf506c62ed14bb0947
 )  # TODO: ORT does not support opset 18 yet
 
 
