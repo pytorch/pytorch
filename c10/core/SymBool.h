@@ -26,9 +26,6 @@ class C10_API SymBool {
   // Only valid if is_heap_allocated()
   SymNode toSymNodeImpl() const;
 
-  // Only valid if !is_heap_allocated(), always returns a ConstantSymNode
-  SymNode promoteToConstantSymNode() const;
-
   // Guaranteed to return a SymNode, wrapping using base if necessary
   SymNode wrap_node(const SymNode& base) const;
 

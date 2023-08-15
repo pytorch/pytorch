@@ -9,7 +9,7 @@ namespace c10 {
 // Can either represent a bool, int (don't support float yet) this is useful
 // for representing otherwise unrepresentable large negative integer constant.
 template <typename T>
-class ConstantSymNodeImpl : public SymNodeImpl {
+class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   static_assert(
       std::is_same<T, int64_t>::value || std::is_same<T, bool>::value,
       "ConstantSymNodeImpl can only accept int64_t or bool types");
@@ -48,21 +48,8 @@ class ConstantSymNodeImpl : public SymNodeImpl {
   bool has_hint() override {
     return true;
   }
-
-  // Temporary hack to avoid having to implement multiple dispatch for now
-  // Currently even if we have this method, we still raise an error when we get
-  // to SingletonSymNode::eq since comparing with non-singleton is disallowed.
-  // However, we may change that behavior in the future.
-  c10::SymNode eq(const c10::SymNode& other) override {
-    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());
-    return other->eq(c10::SymNode(make_intrusive<ConstantSymNodeImpl<int64_t>>(
-        c10::get<int64_t>(value_))));
-  }
-  c10::SymNode ne(const c10::SymNode& other) override {
-    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());
-    return other->ne(c10::SymNode(make_intrusive<ConstantSymNodeImpl<int64_t>>(
-        c10::get<int64_t>(value_))));
-  }
+  c10::SymNode eq(const c10::SymNode& other) override;
+  c10::SymNode ne(const c10::SymNode& other) override;
   std::string str() override {
     if (is_int()) {
       return std::to_string(c10::get<int64_t>(value_));
