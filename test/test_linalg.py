@@ -997,7 +997,7 @@ class TestLinalg(TestCase):
         # but passes on cuda 12.1 update 1 or later.
         a = torch.ones(512, 512, dtype=dtype, device=device)
         a[0, 0] = 1.0e-5
-        a[1, 1] = 1.0e5
+        a[-1, -1] = 1.0e5
 
         eigh_out = torch.linalg.eigh(a)
         svd_out = torch.linalg.svd(a)
