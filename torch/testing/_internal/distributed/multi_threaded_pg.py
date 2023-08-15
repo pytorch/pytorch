@@ -86,12 +86,19 @@ class AllReduce:
     def work(self, data):
         for i in range(len(data[0])):
             tensors = []
+            # use rank0 as the device for sum
+            rank_0_device = data[0][i].device
+            # collect all data to the list and make them
+            # all on rank 0 device
             for src_rank in range(0, len(data)):
-                tensors.append(data[src_rank][i])
+                tensors.append(data[src_rank][i].to(rank_0_device))
+
+            # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
-            with torch.no_grad():
-                for src_rank in range(len(data)):
-                    data[src_rank][i].copy_(res)
+
+            # copy all the reduced value to each rank
+            for src_rank in range(len(data)):
+                data[src_rank][i].copy_(res.to(data[src_rank][i].device))
 
 
 class AllGather:
@@ -160,11 +167,12 @@ class ReduceScatter:
                 dest_tensor_on_rank_i = data[i][0]
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
+                dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
-                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i].to(dst_tensor_device))
                     start_reduction[i] = True
                 else:
-                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
 
 class Broadcast:
     def __init__(self, src):
