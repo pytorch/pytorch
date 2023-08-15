@@ -1018,7 +1018,7 @@ def compile_file(input_path, output_path, cmd) -> None:
             "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ that has builtin OpenMP support;\n" + \
             "(2) install OpenMP via conda: `conda install llvm-openmp`;\n" + \
             "(3) install libomp via brew: `brew install libomp`;\n" + \
-            "(4) setup your custom OpenMP support by the `OMP_PREFIX` environment variable to point to a path with `include/omp.h` under it."
+            "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path with `include/omp.h` under it."
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
 
