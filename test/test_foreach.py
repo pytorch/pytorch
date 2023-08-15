@@ -527,7 +527,10 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
 
-    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
+    @ops(
+        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        dtypes=OpDTypes.supported,
+    )
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
         foreach_op, ref = op.method_variant, op.ref
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
@@ -543,7 +546,10 @@ class TestForeach(TestCase):
         res = foreach_op(tensors, 1)
         self.assertEqual(res, expected)
 
-    @ops(foreach_binary_op_db, allowed_dtypes=[torch.float])
+    @ops(
+        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        allowed_dtypes=[torch.float],
+    )
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
         foreach_op = op.method_variant
         tensors = [
@@ -558,7 +564,10 @@ class TestForeach(TestCase):
         self.assertIsNone(runtime_error)
 
     @skipIfTorchDynamo("Different error msgs, TODO")
-    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
+    @ops(
+        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        dtypes=OpDTypes.supported,
+    )
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
         tensors1 = []
@@ -621,7 +630,10 @@ class TestForeach(TestCase):
                     foreach_op_([tensor1], [tensor2])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
+    @ops(
+        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        dtypes=OpDTypes.supported,
+    )
     def test_binary_op_list_slow_path(self, device, dtype, op):
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
@@ -670,7 +682,10 @@ class TestForeach(TestCase):
             dtype, foreach_op_, native_op_, inputs, is_fastpath=False, is_inplace=True,
             zero_size=False, alpha=None, scalar_self_arg=False)
 
-    @ops(foreach_binary_op_db, dtypes=floating_types_and(torch.half, torch.bfloat16))
+    @ops(
+        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
+    )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
         inputs = (
             [
@@ -725,7 +740,7 @@ class TestForeach(TestCase):
                 self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
 
     @onlyCUDA
-    @ops(foreach_binary_op_db)
+    @ops(filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
@@ -904,7 +919,7 @@ class TestForeach(TestCase):
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
-        if op.name in {"_foreach_zero"}:
+        if op.name in {"_foreach_zero", "_foreach_copy"}:
             self.skipTest(f"{op.name} does not have out-place implementation")
         func, *_ = self._get_funcs(op)
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
