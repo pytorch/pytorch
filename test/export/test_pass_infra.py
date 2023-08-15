@@ -62,6 +62,40 @@ class TestPassInfra(TestCase):
         mod = M()
         _ = export(mod, (torch.tensor(True), x, y)).transform(_ExportPassBase())
 
+    def test_node_name_stability(self) -> None:
+        # Tests that graph nodes stay the same for nodes that are not touched
+        # during transformation
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                # Define a parameter
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                # Define two buffers
+                self.register_buffer('my_buffer1', torch.tensor(3.0))
+                self.register_buffer('my_buffer2', torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+
+                # Mutate one of the buffers (e.g., increment it by 1)
+                self.my_buffer2.add_(1.0)
+
+                return output
+
+        inps = (torch.rand(1), torch.rand(1))
+        m = CustomModule()
+
+        ep_before = export(m, inps)
+
+        # No op transformation that doesn't perform any meaningful changes to node
+        ep_after = ep_before.transform(_ExportPassBase())
+
+        for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
+            self.assertEqual(before_node.name, after_node.name)
+
 
 if __name__ == '__main__':
     run_tests()
