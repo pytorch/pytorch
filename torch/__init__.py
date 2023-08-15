@@ -911,7 +911,7 @@ def set_float32_matmul_precision(precision: str) -> None:
     float32 ones, it's faster to do three multiplications and 2 additions with bfloat16
     precision than it is to do a single multiplication with float32 precision.
 
-    .. _[Henry2019]: http://arxiv.org/abs/1904.06376
+    .. [Henry2019] http://arxiv.org/abs/1904.06376
 
     .. note::
 
