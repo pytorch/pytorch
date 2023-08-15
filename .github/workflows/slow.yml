@@ -130,12 +130,12 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
 
-  linux-bionic-py3_9-gcc9-tsan-build:
-    name: linux-bionic-py3.9-gcc9-tsan
+  linux-focal-py3_9-gcc9-tsan-build:
+    name: linux-focal-py3.9-gcc9-tsan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.9-gcc9-tsan
-      docker-image-name: pytorch-linux-bionic-py3-gcc9-tsan
+      build-environment: linux-focal-py3.9-gcc9-tsan
+      docker-image-name: pytorch-linux-focal-py3-gcc9-tsan
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
@@ -143,12 +143,12 @@ jobs:
         ]}
       sync-tag: tsan-build
 
-  linux-bionic-py3_9-gcc9-tsan-test:
-    name: linux-bionic-py3.9-gcc9-tsan
+  linux-focal-py3_9-gcc9-tsan-test:
+    name: linux-focal-py3.9-gcc9-tsan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_9-gcc9-tsan-build
+    needs: linux-focal-py3_9-gcc9-tsan-build
     with:
-      build-environment: linux-bionic-py3.9-gcc9-tsan
-      docker-image: ${{ needs.linux-bionic-py3_9-gcc9-tsan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_9-gcc9-tsan-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.9-gcc9-tsan
+      docker-image: ${{ needs.linux-focal-py3_9-gcc9-tsan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-gcc9-tsan-build.outputs.test-matrix }}
       sync-tag: tsan-test
