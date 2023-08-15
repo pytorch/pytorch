@@ -458,6 +458,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
     if (nElemBefore > 1) {
       expanded_size.insert(expanded_size.begin(), nElemBefore);
     }
+    if (sliceSize > 1) {
+      expanded_size.insert(expanded_size.end(), sliceSize);
+    }
     expandedValue = expandedValue.expand(expanded_size);
   }
   expandedValue = expandedValue.contiguous();

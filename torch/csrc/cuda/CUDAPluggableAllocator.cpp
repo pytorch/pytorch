@@ -6,9 +6,7 @@
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
-namespace torch {
-namespace cuda {
-namespace CUDAPluggableAllocator {
+namespace torch::cuda::CUDAPluggableAllocator {
 
 int device_count = 0;
 
@@ -257,7 +255,7 @@ void CUDAPluggableAllocator::recordHistory(
     bool enabled,
     c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    bool alloc_trace_record_context) {
+    c10::cuda::CUDACachingAllocator::RecordContext when) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support recordHistory. "
@@ -350,6 +348,4 @@ void custom_raw_deleter(void* ptr) {
   current_custom_allocator->raw_delete(ptr);
 }
 
-} // namespace CUDAPluggableAllocator
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::CUDAPluggableAllocator

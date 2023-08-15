@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
@@ -25,19 +25,21 @@ class PyProcessGroup : public ProcessGroup {
     }
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-        // We cannot use PYBIND11_OVERRIDE because:
-        // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and
-        // 2. The python name is get_future
-        pybind11::gil_scoped_acquire gil;
-        auto override = pybind11::get_override(static_cast<const Work *>(this), "get_future");
+      // We cannot use PYBIND11_OVERRIDE because:
+      // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and
+      // 2. The python name is get_future
+      pybind11::gil_scoped_acquire gil;
+      auto override =
+          pybind11::get_override(static_cast<const Work*>(this), "get_future");
 
-        if (override) {
-            py::object o = override();
-            auto futWrapper = o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>();
-            return futWrapper->fut;
-        }
+      if (override) {
+        py::object o = override();
+        auto futWrapper =
+            o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>();
+        return futWrapper->fut;
+      }
 
-        return Work::getFuture();
+      return Work::getFuture();
     }
   };
 
