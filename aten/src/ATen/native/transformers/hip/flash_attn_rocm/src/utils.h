@@ -8,21 +8,16 @@
 
 
 #pragma once
-Xo
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <torch/torch.h>
 
 #include <ck/ck.hpp>
-
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
 #include <ck/tensor_operation/gpu/device/tensor_specialization.hpp>
-#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v1.hpp>
-#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v2.hpp>
-#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_forward_xdl_cshuffle.hpp>
 #include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
-
 #include <ck/library/utility/check_err.hpp>
 #include <ck/library/utility/device_memory.hpp>
 #include <ck/library/utility/host_tensor.hpp>
@@ -52,7 +47,7 @@ Xo
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-enum DataType {kFloat16, kFloat32, kBFloat16, kInt32, kInt8};
+// enum DataType {kFloat16, kFloat32, kBFloat16, kInt32, kInt8};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -80,35 +75,48 @@ enum DataType {kFloat16, kFloat32, kBFloat16, kInt32, kInt8};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static inline size_t get_size_in_bytes( size_t n, auto dtype ) {
-    if(dtype == torch::kFloat32){
-        return n * 4;
-    }else if(dtype == torch::kBFloat16){
-        return n * 2;
-    }else if(dtype == torch::kFloat16){
-        return n * 2;
-    }else if(dtype == torch::kInt32){
-        return n * 4;
-    }else if(dtype == torch::kInt8){
-        return n;
-    }
-    return 0;
+  if(dtype == torch::kFloat32){
+    return n * 4;
+  }else if(dtype == torch::kBFloat16){
+    return n * 2;
+  }else if(dtype == torch::kFloat16){
+    return n * 2;
+  }else if(dtype == torch::kInt32){
+    return n * 4;
+  }else if(dtype == torch::kInt8){
+    return n; 
+  }
+  return 0;
 }
 
 
 static std::tuple<uint64_t, uint64_t> unpack(at::PhiloxCudaState arg) {
   if (arg.captured_) {
-    #if NEW_UNPACK
-        return std::make_tuple(static_cast<uint64_t>(*arg.seed_.ptr), static_cast<uint64_t>(*(arg.offset_.ptr) + arg.offset_intragraph_));
-    #else
-        return std::make_tuple(arg.seed_, static_cast<uint64_t>(*(arg.offset_.ptr) + arg.offset_intragraph_));
-    #endif
+#if NEW_UNPACK
+    return std::make_tuple(static_cast<uint64_t>(*arg.seed_.ptr), static_cast<uint64_t>(*(arg.offset_.ptr) + arg.offset_intragraph_));
+#else
+    return std::make_tuple(arg.seed_, static_cast<uint64_t>(*(arg.offset_.ptr) + arg.offset_intragraph_));
+#endif
   } else {
-    #if NEW_UNPACK
-        return std::make_tuple(arg.seed_.val, arg.offset_.val);
-    #else
-        return std::make_tuple(arg.seed_, arg.offset_.val);
-    #endif
+#if NEW_UNPACK
+    return std::make_tuple(arg.seed_.val, arg.offset_.val);
+#else
+    return std::make_tuple(arg.seed_, arg.offset_.val);
+#endif
   }
 }
+
+class SimpleDeviceMem {
+ public:
+  SimpleDeviceMem() = delete;
+  explicit SimpleDeviceMem(std::size_t mem_size) 
+      : p_mem_{} { (void)hipMalloc(static_cast<void**>(&p_mem_), mem_size); }
+      
+    void* GetDeviceBuffer() const { return p_mem_; }
+    ~SimpleDeviceMem() { (void)hipFree(p_mem_); }
+
+ private:
+  void* p_mem_;
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
