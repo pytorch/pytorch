@@ -490,6 +490,79 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
 
 
+def error_inputs_native_batch_norm(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=True)
+    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+    input_shape = [1, 4]
+    correct_channels = 4
+    wrong_channels = 3
+    training = True
+    momentum = 0.5
+    eps = 1e-5
+
+    correct_weight = make_arg(correct_channels)
+    correct_bias = make_arg(correct_channels)
+    correct_running_mean = make_arg_without_requires_grad(correct_channels, low=0)
+    correct_running_var = make_arg_without_requires_grad(correct_channels, low=0)
+
+    wrong_weight = make_arg(wrong_channels)
+    wrong_bias = make_arg(wrong_channels)
+    wrong_running_mean = make_arg_without_requires_grad(wrong_channels, low=0)
+    wrong_running_var = make_arg_without_requires_grad(wrong_channels, low=0)
+
+    yield ErrorInput(SampleInput(
+        make_arg(input_shape),
+        args=(
+            wrong_weight,
+            correct_bias,
+            correct_running_mean,
+            correct_running_var,
+            training,
+            momentum,
+            eps,
+        ),
+        kwargs=kwargs
+    ), error_regex="Weight is not the right number of channels")
+    yield ErrorInput(SampleInput(
+        make_arg(input_shape),
+        args=(
+            correct_weight,
+            wrong_bias,
+            correct_running_mean,
+            correct_running_var,
+            training,
+            momentum,
+            eps,
+        ),
+        kwargs=kwargs
+    ), error_regex="Bias is not the right number of channels")
+    yield ErrorInput(SampleInput(
+        make_arg(input_shape),
+        args=(
+            correct_weight,
+            correct_bias,
+            wrong_running_mean,
+            correct_running_var,
+            training,
+            momentum,
+            eps,
+        ),
+        kwargs=kwargs
+    ), error_regex="Running mean is not the right number of channels")
+    yield ErrorInput(SampleInput(
+        make_arg(input_shape),
+        args=(
+            correct_weight,
+            correct_bias,
+            correct_running_mean,
+            wrong_running_var,
+            training,
+            momentum,
+            eps,
+        ),
+        kwargs=kwargs
+    ), error_regex="Running variance is not the right number of channels")
+
 def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
@@ -505,6 +578,10 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
             yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
         else:
             yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
+
+
+def error_inputs__native_batch_norm_legit(op_info, device, **kwargs):
+    return error_inputs_native_batch_norm(op_info, device, **kwargs)
 
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
@@ -12385,6 +12462,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_batch_norm,
+           error_inputs_func=error_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
@@ -12412,6 +12490,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs__native_batch_norm_legit,
+           error_inputs_func=error_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.

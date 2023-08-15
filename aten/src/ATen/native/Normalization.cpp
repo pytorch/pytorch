@@ -209,6 +209,22 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   auto save_mean_a = save_mean.accessor<param_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<param_t, 1>();
 
+  if (running_mean.defined()) {
+    TORCH_CHECK(
+        running_mean.size(0) == n_input,
+        "Running mean is not the right number of channels: ",
+        running_mean.size(0),
+        " != ",
+        n_input);
+  }
+  if (running_var.defined()) {
+    TORCH_CHECK(
+        running_var.size(0) == n_input,
+        "Running variance is not the right number of channels: ",
+        running_var.size(0),
+        " != ",
+        n_input);
+  }
   auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
   auto running_var_a = conditional_accessor_1d<param_t>(running_var);
 

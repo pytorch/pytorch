@@ -34,6 +34,38 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
+  if (weight.defined()) {
+    TORCH_CHECK(
+        weight.size(0) == n_channel,
+        "Weight is not the right number of channels: ",
+        weight.size(0),
+        " != ",
+        n_channel);
+  }
+  if (bias.defined()) {
+    TORCH_CHECK(
+        bias.size(0) == n_channel,
+        "Bias is not the right number of channels: ",
+        bias.size(0),
+        " != ",
+        n_channel);
+  }
+  if (running_mean.defined()) {
+    TORCH_CHECK(
+        running_mean.size(0) == n_channel,
+        "Running mean is not the right number of channels: ",
+        running_mean.size(0),
+        " != ",
+        n_channel);
+  }
+  if (running_var.defined()) {
+    TORCH_CHECK(
+        running_var.size(0) == n_channel,
+        "Running variance is not the right number of channels: ",
+        running_var.size(0),
+        " != ",
+        n_channel);
+  }
   const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
   const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
 
