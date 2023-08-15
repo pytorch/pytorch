@@ -155,6 +155,30 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
 
 
+"""
+    torch.mm(mat1, mat2.to(mat2_dtype))
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("mat2"),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=(
+        lambda match: (config.use_mixed_mm or config.force_mixed_mm)
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+    ),  # needs cuda
+)
+def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
