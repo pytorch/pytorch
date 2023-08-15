@@ -4,8 +4,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 
-#include <test/cpp/common/support.h>
-
 using namespace c10;
 #ifndef C10_MOBILE
 static void check(int64_t value) {
@@ -43,12 +41,13 @@ TEST(SymIntTest, SingletonSymNode) {
 
   // Tentaively throw an error when comparing with a non-singleton, this is not
   // necessarily the right behavior.
-  ASSERT_THROWS_WITH(
-      (a == d), "SingletonSymNode can only be compared with SingletonSymNode");
-  ASSERT_THROWS_WITH(
-      (d == a), "SingletonSymNode can only be compared with SingletonSymNode");
-  ASSERT_THROWS_WITH((a >= b), " not supported by SingletonSymNode");
-  ASSERT_THROWS_WITH((a >= d), " not supported by SingletonSymNode");
-  ASSERT_THROWS_WITH((d >= a), "NYI");
+  ASSERT_THROW((void)(a == d), std::runtime_error);
+  ASSERT_THROW((void)(a != d), std::runtime_error);
+  ASSERT_THROW((void)(d == a), std::runtime_error);
+  ASSERT_THROW((void)(d != a), std::runtime_error);
+
+  ASSERT_THROW((void)(a >= b), std::runtime_error); // "not supported by..."
+  ASSERT_THROW((void)(a >= d), std::runtime_error); // "not supported by..."
+  ASSERT_THROW((void)(d >= a), std::runtime_error); // "NYI"
 }
 #endif

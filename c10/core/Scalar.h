@@ -303,7 +303,7 @@ class C10_API Scalar {
     // Why do we store bool in a double? (preexisting)
     if (auto m = sb.maybe_as_bool()) {
       tag = Tag::HAS_b;
-      v.d = *m;
+      v.i = *m;
     } else {
       tag = Tag::HAS_sb;
       v.p = std::move(sb).release();

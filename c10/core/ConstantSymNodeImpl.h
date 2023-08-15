@@ -10,6 +10,10 @@ namespace c10 {
 // for representing otherwise unrepresentable large negative integer constant.
 template <typename T>
 class ConstantSymNodeImpl : public SymNodeImpl {
+  static_assert(
+      std::is_same<T, int64_t>::value || std::is_same<T, bool>::value,
+      "ConstantSymNodeImpl can only accept int64_t or bool types");
+
  public:
   ConstantSymNodeImpl(T val) : value_(val) {}
 
