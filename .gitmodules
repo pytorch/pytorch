@@ -157,6 +157,3 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
-[submodule "third_party/NVTX"]
-	path = third_party/NVTX
-	url = https://github.com/NVIDIA/NVTX.git
