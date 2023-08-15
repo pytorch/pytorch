@@ -8,7 +8,7 @@ import torch
 import torch._C._onednn as llga
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.decomposition import select_decomp_table
-from torch.csrc.jit.codegen.onednn.onednn_graph import OnednnGraph
+from torch.jit.onednn_graph import OnednnGraph
 from torch.fx import Graph, GraphModule, Node, subgraph_rewriter
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
