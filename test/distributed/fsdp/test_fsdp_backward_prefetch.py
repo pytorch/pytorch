@@ -118,9 +118,9 @@ class TestBackwardPrefetch(FSDPTest):
         def patched_get_handle_to_prefetch(*args, **kwargs):
             handle = orig_get_handle_to_prefetch(*args, **kwargs)
 
-            assert (
-                len(args) == 2
-            ), "expect _get_handle_to_prefetch(state, current_handle)"
+            self.assertEqual(
+                len(args), 2, "expect _get_handle_to_prefetch(state, current_handle)"
+            )
             state = args[0]
             current_handle = args[1]
             training_state = _get_training_state(current_handle)
@@ -148,21 +148,22 @@ class TestBackwardPrefetch(FSDPTest):
                 loss.backward()
                 optim.step()
                 if backward_prefetch is None:
-                    assert len(flat_param_fqns_array) == 0
+                    self.assertEqual(len(flat_param_fqns_array), 0)
                 elif backward_prefetch == BackwardPrefetch.BACKWARD_PRE:
                     encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_PRE
                     # +1 is for None handle
-                    assert len(flat_param_fqns_array) == TOTAL_NUM_PREFETCH + 1
+                    self.assertEqual(len(flat_param_fqns_array), TOTAL_NUM_PREFETCH + 1)
                 elif backward_prefetch == BackwardPrefetch.BACKWARD_POST:
                     encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_POST
-                    assert len(flat_param_fqns_array) == TOTAL_NUM_PREFETCH + 1
+                    self.assertEqual(len(flat_param_fqns_array), TOTAL_NUM_PREFETCH + 1)
 
                 for array_index, fqns in enumerate(flat_param_fqns_array):
                     if array_index >= 0 and array_index < encoder_begin_index:
                         param_index = encoder_begin_index - 1 - array_index
-                        assert fqns == [
-                            x.format(index=param_index) for x in DECODER_PARAM_FQNS
-                        ]
+                        self.assertEqual(
+                            fqns,
+                            [x.format(index=param_index) for x in DECODER_PARAM_FQNS],
+                        )
                     elif (
                         array_index >= encoder_begin_index
                         and array_index <= encoder_begin_index + ENCODER_PREFETCH_NUM
@@ -170,11 +171,12 @@ class TestBackwardPrefetch(FSDPTest):
                         param_index = (
                             encoder_begin_index + ENCODER_PREFETCH_NUM - array_index
                         )
-                        assert fqns == [
-                            x.format(index=param_index) for x in ENCODER_PARAM_FQNS
-                        ]
+                        self.assertEqual(
+                            fqns,
+                            [x.format(index=param_index) for x in ENCODER_PARAM_FQNS],
+                        )
                     else:
-                        assert fqns is None
+                        self.assertTrue(fqns is None)
 
                 flat_param_fqns_array = []
 
