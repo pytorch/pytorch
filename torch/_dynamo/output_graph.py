@@ -331,6 +331,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # Tracks if the output graph has a user defined allowed function in the
+        # graph. This is used later to determine if we should fallback to eager
+        # for certain exceptions. THe idea is that if the user has applied
+        # allow_in_graph, they would like to see the error instead of falling
+        # back for backend errors.
+        self.has_user_defined_allowed_in_graph = False
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -995,6 +1001,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except exceptions_allowed_to_be_fallback as e:
+            if self.has_user_defined_allowed_in_graph:
+                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                    e.__traceback__
+                ) from None
             msg = (
                 "Backend compiler failed with a fake tensor exception at \n"
                 f"{self.root_tx.format_frame_summary()}"

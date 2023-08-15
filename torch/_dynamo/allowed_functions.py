@@ -235,6 +235,12 @@ def _allowed_function_ids():
 
 
 @make_function_id_set
+def _allowed_user_defined_function_ids():
+    rv = {}
+    return rv
+
+
+@make_function_id_set
 def _builtin_function_ids():
     rv = {
         id(v): f"builtins.{k}"
@@ -297,6 +303,10 @@ def is_allowed(obj):
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
     )
+
+
+def is_user_defined_allowed(obj):
+    return id(obj) in _allowed_user_defined_function_ids
 
 
 def torch_get_name(obj, default):
