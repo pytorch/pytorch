@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 from collections import defaultdict
+from enum import auto, Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
@@ -87,6 +88,36 @@ class ExportGraphSignature:
             len(self.user_outputs) + len(self.buffers_to_mutate)
             == assertion_dep_token_index
         )
+
+class ArgumentKind(Enum):
+    Tensor = auto()
+    SymInt = auto()
+    Constant = auto()
+
+
+@dataclasses.dataclass
+class ArgumentSpec:
+    kind: ArgumentKind
+    value: Any
+
+    def __post_init__(self):
+        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
+            assert isinstance(self.value, str)
+
+
+@dataclasses.dataclass
+class ModuleCallSignature:
+    inputs: List[ArgumentSpec]
+    outputs: List[ArgumentSpec]
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+
+@dataclasses.dataclass
+class ModuleCallEntry:
+    fqn: str
+    signature: Optional[ModuleCallSignature] = None
+
 
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
     count = 0
@@ -237,6 +268,7 @@ class ExportedProgram:
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
         equality_constraints: List[Tuple[InputDim, InputDim]],
+        module_call_graph: List[ModuleCallEntry],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -247,6 +279,7 @@ class ExportedProgram:
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self._equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
 
     @property
     @compatibility(is_backward_compatible=True)
@@ -291,6 +324,11 @@ class ExportedProgram:
     def equality_constraints(self):
         return self._equality_constraints
 
+    @property
+    @compatibility(is_backward_compatible=False)
+    def module_call_graph(self):
+        return self._module_call_graph
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
             try:
@@ -305,12 +343,16 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = tuple(value for _, value in self.state_dict.items())
-        self._check_input_constraints(*param_buffer_values, *args)
+        ordered_params = tuple(self.state_dict[name] for name in self.graph_signature.parameters)
+        ordered_buffers = tuple(self.state_dict[name] for name in self.graph_signature.buffers)
+        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
         with torch.no_grad():
+            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+            # See: torch/_functorch/aot_autograd.py#L1034
             res = torch.fx.Interpreter(self.graph_module).run(
-                *param_buffer_values,
+                *ordered_params,
+                *ordered_buffers,
                 *args,
                 enable_io_processing=False
             )
@@ -361,20 +403,100 @@ class ExportedProgram:
         """
         return unlift_exported_program_lifted_states(self)
 
-
     def transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
+
+        def get_output_node_names(gm):
+            output_node = list(gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+
+            return [str(arg) for arg in output_node.args[0]]
+
+        def get_input_node_names(gm):
+            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+
+        def generate_new_graph_signature(old_signature, old_gm, new_gm):
+            """
+            Update graph_signature according to graph after transformation.
+            Transformations can lead to node name changes, which are used in
+            graph_signature to identify inputs and outputs. Therefore, after each
+            transformation, we need to update the graph_signature according to
+            new node names.
+
+            WARNING: This implementation makes a few assumptions
+                - The transformation doesn't change number of inputs/outputs
+                - Each input/output still has the same meaning.
+                    - For inputs, that means that the inputs in transformed
+                        graph map to the same lifted parameter/buffer or user
+                        input as the input of the same position in the graph
+                        before transformation.
+                    - Similarly for outputs, each output should correspond to the
+                        same mutated buffer or user output as the output value of
+                        the same position  in the graph before transformation.
+
+            It is difficult to programatically validate these assumptions, but they
+            should hold true most of the time as inputs/outputs of the graph rarely
+            need to be changed.
+            """
+            old_graph_input_node_names = get_input_node_names(old_gm)
+            new_graph_input_node_names = get_input_node_names(new_gm)
+            assert len(old_graph_input_node_names) == len(new_graph_input_node_names), f"""
+                Number of input nodes changed from {len(old_graph_input_node_names)}
+                to {len(new_graph_input_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            old_graph_output_node_names = get_output_node_names(old_gm)
+            new_graph_output_node_names = get_output_node_names(new_gm)
+            assert len(old_graph_output_node_names) == len(new_graph_output_node_names), f"""
+                Number of output values changed from {len(old_graph_output_node_names)}
+                to {len(new_graph_output_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            node_names_mapping = dict(zip(
+                old_graph_input_node_names + old_graph_output_node_names,
+                new_graph_input_node_names + new_graph_output_node_names
+            ))
+
+            new_signature = copy.deepcopy(old_signature)
+            new_signature.user_inputs = [
+                node_names_mapping[old_user_input]
+                for old_user_input in old_signature.user_inputs
+            ]
+            new_signature.user_outputs = [
+                node_names_mapping[old_user_output]
+                for old_user_output in old_signature.user_outputs
+            ]
+            new_signature.inputs_to_parameters = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[old_input_name]
+                for old_input_name in old_signature.inputs_to_parameters.keys()
+            }
+            new_signature.inputs_to_buffers = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[old_input_name]
+                for old_input_name in old_signature.inputs_to_buffers.keys()
+            }
+            new_signature.buffers_to_mutate = {
+                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[old_output_name]
+                for old_output_name in old_signature.buffers_to_mutate.keys()
+            }
+            return new_signature
+
+
+        new_graph_signature = generate_new_graph_signature(
+            self.graph_signature, self.graph_module, transformed_gm)
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            copy.deepcopy(self.graph_signature),
+            new_graph_signature,
             copy.deepcopy(self.call_spec),
             self.state_dict,
             copy.deepcopy(self.range_constraints),
             copy.deepcopy(self.equality_constraints),
+            copy.deepcopy(self._module_call_graph),
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -396,6 +518,16 @@ class ExportedProgram:
         assert _assertion_graph_res is not None
         _assertion_graph = _assertion_graph_res.graph_module
         _assertion_graph(*args)
+
+    def validate(self):
+        # TODO(zhxchen17) check for get_attr
+        # TODO(zhxchen17) check for funcitonal ops
+        for gm in self.graph_module.modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    assert node.target != torch.ops.higher_order._export_tracepoint
 
 
 def _process_constraints(

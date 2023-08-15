@@ -38,7 +38,7 @@ Work::Work(
   }
 }
 
-OpType Work::retrieveOpType() {
+OpType Work::retrieveOpType() const {
   return opType_;
 }
 
@@ -125,6 +125,10 @@ void Work::finishAndThrow(std::exception_ptr exception) {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+}
+
+float Work::getDuration() const {
+  TORCH_CHECK(false, "Only ProcessGrouppNCCL::WorkNCCL supports getDuration.");
 }
 
 class FutureWrappingWork : public Work {

@@ -1228,6 +1228,11 @@ void initJITBindings(PyObject* module) {
             return a->guard_float(nullptr, 0);
           })
       .def(
+          "expect_true",
+          [](c10::SymNode a) {
+            return a->expect_true(nullptr, 0);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();
