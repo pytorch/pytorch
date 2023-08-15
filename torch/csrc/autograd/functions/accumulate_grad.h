@@ -52,7 +52,7 @@ struct TORCH_API AccumulateGrad : public Node {
   }
 
   std::vector<std::unique_ptr<PostAccumulateGradHook>>&
-  tensor_post_acc_grad_hooks() noexcept {
+  tensor_post_acc_grad_hooks() noexcept override {
     // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
     //     it can be destroyed even though the Tensor is still alive (contrary
     //     to all other Nodes). So we must lazily read the Tensor hooks here.

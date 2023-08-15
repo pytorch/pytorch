@@ -356,6 +356,9 @@ class CompiledNodeArgs {
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
+    for (auto& i : fn->tensor_post_acc_grad_hooks()) {
+      i->compiled_args(*this);
+    }
     collect_size(_node_call.tensor_pre_hooks.size());
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());

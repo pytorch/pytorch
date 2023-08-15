@@ -49,7 +49,7 @@ struct TORCH_API PostAccumulateGradHook {
   // autograd
   virtual void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
     throw std::runtime_error(
-        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+        std::string("not yet implemented for compiled autograd: ") +
         typeid(*this).name());
   }
 };

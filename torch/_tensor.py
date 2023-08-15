@@ -564,13 +564,10 @@ class Tensor(torch._C._TensorBase):
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
             >>> lr = 0.01
             >>> # simulate a simple SGD update
-            >>> h = v.register_post_accumulate_grad_hook(lambda p: p.add(p.grad, alpha=-lr))
+            >>> h = v.register_post_accumulate_grad_hook(lambda p: p.add_(p.grad, alpha=-lr))
             >>> v.backward(torch.tensor([1., 2., 3.]))
             >>> v
-             -0.0100
-             -0.0200
-             -0.0300
-            [torch.FloatTensor of size (3,)]
+            tensor([-0.0100, -0.0200, -0.0300], requires_grad=True)
 
             >>> h.remove()  # removes the hook
         """

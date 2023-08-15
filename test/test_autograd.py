@@ -889,7 +889,58 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(ValueError, "Expected allow_unused to be True or not passed when"):
             torch.autograd.grad(y, x, allow_unused=False, materialize_grads=True)
 
-    def test_post_accumulate_grad_hook(self):
+    def test_post_accumulate_grad_hook_on_non_leaf_is_no_op(self):
+        def hook(tensor):
+            tensor.sub_(1.)
+        leaf = torch.rand(3, requires_grad=True)
+        non_leaf = 2. * leaf
+        non_leaf.register_post_accumulate_grad_hook(hook)
+        sum = non_leaf.sum()
+        sum.backward(retain_graph=True)
+        # The grad does not accumulate for non-leaf Tensors, even if
+        # retain_grad, so the hook should never be called.
+        self.assertEqual(non_leaf, leaf * 2.)
+
+    def test_post_accumulate_grad_hook_multiple_hooks(self):
+        def hook1(tensor):
+            tensor.sub_(tensor.grad)
+
+        def hook2(tensor):
+            tensor.mul_(4.)
+        tensor = torch.rand(3, requires_grad=True)
+        tensor_ref = tensor.clone().detach()
+        tensor.register_post_accumulate_grad_hook(hook1)
+        tensor.register_post_accumulate_grad_hook(hook2)
+        sum = tensor.sum()
+        sum.backward()
+        # both hooks should be called, in order
+        self.assertEqual(4. * (tensor_ref - 1.), tensor)
+
+    def test_post_accumulate_grad_hook_multiple_tensors(self):
+        def hook(tensor):
+            tensor.sub_(tensor.grad)
+        tensor1 = torch.rand(3, requires_grad=True)
+        tensor1_ref = tensor1.clone().detach()
+        tensor2 = torch.rand(5, requires_grad=True)
+        tensor2_ref = tensor2.clone().detach()
+        tensor1.register_post_accumulate_grad_hook(hook)
+        tensor2.register_post_accumulate_grad_hook(hook)
+        tensor1.sum().backward()
+        tensor2.sum().backward()
+        # both tensors should have been modified
+        self.assertEqual(tensor1_ref - 1., tensor1)
+        self.assertEqual(tensor2_ref - 1., tensor2)
+
+    def test_post_accumulate_grad_hook_returns_not_None(self):
+        def bad_hook(tensor):
+            return tensor.grad
+        tensor = torch.rand(2, 3, requires_grad=True)
+        tensor.register_post_accumulate_grad_hook(bad_hook)
+        # should error!
+        with self.assertRaisesRegex(RuntimeError, "hooks should return None."):
+            tensor.sum().backward()
+
+    def test_post_accumulate_grad_hook_e2e(self):
         def setup_optim_in_bwd(model):
             optims = {}
             handles = []

@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <sstream>
+#include "c10/util/Exception.h"
 
 using torch::autograd::Variable;
 using torch::autograd::variable_list;
@@ -214,7 +215,9 @@ auto PyFunctionTensorPostAccGradHook::operator()(const Variable& tensor)
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, THPVariable_Wrap(tensor));
-  _call_hooks(dict, tup.get());
+  bool returned_none = !_call_hooks(dict, tup.get());
+  TORCH_CHECK(
+      returned_none, "Tensor post accumulate grad hooks should return None.");
 }
 
 } // namespace autograd

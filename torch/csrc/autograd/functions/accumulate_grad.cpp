@@ -92,6 +92,11 @@ variable_list AccumulateGrad::apply_with_saved(
       });
   saved.after(variable_copy);
   saved.after(grad_copy);
+
+  for (const auto& hook : tensor_post_acc_grad_hooks()) {
+    (*hook)(variable);
+  }
+
   return variable_list();
 }
 
