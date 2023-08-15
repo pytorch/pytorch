@@ -1073,6 +1073,8 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
+TEST_DEVICE = _check_exists_device()
+
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
@@ -1112,6 +1114,13 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
+def _check_available_device():
+    if TEST_CUDA:
+        return 'cuda'
+    elif TEST_PRIVATEUSE1:
+        return torch._C._get_privateuse1_backend_name()
+
+TEST_DEVICE = _check_available_device()
 
 def skipIfCrossRef(fn):
     @wraps(fn)
