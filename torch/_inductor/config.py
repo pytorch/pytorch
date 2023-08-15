@@ -57,6 +57,17 @@ batch_fusion = True
 # enable reordering pass
 reordering = True
 
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
+# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
+# Autotune will compare perf with normal cast->then->mm option
+use_mixed_mm = False
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
+# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# Autotune will not compare with normal cast->then->mm option.
+# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
+force_mixed_mm = False
+
 # AOTInductor output path
 # If an absolute path is specified, the generated lib files will be stored under the directory;
 # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -82,6 +93,8 @@ max_autotune_gemm_backends = os.environ.get(
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
+save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
