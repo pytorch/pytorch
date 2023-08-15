@@ -4,7 +4,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 
-#include <test/cpp/common/support.h
+#include <test/cpp/common/support.h>
 
 using namespace c10;
 #ifndef C10_MOBILE
