@@ -326,10 +326,12 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
   c10::complex<T> u = z + T(1);
   if (u == T(1)) {
     return z;
-  } else if (u - T(1) == z) {
-    return log(u);
   } else {
-    return log(u) * (z / (u - T(1)));
+    auto log_u = log(u);
+    if (u - T(1) == z) {
+      return log_u;
+    }
+    return log_u * (z / (u - T(1)));
   }
 #endif
 }
