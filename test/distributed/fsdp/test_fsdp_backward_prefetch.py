@@ -1,23 +1,63 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from typing import no_type_check
 from unittest.mock import patch
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._runtime_utils import (
     _get_handle_to_prefetch,
     _get_training_state,
 )
-from torch.distributed.fsdp.flat_param import HandleTrainingState
+from torch.distributed.fsdp.flat_param import FlatParamHandle, HandleTrainingState
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
-NUM_ITERS = 1
+NUM_ITERS = 2
+DECODER_PARAM_FQNS = [
+    "decoder.layers.{index}.self_attn.in_proj_weight",
+    "decoder.layers.{index}.self_attn.in_proj_bias",
+    "decoder.layers.{index}.self_attn.out_proj.weight",
+    "decoder.layers.{index}.self_attn.out_proj.bias",
+    "decoder.layers.{index}.multihead_attn.in_proj_weight",
+    "decoder.layers.{index}.multihead_attn.in_proj_bias",
+    "decoder.layers.{index}.multihead_attn.out_proj.weight",
+    "decoder.layers.{index}.multihead_attn.out_proj.bias",
+    "decoder.layers.{index}.linear1.weight",
+    "decoder.layers.{index}.linear1.bias",
+    "decoder.layers.{index}.linear2.weight",
+    "decoder.layers.{index}.linear2.bias",
+    "decoder.layers.{index}.norm1.weight",
+    "decoder.layers.{index}.norm1.bias",
+    "decoder.layers.{index}.norm2.weight",
+    "decoder.layers.{index}.norm2.bias",
+    "decoder.layers.{index}.norm3.weight",
+    "decoder.layers.{index}.norm3.bias",
+]
+ENCODER_PARAM_FQNS = [
+    "encoder.layers.{index}.self_attn.in_proj_weight",
+    "encoder.layers.{index}.self_attn.in_proj_bias",
+    "encoder.layers.{index}.self_attn.out_proj.weight",
+    "encoder.layers.{index}.self_attn.out_proj.bias",
+    "encoder.layers.{index}.linear1.weight",
+    "encoder.layers.{index}.linear1.bias",
+    "encoder.layers.{index}.linear2.weight",
+    "encoder.layers.{index}.linear2.bias",
+    "encoder.layers.{index}.norm1.weight",
+    "encoder.layers.{index}.norm1.bias",
+    "encoder.layers.{index}.norm2.weight",
+    "encoder.layers.{index}.norm2.bias",
+]
+TOTAL_NUM_PREFETCH = 12
+ENCODER_BEGIN_INDEX_FOR_PRE = 6
+ENCODER_BEGIN_INDEX_FOR_POST = 5
+ENCODER_PREFETCH_NUM = 5
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -29,6 +69,20 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+@no_type_check
+def get_flat_param_fqns(state: _FSDPState, handle: FlatParamHandle) -> None:
+    if handle is None:
+        return None
+    param_to_fqn = state._exec_order_data.param_to_fqn
+    handle_params = handle.flat_param._params  # only populated for use_orig_params
+    param_fqns = [
+        param
+        for param_list in [param_to_fqn[p] for p in handle_params]
+        for param in param_list
+    ]
+    return param_fqns
 
 
 class TestBackwardPrefetch(FSDPTest):
@@ -59,8 +113,7 @@ class TestBackwardPrefetch(FSDPTest):
         tgt = torch.randn((20, 1, 1024), device="cuda")
 
         # monkey patch
-        non_none_handle_count = 0
-        func_call_count = 0
+        flat_param_fqns_array = []
 
         def patched_get_handle_to_prefetch(*args, **kwargs):
             handle = orig_get_handle_to_prefetch(*args, **kwargs)
@@ -78,15 +131,13 @@ class TestBackwardPrefetch(FSDPTest):
                 training_state == HandleTrainingState.BACKWARD_POST
                 and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
             ):
-                nonlocal non_none_handle_count
-                nonlocal func_call_count
-                if handle is not None:
-                    non_none_handle_count += 1
-                func_call_count += 1
+                nonlocal flat_param_fqns_array
+                fqns = get_flat_param_fqns(state, handle)
+                flat_param_fqns_array.append(fqns)
             return handle
 
-        # track num of calls to _get_handle_to_prefetch
-        # track num of non-None prefetch handles
+        # flat params from prefetch handle should match
+        # DECODER_PARAM_FQNS and ENCODER_PARAM_FQNS
         with patch(
             "torch.distributed.fsdp._runtime_utils._get_handle_to_prefetch",
             patched_get_handle_to_prefetch,
@@ -96,30 +147,53 @@ class TestBackwardPrefetch(FSDPTest):
                 loss = model(src, tgt).sum()
                 loss.backward()
                 optim.step()
-        if backward_prefetch is None:
-            self.assertTrue(
-                func_call_count == 0, f"_get_handle_to_prefetch: {func_call_count}"
-            )
-        elif backward_prefetch in [
-            BackwardPrefetch.BACKWARD_PRE,
-            BackwardPrefetch.BACKWARD_POST,
-        ]:
-            self.assertTrue(
-                func_call_count > 0 and non_none_handle_count > 0,
-                f"_get_handle_to_prefetch: {func_call_count} non-None handles: {non_none_handle_count}",
-            )
+                if backward_prefetch is None:
+                    assert len(flat_param_fqns_array) == 0
+                elif backward_prefetch == BackwardPrefetch.BACKWARD_PRE:
+                    encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_PRE
+                    # +1 is for None handle
+                    assert len(flat_param_fqns_array) == TOTAL_NUM_PREFETCH + 1
+                elif backward_prefetch == BackwardPrefetch.BACKWARD_POST:
+                    encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_POST
+                    assert len(flat_param_fqns_array) == TOTAL_NUM_PREFETCH + 1
+
+                for array_index, fqns in enumerate(flat_param_fqns_array):
+                    if array_index >= 0 and array_index < encoder_begin_index:
+                        param_index = encoder_begin_index - 1 - array_index
+                        assert fqns == [
+                            x.format(index=param_index) for x in DECODER_PARAM_FQNS
+                        ]
+                    elif (
+                        array_index >= encoder_begin_index
+                        and array_index <= encoder_begin_index + ENCODER_PREFETCH_NUM
+                    ):
+                        param_index = (
+                            encoder_begin_index + ENCODER_PREFETCH_NUM - array_index
+                        )
+                        assert fqns == [
+                            x.format(index=param_index) for x in ENCODER_PARAM_FQNS
+                        ]
+                    else:
+                        assert fqns is None
+
+                flat_param_fqns_array = []
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_prefetch_pre(self):
-        self._dist_train(BackwardPrefetch.BACKWARD_PRE)
+    def test_backward_prefetch(self):
+        # subtest reuse process group to shorten test time
+        self.run_subtests(
+            {
+                "backward_prefetch": [
+                    None,
+                    BackwardPrefetch.BACKWARD_PRE,
+                    BackwardPrefetch.BACKWARD_POST,
+                ],
+            },
+            self._test_backward_prefetch,
+        )
 
-    @skip_if_lt_x_gpu(2)
-    def test_backward_prefetch_post(self):
-        self._dist_train(BackwardPrefetch.BACKWARD_POST)
-
-    @skip_if_lt_x_gpu(2)
-    def test_backward_prefetch_disabled(self):
-        self._dist_train(None)
+    def _test_backward_prefetch(self, backward_prefetch: BackwardPrefetch):
+        self._dist_train(backward_prefetch)
 
 
 if __name__ == "__main__":
