@@ -286,11 +286,7 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
 
-            if (
-                self.device == "cuda"
-                and not dtype == torch.bfloat16
-                and not SM80OrLater
-            ):
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
                 continue
 
             mod = (
