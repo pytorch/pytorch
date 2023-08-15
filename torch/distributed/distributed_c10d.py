@@ -173,6 +173,11 @@ class Backend:
 
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
+    default_device_backend_map: Dict[str, str] = {
+        'cpu' : GLOO,
+        'cuda' : NCCL,
+    }
+
     backend_capability: Dict[str, List[str]] = {
         GLOO : ["cpu", "cuda"],
         NCCL : ["cuda"],
@@ -234,6 +239,10 @@ class Backend:
 
         setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
+        if devices is not None:
+            for device in devices:
+                if device != 'cpu' and device != 'cuda':
+                    Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
@@ -262,9 +271,9 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            self.device_backend_map = {"cpu": Backend.GLOO}
-            if is_nccl_available():
-                self.device_backend_map["cuda"] = Backend.NCCL
+            for device in Backend.default_device_backend_map:
+                if is_backend_available(Backend.default_device_backend_map[device]):
+                    self.device_backend_map[device] = Backend.default_device_backend_map[device]
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
