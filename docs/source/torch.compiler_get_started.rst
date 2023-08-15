@@ -87,9 +87,9 @@ hub.
 .. code-block:: python
 
    import torch
-   model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True)
+   model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet50', pretrained=True)
    opt_model = torch.compile(model, backend="inductor")
-   model(torch.randn(1,3,64,64))
+   opt_model(torch.randn(1,3,64,64))
 
 And that is not the only available backend, you can run in a REPL
 ``torch.compile.list_backends()`` to see all the available backends. Try out the
@@ -131,7 +131,6 @@ Similarly, let’s try out a TIMM example:
 .. code-block:: python
 
    import timm
-   import torch._dynamo as dynamo
    import torch
    model = timm.create_model('resnext101_32x8d', pretrained=True, num_classes=2)
    opt_model = torch.compile(model, backend="inductor")
