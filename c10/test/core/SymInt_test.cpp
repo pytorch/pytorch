@@ -41,13 +41,13 @@ TEST(SymIntTest, SingletonSymNode) {
 
   // Tentaively throw an error when comparing with a non-singleton, this is not
   // necessarily the right behavior.
-  ASSERT_THROW((void)(a == d), std::runtime_error);
-  ASSERT_THROW((void)(a != d), std::runtime_error);
-  ASSERT_THROW((void)(d == a), std::runtime_error);
-  ASSERT_THROW((void)(d != a), std::runtime_error);
+  ASSERT_THROW((void)(a == d), c10::Error);
+  ASSERT_THROW((void)(a != d), c10::Error);
+  ASSERT_THROW((void)(d == a), c10::Error);
+  ASSERT_THROW((void)(d != a), c10::Error);
 
-  ASSERT_THROW((void)(a >= b), std::runtime_error); // "not supported by..."
-  ASSERT_THROW((void)(a >= d), std::runtime_error); // "not supported by..."
-  ASSERT_THROW((void)(d >= a), std::runtime_error); // "NYI"
+  ASSERT_THROW((void)(a >= b), c10::Error); // "not supported by..."
+  ASSERT_THROW((void)(a >= d), c10::Error); // "not supported by..."
+  ASSERT_THROW((void)(d >= a), c10::Error); // "NYI"
 }
 #endif
