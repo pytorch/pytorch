@@ -404,14 +404,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     self->guard =
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
     THPUtils_checkString(self->name);
-    // auto str_name = THPUtils_unpackString(self->name);
-    std::string str_name;
-    if (PyUnicode_Check(self->name)) {
-      Py_ssize_t size;
-      const char* data = PyUnicode_AsUTF8AndSize(self->name, &size);
-      str_name = std::string(data);
-    }
-    self->guard->before(str_name);
+    self->guard->before(THPUtils_unpackString(self->name));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -471,7 +464,6 @@ void initManualPythonBindings(PyObject* module) {
           "torch._C._profiler_manual.RecordFunctionFast",
       .tp_basicsize = sizeof(RecordFunctionFast),
       .tp_dealloc = (destructor)RecordFunctionFast_dealloc,
-      // .tp_repr = (reprfunc) RecordFunctionFast_repr,
       .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
       .tp_methods = RecordFunctionFast_methods,
       .tp_init = RecordFunctionFast_init,
