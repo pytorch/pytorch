@@ -8,29 +8,29 @@
 
 
 #pragma once
-
+Xo
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <torch/torch.h>
 
-#include "ck/ck.hpp"
+#include <ck/ck.hpp>
 
-#include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
-#include "ck/tensor_operation/gpu/device/tensor_specialization.hpp"
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v1.hpp"
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v2.hpp"
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_forward_xdl_cshuffle.hpp"
-#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
+#include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
+#include <ck/tensor_operation/gpu/device/tensor_specialization.hpp>
+#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v1.hpp>
+#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_backward_xdl_cshuffle_v2.hpp>
+#include <ck/tensor_operation/gpu/device/impl/device_grouped_multihead_attention_forward_xdl_cshuffle.hpp>
+#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
 
-#include "ck/library/utility/check_err.hpp"
-#include "ck/library/utility/device_memory.hpp"
-#include "ck/library/utility/host_tensor.hpp"
-#include "ck/library/utility/host_tensor_generator.hpp"
-#include "ck/library/utility/literals.hpp"
-#include "ck/library/reference_tensor_operation/cpu/reference_batched_gemm.hpp"
-#include "ck/library/reference_tensor_operation/cpu/reference_softmax.hpp"
-#include "ck/library/reference_tensor_operation/cpu/reference_dropout.hpp"
+#include <ck/library/utility/check_err.hpp>
+#include <ck/library/utility/device_memory.hpp>
+#include <ck/library/utility/host_tensor.hpp>
+#include <ck/library/utility/host_tensor_generator.hpp>
+#include <ck/library/utility/literals.hpp>
+#include <ck/library/reference_tensor_operation/cpu/reference_batched_gemm.hpp>
+#include <ck/library/reference_tensor_operation/cpu/reference_softmax.hpp>
+#include <ck/library/reference_tensor_operation/cpu/reference_dropout.hpp>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
