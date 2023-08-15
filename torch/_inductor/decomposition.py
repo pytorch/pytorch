@@ -207,6 +207,13 @@ def mm(self, input2):
 
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
+    def non_empty_tensor(x):
+        # special case for cat'ing with an empty tensor -
+        # just drop the 'empty' inputs so they don't confuse the logic below.
+        return len(x.shape) > 1 or x.shape[0] > 0
+
+    tensors = list(filter(non_empty_tensor, tensors))
+
     if len(tensors) == 1:
         return tensors[0].clone()
     return NotImplemented

@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 from typing import Callable, List, Sequence, Tuple, Union
@@ -117,11 +118,12 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         log.info("couldn't find cat args")
         return
     assert isinstance(tensors, (list, tuple))
-    if "example_value" not in tensors[0].meta:
-        log.warning("example value absent for node: %s", tensors[0])
-        return
+    for tensor in itertools.chain([cat_node], tensors):
+        if "example_value" not in tensor.meta:
+            log.warning("example value absent for node: %s", tensor)
+            return
 
-    ndim = tensors[0].meta["example_value"].dim()
+    ndim = cat_node.meta["example_value"].dim()
 
     def is_empty_tensor(x):
         # special case where torch.cat supports cat'ing with an empty tensor

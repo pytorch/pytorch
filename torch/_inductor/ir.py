@@ -2549,15 +2549,6 @@ class ConcatKernel(NopKernel):
         new_size = list(inputs[0].get_size())
         offsets_start = [0]
         offsets_end = [new_size[dim]]
-
-        # special case for cat'ing with an empty tensor -
-        # just drop the 'empty' inputs so they don't confuse the logic below.
-        def non_empty_input(input):
-            input_size = input.get_size()
-            return len(input.get_size()) > 1 or input.get_size()[0] > 0
-
-        inputs = list(filter(non_empty_input, inputs))
-
         assert 0 <= dim < len(new_size)
         for i in range(1, len(inputs)):
             input_size = inputs[i].get_size()
