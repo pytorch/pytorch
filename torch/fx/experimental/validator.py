@@ -5,7 +5,7 @@ import operator
 import sympy
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch
 from torch._dynamo.exc import TorchDynamoException
@@ -524,31 +524,6 @@ try:
                     assert r == z3.unsat
                     log.debug("translation validation: success")
 
-
-    class ValidationException(TorchDynamoException):
-        def __init__(
-            self,
-            model,
-            assertions: Iterable[z3.ExprRef],
-            target_exprs: Iterable[z3.ExprRef],
-            failed_source_exprs: Iterable[z3.ExprRef]
-        ) -> None:
-            model_str = self._joinlines(model, lambda sym: f"{sym}: {model[sym]}")
-            assertions_str = self._joinlines(assertions, z3str)
-            target_exprs_str = self._joinlines(target_exprs, z3str)
-            failed_source_exprs_str = self._joinlines(failed_source_exprs, z3str)
-
-            super().__init__(
-                "translation validation failed.\n\n"
-                "Model:\n" + model_str + "\n\n"
-                "Assertions:\n" + assertions_str + "\n\n"
-                "Target Expressions:\n" + target_exprs_str + "\n\n"
-                "Failed Source Expressions:\n" + failed_source_exprs_str + "\n\n"
-            )
-
-        def _joinlines(self, xs: Iterable[Any], f: Callable[[Any], str] = lambda x: x) -> str:
-            return "\n".join(f"  ==> {f(x)}" for x in xs)
-
 except ImportError:
     _HAS_Z3 = False
 else:
@@ -572,6 +547,30 @@ def assert_z3_installed_if_tv_set():
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
     )
+
+
+class ValidationException(TorchDynamoException):
+    def __init__(self, model, assertions, target_exprs, failed_source_exprs):
+        assert _HAS_Z3
+
+        def symbolstr(sym) -> str:
+            return f"{sym}: {model[sym]}"
+
+        def joinlines(xs) -> str:
+            return "\n".join(f"  ==> {x}" for x in xs)
+
+        model_str = joinlines(map(symbolstr, model))
+        assertions_str = joinlines(map(z3str, assertions))
+        target_exprs_str = joinlines(map(z3str, target_exprs))
+        failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
+
+        super().__init__(
+            "translation validation failed.\n\n"
+            "Model:\n" + model_str + "\n\n"
+            "Assertions:\n" + assertions_str + "\n\n"
+            "Target Expressions:\n" + target_exprs_str + "\n\n"
+            "Failed Source Expressions:\n" + failed_source_exprs_str
+        )
 
 # Checks when this module is loaded.
 assert_z3_installed_if_tv_set()

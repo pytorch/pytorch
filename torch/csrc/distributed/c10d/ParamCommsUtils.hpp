@@ -1,29 +1,27 @@
 #pragma once
 
-#include <string>
-#include <vector>
+#include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <ATen/record_function.h>
-#include <ATen/core/ivalue.h>
+#include <string>
+#include <vector>
 
 namespace torch {
 
 extern TORCH_API const std::string kParamCommsCallName;
 
-class TORCH_API ParamCommsDebugInfo
-    : public c10::DebugInfoBase {
-
+class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
  public:
   ParamCommsDebugInfo() = default;
   ParamCommsDebugInfo(
-    int rank,
-    std::string&& colName,
-    int inSize,
-    int outSize,
-    at::ScalarType dType,
-    std::vector<int64_t> inSplitSizes,
-    std::vector<int64_t> outSplitSizes);
+      int rank,
+      std::string&& colName,
+      int inSize,
+      int outSize,
+      at::ScalarType dType,
+      std::vector<int64_t> inSplitSizes,
+      std::vector<int64_t> outSplitSizes);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -80,7 +78,7 @@ class TORCH_API ParamCommsDebugInfo
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(seq),                                                        \
-      c10::IValue(pg_ptr),                                                   \
+      c10::IValue(pg_ptr),                                                     \
       rank,                                                                    \
       colName,                                                                 \
       inSplitSizes,                                                            \
@@ -91,8 +89,8 @@ class TORCH_API ParamCommsDebugInfo
 #define RECORD_PARAM_COMMS_DATA(                                               \
     seq,                                                                       \
     pg_ptr,                                                                    \
-    InputTensors,                                                               \
-    OutputTensors,                                                              \
+    InputTensors,                                                              \
+    OutputTensors,                                                             \
     rank,                                                                      \
     colName,                                                                   \
     inSize,                                                                    \
@@ -104,7 +102,7 @@ class TORCH_API ParamCommsDebugInfo
       rank, colName, inSize, outSize, dType, inSplitSizes, outSplitSizes);     \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
-      c10::IValue(InputTensors),                                                \
+      c10::IValue(InputTensors),                                               \
       c10::IValue(seq),                                                        \
       c10::IValue(pg_ptr),                                                     \
       rank,                                                                    \
