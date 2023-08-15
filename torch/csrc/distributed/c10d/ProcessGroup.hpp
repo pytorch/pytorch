@@ -366,14 +366,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("c10d::_reduce_scatter_base_", "")
-                         .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
-                             at::Tensor&,
-                             at::Tensor&,
-                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             const c10::intrusive_ptr<::c10d::ReduceOp>&,
-                             int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::_reduce_scatter_base_", "")
+            .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
+                at::Tensor&,
+                at::Tensor&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                int64_t)>();
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
@@ -383,8 +384,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector corresponds to
-  // an input/output of one `reduce_scatter_tensor` operation.
+  // still named as `_reduce_scatter_base`). Each tensor in the vector
+  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
   virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -435,13 +436,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("c10d::alltoall_", "")
-                         .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-                             const at::TensorList&,
-                             const at::TensorList&,
-                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::alltoall_", "")
+            .typed<
+                std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                    const at::TensorList&,
+                    const at::TensorList&,
+                    const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                    int64_t)>();
     return std::get<1>(op.call(
         outputTensors,
         inputTensors,
@@ -570,8 +573,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     if (device.has_value()) {
       // set device tensor from argument
       tensor = at::empty(
-          {1},
-          at::TensorOptions().device(device.value()).dtype(at::kByte));
+          {1}, at::TensorOptions().device(device.value()).dtype(at::kByte));
     } else if (backendType_ == c10d::ProcessGroup::BackendType::NCCL) {
       // set cuda tensor
       tensor = at::empty(
