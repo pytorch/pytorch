@@ -649,10 +649,9 @@ The eigenvalues are returned in ascending order.
 
 .. warning:: User may see pytorch crashes if running `eigh` on CUDA devices with CUDA versions before 12.1 update 1
              with large ill-conditioned matrices as inputs.
-             Refer to https://pytorch.org/docs/master/notes/numerical_accuracy.html#extremal-values-in-linalg
-             for mathematical details.
+             Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
              If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
-             or (2) use :func:torch.backends.cuda.preferred_linalg_library to
+             or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
              try linear algebra operators with other supported backends.
 
 .. seealso::
