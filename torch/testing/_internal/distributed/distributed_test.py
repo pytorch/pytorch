@@ -605,7 +605,7 @@ class DistributedTest:
             Barrier.sync(*args, **kwargs)
 
         def _init_group_test(self, **kwargs):
-            group = [1]
+            group = [1, 2]
             group_id = dist.new_group(group, **kwargs)
             rank = dist.get_rank()
             if rank not in group:
@@ -866,7 +866,7 @@ class DistributedTest:
             self.assertEqual(_build_tensor(2, value=0), tensor.to("cpu"))
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @require_world_size(2)
+        @require_world_size(3)
         @skip_if_lt_x_gpu(2)
         def test_backend_group(self):
             self._test_group_override_backend(self._init_group_test)

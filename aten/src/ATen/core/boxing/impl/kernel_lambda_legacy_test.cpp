@@ -41,21 +41,21 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
   auto registrar = RegisterOperators("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
           return input + 1;
@@ -67,7 +67,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMultipleOperatorsAndK
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
@@ -78,7 +78,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMultipleOperatorsAndK
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
     auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
         return input + 1;
@@ -93,7 +93,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistrati
 
 bool was_called = false;
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", [] (const Tensor&) -> void {
     was_called = true;
   });
@@ -106,7 +106,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithoutOutput_w
   EXPECT_EQ(0, result.size());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", [] (const Tensor&) -> std::tuple<> {
     was_called = true;
     return std::make_tuple();
@@ -120,7 +120,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithZeroOutputs
   EXPECT_EQ(0, result.size());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int", [] (Tensor, int64_t a, int64_t b) -> int64_t {
         return a + b;
@@ -134,7 +134,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntOutput_w
   EXPECT_EQ(9, result[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::returning_tensor(Tensor input) -> Tensor", [] (const Tensor& input) -> Tensor {
         return input;
@@ -152,7 +152,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorOutpu
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", [] (const Tensor& input1, const Tensor& input2, const Tensor& input3) -> std::vector<Tensor> {
         return {input1, input2, input3};
@@ -169,7 +169,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorListO
   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensorVector()[2]));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", [](const Tensor&, int64_t input1, int64_t input2, int64_t input3) -> std::vector<int64_t> {
         return {input1, input2, input3};
@@ -186,7 +186,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListOutp
   EXPECT_EQ(6, result[0].toIntVector()[2]);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> {
        Dict<string, Tensor> dict;
@@ -218,7 +218,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMultipleOut
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result_dict.at("second")));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", [] (const Tensor& input1) -> Tensor {
         return input1;
@@ -236,7 +236,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInput
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", [](Tensor input1) -> Tensor {
         return input1;
@@ -256,7 +256,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInput
 
 Tensor captured_input;
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", [] (const Tensor& input1) -> void {
         captured_input = input1;
@@ -274,7 +274,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInput
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", [] (Tensor input1) -> void {
         captured_input = input1;
@@ -294,7 +294,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorInput
 
 int64_t captured_int_input = 0;
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()", [](Tensor, int64_t input1) -> void {
         captured_int_input = input1;
@@ -309,7 +309,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntInput_wi
   EXPECT_EQ(3, captured_int_input);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int", [] (Tensor, int64_t input1) -> int64_t {
         return input1 + 1;
@@ -325,7 +325,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntInput_wi
 
 int64_t captured_input_list_size = 0;
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", [] (Tensor, const std::vector<int64_t>& input1) -> void {
         captured_input_list_size = input1.size();
@@ -340,7 +340,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListInpu
   EXPECT_EQ(3, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int", [](Tensor, const std::vector<int64_t>& input1) -> int64_t {
         return input1.size();
@@ -354,7 +354,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListInpu
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", [] (const std::vector<Tensor>& input1) -> void {
         captured_input_list_size = input1.size();
@@ -369,7 +369,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorListI
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", [] (const std::vector<Tensor>& input1) -> int64_t {
         return input1.size();
@@ -383,7 +383,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithTensorVecto
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTensorVectorInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorVectorInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", [] (const std::vector<Tensor>& input1) -> void {
         captured_input_list_size = input1.size();
@@ -398,7 +398,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTenso
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", [] (const std::vector<Tensor>& input1) -> int64_t {
         return input1.size();
@@ -412,7 +412,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTenso
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", [] (std::vector<Tensor> input1) -> void {
         captured_input_list_size = input1.size();
@@ -427,7 +427,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTenso
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", [] (std::vector<Tensor> input1) -> int64_t {
         return input1.size();
@@ -441,7 +441,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithLegacyTenso
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::stringlist_output(str[] input) -> str[]", [](std::vector<std::string> input) {
         return input;
@@ -460,7 +460,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithStringListO
   EXPECT_EQ("value2", output.get(1).toStringRef());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   int captured_dict_size = 0;
 
   auto registrar = RegisterOperators()
@@ -480,7 +480,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictInput_w
   EXPECT_EQ(2, captured_dict_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", [&] (Dict<string, string> input1) {
         return input1.at("key2");
@@ -497,7 +497,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictInput_w
   EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
     .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (Dict<string, string> input) {
       return input;
@@ -518,7 +518,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithDictOutput_
   EXPECT_EQ("value2", output.at("key2"));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   int captured_dict_size = 0;
 
   auto registrar = RegisterOperators()
@@ -538,7 +538,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMa
   EXPECT_EQ(2, captured_dict_size);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", [&] (std::unordered_map<string, string> input1) {
         return input1.at("key2");
@@ -555,7 +555,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMa
   EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
     .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (std::unordered_map<string, string> input) {
       return input;
@@ -576,7 +576,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithUnorderedMa
   EXPECT_EQ("value2", output.at("key2"));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", [](std::unordered_map<string, std::vector<int64_t>> input) {
         return input;
@@ -602,7 +602,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMapOfList_w
 }
 
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", [](std::unordered_map<string, std::vector<std::unordered_map<int64_t, string>>> input) {
         return input;
@@ -634,7 +634,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMapOfListOf
   EXPECT_EQ("40", output.at("key2").get(0).at(40));
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", [](std::vector<std::unordered_map<string, int64_t>> input) {
         return input;
@@ -663,7 +663,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithListOfMap_w
   EXPECT_EQ(4, output.get(1).toGenericDict().at("4").toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", [](std::vector<std::unordered_map<string, std::vector<int64_t>>> input) {
         return input;
@@ -699,7 +699,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithListOfMapOf
   EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntVector()[1]);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -715,7 +715,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithout
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -730,7 +730,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithout
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
@@ -770,7 +770,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
@@ -813,7 +813,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
@@ -851,7 +851,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   EXPECT_EQ("prefix123", result);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   std::string prefix = "prefix";
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", [&] (const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
     return prefix + a + b + c10::guts::to_string(c);
@@ -859,7 +859,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", [] (Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};});
 
@@ -870,7 +870,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered
   EXPECT_FALSE(differences.has_value());
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
@@ -906,7 +906,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_with
   );
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
@@ -925,7 +925,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_with
   );
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
@@ -984,7 +984,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_with
   );
 }
 
-TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});

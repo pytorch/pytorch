@@ -156,17 +156,13 @@ static std::atomic<int> barrierId(0);
 
 static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  auto newBarrierId = barrierId.load();
-  std::string processCountKey = fmt::format(
-      "{}{}{}", storeKeyProcessCount, storeKeyBarrierId, newBarrierId);
+  std::string processCountKey =
+      fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
   std::string activeCallCountKey = fmt::format(
-      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, newBarrierId);
+      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
   std::string barrierKey =
-      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, newBarrierId);
-  return std::make_tuple(
-      std::move(processCountKey),
-      std::move(activeCallCountKey),
-      std::move(barrierKey));
+      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
+  return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
 }
 
 // Synchronize process with all other agent processes strictly using store

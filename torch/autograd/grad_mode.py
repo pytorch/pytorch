@@ -2,10 +2,7 @@ from typing import Any, Optional
 
 import torch
 
-from torch.utils._contextlib import (
-    _DecoratorContextManager,
-    _NoParamDecoratorContextManager,
-)
+from torch.utils._contextlib import _DecoratorContextManager
 
 __all__ = [
     "no_grad",
@@ -16,7 +13,7 @@ __all__ = [
 ]
 
 
-class no_grad(_NoParamDecoratorContextManager):
+class no_grad(_DecoratorContextManager):
     r"""Context-manager that disables gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
@@ -32,7 +29,7 @@ class no_grad(_NoParamDecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
     .. note::
         No-grad is one of several mechanisms that can enable or
@@ -57,12 +54,6 @@ class no_grad(_NoParamDecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
-        >>> @torch.no_grad
-        ... def tripler(x):
-        ...     return x * 3
-        >>> z = tripler(x)
-        >>> z.requires_grad
-        False
         >>> # factory function exception
         >>> with torch.no_grad():
         ...     a = torch.nn.Parameter(torch.rand(10))
@@ -83,7 +74,7 @@ class no_grad(_NoParamDecoratorContextManager):
         torch.set_grad_enabled(self.prev)
 
 
-class enable_grad(_NoParamDecoratorContextManager):
+class enable_grad(_DecoratorContextManager):
     r"""Context-manager that enables gradient calculation.
 
     Enables gradient calculation, if it has been disabled via :class:`~no_grad`
@@ -92,7 +83,7 @@ class enable_grad(_NoParamDecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
     .. note::
         enable_grad is one of several mechanisms that can enable or
@@ -118,13 +109,6 @@ class enable_grad(_NoParamDecoratorContextManager):
         ...     return x * 2
         >>> with torch.no_grad():
         ...     z = doubler(x)
-        >>> z.requires_grad
-        True
-        >>> @torch.enable_grad
-        ... def tripler(x):
-        ...     return x * 3
-        >>> with torch.no_grad():
-        ...     z = tripler(x)
         >>> z.requires_grad
         True
 
@@ -207,7 +191,7 @@ class inference_mode(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
     .. note::
         Inference mode is one of several mechanisms that can enable or
@@ -215,8 +199,7 @@ class inference_mode(_DecoratorContextManager):
         more information on how they compare.
 
     Args:
-        mode_or_func (bool or function): Either a boolean flag whether to enable or disable inference mode
-            or a Python function to decorate with inference mode enabled
+        mode (bool): Flag whether to enable or disable inference mode
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
@@ -237,12 +220,6 @@ class inference_mode(_DecoratorContextManager):
         >>> out = func(x)
         >>> out.requires_grad
         False
-        >>> @torch.inference_mode
-        ... def doubler(x):
-        ...     return x * 2
-        >>> out = doubler(x)
-        >>> out.requires_grad
-        False
 
     """
 
@@ -252,11 +229,6 @@ class inference_mode(_DecoratorContextManager):
         # Holds a context manager that can enable or disable inference mode
         self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
-
-    def __new__(cls, mode_or_func=True):
-        if isinstance(mode_or_func, bool):
-            return super().__new__(cls)
-        return cls()(mode_or_func)
 
     def __enter__(self) -> None:
         self._inference_mode_context = torch._C._InferenceMode(self.mode)

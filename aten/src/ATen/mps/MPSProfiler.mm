@@ -504,7 +504,7 @@ void MPSProfiler::logOperationsProfilingStats(std::FILE* f) const {
                opInfo->runCount,
                fmt::format("{:.3f}", opInfo->totalSchedulingTime / double(opInfo->runCount)),
                fmt::format("{:.3f}", opInfo->totalGpuTime / double(opInfo->runCount)),
-               fmt::format("{:.3f}", opInfo->totalGpuTime.load()),
+               fmt::format("{:.3f}", opInfo->totalGpuTime),
                opInfo->strKey);
   }
 }
@@ -556,7 +556,7 @@ void MPSProfiler::logCPUFallbackProfilingStats(std::FILE* f) const {
                cpuFbInfo->profileId,
                cpuFbInfo->runCount,
                fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime / double(cpuFbInfo->runCount)),
-               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime.load()),
+               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime),
                getIMPSAllocator()->formatSize(cpuFbInfo->totalCopyOverhead),
                cpuFbInfo->opName);
   }
@@ -607,8 +607,8 @@ void MPSProfiler::logCopyProfilingStats(std::FILE* f) const {
           copyStat.kindStr,
           copyStat.totalCount,
           getIMPSAllocator()->formatSize(copyStat.length),
-          fmt::format("{:.3f}", copyStat.totalSchedulingTime.load()),
-          fmt::format("{:.3f}", copyStat.totalGpuTime.load()),
+          fmt::format("{:.3f}", copyStat.totalSchedulingTime),
+          fmt::format("{:.3f}", copyStat.totalGpuTime),
           copyStat.scalarsCount,
           fmt::format("{:.2f} %",
                       copyStat.totalGpuTime > 0.0
