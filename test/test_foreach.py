@@ -1111,7 +1111,7 @@ class TestForeach(TestCase):
                     foreach_copy_(sample.input, rhs_tensors, non_blocking)
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
-                    self.assertEqual(sample.input, ref_input)
+                    self.assertEqual(ref_input, sample.input)
 
 
 instantiate_device_type_tests(TestForeach, globals())
