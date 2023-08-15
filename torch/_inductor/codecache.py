@@ -1014,7 +1014,7 @@ def compile_file(input_path, output_path, cmd) -> None:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
-            instruction = "\n\nOpenMP support not found. Please try either step:\n" + \
+            instruction = "\n\nOpenMP support not found. Please try one of the following solutions:\n" + \
             "(1) use environment variable `CXX` to specify a compiler other than Apple clang++/g++ to have builtin OpenMP support;\n" + \
             "(2) install OpenMP via conda: `conda install llvm-openmp`;\n" + \
             "(3) install libomp via brew: `brew install libomp`;\n" + \
