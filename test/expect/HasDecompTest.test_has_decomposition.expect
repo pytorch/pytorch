@@ -60,8 +60,6 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
-aten::_cslt_compress
-aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -548,7 +546,6 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
-aten::_unsafe_index.Tensor
 aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
@@ -594,8 +591,6 @@ aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
 aten::addr_
-aten::affine_grid_generator
-aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
 aten::allclose
@@ -785,6 +780,8 @@ aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
 aten::hann_window.periodic_out
+aten::hardshrink_backward
+aten::hardshrink_backward.grad_input
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -1114,9 +1111,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rrelu_with_noise
-aten::rrelu_with_noise.out
-aten::rrelu_with_noise_
 aten::rsub.Scalar_out
 aten::rsub.Tensor_out
 aten::scalar_tensor
@@ -1171,6 +1165,8 @@ aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::softmax.int_out
+aten::softshrink_backward
+aten::softshrink_backward.grad_input
 aten::sort
 aten::sort.stable
 aten::sort.values

@@ -13,7 +13,11 @@
 namespace torch {
 namespace profiler {
 
+void initManualPythonBindings(PyObject* module);
+
 void initPythonBindings(PyObject* module) {
+  initManualPythonBindings(module);
+
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_profiler");
 
@@ -324,6 +328,166 @@ void initPythonBindings(PyObject* module) {
       py::arg("cpp") = true);
   m.def("symbolize_tracebacks", py_symbolize);
   installCapturedTracebackPython();
+}
+
+/* [NOTE: RecordFunctionFast]
+ * These are an alternate way to call record_function from python.
+ * The typical context manager is slow (~15us on benchmarks in Aug 2023), which
+ * is usually fine for module-level annotations in python, but slow for per-op
+ * annotations. Part of the reason it is slow is because the calls go through
+ * the dispatcher, in order to make the record_function calls work with
+ * torchscript.
+ *
+ * This implementation is less safe; it doesn't work with torchscript.
+ *
+ * It implements a context manager in C++, which reduces the overhead compared
+ * to using a python context manager that calls into C++.
+ */
+
+namespace {
+struct RecordFunctionFast {
+  PyObject_HEAD PyObject* name;
+  std::unique_ptr<at::RecordFunction> guard;
+};
+
+PyObject* RecordFunctionFast_new(
+    PyTypeObject* subtype,
+    PyObject* args,
+    PyObject* kwargs) {
+  RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
+  if (self != nullptr) {
+    self->name = nullptr;
+    self->guard.reset();
+  }
+  return (PyObject*)self;
+}
+
+int RecordFunctionFast_init(
+    PyObject* selfGeneric,
+    PyObject* args,
+    PyObject* kwargs) {
+  auto self = (RecordFunctionFast*)selfGeneric;
+  constexpr const char* kwlist[] = {"name", nullptr};
+  PyObject* name = nullptr;
+  if (!PyArg_ParseTupleAndKeywords(
+          args, kwargs, "O", const_cast<char**>(kwlist), &name)) {
+    return -1;
+  }
+  if (name) {
+    Py_INCREF(name);
+    self->name = name;
+  }
+  return 0;
+}
+
+void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
+  auto self = (RecordFunctionFast*)selfGeneric;
+  if (self->name) {
+    Py_DECREF(self->name);
+  }
+  if (self->guard) {
+    self->guard.reset();
+  }
+  Py_TYPE(self)->tp_free(self);
+}
+
+PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+    auto self = (RecordFunctionFast*)selfGeneric;
+    TORCH_INTERNAL_ASSERT(
+        !self->guard,
+        "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
+    TORCH_INTERNAL_ASSERT(
+        self->name,
+        "Trying to enter a new record_function_fast context but self->name is not set");
+    self->guard =
+        std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
+    THPUtils_checkString(self->name);
+    self->guard->before(THPUtils_unpackString(self->name));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+    auto self = (RecordFunctionFast*)selfGeneric;
+    TORCH_INTERNAL_ASSERT(
+        self->guard,
+        "Trying to exit an active record_function_fast context but no guard is set");
+    self->guard.reset();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* RecordFunctionFast_set_name(PyObject* selfGeneric, PyObject* pyName) {
+  HANDLE_TH_ERRORS
+  auto self = (RecordFunctionFast*)selfGeneric;
+  if (self->name) {
+    Py_DECREF(self->name);
+    self->name = nullptr;
+  }
+
+  if (pyName) {
+    Py_INCREF(pyName);
+    self->name = pyName;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+} // namespace
+
+static PyObject* profilerManualModule = NULL;
+
+void initManualPythonBindings(PyObject* module) {
+  static PyMethodDef functions[] = {{NULL}};
+  static struct PyModuleDef def = {
+      PyModuleDef_HEAD_INIT, "torch._C._profiler_manual", NULL, -1, functions};
+  PyObject* profilerManual = PyModule_Create(&def);
+  profilerManualModule = profilerManual;
+  if (!profilerManual) {
+    throw python_error();
+  }
+
+  static PyMethodDef RecordFunctionFast_methods[] = {
+      {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
+      {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
+      {"set_name", RecordFunctionFast_set_name, METH_O, nullptr},
+      {NULL},
+  };
+
+  static PyTypeObject RecordFunctionFast_Type = {
+      PyVarObject_HEAD_INIT(NULL, 0)};
+
+  RecordFunctionFast_Type.tp_name =
+      "torch._C._profiler_manual.RecordFunctionFast",
+  RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
+  RecordFunctionFast_Type.tp_dealloc = (destructor)RecordFunctionFast_dealloc;
+  RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+  RecordFunctionFast_Type.tp_methods = RecordFunctionFast_methods;
+  RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
+  RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
+
+  if (PyType_Ready(&RecordFunctionFast_Type) < 0) {
+    throw python_error();
+  }
+
+  Py_INCREF(&RecordFunctionFast_Type);
+  if (PyModule_AddObject(
+          profilerManual,
+          "_RecordFunctionFast",
+          (PyObject*)&RecordFunctionFast_Type) != 0) {
+    Py_DECREF(&RecordFunctionFast_Type);
+    throw python_error();
+  }
+
+  // steal a reference to to profilerManual
+  if (PyModule_AddObject(module, "_profiler_manual", profilerManual) != 0) {
+    throw python_error();
+  }
 }
 
 } // namespace profiler
