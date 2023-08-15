@@ -451,7 +451,32 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   auto& sym_shape_meta{symbolic_shape_meta()};
   SymIntArrayRef sizes = sym_shape_meta.sizes_;
   SymIntArrayRef strides = sym_shape_meta.strides_;
-  return _compute_contiguous(sizes, strides, sym_shape_meta.numel_);
+
+  auto& numel = sym_shape_meta.numel_;
+  auto numel_has_hint = numel.has_hint();
+  if (numel_has_hint && numel == 0) {
+    return true;
+  }
+  SymInt z = 1;
+  // NB: make sure we do signed arithmetic
+  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+    const auto& size_d = sizes[d];
+    if (d == 0 && strides[d].has_hint() && strides[d] == z) {
+      return true;
+    } else if (size_d != 1) {
+      if (strides[d] == z) {
+        z *= size_d;
+      } else {
+        // Force a guard on the numel one last time
+        if (!numel_has_hint && numel == 0) {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 // The rest of them

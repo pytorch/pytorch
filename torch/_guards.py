@@ -22,6 +22,7 @@ from typing import (
     Tuple,
     TypeVar,
 )
+import traceback
 
 import torch
 
@@ -143,6 +144,11 @@ class Guard:
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
+
+    stack = None
+
+    def __post_init__(self):
+        self.stack = traceback.format_stack()
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))

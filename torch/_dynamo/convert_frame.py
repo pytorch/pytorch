@@ -5,6 +5,7 @@ import os
 import random
 import types
 import weakref
+import textwrap
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
@@ -400,6 +401,11 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
+    from torch.fx.experimental.validator import (
+        translation_validation_enabled,
+        ValidationException,
+    )
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
@@ -421,8 +427,21 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
         )
-        with tracing(tracer.output.tracing_context):
-            tracer.run()
+
+        try:
+            with tracing(tracer.output.tracing_context):
+                tracer.run()
+        except (exc.RestartAnalysis, exc.SkipFrame):
+            raise
+        except Exception:
+            if translation_validation_enabled():
+                fakes = tracer.output.tracked_fakes
+                tracer.output.shape_env.produce_guards(
+                    [a.fake for a in fakes],
+                    [a.source for a in fakes],
+                )
+            raise
+
         output = tracer.output
         assert output is not None
         assert output.output_instructions
@@ -511,14 +530,16 @@ def _compile(
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [
-                    f"  {code}"
-                    for guard in sorted(output.guards)
-                    if guard.code_list is not None
-                    for code in guard.code_list
-                ]
-            )
+            for guard in sorted(output.guards):
+                if guard.code_list is None:
+                    continue
+                for code in guard.code_list:
+                    guard_str += f"  {code}\n"
+                    """
+                    if "_length_per_key" in code:
+                        guard_str += '  # ^ Above from:'
+                        guard_str += textwrap.indent(''.join(guard.stack), "  # ")
+                    """
             guards_log.debug(guard_str)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -542,6 +563,7 @@ def _compile(
         AssertionError,
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
+        ValidationException,
     ) as e:
         fail_reason = str(e)
         exception_handler(e, code, frame, export=export)

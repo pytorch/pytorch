@@ -571,6 +571,8 @@ class TorchLogsFormatter(logging.Formatter):
         prefix = (
             f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
         )
+        n = record.name.split('.')[-1]
+        prefix = f"{n}: [{record.levelname}]"
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 

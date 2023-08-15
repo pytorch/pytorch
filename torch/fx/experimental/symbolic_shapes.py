@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -304,13 +304,57 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
+            builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(min, max)
+        shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
+
+    if r := shape_env.runtime_var_to_range.get(s, None):
+        shape_env.runtime_var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, runtime_min), builtins.min(r.upper, runtime_max)
+        )
+    else:
+        shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
+
+def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    This function is NOT INTENDED to be used by itself.
+    """
+
+    if isinstance(a, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat/SymBool is nyi")
+
+    assert isinstance(a, SymInt)
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
+    if min is None:
+        min = 0
+    if max is None:
+        max = sympy.oo
+
+    if max <= 2:
+        raise ValueError(f"Maximum value to constrain_as_size must be greater than 2, but was {max}")
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    compiler_min = 2 if min < 2 else min
+
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=compiler_min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
+
 
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
@@ -350,8 +394,16 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         min = -sympy.oo
     if max is None:
         max = sympy.oo
-    if not isinstance(a, SymInt):
-        constrain_range_int(a, min=min, max=max)
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    if isinstance(a, int):
+        if not (min <= a <= max):
+            raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
     if isinstance(a.node.expr, sympy.Integer):
@@ -364,35 +416,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
 
-def constrain_range_int(a, *, min, max):
-    """
-    Constrain range on concrete int value.
-    This can happens for the following scenarios:
-    - Eager mode execution and real int value is provided.
-    - During tracing the traced symbol is resolved as a static integer (see
-      PR #101655 for more details).
-    """
-    if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
-
-    assert not isinstance(a, SymInt)
-    if not (min <= a <= max):
-        raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-
-    if (
-        (fake_mode := detect_fake_mode()) is not None and
-        getattr(fake_mode, "shape_env", None) is not None
-    ):
-        # If we are tracing with a fake mode then add this integer to the
-        # shape_env's var_to_range
-        sym_integer = sympy.Integer(a)
-        shape_env = fake_mode.shape_env
-        _constrain_symbol_range(shape_env, sym_integer, min, max)
-        shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
 def constrain_unify(a, b):
     """
@@ -2001,6 +2033,10 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        # Maps symbolic ints to their min/max range for runtime checks.
+        # This is because we assume a graph generated with N=2 is general enough
+        # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
+        self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
@@ -2167,6 +2203,10 @@ class ShapeEnv:
             self.fx_node_cache[node_key] = node
 
         return self.fx_node_cache[node_key]
+
+    def remove_fx_node(self, node: Optional[torch.fx.Node]) -> None:
+        if _translation_validation_enabled() and node is not None:
+            self.graph.erase_node(node)
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -2822,7 +2862,9 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
-                r = self.var_to_range[symbol]
+                r = self.runtime_var_to_range.get(symbol)
+                if r is None:
+                    r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:
                     if isinstance(c, StrictMinMaxConstraint):
@@ -2905,6 +2947,7 @@ class ShapeEnv:
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
             for sym, vr in self.var_to_range.items():
+                vr = self.runtime_var_to_range.get(sym, vr)
                 if vr.lower != -sympy.oo:
                     self._add_target_expr(sympy.Le(vr.lower, sym))
                 if vr.upper != sympy.oo:
@@ -3143,6 +3186,8 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
+            #import ctypes
+            #ctypes.string_at(0)
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3320,8 +3365,7 @@ class ShapeEnv:
                     ''.join(traceback.format_list(user_tb))
                 )
             self.log.info(
-                "%s %s [guard added]%s (%s)%s",
-                prefix,
+                "eval %s [guard added]%s (%s)%s",
                 g,
                 maybe_user_loc,
                 format_frame(frame),
@@ -3346,79 +3390,104 @@ class ShapeEnv:
         #
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
+        node = None
         if (
                 _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
             if concrete_val is sympy.true:
-                self.create_fx_call_function(torch._assert, (fx_node,))
+                node = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
                 neg = self.create_fx_call_function(operator.not_, (fx_node,))
-                self.create_fx_call_function(torch._assert, (neg,))
+                node = self.create_fx_call_function(torch._assert, (neg,))
             else:
                 eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-                self.create_fx_call_function(torch._assert, (eql,))
+                node = self.create_fx_call_function(torch._assert, (eql,))
 
-        if len(orig_expr.free_symbols) == 0:
-            self.log.debug("eval %s [trivial]", orig_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert orig_expr == hint, f"{orig_expr} != {hint}"
-            return orig_expr
+        # After creating the FX node corresponding to orig_expr, we must make sure that
+        # no error will be raised until the end of this function.
+        #
+        # Reason: the translation validation may become invalid otherwise.
+        #
+        # If an error is raised before the end of this function, we remove the FX node
+        # inserted, and re-raise the error.
+        guard = None
+        tb = None
 
-        expr = orig_expr
+        try:
+            if len(orig_expr.free_symbols) == 0:
+                self.log.debug("eval %s [trivial]", orig_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert orig_expr == hint, f"{orig_expr} != {hint}"
+                return orig_expr
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert static_expr == hint, f"{static_expr} != {hint}"
-            return static_expr
+            expr = orig_expr
 
-        if not (expr.free_symbols <= self.var_to_val.keys()):
-            # TODO: dedupe this with _maybe_evaluate_static
-            # Attempt to eliminate the unbacked SymInt
-            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-            if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
-            expr = new_expr
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
+                # NB: don't test float as there may be precision issues
+                if isinstance(hint, (int, bool)):
+                    assert static_expr == hint, f"{static_expr} != {hint}"
+                return static_expr
 
-        self._check_frozen(expr, concrete_val)
+            if not (expr.free_symbols <= self.var_to_val.keys()):
+                # TODO: dedupe this with _maybe_evaluate_static
+                # Attempt to eliminate the unbacked SymInt
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                expr = new_expr
 
-        if isinstance(expr, (sympy.Eq, sympy.Ne)):
-            self._maybe_guard_eq(expr, bool(concrete_val))
-            # TODO: If we successfully eliminate a symbol via equality, it
-            # is not actually necessary to save a guard for the equality,
-            # as we will implicitly generate a guard when we match that
-            # input against the symbol
-        elif isinstance(concrete_val, sympy.Integer):
-            # WARNING: we cannot actually do simplifications on guards
-            # on floating point values, because Sympy generally does not
-            # think expressions on integers can ever be equal to floating
-            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-            # very clear algebraic laws that hold for floating point, such
-            # simplifications are error prone anyway, so be sure not to
-            # maybe_guard_eq in those cases.
-            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+            self._check_frozen(expr, concrete_val)
 
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
+            if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    expr = sympy.Not(expr)
+
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                self._maybe_guard_eq(expr, bool(concrete_val))
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol
+            elif isinstance(concrete_val, sympy.Integer):
+                # WARNING: we cannot actually do simplifications on guards
+                # on floating point values, because Sympy generally does not
+                # think expressions on integers can ever be equal to floating
+                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+                # very clear algebraic laws that hold for floating point, such
+                # simplifications are error prone anyway, so be sure not to
+                # maybe_guard_eq in those cases.
+                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+
+            if concrete_val is sympy.true:
+                g = expr
+            elif concrete_val is sympy.false:
+                g = sympy.Not(expr)
+            else:
+                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            if not self._suppress_guards_tls():
+                tb = traceback.extract_stack()[:-1]
+                stack = ''.join(traceback.format_list(tb))
+                guard = ShapeGuard(g, stack)
+                self.guards.append(guard)
+        except Exception:
+            self.remove_fx_node(node)
+            raise
         else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+            if not self._suppress_guards_tls():
+                assert guard is not None
+                assert tb is not None
 
-        if not self._suppress_guards_tls():
-            tb = traceback.extract_stack()[:-1]
-            stack = ''.join(traceback.format_list(tb))
-            guard = ShapeGuard(g, stack)
-            self.guards.append(guard)
-            self.refine_ranges(guard)
-            self._log_guard("eval", g, tb)
-        else:
-            self.log.debug("eval %s [guard suppressed]", g)
+                self.refine_ranges(guard)
+
+                self._log_guard("eval", g, tb)
+            else:
+                self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
 

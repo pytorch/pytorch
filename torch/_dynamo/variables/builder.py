@@ -20,7 +20,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.fx.experimental.symbolic_shapes import (
-    constrain_range,
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -834,7 +834,7 @@ class VariableBuilder:
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if (
+            if not config.force_unspec_int_unbacked_size_like  and (
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
@@ -1042,7 +1042,7 @@ class VariableBuilder:
                 value, int
             ):
                 wrapped_value = shape_env.create_unbacked_symint()
-                constrain_range(wrapped_value, min=2)
+                _constrain_range_for_size(wrapped_value)
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
                 )
