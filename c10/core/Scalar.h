@@ -300,7 +300,6 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymBool sb) {
-    // Why do we store bool in a double? (preexisting)
     if (auto m = sb.maybe_as_bool()) {
       tag = Tag::HAS_b;
       v.i = *m;
