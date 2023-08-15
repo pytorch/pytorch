@@ -38,7 +38,7 @@ Work::Work(
   }
 }
 
-OpType Work::retrieveOpType() {
+OpType Work::retrieveOpType() const {
   return opType_;
 }
 

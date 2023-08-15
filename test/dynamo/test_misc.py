@@ -6565,6 +6565,47 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_deque_input(self):
+        a = torch.randn([2, 3])
+        b = torch.randn([2, 3])
+        d1 = collections.deque([a, b])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([a, b])
+        d2.insert(0, "foo")
+
+        def fn(q):
+            a = q.pop()
+            b = q.pop()
+            return a * b
+
+        eager = fn(d1)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_append_left(self):
+        d1 = collections.deque([10, 10])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([10, 10])
+        d2.insert(0, "foo")
+
+        def fn(q, a, b):
+            q.appendleft(a)
+            q.appendleft(b)
+            return q.popleft() * q.popleft()
+
+        a = torch.randn([3, 3])
+        b = torch.randn([3, 3])
+        eager = fn(d1, a, b)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2, a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertTrue(isinstance(compiled, torch.Tensor))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
