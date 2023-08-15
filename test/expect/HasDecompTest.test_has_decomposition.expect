@@ -780,6 +780,8 @@ aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
 aten::hann_window.periodic_out
+aten::hardshrink_backward
+aten::hardshrink_backward.grad_input
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -1163,6 +1165,8 @@ aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::softmax.int_out
+aten::softshrink_backward
+aten::softshrink_backward.grad_input
 aten::sort
 aten::sort.stable
 aten::sort.values
