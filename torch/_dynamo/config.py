@@ -40,6 +40,9 @@ cache_size_limit = 64
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
+# TODO explain
+force_unspec_int_unbacked_size_like = False
+
 # Assume these functions return constants
 constant_functions = {
     torch.jit.is_scripting: False,

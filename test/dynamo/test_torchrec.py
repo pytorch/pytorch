@@ -1,9 +1,18 @@
+import unittest
+
 import torch
 import torch._dynamo.test_case
-import torchrec
-from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torch._dynamo.testing import CompileCounter
 
+try:
+    from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+    HAS_TORCHREC = True
+except ImportError:
+    HAS_TORCHREC = False
+
+
+@unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
 class TorchRecTests(torch._dynamo.test_case.TestCase):
     def test_simple(self):
         jag_tensor1 = KeyedJaggedTensor(
@@ -21,7 +30,7 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
 
         counter = CompileCounter()
 
-        @torch._dynamo.optimize(counter)
+        @torch._dynamo.optimize(counter, nopython=True)
         def f(jag_tensor):
             return jag_tensor["index_0"].values().sum()
 

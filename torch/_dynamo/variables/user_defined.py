@@ -565,7 +565,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(key, self)
 
 
-"""
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
-    
-"""
+    @staticmethod
+    def is_matching_object(obj):
+        try:
+            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+        except ImportError:
+            return False
+        else:
+            return type(obj) is KeyedJaggedTensor
+
+    def __init__(self, value, **kwargs):
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert type(value) is KeyedJaggedTensor
+        super().__init__(value, **kwargs)
+
+    def var_getattr(self, tx, name):
+        source = AttrSource(self.source, name) if self.source else None
+        if source is not None and name in ("_length_per_key", "_offset_per_key"):
+            with torch._dynamo.config.patch(force_unspec_int_unbacked_size_like=True):
+                return super().var_getattr(tx, name)
+        return super().var_getattr(tx, name)

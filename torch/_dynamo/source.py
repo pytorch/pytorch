@@ -437,6 +437,20 @@ class NNModuleSource(ChainedSource):
         return self.base.name()
 
 
+# Just a marker to help us easily tell if we're dealing with a KJT, because
+# these need special handling at the leaves
+@dataclasses.dataclass(frozen=True)
+class KeyedJaggedTensorSource(ChainedSource):
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self.base.name()
+
+
 @dataclasses.dataclass(frozen=True)
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
