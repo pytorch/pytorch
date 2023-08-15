@@ -367,7 +367,7 @@ int RecordFunctionFast_init(
     PyObject* args,
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
-  static char* kwlist[] = {"name"};
+  constexpr const char* kwlist[] = {"name", nullptr};
   PyObject* name = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
           args, kwargs, "O", const_cast<char**>(kwlist), &name)) {
