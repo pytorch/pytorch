@@ -49,7 +49,7 @@ class TestUploadStats(unittest.TestCase):
 
         emit_should_include = {
             "metric_name": "metric_name",
-            "calling_file": "test_upload_stats_lib.py",
+            "calling_file": "test_upload_metrics.py",
             "calling_module": current_module,
             "calling_function": "test_emit_metric",
             "repo": REPO,
