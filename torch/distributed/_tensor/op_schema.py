@@ -179,7 +179,13 @@ class OpSchema:
     def __hash__(self) -> int:
         # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
         frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
-        return hash((self.func_schema, self.args_spec, frozen_set_kwargs_schema))
+        return hash(
+            (
+                self.func_schema,
+                tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
+                frozen_set_kwargs_schema,
+            )
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, OpSchema):
