@@ -171,6 +171,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_binary_op(self, device, dtype, op, is_fastpath):
+        has_out_of_place = op.name not in {"_foreach_copy"}
         scalar_self_arg_test_complete = False
         for i, sample in enumerate(op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)):
             (rhs_arg,) = sample.args
@@ -179,11 +180,12 @@ class TestForeach(TestCase):
             alpha = kwargs.pop("alpha", None)
             disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-            self._binary_test(
-                dtype, wrapped_op, ref, [sample.input, rhs_arg],
-                is_fastpath and not disable_fastpath, False,
-                alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
-            )
+            if has_out_of_place:
+                self._binary_test(
+                    dtype, wrapped_op, ref, [sample.input, rhs_arg],
+                    is_fastpath and not disable_fastpath, False,
+                    alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
+                )
             self._binary_test(
                 dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
                 is_fastpath and not disable_fastpath, True,
@@ -1074,6 +1076,27 @@ class TestForeach(TestCase):
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
             torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_multi_device_inputs(self, device, dtype, op):
+        foreach_copy_ = op.inplace_variant
+        copy_ = op.ref_inplace
+        for non_blocking in (False, True):
+            for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+                with torch.no_grad():
+                    ref_input = [t.clone().detach() for t in sample.input]
+                foreach_copy_(sample.input, sample.args[0], non_blocking)
+                for t, s in zip(ref_input, sample.args[0]):
+                    copy_(t, s, non_blocking)
+                self.assertEqual(sample.input, ref_input)
+                if torch.cuda.device_count() > 1:
+                    device = torch.device("cuda", 1)
+                    rhs_tensors = [t.to(device) for t in sample.args[0]]
+                    foreach_copy_(sample.input, rhs_tensors, non_blocking)
+                    for t, s in zip(ref_input, rhs_tensors):
+                        copy_(t, s, non_blocking)
+                    self.assertEqual(sample.input, ref_input)
 
 
 instantiate_device_type_tests(TestForeach, globals())
