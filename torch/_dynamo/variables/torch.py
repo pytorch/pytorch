@@ -329,37 +329,19 @@ class TorchVariable(VariableTracker):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
-        elif self.value is torch.cuda.stream:
+        elif hasattr(self.value, '__name__') and self.value.__name__ == 'stream':
             log.warning(
-                "torch.cuda.stream() not fully supported, streams may be ignored"
+                "torch." + args[0].device + ".stream() not fully supported, streams may be ignored"
             )
             assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0], 'cuda', **options)
-        elif self.value is torch.xpu.stream:
-            log.warning(
-                "torch.xpu.stream() not fully supported, streams may be ignored"
-            )
-            assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0], 'xpu', **options)
-        elif self.value is torch.cuda.streams.Stream:
+            return StreamContextVariable.create(tx, args[0], **options)
+        elif hasattr(self.value, 'stream_id'):
             return wrap_fx_proxy_cls(
                 StreamVariable,
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    torch.cuda.streams.Stream,
-                    (),
-                    {},
-                ),
-                **options,
-            )
-        elif self.value is torch.xpu.streams.Stream:
-            return wrap_fx_proxy_cls(
-                StreamVariable,
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    torch.xpu.streams.Stream,
+                    self.value,
                     (),
                     {},
                 ),

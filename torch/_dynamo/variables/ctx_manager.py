@@ -360,7 +360,7 @@ class NullContextVariable(ContextWrappingVariable):
 
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, device, **kwargs):
+    def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
         current_stream = wrap_fx_proxy_cls(
@@ -368,7 +368,7 @@ class StreamContextVariable(ContextWrappingVariable):
             tx,
             tx.output.create_proxy(
                 "call_function",
-                getattr(getattr(torch, device), 'current_stream'),
+                getattr(getattr(torch, target_value.device), 'current_stream'),
                 (None,),
                 {},
             ),
@@ -376,7 +376,7 @@ class StreamContextVariable(ContextWrappingVariable):
         return StreamContextVariable(
             target_values=[target_value],
             initial_values=[current_stream],
-            device=device,
+            device=target_value.device,
             **kwargs,
         )
 
@@ -388,7 +388,7 @@ class StreamContextVariable(ContextWrappingVariable):
         self.set_stream_func = getattr(getattr(torch, self.device), 'set_stream')
 
     def enter(self, tx):
-        # CUDA stream generated inside of traced function
+        # stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
@@ -396,9 +396,11 @@ class StreamContextVariable(ContextWrappingVariable):
                 (self.target_values[0].as_proxy(),),
                 {},
             )
-        # CUDA stream passed from outside of traced function
+        # stream passed from outside of traced function
         else:
             stream = self.target_values[0].value
+            # TODO: here could be a problem because ipex._C cannot be called
+            # and torch._C does not contain any xpu function
             tx.output.create_proxy(
                 "call_function",
                 getattr(torch._C, '_' + str(self.device) + '_setStream'),
@@ -427,6 +429,7 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
+        assert value.device.type == device, f"stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -439,7 +442,7 @@ class StreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(self.device + "stream")
+        unimplemented(self.device + " stream")
 
     def as_proxy(self):
         return self.proxy

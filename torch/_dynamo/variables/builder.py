@@ -565,19 +565,11 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, torch.cuda.streams.Stream):
+        elif hasattr(value, 'stream_id'):
             return StreamVariable(
                 None,
                 value,
-                device='cuda',
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
-        elif isinstance(value, torch.xpu.streams.Stream):
-            return StreamVariable(
-                None,
-                value,
-                device='xpu',
+                value.device.type,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
@@ -1341,12 +1333,9 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
+    elif hasattr(proxy.node.target(), 'stream_id'):
         proxy.node.meta["example_value"] = example_value
-        return StreamVariable(proxy, example_value, 'cuda', **options)
-    elif proxy.node.target in [torch.xpu.streams.Stream, torch.xpu.current_stream]:
-        proxy.node.meta["example_value"] = example_value
-        return StreamVariable(proxy, example_value, 'xpu', **options)
+        return StreamVariable(proxy, example_value, example_value.device.type, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
         torch.sym_int,
         getattr,
