@@ -1,12 +1,14 @@
 #ifdef _WIN32
 #include <wchar.h> // _wgetenv for nvtx
 #endif
+#ifndef FBCODE_CAFFE2
+#include <nvtx3/nvToolsExt.h>
+#else
 #include <nvToolsExt.h>
+#endif
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace cuda {
-namespace shared {
+namespace torch::cuda::shared {
 
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -19,6 +21,4 @@ void initNvtxBindings(PyObject* module) {
   nvtx.def("markA", nvtxMarkA);
 }
 
-} // namespace shared
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::shared
