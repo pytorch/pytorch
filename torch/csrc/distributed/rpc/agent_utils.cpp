@@ -163,7 +163,7 @@ static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
       "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, newBarrierId);
   std::string barrierKey =
       fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, newBarrierId);
-  return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
+  return std::make_tuple(std::move(processCountKey), std::move(activeCallCountKey), std::move(barrierKey));
 }
 
 // Synchronize process with all other agent processes strictly using store
