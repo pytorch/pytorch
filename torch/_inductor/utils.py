@@ -1013,7 +1013,7 @@ def try_find_schema(schemas, args, kwargs):
     return None
 
 
-def get_device_flops(dtype):
+def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)

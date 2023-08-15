@@ -22,7 +22,7 @@ from .utils import (
     cache_on_self,
     cmp,
     free_symbol_has,
-    get_device_flops,
+    get_device_tflops,
     get_dtype_size,
     has_triton,
     sympy_product,
@@ -428,7 +428,7 @@ class BaseSchedulerNode:
         try:
             from triton.testing import get_dram_gbps
             gpu_memory_bandwidth = get_dram_gbps()
-            gpu_flops = get_device_flops(dtype)
+            gpu_flops = get_device_tflops(dtype) * 10**12
         except Exception:
             return 0
 

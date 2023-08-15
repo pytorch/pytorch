@@ -158,7 +158,7 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     # Fails with AMD
     try:
-        machine_balance = (1000 * utils.get_device_flops(dtype)) / get_dram_gbps()
+        machine_balance = (1000 * utils.get_device_tflops(dtype)) / get_dram_gbps()
     except Exception:
         return True
 
