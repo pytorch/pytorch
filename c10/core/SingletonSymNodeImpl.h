@@ -5,10 +5,12 @@
 
 namespace c10 {
 
-// An object that only defines the equality operator.
+// An int-like object that only defines the equality operator.
 class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
-  SingletonSymNodeImpl(int64_t val) : val_(val) {}
+  // CAUTION: you should probably not be constructing these directly; please
+  // the higher-level API in python instead (TODO: actually introduce that).
+  explicit SingletonSymNodeImpl(int64_t val) : val_(val) {}
 
   bool bool_() override {
     return false;
@@ -62,7 +64,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
         c,
         "SingletonSymNode can only be compared with SingletonSymNode, but got ",
         other->str());
-    return SymBool(val_ == *c).promoteToConstantSymNode();
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *c));
   }
 
   c10::SymNode ne(const c10::SymNode& other) override {
@@ -71,7 +73,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
         c,
         "SingletonSymNode can only be compared with SingletonSymNode, but got ",
         other->str());
-    return SymBool(val_ != *c).promoteToConstantSymNode();
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ != *c));
   }
 
   c10::optional<int64_t> singleton_int() override {
