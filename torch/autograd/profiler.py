@@ -6,11 +6,7 @@ import torch
 
 import torch.cuda
 from torch._C import _get_privateuse1_backend_name
-from torch._C._profiler import (
-    _ExperimentalConfig,
-    _record_function_fast_start,
-    _record_function_fast_stop,
-)
+from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
     _disable_profiler,
@@ -561,18 +557,6 @@ class profile:
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
         )
         return function_events
-
-
-class _record_function_fast(_ContextDecorator):
-    def __init__(self, name: str, args: Optional[str] = None):
-        self.name: str = name
-        self.args: Optional[str] = args
-
-    def __enter__(self):
-        self.record = _record_function_fast_start(self.name, self.args)
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        _record_function_fast_stop(self.record)
 
 
 class record_function(_ContextDecorator):

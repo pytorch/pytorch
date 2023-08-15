@@ -175,12 +175,12 @@ class BatchDimAnalyzer:
         node_batch_dim = self.compute_batch_dim(node)
         if node_batch_dim == -1:
             # indicate this activation is replicated
-            act_spec = DTensorSpec(mesh=mesh, placements=[Replicate()])
+            act_spec = DTensorSpec(mesh=mesh, placements=(Replicate(),))
         elif node_batch_dim == -2:
             # indicate this activation is partial
-            act_spec = DTensorSpec(mesh=mesh, placements=[_Partial()])
+            act_spec = DTensorSpec(mesh=mesh, placements=(_Partial(),))
         else:
             # indicate this activation is Shard
-            act_spec = DTensorSpec(mesh=mesh, placements=[Shard(node_batch_dim)])
+            act_spec = DTensorSpec(mesh=mesh, placements=(Shard(node_batch_dim),))
 
         return act_spec

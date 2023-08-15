@@ -152,6 +152,9 @@ class CachingAutotuner(KernelInterface):
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
+        self.record_function_ctx = torch._C._profiler_manual._RecordFunctionFast(
+            self.meta.get("kernel_name", "triton kernel")
+        )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -398,9 +401,7 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        with torch.profiler.record_function(
-            self.meta.get("kernel_name", "triton kernel")
-        ):
+        with self.record_function_ctx:
             return launcher(
                 *args,
                 grid=grid,
@@ -652,6 +653,10 @@ def triton_config(
     override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
+
+    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
+    size_hints = list(reversed(size_hints))
+
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -710,7 +715,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -732,7 +737,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    if num_warps is None:
+        num_warps = conditional_product(x, r) // 128
+    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -909,6 +916,10 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 tiny_config,
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
+                # halve the XBLOCK/RBLOCK compared to outer_config
+                # TODO: this may only be beneficial when each iteration of the reduciton
+                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+                triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],
             meta=meta,
             filename=filename,
@@ -979,8 +990,17 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(xnumel, ynumel=None, znumel=None):
+def grid(*numels):
     """Helper function to compute triton grids"""
+
+    if len(numels) == 1:
+        xnumel, ynumel, znumel = numels[0], None, None
+    elif len(numels) == 2:
+        xnumel, ynumel, znumel = numels[1], numels[0], None
+    elif len(numels) == 3:
+        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
+    else:
+        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:

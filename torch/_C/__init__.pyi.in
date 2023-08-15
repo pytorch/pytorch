@@ -1118,7 +1118,8 @@ class _LinalgBackend:
 
 class ConvBackend(Enum): ...
 
-class Tag(Enum): ...
+class Tag(Enum):
+    ${tag_attributes}
 
 # Defined in `valgrind.h` and `callgrind.h` respectively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
@@ -1547,13 +1548,20 @@ def _cuda_memoryStats(device: _int) -> Dict[str, Any]: ...
 def _cuda_resetAccumulatedMemoryStats(device: _int) -> None: ...
 def _cuda_resetPeakMemoryStats(device: _int) -> None: ...
 def _cuda_memorySnapshot() -> Dict[str, Any]: ...
-def _cuda_recordMemoryHistory(
+def _cuda_record_memory_history_legacy(
     enabled: _bool,
     record_context: _bool,
     record_context_cpp: _bool,
     alloc_trace_max_entries: _int,
     alloc_trace_record_context: _bool,
 ) -> None: ...
+def _cuda_record_memory_history(
+    enabled: Optional[str],
+    context: Optional[str],
+    stacks: str,
+    max_entries
+) -> None: ...
+
 def _cuda_getAllocatorBackend() -> str: ...
 class _cuda_CUDAAllocator_AllocatorState:
     pass

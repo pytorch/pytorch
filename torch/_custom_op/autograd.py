@@ -56,21 +56,55 @@ def autograd_not_implemented(custom_op):
     return kernel
 
 
+def mark_non_differentiable(ctx, output, output_differentiability):
+    # Output types are restricted to be:
+    # - Tensor
+    # - Tensor[]
+    # - int, bool, Scalar, float
+    # See _check_can_register_backward
+    if output_differentiability is not None:
+        if not isinstance(output, tuple):
+            tuple_output = (output,)
+        else:
+            tuple_output = output  # type: ignore[assignment]
+        assert len(output_differentiability) == len(tuple_output)
+        non_differentiable_tensors = []
+        for idx, (differentiable, out) in enumerate(zip(output_differentiability, tuple_output)):
+            if isinstance(out, torch.Tensor):
+                if not differentiable:
+                    non_differentiable_tensors.append(out)
+                continue
+            if isinstance(out, list):
+                if not differentiable:
+                    non_differentiable_tensors.extend(out)
+                continue
+            if differentiable:
+                raise RuntimeError(
+                    f"With output_differentiability={output_differentiability}. "
+                    f"At idx {idx}, we received an object of type {type(out)} that "
+                    f"is not a Tensor, so it cannot have be marked as differentiable in "
+                    f"output_differentiability.")
+        if non_differentiable_tensors:
+            ctx.mark_non_differentiable(*non_differentiable_tensors)
+
+
 def construct_autograd_kernel(
         schema,
         output_differentiability,
-        forward_op,
+        custom_op,
+        op_overload,
         save_for_backward_fn,
         backward_fn):
 
     def apply(*args):
         flat_args, spec = pytree.tree_flatten(args)
+        out_spec = None
 
         def forward(ctx, *flat_args):
             ctx.set_materialize_grads(True)
             args = pytree.tree_unflatten(list(flat_args), spec)
             with torch._C._AutoDispatchBelowAutograd():
-                output = forward_op(*args)
+                output = op_overload(*args)
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(
@@ -80,37 +114,34 @@ def construct_autograd_kernel(
             to_save = save_for_backward_fn(save_for_backward_fn_inputs, output)
 
             save_pytree_for_backward(ctx, (to_save, args_info))
+            mark_non_differentiable(ctx, output, output_differentiability)
 
-            # Output must be one or more Tensors, no TensorList (yet)
-            if output_differentiability is not None:
-                if isinstance(output, tuple):
-                    assert len(output_differentiability) == len(output)
-                    for differentiable, out in zip(output_differentiability, output):
-                        if not differentiable:
-                            ctx.mark_non_differentiable(out)
-                else:
-                    assert len(output_differentiability) == 1
-                    if not output_differentiability[0]:
-                        ctx.mark_non_differentiable(output)
+            nonlocal out_spec
+            flat_output, out_spec = pytree.tree_flatten(output)
+            return tuple(flat_output)
 
-            return output
-
-        def backward(ctx, *grads):
+        def backward(ctx, *flat_grad_output):
+            assert out_spec is not None
+            grads = pytree.tree_unflatten(list(flat_grad_output), out_spec)
             saved, args_info = unpack_saved(ctx)
             # There is nothing on the ctx object for now, it is just there so
             # that we can add additional things in the future.
             inner_ctx = object()
+            if not isinstance(grads, tuple):
+                grads = (grads,)
             grad_inputs_dict = backward_fn(inner_ctx, saved, *grads)
 
             # Massage the grad_inputs_dict to a form acceptable by
             # autograd.Function.
-            validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info)
+            validate_grad_inputs_dict(grad_inputs_dict, custom_op, args_info)
             return grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info)
 
         generated_cls = gen_autograd_function(
-            forward_op._opname + '_customop', forward, backward)
+            custom_op._opname + '_customop', forward, backward)
 
-        return generated_cls.apply(*flat_args)
+        flat_output = generated_cls.apply(*flat_args)
+        assert out_spec is not None
+        return pytree.tree_unflatten(list(flat_output), out_spec)
     return apply
 
 
