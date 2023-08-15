@@ -143,7 +143,7 @@ def register_philox_rand():
         impl_aten=_philox_rand,
         impl_meta=_philox_rand_meta,
         doc="Philox based stateless rand operator",
-        tags=(torch.Tag.nondeterministic_seeded,),  # type: ignore[attr-defined]
+        tags=(torch.Tag.nondeterministic_seeded,),
     )
 
 

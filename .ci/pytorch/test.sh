@@ -1021,11 +1021,18 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchtext
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # https://github.com/opencv/opencv-python/issues/885
+  pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
+    # Do this after checkout_install_torchbench to ensure we clobber any
+    # nightlies that torchbench may pull in
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+      install_torchrec_and_fbgemm
+    fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
