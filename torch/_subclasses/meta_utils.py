@@ -511,27 +511,14 @@ class MetaConverter:
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
         ):
-            if torch._is_functional_tensor(t):
-                reapply_views = torch._C._functionalization_reapply_views_tls()
-                unwrap_t = _unwrap_functional_tensor(t, reapply_views)
-                st = peek_interpreter_stack()
-                pop_st_ctx = (
-                    torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
-                    if st is not None
-                    else contextlib.nullcontext()
-                )
-                with pop_st_ctx:
-                    fake_t = self.meta_tensor(
-                        unwrap_t, shape_env=shape_env, callback=callback, source=source
-                    )
-                return _wrap_functional_tensor(fake_t, current_level())
-            elif t.device.type != "xla" and any(
+            if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
+                    torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
@@ -543,6 +530,23 @@ class MetaConverter:
                 # instrumentation will see the meta conversions and the
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
+                if torch._is_functional_tensor(t):
+                    reapply_views = torch._C._functionalization_reapply_views_tls()
+                    unwrap_t = _unwrap_functional_tensor(t, reapply_views)
+                    st = peek_interpreter_stack()
+                    pop_st_ctx = (
+                        torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
+                        if st is not None
+                        else contextlib.nullcontext()
+                    )
+                    with pop_st_ctx:
+                        fake_t = self.meta_tensor(
+                            unwrap_t,
+                            shape_env=shape_env,
+                            callback=callback,
+                            source=source,
+                        )
+                    return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
                 return NotImplemented
             else:
