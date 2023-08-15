@@ -18,12 +18,14 @@ pip_install \
 # onnx-weekly. Otherwise, onnx-weekly could be
 # overwritten by onnx.
 pip_install \
-  onnxruntime==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
   transformers==4.31.0
+
+pip_install coloredlogs packaging
+pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230821001
 
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.
