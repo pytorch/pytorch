@@ -6,11 +6,6 @@
 
 namespace c10 {
 
-SymNode SymBool::promoteToConstantSymNode() const {
-  TORCH_CHECK(!is_heap_allocated())
-  return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(data_));
-}
-
 SymNode SymBool::toSymNodeImpl() const {
   TORCH_CHECK(is_heap_allocated());
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
