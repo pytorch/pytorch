@@ -2584,16 +2584,20 @@ class CppKernelProxy(CppKernel):
             return
 
         def select_tiling_indices():
+            rw_index = []
             all_index = []
             for node in nodes:
+                rw_index += [*node._body.reads, *node._body.writes]
                 all_index += list(node._body.indexing_exprs.values())
+
             contig_vars = set()
             contig_vars_list = []
             non_contig_stride_const = set()
             non_contig_stride_other = set()
-            for index in all_index:
+
+            for index in rw_index:
                 for var in index.free_symbols:
-                    if not re.search(r"^d\d+$", var.name):
+                    if not re.search(r"^z\d+$", var.name):
                         continue
                     stride = stride_at(var, index)
                     if stride == 1:
@@ -2603,6 +2607,18 @@ class CppKernelProxy(CppKernel):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))
+
+            # If there has index_expr, remove this var in index_expr from contig_vars
+            # to disable the vec.
+            for index in all_index:
+                if index in rw_index:
+                    continue
+                for var in index.free_symbols:
+                    if not re.search(r"^z\d+$", var.name):
+                        continue
+                    if int(var.name[1:]) in contig_vars:
+                        contig_vars.remove(int(var.name[1:]))
+
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
@@ -2621,9 +2637,11 @@ class CppKernelProxy(CppKernel):
                 and contig_vars_sorted[-1] == len(self.itervars) - 1
             ):
                 return contig_vars_sorted
-            return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
-                -1:
-            ]
+            return sorted(
+                contig_vars_sorted,
+                key=lambda i: contig_vars_list.count(i),
+                reverse=True,
+            )[-1:]
 
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types

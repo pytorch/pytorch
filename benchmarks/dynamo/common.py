@@ -307,6 +307,10 @@ CI_SKIP_OPTIMIZER = {
 
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
+    # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
+    # It iterates over the batch, which is dynamic, and dynamo chokes
+    # We should be able to graphbreak there.
+    "doctr_det_predictor",
 }
 
 
