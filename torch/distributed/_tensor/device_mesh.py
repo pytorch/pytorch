@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import List, no_type_check, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -114,7 +114,6 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self._mesh_dim_names = _mesh_dim_names
-        self._parent_device_mesh = None
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -275,6 +274,7 @@ class DeviceMesh:
         return self._coordinate_on_dim if self._coordinate_on_dim else None
 
 
+@no_type_check
 def init_device_mesh(
     device_type: str,
     mesh_dims: Optional[Sequence[int]] = None,
@@ -284,7 +284,8 @@ def init_device_mesh(
     Initializes a `DeviceMesh` based on the device_type. If no mesh_dims and mesh_dim_names
     are provided, a `DeviceMesh` with a single mesh dimension equal to the world size is initialized.
     If mesh_dims and mesh_dim_names are provided, it will create a `DeviceMesh` with n-d dimensional
-    array as specified in`mesh_dims`, with each mesh_dim named with `mesh_dim_names`.
+    array as specified in `mesh_dims`, with each mesh_dim named by a string in `mesh_dim_names`
+    respectively.
 
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
@@ -316,15 +317,13 @@ def init_device_mesh(
     """
     if mesh_dims is None and mesh_dim_names is None:
         return DeviceMesh(
-            device_type=device_type,
-            mesh=torch.arange(dist.get_world_size())
+            device_type=device_type, mesh=torch.arange(dist.get_world_size())
         )
 
     mesh_world_size = torch.prod(torch.tensor(mesh_dims))
     if mesh_world_size != dist.get_world_size() or mesh_dims.count(-1) == 1:
         raise RuntimeError(
             f"The product of `mesh_dims` need to be equal to the world size {dist.get_world_size()}, but found {mesh_world_size}!"
-
         )
 
     if len(mesh_dims) != len(mesh_dim_names):
@@ -332,8 +331,9 @@ def init_device_mesh(
             f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_dims)}."
         )
 
-
     mesh = torch.arange(dist.get_world_size()).view(mesh_dims)
-    device_mesh = DeviceMesh(device_type=device_type, mesh=mesh, _mesh_dim_names=mesh_dim_names)
+    device_mesh = DeviceMesh(
+        device_type=device_type, mesh=mesh, _mesh_dim_names=mesh_dim_names
+    )
 
     return device_mesh

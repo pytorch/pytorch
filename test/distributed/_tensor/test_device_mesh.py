@@ -9,7 +9,7 @@ from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
 )
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed._tensor.placement_types import Shard
 
 from torch.distributed.distributed_c10d import (
@@ -155,6 +155,28 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
+
+
+class InitDeviceMeshTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_default_init_device_mesh(self):
+        default_mesh = init_device_mesh(self.device_type)
+        ref_mesh = DeviceMesh(self.device_type, torch.arange(8))
+        self.assertEqual(default_mesh, ref_mesh)
+
+    @with_comms
+    def test_init_device_mesh(self):
+        mesh_dims = [2, 4]
+        mesh_dim_names = ["DP", "TP"]
+        two_d_mesh = init_device_mesh(self.device_type, mesh_dims, mesh_dim_names)
+
+        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_dims))
+        self.assertEqual(two_d_mesh, ref_mesh)
+        self.assertEqual(two_d_mesh._mesh_dim_names, mesh_dim_names)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
