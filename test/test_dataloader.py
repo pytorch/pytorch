@@ -1563,39 +1563,91 @@ except RuntimeError as e:
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
+    def test_not_even_using_a_generator(self):
+        class MyDataset(SynchronizedDataset):
+            def __getitem__(self, idx):
+                self.sync_once()
+                return idx
+        num_workers = 2
+        dataset_len = 10
+        dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
+        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=True)
+        list(dl)
+
     @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
     def test_worker_generator_seed(self):
         # Tests for the RNG seeding behaviour within _worker_loop.
-        torch.manual_seed(0)
-        g1 = torch.Generator().manual_seed(1)
-        g2 = torch.Generator().manual_seed(2)
+        # See Note [RNG re-seeding in Dataloader workers]
 
         class MyDataset(SynchronizedDataset):
             def __getitem__(self, idx):
                 self.sync_once()
                 HIGH = 100_000
-                from_global = torch.randint(0, HIGH, size=(1,)).item()
+                from_default = torch.randint(0, HIGH, size=(1,)).item()
                 from_g1 = torch.randint(0, HIGH, size=(1,), generator=g1).item()
                 from_g2 = torch.randint(0, HIGH, size=(1,), generator=g2).item()
 
-                return from_global, from_g1, from_g2
+                return from_default, from_g1, from_g2
 
 
         num_workers = 2
         dataset_len = 10
         dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
-        dl = DataLoader(dataset, num_workers=num_workers)
+        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=True)
 
-        for from_global, from_g1, from_g2 in dl:
+        # ALL DIFFERENT SEEDS
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(1)
+        g2 = torch.Generator().manual_seed(2)
+
+        for from_default, from_g1, from_g2 in dl:
             # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
-            self.assertEqual(len({from_global, from_g1, from_g2}), 3)
+            self.assertEqual(len({from_default, from_g1, from_g2}), 3)
 
         # Make sure that the Generators' RNG is different across workers.
         # We check that by making sure all the samples of a given Generator are different across Dataloader entry.
         # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
-        all_from_global, all_from_g1, all_from_g2 = zip(*dl)
-        for all_from_generator in (all_from_global, all_from_g1, all_from_g2):
+        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
+        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
             self.assertEqual(len(set(all_from_generator)), dataset_len)
+
+        # ALL EQUAL SEEDS
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(0)
+        g2 = torch.Generator().manual_seed(0)
+
+        # All seeds are equal so we expect the RNG of all Generators to be the same.
+        # The RNG of user-made Generator are the same, but still different from the default RNG.
+        # That's due to different seeding strategies. It's OK, in general users shouldn't assume any guarantees
+        # regarding when / where the default RNG gets consumed anyway.
+        for from_default, from_g1, from_g2 in dl:
+            self.assertEqual(from_g1, from_g2)
+            self.assertNotEqual(from_default, from_g1)
+
+        # Same check as when seeds are different: even if they're equal we still want the RNG of a given Generator
+        # to be different across workers.
+        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
+        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
+            self.assertEqual(len(set(all_from_generator)), dataset_len)
+
+        # BEHAVIOR ACROSS EPOCHS
+        default_state_before_epoch = torch.random.get_rng_state()
+        g1_state_before_epoch = g1.get_state()
+        g2_state_before_epoch = g2.get_state()
+
+        all_from_default_a, all_from_g1_a, all_from_g2_a = zip(*dl)
+        # The default RNG got consumed while the user-made Generators weren't
+        self.assertNotEqual(default_state_before_epoch, torch.random.get_rng_state())
+        self.assertEqual(g1_state_before_epoch, g1.get_state())
+        self.assertEqual(g2_state_before_epoch, g2.get_state())
+        # All RNGs are still different across epoch, as expected: this is because
+        # all Generators' new seeds still depend on the `generator` parameter of
+        # the Dataloader, which by default is the default RNG, which got
+        # properly consumed in-between epochs.
+        all_from_default_b, all_from_g1_b, all_from_g2_b = zip(*dl)
+        self.assertNotEqual(all_from_default_a, all_from_default_b)
+        self.assertNotEqual(all_from_g1_a, all_from_g1_b)
+        self.assertNotEqual(all_from_g2_a, all_from_g2_b)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)

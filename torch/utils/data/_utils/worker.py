@@ -221,19 +221,22 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         signal_handling._set_worker_signal_handlers()
 
         torch.set_num_threads(1)
+
+        # Note [RNG re-seeding in Dataloader workers]
+        # We need to explicitly re-seed all RNGs here (builtin random, numpy, torch) to ensure that the RNGs are
+        # different across workers.
+        # We have to seed the default RNG and the user-made ones differently otherwise the RNG of all Generators
+        # would be the same as the default one.
+        # For each Generator we have to draw a seed that depends on its current state (done in _generate_seed()),
+        # otherwise all Generator instances within a given worker would have the same RNG.
         seed = base_seed + worker_id
         random.seed(seed)
         generators = [o for o in gc.get_objects() if isinstance(o, torch.Generator)]
         for generator in generators:
             if generator is torch.random.default_generator:
                 torch.manual_seed(seed)
-            else:
-                # Note that we can't use generator.manual_seed(seed) here, otherwise the RNG of the generator
-                # would be the same as the global one.
-                # We also need to create a generator_seed that depends on the current generator state, otherwise
-                # all Generator instances within a given worker would have the same RNG.
-                generator_seed = generator.initial_seed() + seed
-                generator.manual_seed(generator_seed)
+            elif generator.device.type != "cuda":
+                generator.manual_seed(_generate_seed(generator) + seed)
         if HAS_NUMPY:
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
@@ -338,3 +341,6 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
     if done_event.is_set():
         data_queue.cancel_join_thread()
         data_queue.close()
+
+def _generate_seed(generator):
+    return torch.empty((), dtype=torch.int64).random_(generator=generator).item()

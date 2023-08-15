@@ -238,6 +238,10 @@ static int THPGenerator_traverse(
   return 0;
 }
 
+// Even though they can't have cyclic references, we explicitly allow Generator
+// objects to be tracked by the GC. This provides convenient access to all
+// existing Generators instances when we need to re-seed them.
+// See Note [RNG re-seeding in Dataloader workers]
 PyTypeObject THPGeneratorType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
