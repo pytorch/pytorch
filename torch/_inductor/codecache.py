@@ -712,7 +712,7 @@ def is_conda_llvm_openmp_installed():
 
 
 @functools.lru_cache(None)
-def homebrew_ibomp():
+def homebrew_libomp():
     try:
         # check if `brew` is installed
         subprocess.check_output(["which", "brew"])
@@ -826,7 +826,7 @@ def get_include_and_linking_paths(
 
             # next, try to use openmp from `brew install libomp`
             if not omp_available:
-                omp_available, libomp_path = homebrew_ibomp()
+                omp_available, libomp_path = homebrew_libomp()
                 if omp_available:
                     ipaths.append(os.path.join(libomp_path, "include"))
                     lpaths.append(os.path.join(libomp_path, "lib"))
