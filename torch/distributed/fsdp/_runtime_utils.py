@@ -20,6 +20,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     _is_composable,
     _no_dispatch_record_stream,
+    clean_tensor_name,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
@@ -347,9 +348,12 @@ def _reshard(
     """
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
-        free_event = state._device_handle.Event()
-        free_event.record()
-        state._free_event_queue.enqueue(free_event)
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            # We don't run a even queue for freeing under torch compile atm
+            # But maybe we need to? TODO(voz): Look into this
+            free_event = state._device_handle.Event()
+            free_event.record()
+            state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
     # Since we prefetch entire handles keys at a time, conservatively mark
     # the entire key as no longer prefetched once we free at least one
@@ -1485,10 +1489,12 @@ def _get_buffers_and_dtypes_for_computation(
         root_module
     )
     for fsdp_state, fsdp_module in zip(reversed(fsdp_states), reversed(fsdp_modules)):
-        for buffer in fsdp_module.buffers():
+        for buffer_name, buffer in fsdp_module.named_buffers():
             if buffer in visited_buffers:
                 continue
             visited_buffers.add(buffer)
+            if clean_tensor_name(buffer_name) in fsdp_state._ignored_buffer_names:
+                continue
             buffers.append(buffer)
             buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)
     assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"
