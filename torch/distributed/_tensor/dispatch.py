@@ -101,31 +101,6 @@ def redistribute_local_args(
 
     op_info.flat_local_args = new_flat_local_args
 
-    # new_flat_local_kwargs = []
-    # for i, kwarg_spec in enumerate(op_info.flat_kwargs_schema):
-    #     reshard_arg_spec = flatten_args_schema_to_reshard[i]
-    #     if isinstance(arg_spec, DTensorSpec):
-    #         reshard_spec = _redistribute_with_local_tensor()
-    #     else:
-    #         new_flat_local_args.append(reshard_arg_spec)
-
-    # flatten_args, args_tree_spec = tree_flatten(args)
-    # flatten_args_schema, _ = tree_flatten(args_schema)
-
-    # for i, arg in enumerate(flatten_args):
-    #     if isinstance(arg, dtensor.DTensor):
-    #         if redistribute_with_schema:
-    #             target_spec = flatten_args_schema[i]
-    #             if arg._spec != target_spec:
-    #                 arg = redistribute_dtensor(
-    #                     arg, target_spec.mesh, target_spec.placements
-    #                 )
-
-    #         # reuse the schema list and update it with local tensor
-    #         flatten_args_schema[i] = arg._local_tensor
-
-    # return tree_unflatten(flatten_args_schema, args_tree_spec)
-
 
 def operator_dispatch(
     op_call: torch._ops.OpOverload,
