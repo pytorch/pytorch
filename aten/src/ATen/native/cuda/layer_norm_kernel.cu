@@ -724,14 +724,20 @@ void LayerNormKernelImplInternal(
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+
   // check if can take fast path - all tensors are properly aligned, N is less than 2^24 (to use float count),
   // N is multiple of vec_size (so that all rows are aligned if tensor is aligned)
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
+  bool can_vec_X = can_vectorize(X_data, aligment);
+  bool can_vec_Y = can_vectorize(Y_data, alignment);
+  bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
+  bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
+
   if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
-  can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
+  can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
