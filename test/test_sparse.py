@@ -4963,7 +4963,7 @@ class TestSparseAny(TestCase):
                     layout,
                     dtype=torch.float64,
                     # TODO: fix gh-107126 to enable batched samples:
-                    enable_batch=not (layout is torch.sparse_csr),
+                    enable_batch=layout is not torch.sparse_csr,
                     enable_hybrid=not (
                         layout is torch.sparse_csr and (
                             # FIXME: RuntimeError: sparse_mask(): the

@@ -651,7 +651,7 @@ def enable_sparse_support(gradcheck):
                 # Workaround for non-batch cases:
                 return torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).to_sparse(layout=d['layout'])
             else:
-                raise ValueError(f'unsupported sparse layout: {layout}')
+                raise ValueError(f'unsupported sparse layout: {d["layout"]}')
 
         def convert_to_strided_representation(args):
             if not isinstance(args, (list, tuple)):

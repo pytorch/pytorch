@@ -1110,11 +1110,125 @@ def forward(self, primals_1, primals_2):
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+    # https://github.com/pytorch/pytorch/issues/106456
+    def test_input_mutation_noncontiguous(self):
+        def f(a):
+            a.mul_(2)
+            return a + 1
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            # create a non-contiguous view to pass as an input to the compiler
+            inp = x[:, 0]
+            return [base], [inp]
+
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+    # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    def test_input_mutation_false_aliasing(self):
+        def f(a, b):
+            a.mul_(3)
+            b.mul_(2)
+            return a + b
+
+        # No overlap, contiguous
+        def inp_callable1(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            # create two non-contiguous views that share storage, but are actually non-overlapping
+            a = x[0:2]
+            b = x[2:4]
+            return [base], [a, b]
+
+        fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
+
+        # Important characteristic: the graph takes in 2 inputs!
+        # That shows that we didn't try to run our complicated synthetic base logic,
+        # because we successfully detected false aliasing across the two inputs.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    return (mul, mul_1, add)""")
+
+        # No overlap, non-contiguous: first tensor ends before second tensor start
+        def inp_callable2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (8, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (8, 1), storage_offset=28)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous: tensors are perfectly interleaved
+        def inp_callable3(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            a = x[:, 0:2]
+            b = x[:, 2:4]
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable4(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=22)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable5(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=23)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap1(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=24)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=25)
+            return [base], [a, b]
+
+        fw_graph2 = self.verify_aot_autograd(f, partial(inp_callable2, req_grad=False), test_mutation=True)
+        fw_graph3 = self.verify_aot_autograd(f, partial(inp_callable3, req_grad=False), test_mutation=True)
+        fw_graph4 = self.verify_aot_autograd(f, partial(inp_callable4, req_grad=False), test_mutation=True)
+        fw_graph5 = self.verify_aot_autograd(f, partial(inp_callable5, req_grad=False), test_mutation=True)
+
+        fw_graph_overlap1 = self.verify_aot_autograd(f, partial(inp_callable_overlap2, req_grad=False), test_mutation=True)
+        fw_graph_overlap2 = self.verify_aot_autograd(f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True)
+
+        # All non-overlap graphs should be the same since we detected false aliasing
+        self.assertEqual(str(fw_graph.code), str(fw_graph2.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
+
+        # All overlap graphs should be the same since we detected real aliasing
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap2.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap1.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap2.code))
+
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
@@ -1167,11 +1281,11 @@ def forward(self, primals_1, primals_2):
             return a + b
 
         def inp_callable(req_grad):
-            base = torch.ones(2, 2, requires_grad=req_grad)
+            base = torch.ones(4, 2, requires_grad=req_grad)
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
@@ -1187,7 +1301,7 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 

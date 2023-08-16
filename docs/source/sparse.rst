@@ -1340,6 +1340,7 @@ function, decorate the function with
     :nosignatures:
 
     sparse.enable_sparse_outputs
+    sparse.enable_sparse_support
 
 Unary functions
 ---------------
