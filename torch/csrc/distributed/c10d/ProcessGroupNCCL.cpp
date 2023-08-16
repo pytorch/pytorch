@@ -1502,8 +1502,16 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     if (tensor_lists[i].size() != world_size * num_devices) {
       TORCH_CHECK(
           false,
-          "Tensor list input to scatter/gather must match number of collective"
-          " participants");
+          c10::str(
+              "Tensor list input to scatter/gather must match number of collective participants ",
+              "but got ",
+              tensor_lists[i].size(),
+              " inputs",
+              " with world_size ",
+              world_size,
+              " and ",
+              num_devices,
+              " devices."));
     }
 
     // Only check device match for the first tensor in the list; the call to
