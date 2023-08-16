@@ -2933,8 +2933,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Expected each tensor to have same metadata but got",
+            RuntimeError,
+            "Unmatched tensor metadata from cond\(\) branches.",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,

@@ -1191,9 +1191,11 @@ def export(
                         out = torch.fx.Interpreter(graph).run(*args[params_len:], **kwargs)
                         return out
 
-                with fake_mode:
-                    fake_params_buffers = pytree.tree_map(fake_mode.from_tensor, params_and_buffers_flat)
-                    fake_graph_inputs = pytree.tree_map(fake_mode.from_tensor, graph_inputs)
+                fake_mode_new = _guards.detect_fake_mode(graph_inputs) if _guards.detect_fake_mode(graph_inputs) is not None else fake_mode
+
+                with fake_mode_new:
+                    fake_params_buffers = pytree.tree_map(fake_mode_new.from_tensor, params_and_buffers_flat)
+                    fake_graph_inputs = pytree.tree_map(fake_mode_new.from_tensor, graph_inputs)
                     graph_captured_result = functional_call(*fake_params_buffers, *fake_graph_inputs)
                 return graph_captured_result
 
