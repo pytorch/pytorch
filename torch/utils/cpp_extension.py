@@ -1343,19 +1343,19 @@ def _get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
-def _check_and_build_precompiler_headers(extra_cflags,
+def _check_and_build_extension_h_precompiler_headers(extra_cflags,
                             extra_include_paths,
                             is_standalone=False):
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
     GCC offical manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
     PCH only works when built pch file(header.h.gch) and build target have the same build parameters. So, We need
-    add a signture file to recoder PCH file parameters. If the build parameters(signture) changed, it should rebuild
+    add a siganture file to record PCH file parameters. If the build parameters(siganture) changed, it should rebuild
     PCH file.
 
     Note:
-    1. Windows and MacOS have different PCH mechanism, We only support on Linux currently.
-    2. It is only works on GCC/G++.
+    1. Windows and MacOS have different PCH mechanism. We only support Linux currently.
+    2. It only works on GCC/G++.
     '''
     if not IS_LINUX:
         return
@@ -1439,8 +1439,7 @@ def _check_and_build_precompiler_headers(extra_cflags,
         try:
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            from .._inductor.exc import CppCompileError
-            raise CppCompileError(pch_cmd, e.output) from e
+            raise RuntimeError("Compile PreCompile Header fail, command: {}".format(pch_cmd))
 
     extra_cflags_str = listToString(extra_cflags)
     extra_include_paths_str = listToString(extra_include_paths)
@@ -1563,7 +1562,7 @@ def load_inline(name,
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
     # Using PreCompile Header('torch/extension.h') to reduce compile time.
-    _check_and_build_precompiler_headers(extra_cflags,
+    _check_and_build_extension_h_precompiler_headers(extra_cflags,
                         extra_include_paths)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
