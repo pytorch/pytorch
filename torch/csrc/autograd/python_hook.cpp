@@ -12,7 +12,6 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <sstream>
-#include "c10/util/Exception.h"
 
 using torch::autograd::Variable;
 using torch::autograd::variable_list;
@@ -40,10 +39,10 @@ namespace {
 // Depending on the case, args and res can hold different types of objects:
 //
 // args:
-// TensorPreHook          (Tensor,)
-// PreHook                ((Tensor, ...),)                (grad_outputs,)
-// PostHook               ((Tensor, ...), (Tensor, ...))  (grad_inputs,
-// grad_outputs) TensorPostAccGradHook  ((Tensor), ()) (tensor,)
+// TensorPreHook   (Tensor,)
+// PreHook         ((Tensor, ...),)                (grad_outputs,)
+// PostHook        ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+// TensorPostAccGradHook  ((Tensor), ())                  (tensor,)
 //
 // res:
 // TensorPreHook          Tensor

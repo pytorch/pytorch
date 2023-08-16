@@ -529,7 +529,7 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.register_hook, (self,), self, hook)
         if not self.requires_grad:
             raise RuntimeError(
-                "cannot register a hook on a tensor that " "doesn't require gradient"
+                "cannot register a hook on a tensor that doesn't require gradient"
             )
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
@@ -542,15 +542,15 @@ class Tensor(torch._C._TensorBase):
     def register_post_accumulate_grad_hook(self, hook):
         r"""Registers a backward hook that runs after grad accumulation.
 
-        The hook will be called after the .grad field is set on a Tensor, meaning
-        all gradients have already been accumulated. The hook should have the
-        following signature::
+        The hook will be called after all gradients for a tensor have been accumulated,
+        meaning that the .grad field has been updated on that tensor. The hook should
+        have the following signature::
 
             hook(Tensor param) -> None
 
         Note that, unlike other autograd hooks, this hook operates on the tensor
-        that requires grad and not the grad itself. The hook can modify and access
-        its Tensor argument, including its .grad field.
+        that requires grad and not the grad itself. The hook can in-place modify
+        and access its Tensor argument, including its .grad field.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
@@ -577,7 +577,7 @@ class Tensor(torch._C._TensorBase):
             )
         if not self.requires_grad:
             raise RuntimeError(
-                "cannot register a hook on a tensor that " "doesn't require gradient"
+                "cannot register a hook on a tensor that doesn't require gradient"
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()

@@ -367,6 +367,7 @@ void add_post_acc_grad_hook(
     const at::TensorBase& self,
     std::unique_ptr<PostAccumulateGradHook> hook) {
   AutogradMeta* meta = materialize_autograd_meta(self);
+  TORCH_INTERNAL_ASSERT(meta->post_acc_grad_hooks_.empty());
   meta->post_acc_grad_hooks_.push_back(std::move(hook));
 }
 

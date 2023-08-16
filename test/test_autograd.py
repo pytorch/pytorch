@@ -996,6 +996,41 @@ class TestAutograd(TestCase):
             self.assertEqual(p_static, p)
             self.assertNotEqual(p_reference, p)
 
+    def test_post_grad_accumulate_hook_gets_cleaned_up(self):
+        def fun_stuff_with_hook():
+            thing_to_put_in_hook = torch.rand(3)
+
+            def hook(tensor):
+                tensor.sub_(tensor.grad)
+                tensor.add_(thing_to_put_in_hook)
+            tensor = torch.rand(3, requires_grad=True)
+            tensor.register_post_accumulate_grad_hook(hook)
+            tensor.sum().backward()
+            ref = weakref.ref(thing_to_put_in_hook)
+            gc.collect()
+            self.assertIsNotNone(ref())  # thing_to_put_in_hook should still be alive
+            return ref
+
+        with disable_gc():
+            ref = fun_stuff_with_hook()
+            self.assertIsNone(ref())  # thing_to_put_in_hook should have been cleaned
+
+    def test_post_grad_accumulate_hook_with_pre_hook(self):
+        def pre_hook(grad):
+            return grad.sub(2.)
+
+        def post_acc_grad_hook(tensor):
+            tensor.grad.mul_(5.)
+
+        tensor = torch.rand(3, requires_grad=True)
+        tensor.register_hook(pre_hook)
+        tensor.register_post_accumulate_grad_hook(post_acc_grad_hook)
+        tensor.sum().backward()
+
+        # prehook should run before post acc grad hook, so the grads should be
+        # (1 - 2) * 5 and not (1 * 5) - 2
+        self.assertEqual(torch.tensor([-5., -5., -5.]), tensor.grad)
+
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
         class MyHookClass:
