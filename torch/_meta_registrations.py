@@ -4783,47 +4783,27 @@ def meta__scaled_dot_product_flash_backward(
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
+    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
+    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
 
-    if device_hint(query) == "cpu":
-        seq_q = query.size(2)
-        seq_kv = value.size(2)
-        grad_q = torch.empty_permuted(
-            (batch_size, num_heads, seq_q, head_dim),
-            (0, 2, 1, 3),
-            dtype=query.dtype,
-            device=query.device,
-        )
-        grad_k = torch.empty_permuted(
-            (batch_size, num_heads, seq_kv, head_dim),
-            (0, 2, 1, 3),
-            dtype=key.dtype,
-            device=key.device,
-        )
-        grad_v = torch.empty_permuted(
-            (batch_size, num_heads, seq_kv, head_dim),
-            (0, 2, 1, 3),
-            dtype=value.dtype,
-            device=value.device,
-        )
-    else:
-        grad_q = torch.empty_permuted(
-            (batch_size, num_heads, max_q, head_dim),
-            (0, 2, 1, 3),
-            dtype=query.dtype,
-            device=query.device,
-        )
-        grad_k = torch.empty_permuted(
-            (batch_size, num_heads, max_k, head_dim),
-            (0, 2, 1, 3),
-            dtype=key.dtype,
-            device=key.device,
-        )
-        grad_v = torch.empty_permuted(
-            (batch_size, num_heads, max_k, head_dim),
-            (0, 2, 1, 3),
-            dtype=value.dtype,
-            device=value.device,
-        )
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, len_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, len_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, len_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
     return grad_q, grad_k, grad_v
 
