@@ -86,6 +86,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
 
   TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support erfinv op with scalar type: Double");
 
+  Tensor inputTensor = self;
   Tensor outputTensor = output_;
   bool needs_output_copy = false;
   uint32_t length = output_.numel();
@@ -99,6 +100,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
         getCPLState(device, getMetalType(outputTensor), getMetalType(self), "erfinv_mps_kernel");
 
     if (!self.is_contiguous()) {
+      inputTensor = inputTensor.contiguous();
       outputTensor = outputTensor.contiguous();
       needs_output_copy = true;
     }
@@ -107,13 +109,13 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLBuffer> outBuf = getMTLBufferStorage(outputTensor);
-      id<MTLBuffer> inputBuf = getMTLBufferStorage(self);
+      id<MTLBuffer> inputBuf = getMTLBufferStorage(inputTensor);
 
-      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {self});
+      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:outBuf offset:outputTensor.storage_offset() * outputTensor.element_size() atIndex:0];
-      [computeEncoder setBuffer:inputBuf offset:self.storage_offset() * self.element_size() atIndex:1];
+      [computeEncoder setBuffer:inputBuf offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:1];
 
       MTLSize gridSize = MTLSizeMake(length, 1, 1);
       uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];

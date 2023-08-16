@@ -7656,18 +7656,19 @@ class TestNLLLoss(TestCaseMPS):
             # test slice
             for dtypef in [torch.float32]:
                 cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                # create slice of tensor on the 2nd dimension
+                mps_x = cpu_x.detach().clone().to('mps')
                 cpu_slice = cpu_x[:, ::2, :, :]
-                mps_slice = cpu_slice.detach().clone().to('mps')
+                mps_slice = mps_x[:, ::2, :, :]
                 self.assertEqual(op(cpu_slice), op(mps_slice))
             # test view
             for dtypef in [torch.float32]:
                 cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
                 # create view of tensor by reducing the 3rd and 4th dimension
                 combined_dim = shape[-1] * shape[-2]
                 reshaped_dims = list(shape[:-2]) + [combined_dim]
                 cpu_view = cpu_x.view(*reshaped_dims)
-                mps_view = cpu_view.detach().clone().to('mps')
+                mps_view = mps_x.view(*reshaped_dims)
                 self.assertEqual(op(cpu_view), op(mps_view))
 
         helper((2, 8, 4, 5), torch.exp)
