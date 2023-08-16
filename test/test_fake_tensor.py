@@ -1,7 +1,7 @@
 # Owner(s): ["module: meta tensors"]
 
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
+    TestCase, TEST_WITH_TORCHDYNAMO, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
     instantiate_parametrized_tests)
 import torch
 import torch._dynamo
@@ -111,6 +111,7 @@ class FakeTensorTest(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertEqual(fake_t.requires_grad, t.requires_grad)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_index_cuda_with_cpu(self):
         with FakeTensorMode():
@@ -253,6 +254,7 @@ class FakeTensorTest(TestCase):
             with FakeTensorMode():
                 y = x[0]
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     def test_fake_grad_copy(self):
         x = torch.rand([4, 4], requires_grad=True)
         x.grad = torch.rand([4, 4])
@@ -282,6 +284,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.dtype, torch.float)
             self.assertEqual(out.device.type, "cpu")
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     def test_from_numpy(self):
         with FakeTensorMode():
             x = torch.tensor(np.zeros([4, 4]))
@@ -353,6 +356,7 @@ class FakeTensorTest(TestCase):
                 x.add_(y)
 
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):
         with FakeTensorMode():
@@ -369,6 +373,7 @@ class FakeTensorTest(TestCase):
             y = x + x
             self.assertTrue(mode.in_kernel_invocation)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @skipIfRocm
     @parametrize("allow_fallback_kernels", [False, True],
                  lambda a: 'with_fallback' if a else 'without_fallback')
@@ -540,6 +545,7 @@ class FakeTensorTest(TestCase):
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_new(self):
         with FakeTensorMode():
@@ -550,6 +556,7 @@ class FakeTensorTest(TestCase):
             self.checkType(b.new(device='cuda'), "cuda", [0])
             self.checkType(a.new(torch.rand([1])), "cpu", [1])
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     def test_scalar_inputs(self):
         with FakeTensorMode():
             self.checkType(torch.div(3, 2), "cpu", [])
@@ -557,6 +564,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(ten.dtype, torch.float)
             self.checkType(ten, "cpu", [2])
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     def test_allow_meta(self):
         def run_meta():
             with FakeTensorMode():
@@ -585,6 +593,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(r.size(), f.size())
             self.assertEqual(r.device, f.device)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
             def __init__(self):
@@ -613,6 +622,7 @@ class FakeTensorTest(TestCase):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_aten_copy_multi_device(self):
         with FakeTensorMode():
@@ -626,6 +636,7 @@ class FakeTensorTest(TestCase):
         self.checkType(copy2, "cuda", (4,))
         self.checkType(out, "cpu", (4,))
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_aten_index_multi_device(self):
         with FakeTensorMode():
@@ -647,6 +658,7 @@ class FakeTensorTest(TestCase):
         self.checkType(r3, "cpu", (4, 4))
         self.checkType(r4, "cuda", (4, 4))
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_aten_slice_scatter_multi_device(self):
         with FakeTensorMode():
