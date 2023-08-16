@@ -64,6 +64,6 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
     except Exception as e:
         warnings.warn(
             f"Error deriving logger module name, using <None>. Exception: {e}",
-            RuntimeWarning,
+            RuntimeWarning, stacklevel=1
         )
         return None

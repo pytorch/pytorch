@@ -1824,7 +1824,7 @@ class CudaMemoryLeakCheck:
                     i,
                     self.driver_befores[i],
                     driver_mem_allocated)
-                warnings.warn(msg)
+                warnings.warn(msg, stacklevel=1)
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)

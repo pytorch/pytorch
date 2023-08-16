@@ -482,7 +482,7 @@ def _flatten_optim_state_dict(
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:
                         warnings.warn(
-                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}.", stacklevel=1
                         )
 
             else:
@@ -1439,7 +1439,7 @@ def _optim_state_dict(
             "most cases, this is a user-defined state that is not "
             "associated with any particular parameter. Another possible "
             "case is this state is managed by TorchRec. Otherwise, there may "
-            " be a mismatched assumption of optim_state_dict of this mode."
+            " be a mismatched assumption of optim_state_dict of this mode.", stacklevel=1
         )
         fsdp_osd_state[key] = value
 

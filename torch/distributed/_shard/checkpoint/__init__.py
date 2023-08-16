@@ -7,6 +7,6 @@ import warnings
 from torch.distributed.checkpoint import *  # noqa: F403
 warnings.warn(
     "torch.distributed._shard.checkpoint will be deprecated, use torch.distributed.checkpoint instead",
-    DeprecationWarning
+    DeprecationWarning, stacklevel=1
 )
 sys.modules['torch.distributed._shard.checkpoint'] = torch.distributed.checkpoint

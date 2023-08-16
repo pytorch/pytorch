@@ -1344,7 +1344,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "and silence this warning, please use dropout instead. Note that dropout2d "
                     "exists to provide channel-wise dropout on inputs with 2 spatial dimensions, "
                     "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, stacklevel=1)
 
     # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
     # a 3D input will perform dropout1d behavior instead. This was done historically and the
@@ -1388,7 +1388,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "and silence this warning, please use dropout instead. Note that dropout3d "
                     "exists to provide channel-wise dropout on inputs with 3 spatial dimensions, "
                     "a channel dimension, and an optional batch dimension (i.e. 4D or 5D inputs).")
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, stacklevel=1)
 
     is_batched = inp_dim == 5
     if not is_batched:

@@ -301,7 +301,7 @@ class _ExecOrderData:
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank}. Collectives are unchecked and may "
-                    f"give incorrect results or hang.\n{msg_prefix}{msg_suffix}"
+                    f"give incorrect results or hang.\n{msg_prefix}{msg_suffix}", stacklevel=1
                 )
                 self.warn_status = _ExecOrderWarnStatus.WARNING
             self.current_order_index += 1

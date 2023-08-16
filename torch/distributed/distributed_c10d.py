@@ -760,7 +760,7 @@ def _get_global_rank(group, rank):
     """
     warnings.warn(
         "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead"
+        "please use torch.distributed.distributed_c10d.get_global_rank instead", stacklevel=1
     )
     return get_global_rank(group, rank)
 
@@ -1125,7 +1125,7 @@ def init_process_group(
             warnings.warn(
                 "For MPI backend, world_size ({}) and rank ({}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank)
+                "MPI runtime.".format(world_size, rank), stacklevel=1
             )
 
         default_pg, _ = _new_process_group_helper(

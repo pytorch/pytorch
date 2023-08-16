@@ -115,13 +115,13 @@ class BaseScheduler:
             if not hasattr(self.sparsifier.step, "_with_counter"):
                 warnings.warn("Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
                               "initialization. Please, make sure to call `sparsifier.step()` before "
-                              "`scheduler.step()`.", UserWarning)
+                              "`scheduler.step()`.", UserWarning, stacklevel=1)
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
             elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
                               "You have to make sure you run the sparsifier.step() BEFORE any "
-                              "calls to the scheduler.step().", UserWarning)
+                              "calls to the scheduler.step().", UserWarning, stacklevel=1)
         self._step_count += 1
 
         class _enable_get_sl_call:

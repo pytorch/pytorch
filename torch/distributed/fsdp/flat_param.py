@@ -1436,7 +1436,7 @@ class FlatParamHandle:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
-                    "approximate those ranks' sharded gradients being `None`"
+                    "approximate those ranks' sharded gradients being `None`", stacklevel=1
                 )
             flat_param._saved_grad_shard = None  # type: ignore[assignment]
             sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
@@ -2252,7 +2252,7 @@ class FlatParamHandle:
                 f"[Rank {rank}] {'Parameter' if is_param else 'Gradient'} needs "
                 f"writeback in {self._training_state}\n"
                 f"expected shape={expected_shape} shape={src_shape} "
-                f"expected device={dst_tensor.device} device={src_device}"
+                f"expected device={dst_tensor.device} device={src_device}", stacklevel=1
             )
         if src_tensor is not None and src_tensor.shape != expected_shape:
             # NOTE: Gradient shape mismatch is not possible in practice since
