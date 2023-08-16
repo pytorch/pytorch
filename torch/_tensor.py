@@ -543,8 +543,12 @@ class Tensor(torch._C._TensorBase):
         r"""Registers a backward hook that runs after grad accumulation.
 
         The hook will be called after all gradients for a tensor have been accumulated,
-        meaning that the .grad field has been updated on that tensor. The hook should
-        have the following signature::
+        meaning that the .grad field has been updated on that tensor. The post
+        accumulate grad hook is ONLY applicable for leaf tensors as the AccumulateGrad
+        node is only called for leaf tensors. Registering this hook on a non-leaf
+        tensor will do nothing!
+
+        The hook should have the following signature::
 
             hook(Tensor param) -> None
 

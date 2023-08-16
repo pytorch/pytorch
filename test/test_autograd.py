@@ -1015,21 +1015,34 @@ class TestAutograd(TestCase):
             ref = fun_stuff_with_hook()
             self.assertIsNone(ref())  # thing_to_put_in_hook should have been cleaned
 
-    def test_post_grad_accumulate_hook_with_pre_hook(self):
+    def test_post_grad_accumulate_hook_ordering(self):
         def pre_hook(grad):
             return grad.sub(2.)
 
+        def acc_grad_node_pre_hook(grad_out):
+            return (grad_out[0].div_(5.),)
+
         def post_acc_grad_hook(tensor):
-            tensor.grad.mul_(5.)
+            tensor.grad.mul_(10.)
+
+        def acc_grad_node_post_hook(grad_in, grad_out):
+            return (grad_out[0].add_(0.5),)
 
         tensor = torch.rand(3, requires_grad=True)
+        acc_grad = tensor.view_as(tensor).grad_fn.next_functions[0][0]
         tensor.register_hook(pre_hook)
+        acc_grad.register_prehook(acc_grad_node_pre_hook)
         tensor.register_post_accumulate_grad_hook(post_acc_grad_hook)
+        acc_grad.register_hook(acc_grad_node_post_hook)
         tensor.sum().backward()
 
-        # prehook should run before post acc grad hook, so the grads should be
-        # (1 - 2) * 5 and not (1 * 5) - 2
-        self.assertEqual(torch.tensor([-5., -5., -5.]), tensor.grad)
+        # the hooks should run in the order of:
+        #   1. tensor prehook
+        #   2. acc_grad prehook
+        #   3. tensor post acc_grad hook
+        #   4. acc_grad posthook
+        # so that would be (1 - 2) / 5 * 10 + 0.5 = -1.5
+        self.assertEqual(torch.tensor([-1.5, -1.5, -1.5]), tensor.grad)
 
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
