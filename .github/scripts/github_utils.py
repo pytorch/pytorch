@@ -161,9 +161,9 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
             merge_base = json_data.get("merge_base_commit", {}).get("sha", "")
         else:
             warnings.warn(
-                f"Failed to get merge base for {base}...{head}: Empty response"
+                f"Failed to get merge base for {base}...{head}: Empty response", stacklevel=1
             )
     except Exception as error:
-        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
+        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}", stacklevel=1)
 
     return merge_base

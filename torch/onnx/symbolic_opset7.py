@@ -43,7 +43,7 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         warnings.warn(
             "Multidirectional broadcasting is not supported in opset 7. "
             "This might cause the onnx model to be incorrect, if inputs to max operators "
-            "have different shapes"
+            "have different shapes", stacklevel=1
         )
     return opset9.max(g, self, dim_or_y, keepdim)
 
@@ -55,7 +55,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         warnings.warn(
             "Multidirectional broadcasting is not supported in opset 7. "
             "This might cause the onnx model to be incorrect, if inputs to min operators "
-            "have different shapes"
+            "have different shapes", stacklevel=1
         )
     return opset9.min(g, self, dim_or_y, keepdim)
 

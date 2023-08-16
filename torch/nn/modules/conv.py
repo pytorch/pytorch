@@ -1126,7 +1126,7 @@ class _ConvTransposeMixin(_ConvTransposeNd):
     def __init__(self, *args, **kwargs):
         warnings.warn(
             "_ConvTransposeMixin is a deprecated internal class. "
-            "Please consider using public APIs.")
+            "Please consider using public APIs.", stacklevel=1)
         super().__init__(*args, **kwargs)
 
 

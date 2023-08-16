@@ -1355,7 +1355,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                       "1D dropout behavior is desired - input is interpreted as shape (N, C, L), where C "
                       "is the channel dim. This behavior will change in a future release to interpret the "
                       "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
-                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
+                      "channel-wise dropout behavior, please switch to using dropout1d instead.", stacklevel=1)
 
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
 
@@ -1904,7 +1904,7 @@ def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: floa
     if has_torch_function_unary(logits):
         return handle_torch_function(gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim)
     if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated and has no effect.")
+        warnings.warn("`eps` parameter is deprecated and has no effect.", stacklevel=1)
 
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
@@ -2350,7 +2350,7 @@ def embedding_bag(
         warnings.warn(
             "Argument order of nn.functional.embedding_bag was changed. "
             "Usage `embedding_bag(weight, input, ...)` is deprecated, "
-            "and should now be `embedding_bag(input, weight, ...)`."
+            "and should now be `embedding_bag(input, weight, ...)`.", stacklevel=1
         )
         weight, input = input, weight
 
@@ -2945,7 +2945,7 @@ def kl_div(
             warnings.warn(
                 "reduction: 'mean' divides the total loss by both the batch size and the support size."
                 "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
-                "'mean' will be changed to behave the same as 'batchmean' in the next major release."
+                "'mean' will be changed to behave the same as 'batchmean' in the next major release.", stacklevel=1
             )
 
         # special case for batchmean
@@ -3768,7 +3768,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.", stacklevel=1)
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
@@ -4083,7 +4083,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.", stacklevel=1)
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
@@ -4139,7 +4139,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.", stacklevel=1)
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
@@ -4299,7 +4299,7 @@ def grid_sample(
             "Default grid_sample and affine_grid behavior has changed "
             "to align_corners=False since 1.3.0. Please specify "
             "align_corners=True if the old behavior is desired. "
-            "See the documentation of grid_sample for details."
+            "See the documentation of grid_sample for details.", stacklevel=1
         )
         align_corners = False
 
@@ -4361,7 +4361,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
             "Default grid_sample and affine_grid behavior has changed "
             "to align_corners=False since 1.3.0. Please specify "
             "align_corners=True if the old behavior is desired. "
-            "See the documentation of grid_sample for details."
+            "See the documentation of grid_sample for details.", stacklevel=1
         )
         align_corners = False
 
@@ -4393,7 +4393,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
             "Since version 1.3.0, affine_grid behavior has changed "
             "for unit-size grids when align_corners=True. "
             "This is not an intended use case of affine_grid. "
-            "See the documentation of affine_grid for details."
+            "See the documentation of affine_grid for details.", stacklevel=1
         )
     elif min(size) <= 0:
         raise ValueError(f"Expected non-zero, positive output size. Got {size}")
@@ -5077,7 +5077,7 @@ def _canonical_mask(
             if _mask_dtype != other_type:
                 warnings.warn(
                     f"Support for mismatched {mask_name} and {other_name} "
-                    "is deprecated. Use same type for both instead."
+                    "is deprecated. Use same type for both instead.", stacklevel=1
                 )
         if not _mask_is_float:
             mask = (

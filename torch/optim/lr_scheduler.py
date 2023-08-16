@@ -259,7 +259,7 @@ class LambdaLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.")
+                          "please use `get_last_lr()`.", stacklevel=1)
 
         return [base_lr * lmbda(self.last_epoch)
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]

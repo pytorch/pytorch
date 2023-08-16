@@ -1032,7 +1032,7 @@ def embedding(
         warnings.warn(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "
-            "ONNX does not support not updating the embedding vector at padding_idx during training."
+            "ONNX does not support not updating the embedding vector at padding_idx during training.", stacklevel=1
         )
 
     return g.op("Gather", weight, indices)
@@ -1275,7 +1275,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + "Axis is converted to "
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect."
+                + "Passing an tensor of different rank in execution will be incorrect.", stacklevel=1
             )
             squeeze_dim += rank
         else:
@@ -1294,7 +1294,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + " of the input "
             + "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on "
             + "non-singleton dimensions, it is recommended to export this model using opset "
-            + "version 11 or higher."
+            + "version 11 or higher.", stacklevel=1
         )
         return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
@@ -1307,7 +1307,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + ". The model will "
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
             + "input shapes, please use opset version 11 to "
-            + "export the model."
+            + "export the model.", stacklevel=1
         )
         return self
 
@@ -1315,7 +1315,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
         "This model contains a squeeze operation on dimension "
         + str(squeeze_dim)
         + ". If the model is "
-        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model."
+        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model.", stacklevel=1
     )
     return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
@@ -4245,7 +4245,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect."
+                + "Passing an tensor of different rank in execution will be incorrect.", stacklevel=1
             )
             dim = dim + rank + 1
         else:
@@ -4665,7 +4665,7 @@ def _generic_rnn(
         + " can cause an error "
         + "when running the ONNX model with a different batch size. "
         + "Make sure to save the model with a batch size of 1, "
-        + "or define the initial states (h0/c0) as inputs of the model. "
+        + "or define the initial states (h0/c0) as inputs of the model. ", stacklevel=1
     )
 
     onnxActivations = [
@@ -5802,7 +5802,7 @@ def index(g: jit_utils.GraphContext, self, index):
             warnings.warn(
                 "Exporting aten::index operator with indices of type Byte. "
                 "Only 1-D indices are supported. In any other case, "
-                "this will produce an incorrect ONNX graph."
+                "this will produce an incorrect ONNX graph.", stacklevel=1
             )
             index = symbolic_helper._squeeze_helper(g, nonzero(g, index), [1])
         return index
@@ -5858,7 +5858,7 @@ def index(g: jit_utils.GraphContext, self, index):
                 f"{GLOBALS.export_onnx_opset_version}"
                 " is achieved by combination of multiple ONNX operators, "
                 "including Reshape, Transpose, Concat, and Gather. "
-                "If indices include negative values, the exported graph will produce incorrect results."
+                "If indices include negative values, the exported graph will produce incorrect results.", stacklevel=1
             )
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
@@ -6616,7 +6616,7 @@ def fill(g: jit_utils.GraphContext, self, value):
 def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     warnings.warn(
         "Warning: ONNX export does not support duplicated values in 'index' field, "
-        + "this will cause the ONNX model to be incorrect."
+        + "this will cause the ONNX model to be incorrect.", stacklevel=1
     )
 
     # ONNX does not support "alpha" argument, unlike aten index_add

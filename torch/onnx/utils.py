@@ -107,7 +107,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
                     "You are exporting the model in training mode with onnx opset "
                     f"version {GLOBALS.export_onnx_opset_version}. "
                     "Opset versions lower than opset 12 will not be able to export "
-                    "nodes such as Dropout and BatchNorm correctly."
+                    "nodes such as Dropout and BatchNorm correctly.", stacklevel=1
                 )
         else:
             GLOBALS.export_training = False
@@ -734,14 +734,14 @@ def warn_on_static_input_change(input_states):
                     "for configuration use. "
                     "Also note that the order and values of the keys must remain the same. "
                 )
-                warnings.warn(warning)
+                warnings.warn(warning, stacklevel=1)
         elif isinstance(input, str):
             if input != traced_input:
                 warning = (
                     "The model seems to have string inputs/outputs. "
                     "Note that strings will not appear as inputs/outputs of the ONNX graph. "
                 )
-                warnings.warn(warning)
+                warnings.warn(warning, stacklevel=1)
 
 
 @_beartype.beartype
@@ -755,7 +755,7 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
             warnings.warn(
                 f"'{arg_name}' can be set to True only when 'operator_export_type' is "
                 "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
-                f"'{arg_name}' argument will be ignored."
+                f"'{arg_name}' argument will be ignored.", stacklevel=1
             )
         arg_value = False
     return arg_value
@@ -791,7 +791,7 @@ def _decide_keep_init_as_input(
                 "8 or lower would lead to an invalid ONNX graph. Therefore, "
                 "'keep_initializers_as_inputs=False' is ignored during export."
                 "Exported model will have initializers as graph inputs (compliant "
-                " to ONNX IR v3)."
+                " to ONNX IR v3).", stacklevel=1
             )
         return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
     val_keep_init_as_ip = (
@@ -826,7 +826,7 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
             "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
             "learnable model parameters may not translate correctly in the exported ONNX model "
             "because constant folding mutates model parameters. Please consider "
-            "turning off constant folding or setting the training=TrainingMode.EVAL."
+            "turning off constant folding or setting the training=TrainingMode.EVAL.", stacklevel=1
         )
     return do_constant_folding
 
@@ -844,7 +844,7 @@ def _decide_input_format(model, args):
     try:
         sig = _signature(model)
     except ValueError as e:
-        warnings.warn(f"{e}, skipping _decide_input_format")
+        warnings.warn(f"{e}, skipping _decide_input_format", stacklevel=1)
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
@@ -872,9 +872,9 @@ def _decide_input_format(model, args):
         args = args_list if isinstance(args, list) else tuple(args_list)
     # Cases of models with no input args
     except IndexError:
-        warnings.warn("No input args, skipping _decide_input_format")
+        warnings.warn("No input args, skipping _decide_input_format", stacklevel=1)
     except Exception as e:
-        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
+        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}", stacklevel=1)
 
     return args
 
@@ -1823,7 +1823,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
             "The first argument to symbolic functions is deprecated in 1.13 and will be "
             "removed in the future. Please annotate treat the first argument (g) as GraphContext "
             "and use context information from the object instead.",
-            category=FutureWarning,
+            category=FutureWarning, stacklevel=1
         )
 
         def wrapper(graph_context: jit_utils.GraphContext, *args, **kwargs):
@@ -2062,12 +2062,12 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     for key, value in dynamic_axes.items():
         if key not in valid_names:
             warnings.warn(
-                f"Provided key {key} for dynamic axes is not a valid input/output name"
+                f"Provided key {key} for dynamic axes is not a valid input/output name", stacklevel=1
             )
         if isinstance(value, list):
             warnings.warn(
                 "No names were found for specified dynamic axes of provided input."
-                f"Automatically generated names will be applied to each dynamic axes of input {key}"
+                f"Automatically generated names will be applied to each dynamic axes of input {key}", stacklevel=1
             )
 
             value_dict = {}
@@ -2078,7 +2078,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     )
                 if x in value_dict:
                     warnings.warn(
-                        f"Duplicate dynamic axis index {x} was provided for input {key}."
+                        f"Duplicate dynamic axis index {x} was provided for input {key}.", stacklevel=1
                     )
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)

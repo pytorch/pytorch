@@ -842,7 +842,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 # use env vars so pytest-xdist subprocesses can still access them
                 os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
         else:
-            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
+            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}', stacklevel=1)
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
             with open(DISABLED_TESTS_FILE) as fp:
@@ -850,7 +850,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
         else:
-            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}')
+            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}', stacklevel=1)
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -3626,7 +3626,7 @@ def download_file(url, binary=True):
         return path
     except error.URLError as e:
         msg = f"could not download test file '{url}'"
-        warnings.warn(msg, RuntimeWarning)
+        warnings.warn(msg, RuntimeWarning, stacklevel=1)
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
