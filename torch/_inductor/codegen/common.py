@@ -815,6 +815,8 @@ class Kernel(CodeGen):
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
+        self.node_schedule = None
+
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
@@ -984,8 +986,8 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if V.graph.scheduler:
-            V.graph.scheduler.remove_kernel_local_buffers()
+        assert V.graph.scheduler, "Scheduler should be already set"
+        V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:

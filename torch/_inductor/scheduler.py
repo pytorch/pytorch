@@ -69,6 +69,7 @@ class BaseSchedulerNode:
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
         self.written = False
+        self.node_idx = None
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -151,9 +152,14 @@ class BaseSchedulerNode:
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
 
-    def used_or_aliased_buffer_names(self) -> Set[str]:
+    def used_or_aliased_buffer_names(self, include_write=True) -> Set[str]:
         used_names = set()
-        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
+        if include_write:
+            deps = itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        else:
+            deps = self.read_writes.reads
+
+        for dep in deps:
             used_names.add(dep.name)
             if V.graph.name_to_buffer.get(dep.name):
                 layout = V.graph.name_to_buffer[dep.name].get_layout()
@@ -847,6 +853,8 @@ class Scheduler:
         }
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        for idx, node in enumerate(self.nodes):
+            node.node_idx = idx
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -875,6 +883,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
+        self.compute_buffer_users()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -884,7 +893,6 @@ class Scheduler:
         # used during codegen:
         self.current_device = None
         self.buffer_names_to_free = set()
-        self.buffer_names_no_longer_needed = set()
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
@@ -1379,6 +1387,23 @@ class Scheduler:
         node1, node2 = nodes
         return self.score_fusion(node1, node2)
 
+    def compute_buffer_users(self):
+        """
+        Track the user nodes for each buffer.
+        """
+        self.buffer_users = collections.defaultdict(set)
+        for node in self.nodes:
+            assert not isinstance(
+                node, FusedSchedulerNode
+            ), "This method should be called before fusion"
+            for used in node.used_or_aliased_buffer_names(include_write=False):
+                self.buffer_users[used].add(node.node_idx)
+
+        # set user for graph output buffers
+        for node_name in V.graph.get_output_names():
+            # -1 mark a buffer is needed for output
+            self.buffer_users[node_name].add(-1)
+
     def compute_last_usage(self):
         """
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
@@ -1416,9 +1441,16 @@ class Scheduler:
         same kernel can be removed.
         """
 
-        names_to_remove = (
-            V.kernel.store_buffer_names & self.buffer_names_no_longer_needed
-        )
+        fused_node_ids = {
+            node.node_idx
+            for node in V.kernel.node_schedule
+            if isinstance(node, BaseSchedulerNode)
+        }
+        names_to_remove = []
+        for out_buf in V.kernel.store_buffer_names:
+            users = self.buffer_users[out_buf]
+            if users.issubset(fused_node_ids):
+                names_to_remove.append(out_buf)
 
         def remove_filter(n):
             return (
@@ -1518,7 +1550,6 @@ class Scheduler:
     def codegen(self):
         for node in self.nodes:
             self.enter_context(node)
-            self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()

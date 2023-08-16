@@ -1835,9 +1835,6 @@ class TritonKernel(Kernel):
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark())
 
-        if name is not None:
-            return code.getvalue()
-
         return code.getvalue()
 
     def codegen_static_numels(self, code):
@@ -2160,8 +2157,7 @@ class TritonScheduling:
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("Schedule:\n %s", node_schedule)
+        schedule_log.debug("Schedule:\n %s", node_schedule)
 
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -2275,6 +2271,16 @@ class TritonScheduling:
         if origins:
             wrapper.writeline(origins)
 
+        if config.debug_fusion:
+            from torch._inductor.scheduler import BaseSchedulerNode
+
+            node_ids = [
+                n.node_idx for n in node_schedule if isinstance(n, BaseSchedulerNode)
+            ]
+            wrapper.writeline(
+                f"{wrapper.comment} Fused node idx list: {', '.join(map(str, node_ids))}"
+            )
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
@@ -2286,6 +2292,7 @@ class TritonScheduling:
             mutations=mutations,
             index_dtype=index_dtype,
         )
+        kernel.node_schedule = node_schedule
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
