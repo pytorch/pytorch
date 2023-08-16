@@ -33,20 +33,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
-          - docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
-          - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9
-          - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
-          - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks
-          - docker-image-name: pytorch-linux-bionic-py3.8-clang9
-          - docker-image-name: pytorch-linux-bionic-py3.11-clang9
           - docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+          - docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+          - docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+          - docker-image-name: pytorch-linux-focal-py3.8-clang10
+          - docker-image-name: pytorch-linux-focal-py3.11-clang10
           - docker-image-name: pytorch-linux-focal-rocm-n-1-py3
           - docker-image-name: pytorch-linux-focal-rocm-n-py3
           - docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12
           - docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
-          - docker-image-name: pytorch-linux-focal-py3.8-gcc7
-          - docker-image-name: pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks
+          - docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+          - docker-image-name: pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks
           - docker-image-name: pytorch-linux-jammy-py3-clang12-asan
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
           - docker-image-name: pytorch-linux-focal-linter
