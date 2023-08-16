@@ -1606,19 +1606,18 @@ except RuntimeError as e:
             all_from_generator = {x.item() for x in all_from_generator}
             self.assertEqual(len(all_from_generator), dataset_len)
 
-        del g1
-        del g2
-        gc.collect()
-
         # ALL EQUAL SEEDS
         torch.manual_seed(0)
         g1 = torch.Generator().manual_seed(0)
         g2 = torch.Generator().manual_seed(0)
 
         # All seeds are equal so we expect the RNG of all Generators to be the same.
+        # Default RNG is different from the non-default ones, due to slightly different logic for the choice
+        # of the base seed: the non-default Generators are first consumed in the main process before generating
+        # their seed.
         for from_default, from_g1, from_g2 in dl:
             self.assertEqual(from_g1, from_g2)
-            self.assertEqual(from_default, from_g1)
+            self.assertNotEqual(from_default, from_g1)
 
         # Same check as when seeds are different: even if they're equal we still want the RNG of a given Generator
         # to be different across workers.
@@ -1642,22 +1641,6 @@ except RuntimeError as e:
         self.assertNotEqual(all_from_default_a, all_from_default_b)
         self.assertNotEqual(all_from_g1_a, all_from_g1_b)
         self.assertNotEqual(all_from_g2_a, all_from_g2_b)
-
-        del g1
-        del g2
-        gc.collect()
-
-        # FUN STUFF
-        torch.manual_seed(0)
-        g1 = torch.Generator().manual_seed(0)
-        g2 = torch.Generator().manual_seed(0)
-        torch.randint(0, 100, size=(1,), generator=g1)  # consume g1
-        # We would expect g1 and g2 to yield different RNG, since g1 got consumed while g2 didn't.
-        # Yet, they both produce the same samples within the workers.
-        # Why? Because they have the same initial seed!
-        # See more details in the NOTE [RNG re-seeding in Dataloader workers]
-        for _, from_g1, from_g2 in dl:
-            self.assertEqual(from_g1, from_g2)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
