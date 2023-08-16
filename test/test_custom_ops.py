@@ -35,7 +35,7 @@ class CustomOpTestCaseBase(TestCase):
                 continue
             torch._custom_op.impl.global_registry[key]._destroy()
         if hasattr(torch.ops, self.test_ns):
-            del torch.ops._test_custom_op
+            delattr(torch.ops, self.test_ns)
         for lib in self.libraries:
             del lib.m
         del self.libraries
@@ -1684,6 +1684,182 @@ def forward(self, x_1):
         y = op(x)
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
+
+
+class MiniOpTest(CustomOpTestCaseBase):
+    test_ns = "mini_op_test"
+
+    def _op_with_incorrect_schema(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x[:], "CompositeExplicitAutograd")
+        return self.get_op(qualname)
+
+    def _op_delayed_backward_error(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x.clone(), "CompositeExplicitAutograd")
+        op = self.get_op(qualname)
+
+        class Op(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return op(x)
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise NotImplementedError()
+
+        def autograd_impl(x):
+            return Op.apply(x)
+
+        lib.impl(name, autograd_impl, "Autograd")
+        return op
+
+    def _op_with_no_abstract_impl(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x.clone(), "CPU")
+        return self.get_op(qualname)
+
+    def test_mm(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(3, 5)
+        result = torch.ops.aten.mm.default(x, y)
+        self.assertEqual(result, x @ y)
+
+    def test_mm_errors(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(4, 5)
+        with self.assertRaisesRegex(RuntimeError, "cannot be multiplied"):
+            result = torch.ops.aten.mm.default(x, y)
+
+    def test_nonzero(self):
+        x = torch.tensor([0, 1, 2, 0, 0])
+        y = torch.ops.aten.nonzero.default(x)
+        self.assertEqual(y, torch.tensor([[1], [2]]))
+
+    def test_inplace(self):
+        x = torch.randn(3)
+        x_clone = x.clone()
+        y = torch.ops.aten.sin_(x)
+        self.assertEqual(x, x_clone.sin())
+
+    def test_incorrect_schema(self):
+        op = self._op_with_incorrect_schema("incorrect_schema")
+        x = torch.randn(3)
+        op(x)
+
+    def test_no_abstract(self):
+        op = self._op_with_no_abstract_impl("no_abstract")
+        x = torch.randn(3)
+        op(x)
+
+    def test_delayed_error(self):
+        op = self._op_delayed_backward_error("delayed_error")
+        x = torch.randn([], requires_grad=True)
+        y = op(x)
+        with self.assertRaises(NotImplementedError):
+            y.sum().backward()
+
+    def test_delayed_error_no_requires_grad(self):
+        op = self._op_delayed_backward_error("delayed_error")
+        x = torch.randn([])
+        y = op(x)
+
+
+mini_op_test_failures_dict = {
+    "aten::nonzero": {
+        # Nonzero doesn't support static shapes
+        "test_aot_dispatch_static__test_nonzero": "xfail",
+    },
+    "mini_op_test::delayed_error": {
+        "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+        "test_aot_dispatch_static__test_delayed_error": "xfail",
+    },
+    "mini_op_test::incorrect_schema": {
+        # "skip" just to test the skip mechanism
+        "test_schema__test_incorrect_schema": "skip",
+    },
+    "mini_op_test::no_abstract": {
+        "test_aot_dispatch_dynamic__test_no_abstract": "xfail",
+        "test_aot_dispatch_static__test_no_abstract": "xfail",
+        "test_faketensor__test_no_abstract": "xfail",
+    },
+}
+
+mini_op_test_checks = [
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_static",
+    "test_aot_dispatch_dynamic",
+]
+
+optests.generate_opcheck_tests(
+    MiniOpTest,
+    ["aten", "MiniOpTest"],
+    mini_op_test_failures_dict,
+    [],
+    mini_op_test_checks,
+)
+
+
+class TestGenerateOpcheckTests(TestCase):
+    def test_MiniOpTest(self):
+        for orig_test in ["test_mm", "test_nonzero"]:
+            for test in mini_op_test_checks:
+                expected_test = f"{test}__{orig_test}"
+                self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
+
+    def test_failures_dict_validation(self):
+        from torch.testing._internal.optests.generate_tests import (
+            validate_failures_dict,
+        )
+
+        failures = {
+            "mini_op_test::incorrect_schema": {},
+            "mini_op_test::delayed_error": {},
+        }
+        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error": "xfail",
+                "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error": "XFAIL",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "got value=XFAIL"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch__test_delayed_error": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "should begin with one of"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error_nopenopenope": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
 
 
 only_for = ("cpu", "cuda")

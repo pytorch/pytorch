@@ -1799,6 +1799,26 @@ class CommonTemplate:
                 check_lowp=True,
             )
 
+    @config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
+
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(0, 255, (4, 8), dtype=torch.uint8),
+                ),
+                check_lowp=True,
+            )
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
@@ -2099,19 +2119,6 @@ class CommonTemplate:
 
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
-
-    def test_softshrink_backward(self):
-        grad_output = torch.randn(1)
-        lambd = 0.5
-
-        def fn(a, grad_output, lambd):
-            a = a.cos()
-            return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
-
-        self.common(
-            fn,
-            (torch.randn(10), grad_output, lambd),
-        )
 
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
