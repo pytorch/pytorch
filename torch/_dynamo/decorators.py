@@ -242,11 +242,10 @@ def mark_static_address(t, guard=True):
     Marks an input tensor whose data_ptr will not change across multiple calls
     to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
     is not needed for this input. The data_ptr will be guarded if guard=True. Note:
-    Until https://github.com/pytorch/pytorch/issues/104095 is resolved, tensors marked
-    in this way will be kept alive until `torch._dynamo.reset()` is called.
+    Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
     if not isinstance(t, torch.Tensor):
-        raise ValueError("mark_static_address expects a tensor")
+        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
 
     if guard:
         t._dynamo_static_input_type = "guarded"
