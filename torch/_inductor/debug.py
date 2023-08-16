@@ -266,6 +266,7 @@ class DebugContext:
         return open(os.path.join(self._path, filename), "w")
 
     def filename(self, suffix):
+        assert self._path
         return os.path.join(self._path, suffix)
 
     def upload_tar(self):
@@ -291,7 +292,7 @@ class DebugContext:
 
             self._stack.callback(reset_log_level, prev_level)
 
-        self._stack.enter_context(V.set_debug_handler(self))
+        self._stack.enter_context(V.set_debug_handler(self))  # type: ignore[call-arg]
 
         if not config.trace.enabled:
             return
@@ -329,6 +330,7 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self):
+        assert self._prof
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
@@ -456,16 +458,17 @@ def load_args_and_run_compile_fx_inner(path):
 
     def handle_tensor(x):
         if isinstance(x, TensorMetadataHolder):
+            assert x.tensor_metadata.stride
             return torch._dynamo.testing.rand_strided(
                 x.tensor_metadata.shape,
                 x.tensor_metadata.stride,
-                x.tensor_metadata.dtype,
+                x.tensor_metadata.dtype if x.tensor_metadata.dtype else torch.float32,
                 x.device,
             )
         else:
             return x
 
     fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-    with fake_mode, config.patch("save_args", False):
+    with fake_mode, config.patch("save_args", False):  # type: ignore[attr-defined]
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

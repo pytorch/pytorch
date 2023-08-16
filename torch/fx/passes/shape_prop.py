@@ -4,7 +4,7 @@ import traceback
 
 from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.node import Node, map_aggregate
-from typing import Any, Tuple, NamedTuple, Optional, Dict
+from typing import Any, Tuple, NamedTuple, Optional, Dict, Sequence
 from torch.fx._compatibility import compatibility
 from torch._guards import detect_fake_mode
 
@@ -17,14 +17,14 @@ class TensorMetadata(NamedTuple):
 
     # General Tensor metadata
     shape : torch.Size
-    dtype : torch.dtype
-    requires_grad : bool
-    stride : Tuple[int, ...]
+    dtype : Optional[torch.dtype]
+    requires_grad : Optional[bool]
+    stride : Optional[Tuple[int, ...]]
     memory_format : Optional[torch.memory_format]
 
     # Quantization metadata
-    is_quantized : bool
-    qparams: Dict[str, Any]
+    is_quantized : Optional[bool]
+    qparams: Optional[Dict[str, Any]]
 
 def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
@@ -186,6 +186,8 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
+        fake_args: Sequence[Any]
+
         if self.fake_mode is not None:
             fake_args = [self.fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args]
         else:
