@@ -64,7 +64,6 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         dtensor_spec = ctx.dtensor_spec
-        dtensor_meta = dtensor_spec.tensor_meta
         _, tensor_stride = compute_global_tensor_info(
             grad_output, dtensor_spec.mesh, dtensor_spec.placements
         )
@@ -72,8 +71,8 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output,
             dtensor_spec.mesh,
             dtensor_spec.placements,
-            shape=dtensor_meta.shape,
-            dtype=dtensor_meta.dtype,
+            shape=dtensor_spec.shape,
+            dtype=grad_output.dtype,
             requires_grad=grad_output.requires_grad,
             stride=tuple(tensor_stride),
         )
@@ -195,13 +194,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
-        # TODO: populate all tensor meta fields properly
-        # NOTE: memory_format is non-pickable so we intentionally skip it
-        tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, None, False, {}
-        )
         # deepcopy and set spec
-        r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
+        r._spec = DTensorSpec(
+            device_mesh, placements, shape=shape, stride=stride
+        )
         r._local_tensor = local_tensor
         return r
 
@@ -216,21 +212,22 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return self._local_tensor, self._spec
+        return self._local_tensor, (self._spec, self.requires_grad)
 
     @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
+    def __tensor_unflatten__(local_tensor, flattened_spec):
         assert (
-            spec is not None
+            flattened_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        spec, requires_grad = flattened_spec
         return DTensor(
             local_tensor,
             spec.mesh,
             spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
-            requires_grad=spec.tensor_meta.requires_grad,
-            stride=spec.tensor_meta.stride,
+            shape=spec.shape,
+            dtype=local_tensor.dtype,
+            requires_grad=requires_grad,
+            stride=spec.stride,
         )
 
     @classmethod

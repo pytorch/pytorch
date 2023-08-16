@@ -14,16 +14,15 @@ KwargsType = Dict[str, object]
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
-def _rebuild_tensor_from_dtensor_meta(arg) -> object:
+def _rebuild_tensor_from_dtensor_spec(arg) -> object:
     """ "
     This is used to propagate tensor metadata, must be under fake mode
     """
-    assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+    assert arg.shape is not None, "DTensorSpec does not contain shape."
+    assert arg.stride is not None, "DTensorSpec does not contain stride."
     return torch.empty_strided(
-        arg.tensor_meta.shape,
-        arg.tensor_meta.stride,
-        dtype=arg.tensor_meta.dtype,
-        requires_grad=arg.tensor_meta.requires_grad,
+        arg.shape,
+        arg.stride,
     )
 
 def _is_inplace_op(op: torch._ops.OpOverload):
@@ -188,7 +187,7 @@ class OpSchema:
             to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema
+            DTensorSpec, _rebuild_tensor_from_dtensor_spec, self.args_schema
         )
 
     def gen_fake_kwargs(self) -> KwargsType:
@@ -198,7 +197,7 @@ class OpSchema:
             to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
-            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
+            DTensorSpec, _rebuild_tensor_from_dtensor_spec, self.kwargs_schema
         )
 
     def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:

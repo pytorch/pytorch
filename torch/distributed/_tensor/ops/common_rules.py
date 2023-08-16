@@ -34,6 +34,7 @@ def _gen_reshard_suggestions(
                 dim_map=dim_map,
                 sums=pending_sum,
                 tensor_meta=input_spec.tensor_meta,
+                shape=input_spec.shape,
             )
         )
     suggested_schema = OpSchema(op_schema.op, tuple(suggested_arg_specs), {})

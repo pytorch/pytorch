@@ -39,15 +39,14 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-        assert spec.tensor_meta is not None
         return dtensor.DTensor(
             res,
             spec.mesh,
             spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
+            shape=spec.shape,
+            dtype=res.dtype,
             requires_grad=res.requires_grad,
-            stride=spec.tensor_meta.stride,
+            stride=spec.stride,
         )
 
     if isinstance(res, torch.Tensor):

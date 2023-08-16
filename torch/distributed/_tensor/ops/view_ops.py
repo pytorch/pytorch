@@ -662,7 +662,8 @@ def register_prop_rule_map(
                             DTensorSpec(
                                 placements=tuple(suggested_placements),
                                 mesh=input_dtensor_spec.mesh,
-                                tensor_meta=input_dtensor_spec.tensor_meta,
+                                shape=input_dtensor_spec.shape,
+                                stride=input_dtensor_spec.stride
                             ),
                         )
                         + op_schema.args_schema[1:],
