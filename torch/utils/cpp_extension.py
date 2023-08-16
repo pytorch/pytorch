@@ -1350,7 +1350,7 @@ def _check_and_build_extension_h_precompiler_headers(extra_cflags,
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
     GCC offical manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
     PCH only works when built pch file(header.h.gch) and build target have the same build parameters. So, We need
-    add a siganture file to record PCH file parameters. If the build parameters(siganture) changed, it should rebuild
+    add a signature file to record PCH file parameters. If the build parameters(signature) changed, it should rebuild
     PCH file.
 
     Note:
