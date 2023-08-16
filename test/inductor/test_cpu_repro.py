@@ -385,6 +385,7 @@ class CPUReproTests(TestCase):
                         inps_var = [v_var]
                         self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    @slowTest
     def test_lstm_packed(self):
         params_dict = {
             "unbatched": [True, False],
@@ -2120,6 +2121,15 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_invalid_index_of_empty_tensor(self):
+        def fn(a):
+            b = a[[0]]
+            return b
+
+        a = torch.tensor([])
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(a)
 
     def test_ir_node_str(self):
         @torch.compile

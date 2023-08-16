@@ -65,6 +65,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_instruction_source_311,
+    get_static_address_type,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -251,7 +252,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
+        fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
@@ -326,7 +327,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
-
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
         # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086
@@ -608,9 +608,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
+            if get_static_address_type(target) == "guarded":
+                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
+
                 return wrap_fx_proxy(
                     self.root_tx,
                     tracer.create_proxy("get_attr", module_key, tuple(), {}),

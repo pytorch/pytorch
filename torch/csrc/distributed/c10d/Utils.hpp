@@ -35,7 +35,8 @@ namespace c10d {
 TORCH_API std::string parse_env(const char* env_var_name);
 
 // Retrieve tensor shapes from a given tensor.
-TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors);
 
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
@@ -73,7 +74,9 @@ inline void assertSameType(
   }
 }
 
-inline std::vector<std::string> split(char separator, const std::string& string) {
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
   std::vector<std::string> pieces;
   std::stringstream ss(string);
   std::string item;
@@ -90,7 +93,8 @@ inline int parseEnvVarInt(const char* envVarName) {
     try {
       val = std::stoi(stringValue);
     } catch (std::exception& e) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
     return val;
@@ -98,7 +102,9 @@ inline int parseEnvVarInt(const char* envVarName) {
   return C10D_ENV_NOT_SET;
 }
 
-inline const char* parseEnvVarString(const char* envVarName, const char* default_val) {
+inline const char* parseEnvVarString(
+    const char* envVarName,
+    const char* default_val) {
   const char* val = std::getenv(envVarName);
   if (val == nullptr) {
     val = default_val;
@@ -107,22 +113,23 @@ inline const char* parseEnvVarString(const char* envVarName, const char* default
 }
 
 inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
-    int val = parseEnvVarInt(envVarName);
-    if (val == C10D_ENV_NOT_SET)
-      return defaultVal;
-    return val;
+  int val = parseEnvVarInt(envVarName);
+  if (val == C10D_ENV_NOT_SET)
+    return defaultVal;
+  return val;
 }
 
 inline bool parseEnvVarFlag(const char* envVarName) {
-    int val = parseEnvVarInt(envVarName);
-    if (val == 1) {
-      return true;
-    } else if (val == 0 || val == C10D_ENV_NOT_SET) {
-      return false;
-    }
-    TORCH_CHECK(false,
-        "Invalid value for environment variable: " + std::string(envVarName));
+  int val = parseEnvVarInt(envVarName);
+  if (val == 1) {
+    return true;
+  } else if (val == 0 || val == C10D_ENV_NOT_SET) {
     return false;
+  }
+  TORCH_CHECK(
+      false,
+      "Invalid value for environment variable: " + std::string(envVarName));
+  return false;
 }
 
 inline void assertSameSizes(
@@ -466,7 +473,7 @@ size_t computeLengthsAndOffsets(
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
@@ -483,7 +490,7 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
@@ -514,7 +521,7 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        TORCH_CHECK(false, "Socket Timeout");                       \
+        TORCH_CHECK(false, "Socket Timeout");                             \
       } else {                                                            \
         throw std::system_error(errno_local, std::system_category());     \
       }                                                                   \
@@ -531,7 +538,7 @@ using SizeType = uint64_t;
       if (errno == EINTR) {                                     \
         continue;                                               \
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        TORCH_CHECK(false, "Socket Timeout");             \
+        TORCH_CHECK(false, "Socket Timeout");                   \
       } else {                                                  \
         throw std::system_error(errno, std::system_category()); \
       }                                                         \

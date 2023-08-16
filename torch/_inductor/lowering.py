@@ -423,28 +423,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args
             )
 
-        def has_type_promotion(*args):
-            if len(args) < 2:
-                return False
-            else:
-                dtype = None
-                for t in args:
-                    if isinstance(t, TensorBox):
-                        if dtype is None:
-                            dtype = t.data.get_dtype()  # type: ignore[attr-defined]
-                        elif dtype != t.data.get_dtype():
-                            return True
-                return False
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
-        # Note: we'll fallback on type promotion until
-        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
-        # is in the pytorch triton version
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                use_foreach = not is_dynamic(*args)
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -1627,8 +1611,8 @@ def inductor_randint(
     )
 
 
-@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
-def _inductor_bucketize(
+@register_lowering(aten.bucketize, type_promotion_kind=None)
+def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
     *,
@@ -1638,7 +1622,7 @@ def _inductor_bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -4518,6 +4502,14 @@ register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+
+
+@register_lowering(aten.sym_constrain_range)
+def sym_constrain_range(a, min, max):
+    tracing_context = torch._guards.TracingContext.get()
+    assert tracing_context is not None
+    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    return a
 
 
 @register_lowering(aten.sym_size)
