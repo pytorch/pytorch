@@ -365,21 +365,23 @@ def run_ort(
     else:
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)
+            model_proto = onnx.load(buffer)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            buffer = inlined_model_proto.SerializeToString()
+            ort_model = buffer
         else:
             assert isinstance(ort_model, str)
-            buffer = ort_model
-
-        # NOTE: inline_local_functions doesn't work with >2GB models,
-        # so we need to load the model without external data to inline.
-        model_proto = onnx.load(buffer, load_external_data=False)
-        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
-        onnx.save(inlined_model_proto, buffer)
+            # NOTE: inline_local_functions doesn't work with >2GB models,
+            # so we need to load the model without external data to inline.
+            model_proto = onnx.load(ort_model, load_external_data=False)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            onnx.save(inlined_model_proto, ort_model)
 
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()
     session_options.log_severity_level = 3  # Error
     session = onnxruntime.InferenceSession(
-        buffer, providers=["CPUExecutionProvider"], sess_options=session_options
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
 
