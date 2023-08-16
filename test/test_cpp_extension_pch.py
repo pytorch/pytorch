@@ -1,10 +1,8 @@
-import unittest
 import time
-import importlib
 import torch.testing._internal.common_utils as common
 
 from torch.utils.cpp_extension import load_inline, remove_extension_h_precompiler_headers
-    
+
 def load_inline_without_pch():
     source_orig = """
     at::Tensor sin_add_orig(at::Tensor x, at::Tensor y) {
@@ -15,7 +13,7 @@ def load_inline_without_pch():
     start = time.time()
     module = load_inline(name='inline_extension_orig',
                             cpp_sources=[source_orig],
-                            functions=['sin_add_orig'], 
+                            functions=['sin_add_orig'],
                             use_pch=False)
     end = time.time()
     return (end - start)
@@ -48,16 +46,16 @@ def load_inline_gen_pch():
 
 
 class TestCppExtensionPCH(common.TestCase):
-   
+
     def test_pch(self):
         # genarate PCH
         time_gen_pch = load_inline_gen_pch()
         print("compile time, gen pch: {}".format(time_gen_pch))
-        
-        time_pch = load_inline_with_pch()        
+
+        time_pch = load_inline_with_pch()
         time_orig = load_inline_without_pch()
         print("compile time, origin: {}, with pch: {}".format(time_orig, time_pch))
-        
-    
+
+
 if __name__ == "__main__":
     common.run_tests()
