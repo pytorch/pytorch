@@ -686,7 +686,7 @@ if torch._C._has_mkldnn:
                 reshape_1_node = old_linear_node.args[0]
                 graph.erase_node(reshape_2_node)
                 graph.erase_node(old_linear_node)
-                if reshape_1_node.users == 0:
+                if len(reshape_1_node.users) == 0:
                     graph.erase_node(reshape_1_node)
 
         def is_linear_add_bias(match):
