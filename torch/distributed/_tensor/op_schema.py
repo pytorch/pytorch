@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_map_only, TreeSpec
 
 
 # Common type aliases
@@ -245,3 +245,23 @@ class OutputSharding:
     output_spec: OutputSpecType
     schema_suggestions: Optional[List[OpSchema]] = None
     failed_reason: Optional[str] = None
+    needs_redistribute: bool = False
+
+
+@dataclass
+class OpInfo:
+    """
+    All Runtime Op execution info are packed here
+    """
+
+    op_call: torch.ops.OpOverload
+    schema: OpSchema
+    flat_args_schema: ArgsType
+    flat_kwargs_schema: KwargsType
+    flat_local_args: ArgsType
+    flat_local_kwargs: KwargsType
+    args_tree_spec: TreeSpec
+    kwargs_tree_spec: TreeSpec
+
+    # the output sharding info
+    output_sharding: Optional[OutputSharding] = None

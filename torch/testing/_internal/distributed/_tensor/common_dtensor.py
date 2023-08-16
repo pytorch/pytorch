@@ -37,7 +37,7 @@ from torch.distributed._tensor import (
     redistribute,
 )
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed._tensor.placement_types import Placement, DTensorSpec
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
@@ -87,25 +87,25 @@ class RedistributeProfile:
 @contextmanager
 def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
 
-    orig_redistribute_dtensor = redistribute.redistribute_dtensor
+    orig_redistribute_local_tensor = redistribute.redistribute_local_tensor
     profile: RedistributeProfile = RedistributeProfile(num_calls=0)
 
     # pyre-ignore[53]
-    def patched_redistribute_dtensor(
-        input: DTensor,
-        device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+    def patched_redistribute_local_tensor(
+        local_tensor: torch.Tensor,
+        current_spec: DTensorSpec,
+        target_spec: DTensorSpec,
     ) -> DTensor:
-        result = orig_redistribute_dtensor(input, device_mesh, placements)
+        result = orig_redistribute_local_tensor(local_tensor, current_spec, target_spec)
         profile.num_calls += 1
         return result
 
     try:
         # pyre-ignore[9]
-        redistribute.redistribute_dtensor = patched_redistribute_dtensor
+        redistribute.redistribute_local_tensor = patched_redistribute_local_tensor
         yield profile
     finally:
-        redistribute.redistribute_dtensor = orig_redistribute_dtensor
+        redistribute.redistribute_local_tensor = orig_redistribute_local_tensor
 
 
 class DTensorTestBase(MultiProcessTestCase):
