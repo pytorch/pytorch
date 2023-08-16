@@ -225,33 +225,42 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     auto i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
     WelfordDataLN wd = compute_stats(block_row, N, s_data);
+
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
+    const vec_t * gamma_vec = reinterpret_cast<const vec_t*>(gamma);
+    const vec_t * beta_vec = reinterpret_cast<const vec_t*>(beta);
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     const int n_vec_to_read = N/vec_size;
+
     T_ACC rstd_val = c10::cuda::compat::rsqrt(wd.sigma2 + eps);
-    //no tail, N is guaranteed to be multiple of vec size
+
+    // No tail, N is guaranteed to be multiple of vec size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
+      vec_t gamma_crnt = gamma_vec[i];
+      vec_t beta_crnt = beta_vec[i];
       vec_t out;
-      //computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
+
+      // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
       if (gamma != nullptr && beta != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
-          + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = static_cast<T_ACC>(gamma_crnt.val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+            + static_cast<T_ACC>(beta_crnt.val[ii]);
         }
       } else if (gamma != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+          out.val[ii] = static_cast<T_ACC>(gamma_crnt.val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
         }
       } else if (beta != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_crnt.val[ii]);
         }
       } else {
         #pragma unroll
