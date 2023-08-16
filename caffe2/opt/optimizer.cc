@@ -11,6 +11,7 @@ void workspaceOptimizations(nom::repr::NNModule* nn, Workspace* ws, int level) {
   switch (level) {
     case 1:
       opt::fuseConvBN(nn, ws);
+      break;
     case 0:
     default:
       break;
