@@ -148,7 +148,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-7/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-12/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -182,7 +182,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # have, and it applies to child processes.
 
     # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=/usr/lib/llvm-12/lib/clang/12.0.1/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
     # Increase stack size, because ASAN red zones use more stack
@@ -505,40 +505,38 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Running ATen tests with pytorch lib"
+  echo "Running ATen tests with pytorch lib"
 
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Running test with the install folder"
-      # Rename the build folder when running test to ensure it
-      # is not depended on the folder
-      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_TEST_DIR"
-    else
-      echo "Running test with the build folder"
-      TEST_BASE_DIR="$BUILD_BIN_DIR"
-    fi
-
-    # NB: the ATen test binaries don't have RPATH set, so it's necessary to
-    # put the dynamic libraries somewhere were the dynamic linker can find them.
-    # This is a bit of a hack.
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
-
-    ls "$TEST_BASE_DIR"
-    aten/tools/run_tests.sh "$TEST_BASE_DIR"
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      # Restore the build folder to avoid any impact on other tests
-      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
-    fi
-
-    assert_git_not_dirty
+  if [[ -n "$IN_WHEEL_TEST" ]]; then
+    echo "Running test with the install folder"
+    # Rename the build folder when running test to ensure it
+    # is not depended on the folder
+    mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+    TEST_BASE_DIR="$TORCH_TEST_DIR"
+  else
+    echo "Running test with the build folder"
+    TEST_BASE_DIR="$BUILD_BIN_DIR"
   fi
+
+  # NB: the ATen test binaries don't have RPATH set, so it's necessary to
+  # put the dynamic libraries somewhere were the dynamic linker can find them.
+  # This is a bit of a hack.
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
+
+  ls "$TEST_BASE_DIR"
+  aten/tools/run_tests.sh "$TEST_BASE_DIR"
+
+  if [[ -n "$IN_WHEEL_TEST" ]]; then
+    # Restore the build folder to avoid any impact on other tests
+    mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+  fi
+
+  assert_git_not_dirty
 }
 
 test_without_numpy() {
@@ -1023,11 +1021,18 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchtext
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # https://github.com/opencv/opencv-python/issues/885
+  pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
+    # Do this after checkout_install_torchbench to ensure we clobber any
+    # nightlies that torchbench may pull in
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+      install_torchrec_and_fbgemm
+    fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
