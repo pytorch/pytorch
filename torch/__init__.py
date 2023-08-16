@@ -161,7 +161,7 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 
 # See Note [Global dependencies]
-def _load_global_deps():
+def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == 'Windows':
         return
 
@@ -659,7 +659,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(mode, *, warn_only=False):
+def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.bool = False) -> None:
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
@@ -799,13 +799,13 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     """
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
-def are_deterministic_algorithms_enabled():
+def are_deterministic_algorithms_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
 
-def is_deterministic_algorithms_warn_only_enabled():
+def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is set to warn only.
     Refer to :func:`torch.use_deterministic_algorithms` documentation for more
     details.
@@ -874,7 +874,7 @@ def get_float32_matmul_precision() -> builtins.str:
     """
     return _C._get_float32_matmul_precision()
 
-def set_float32_matmul_precision(precision):
+def set_float32_matmul_precision(precision: str) -> None:
     r"""Sets the internal precision of float32 matrix multiplications.
 
     Running float32 matrix multiplications in lower precision may significantly increase
@@ -919,7 +919,7 @@ def set_float32_matmul_precision(precision):
     """
     _C._set_float32_matmul_precision(precision)
 
-def set_warn_always(b):
+def set_warn_always(b: builtins.bool) -> None:
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.
     Setting it to True causes these warnings to always appear, which may be
@@ -931,7 +931,7 @@ def set_warn_always(b):
     """
     _C._set_warnAlways(b)
 
-def is_warn_always_enabled():
+def is_warn_always_enabled() -> builtins.bool:
     r"""Returns True if the global warn_always flag is turned on. Refer to
     :func:`torch.set_warn_always` documentation for more details.
     """
@@ -1439,7 +1439,7 @@ from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
 
-def compiled_with_cxx11_abi():
+def compiled_with_cxx11_abi() -> builtins.bool:
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return _C._GLIBCXX_USE_CXX11_ABI
 
@@ -1618,11 +1618,16 @@ def compile(model: Optional[Callable] = None, *,
         By default (None), we automatically detect if dynamism has occurred and compile a more
         dynamic kernel upon recompile.
        backend (str or Callable): backend to be used
+
         - "inductor" is the default backend, which is a good balance between performance and overhead
+
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+
         - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
+
         - "default" is the default mode, which is a good balance between performance and overhead
 
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
@@ -1633,7 +1638,7 @@ def compile(model: Optional[Callable] = None, *,
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
           It enables CUDA graphs by default.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
@@ -1641,13 +1646,21 @@ def compile(model: Optional[Callable] = None, *,
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+
         - `max_autotune` which will profile to pick the best matmul configuration
+
         - `fallback_random` which is useful when debugging accuracy issues
+
         - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+
         - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+
         - `trace.enabled` which is the most useful debugging flag to turn on
+
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 

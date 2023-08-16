@@ -3971,7 +3971,7 @@ class TestLinalg(TestCase):
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
-        make_randn = partial(torch.randn, dtype=dtype, device=device)
+        make_fullrank = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=dtype, device=device)
         b, n, k = shape
         for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
             # expand means that we generate a batch of matrices with a stride of zero in the batch dimension
@@ -3991,7 +3991,7 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                PLU = torch.linalg.lu(make_randn(*size_a))
+                PLU = torch.linalg.lu(make_fullrank(*size_a))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
@@ -5679,15 +5679,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
-        SM86OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 6)
-        if version == (11, 7):
+        SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+        if version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
-                if SM86OrLater:
-                    _test(17, k, n, use_transpose_a, use_transpose_b, False)
+                if SM80OrLater:
+                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
                 else:
                     with self.assertRaisesRegex(RuntimeError,
                                                 "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                        _test(17, k, n, use_transpose_a, use_transpose_b, False)
+                        _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if use_transpose_a and not use_transpose_b:
                 with self.assertRaisesRegex(RuntimeError,
@@ -5700,7 +5700,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM86OrLater:
+                if SM80OrLater:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -5718,7 +5718,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("_int_mm not compiled for ROCM")
 
         version = _get_torch_cuda_version()
-        if version != (11, 7):
+        if version < (11, 7):
             self.skipTest("_int_mm only compiled for CUDA 11.7")
 
         def genf_int(x, y):
