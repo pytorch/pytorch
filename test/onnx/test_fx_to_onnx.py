@@ -471,7 +471,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     # TODO: From Config/Model
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.skip_in_ci(
         "SymFloat in OnnxFUnction attribute is not supported yet."
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
@@ -538,7 +538,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.skip_in_ci(
         "AssertionError: Mutating module attribute seq_len_cached during export."
         "self.seq_len_cached = seq_len"
     )
