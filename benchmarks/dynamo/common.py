@@ -1494,7 +1494,7 @@ def optimize_onnx_ctx(
             return onnx_model.run(inputs)
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
-            diagnostic_context = e.diagnostic_context
+            diagnostic_context = e.export_output.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
