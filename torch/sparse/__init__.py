@@ -29,6 +29,7 @@ __all__ = [
     'SparseSemiStructuredTensor',
     'to_sparse_semi_structured',
     'enable_sparse_outputs',
+    'enable_sparse_support',
 ]
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
