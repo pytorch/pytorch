@@ -2584,19 +2584,19 @@ class CppKernelProxy(CppKernel):
             return
 
         def select_tiling_indices():
-            rw_index = []
-            all_index = []
+            rw_index_exprs = []
+            all_index_exprs = []
             for node in nodes:
-                rw_index += [*node._body.reads, *node._body.writes]
-                all_index += list(node._body.indexing_exprs.values())
+                rw_index_exprs += [*node._body.reads, *node._body.writes]
+                all_index_exprs += list(node._body.indexing_exprs.values())
 
             contig_vars = set()
             contig_vars_list = []
             non_contig_stride_const = set()
             non_contig_stride_other = set()
 
-            for index in rw_index:
-                for var in index.free_symbols:
+            for index_expr in rw_index_exprs:
+                for var in index_expr.free_symbols:
                     if not re.search(r"^z\d+$", var.name):
                         continue
                     stride = stride_at(var, index)
@@ -2610,10 +2610,10 @@ class CppKernelProxy(CppKernel):
 
             # If there has index_expr, remove this var in index_expr from contig_vars
             # to disable the vec.
-            for index in all_index:
-                if index in rw_index:
+            for index_expr in all_index_exprs:
+                if index_expr in rw_index_exprs:
                     continue
-                for var in index.free_symbols:
+                for var in index_expr.free_symbols:
                     if not re.search(r"^z\d+$", var.name):
                         continue
                     if int(var.name[1:]) in contig_vars:
