@@ -607,7 +607,9 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(f"ONNX export failed on {op} because {msg} not supported", stacklevel=1)
+        warnings.warn(
+            f"ONNX export failed on {op} because {msg} not supported", stacklevel=1
+        )
     elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 
@@ -839,7 +841,8 @@ def _interpolate_warning(interpolate_mode):
         "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
         "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
         "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
-        "We recommend using opset 11 and above for models using this operator.", stacklevel=1
+        "We recommend using opset 11 and above for models using this operator.",
+        stacklevel=1,
     )
 
 
@@ -1174,7 +1177,8 @@ def __interpolate_helper(
             if not is_scalar:
                 warnings.warn(
                     "Cannot verify if the output_size is a scalar "
-                    "while exporting interpolate. Assuming that it is not a scalar.", stacklevel=1
+                    "while exporting interpolate. Assuming that it is not a scalar.",
+                    stacklevel=1,
                 )
 
         if is_scalar:
@@ -1512,7 +1516,8 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # in training.
     warnings.warn(
         f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
-        f"is set to {op_mode_text}. Exporting with {op_mode_text}.", stacklevel=1
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}.",
+        stacklevel=1,
     )
 
 

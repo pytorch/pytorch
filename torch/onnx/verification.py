@@ -270,7 +270,8 @@ def _compare_onnx_pytorch_outputs_in_np(
                     warnings.warn(
                         f"Suppressed AssertionError:\n{e}.\n"
                         f"Error percentage {error_percentage} "
-                        f"within acceptable range {acceptable_error_percentage}.", stacklevel=1
+                        f"within acceptable range {acceptable_error_percentage}.",
+                        stacklevel=1,
                     )
                     continue
             if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
@@ -398,7 +399,8 @@ def _try_clone_model(model):
         return copy.deepcopy(model)
     except Exception:
         warnings.warn(
-            "Failed to clone model. Model state might be mutated during verification.", stacklevel=1
+            "Failed to clone model. Model state might be mutated during verification.",
+            stacklevel=1,
         )
         return model
 

@@ -262,7 +262,8 @@ def benchmark_in_sub_process(
             assert status != 0
 
             warnings.warn(
-                f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains.", stacklevel=1  # noqa: B950 line too long
+                f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains.",
+                stacklevel=1,  # noqa: B950 line too long
             )
 
             tuning_process.clear()

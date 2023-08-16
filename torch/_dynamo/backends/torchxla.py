@@ -15,7 +15,8 @@ def torchxla_trivial(gm, fake_tensor_inputs):
 @register_backend
 def torchxla_trace_once(model, fake_tensor_inputs):
     warnings.warn(
-        "This backend will be deprecated in 2.2, please use `openxla` backend instead", stacklevel=1
+        "This backend will be deprecated in 2.2, please use `openxla` backend instead",
+        stacklevel=1,
     )
 
     return xla_backend_helper(model, fake_tensor_inputs)

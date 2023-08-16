@@ -189,7 +189,8 @@ def _check_capability():
             if current_arch < min_arch:
                 warnings.warn(
                     old_gpu_warn
-                    % (d, name, major, minor, min_arch // 10, min_arch % 10), stacklevel=1
+                    % (d, name, major, minor, min_arch // 10, min_arch % 10),
+                    stacklevel=1,
                 )
 
 
@@ -215,7 +216,8 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
             warnings.warn(
                 incompatible_device_warn.format(
                     device_name, capability, " ".join(arch_list), device_name
-                ), stacklevel=1
+                ),
+                stacklevel=1,
             )
 
 

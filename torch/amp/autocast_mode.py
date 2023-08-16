@@ -248,7 +248,8 @@ class autocast:
             and self.device == "cuda"
         ):
             warnings.warn(
-                "User provided device_type of 'cuda', but CUDA is not available. Disabling", stacklevel=1
+                "User provided device_type of 'cuda', but CUDA is not available. Disabling",
+                stacklevel=1,
             )
             enabled = False
         if dtype is not None:

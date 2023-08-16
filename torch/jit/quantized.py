@@ -14,7 +14,8 @@ class QuantizedLinear(torch.jit.ScriptModule):
         super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinear is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.",
+            stacklevel=1,
         )
 
         self.in_features = other.in_features
@@ -80,7 +81,8 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
         super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinearFP16 is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.",
+            stacklevel=1,
         )
         self.in_features = other.in_features
         self.out_features = other.out_features
@@ -137,7 +139,8 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
         super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNCellBase is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.",
+            stacklevel=1,
         )
 
         self.input_size = other.input_size
@@ -246,7 +249,8 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedRNNCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.",
+            stacklevel=1,
         )
         self.nonlinearity = other.nonlinearity
 
@@ -303,7 +307,8 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
         super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedLSTMCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTMCell instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTMCell instead.",
+            stacklevel=1,
         )
 
     @torch.jit.script_method
@@ -341,7 +346,8 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedGRUCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRUCell instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRUCell instead.",
+            stacklevel=1,
         )
 
     @torch.jit.script_method
@@ -391,7 +397,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNBase is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic instead.",
+            stacklevel=1,
         )
         self.mode = other.mode
         self.input_size = other.input_size
@@ -516,7 +523,8 @@ class QuantizedLSTM(QuantizedRNNBase):
         super().__init__(other, dtype)
         warnings.warn(
             "torch.jit.QuantizedLSTM is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTM instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTM instead.",
+            stacklevel=1,
         )
 
     @torch.jit.script_method
@@ -633,7 +641,8 @@ class QuantizedGRU(QuantizedRNNBase):
         super().__init__(*args, **kwargs)
         warnings.warn(
             "torch.jit.QuantizedGRU is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRU instead.", stacklevel=1
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRU instead.",
+            stacklevel=1,
         )
 
     @torch.jit.script_method
@@ -728,7 +737,8 @@ class QuantizedGRU(QuantizedRNNBase):
 def quantize_rnn_cell_modules(module):
     warnings.warn(
         "quantize_rnn_cell_modules function has been deprecated. "
-        "Please use torch.ao.quantization.quantize_dynamic API instead.", stacklevel=1
+        "Please use torch.ao.quantization.quantize_dynamic API instead.",
+        stacklevel=1,
     )
     reassign = {}
     for name, mod in module.named_modules():
@@ -751,7 +761,8 @@ def quantize_rnn_cell_modules(module):
 def quantize_linear_modules(module, dtype=torch.int8):
     warnings.warn(
         "quantize_linear_modules function has been deprecated. "
-        "Please use torch.ao.quantization.quantize_dynamic API instead.", stacklevel=1
+        "Please use torch.ao.quantization.quantize_dynamic API instead.",
+        stacklevel=1,
     )
 
     reassign = {}
@@ -777,7 +788,8 @@ def quantize_linear_modules(module, dtype=torch.int8):
 def quantize_rnn_modules(module, dtype=torch.int8):
     warnings.warn(
         "quantize_rnn_modules function has been deprecated. "
-        "Please use torch.ao.quantization.quantize_dynamic API instead.", stacklevel=1
+        "Please use torch.ao.quantization.quantize_dynamic API instead.",
+        stacklevel=1,
     )
     reassign = {}
     for name, mod in module.named_modules():

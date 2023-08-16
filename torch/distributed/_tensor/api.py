@@ -181,7 +181,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if requires_grad != local_tensor.requires_grad:
             warnings.warn(
                 "To construct DTensor from torch.Tensor, it's recommended to "
-                "use local_tensor.detach() and make requires_grad consistent.", stacklevel=1
+                "use local_tensor.detach() and make requires_grad consistent.",
+                stacklevel=1,
             )
 
         # new method instruct wrapper tensor from local_tensor and add

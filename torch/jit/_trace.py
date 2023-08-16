@@ -780,14 +780,16 @@ def trace(
         return func
     if optimize is not None:
         warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead", stacklevel=1
+            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead",
+            stacklevel=1,
         )
 
     if isinstance(func, torch.jit.ScriptModule):
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
         # would result in an error.
         warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.", stacklevel=1
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.",
+            stacklevel=1,
         )
         return func
 
@@ -1004,7 +1006,8 @@ def trace_module(
         return mod
     if optimize is not None:
         warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead", stacklevel=1
+            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead",
+            stacklevel=1,
         )
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)

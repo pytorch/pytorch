@@ -549,7 +549,10 @@ def add_workflow_conclusions(
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
                     if not isinstance(checkrun_node, dict):
-                        warn(f"Expected dictionary, but got {type(checkrun_node)}", stacklevel=1)
+                        warn(
+                            f"Expected dictionary, but got {type(checkrun_node)}",
+                            stacklevel=1,
+                        )
                         continue
                     checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
@@ -1846,7 +1849,8 @@ def categorize_checks(
                 if ok_failed_checks_threshold is not None
                 and len(ok_failed_checks) > ok_failed_checks_threshold
                 else ""
-            ), stacklevel=1
+            ),
+            stacklevel=1,
         )
 
     if (

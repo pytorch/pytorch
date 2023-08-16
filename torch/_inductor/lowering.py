@@ -1323,7 +1323,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 @functools.lru_cache(None)
 def _warn_complex_not_supported():
     warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager.", stacklevel=1
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager.",
+        stacklevel=1,
     )
 
 

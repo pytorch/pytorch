@@ -11,7 +11,8 @@ class Type(Function):
     def forward(ctx, i, dest_type):
         warnings.warn(
             "torch.autograd._functions.Type is deprec, stacklevel=1ated as of PyTorch 2.1, please use "
-            "torch.tensor.to(dtype=dtype) instead.", stacklevel=1
+            "torch.tensor.to(dtype=dtype) instead.",
+            stacklevel=1,
         )
         ctx.input_type = type(i)
         ctx.input_device = -1 if not i.is_cuda else i.get_device()

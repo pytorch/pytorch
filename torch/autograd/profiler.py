@@ -1016,7 +1016,8 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}", stacklevel=1
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
+                    stacklevel=1,
                 )
             for _ in range(0, delta):
                 _kineto_step()

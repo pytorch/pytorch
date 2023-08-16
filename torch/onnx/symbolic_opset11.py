@@ -954,7 +954,8 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + str(dim_size)
             + ". The model will "
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
-            + "input shapes, please export with dynamic_axes argument.", stacklevel=1
+            + "input shapes, please export with dynamic_axes argument.",
+            stacklevel=1,
         )
         return self
     return symbolic_helper._squeeze_helper(g, self, [dim])

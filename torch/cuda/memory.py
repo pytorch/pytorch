@@ -334,7 +334,8 @@ def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:
     warnings.warn(
         "torch.cuda.reset_max_memory_allocated now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
-        FutureWarning, stacklevel=1
+        FutureWarning,
+        stacklevel=1,
     )
     return reset_peak_memory_stats(device=device)
 
@@ -361,7 +362,8 @@ def reset_max_memory_cached(device: Union[Device, int] = None) -> None:
     warnings.warn(
         "torch.cuda.reset_max_memory_cached now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
-        FutureWarning, stacklevel=1
+        FutureWarning,
+        stacklevel=1,
     )
     return reset_peak_memory_stats(device=device)
 
@@ -448,7 +450,8 @@ def memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
     warnings.warn(
         "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        FutureWarning, stacklevel=1
+        FutureWarning,
+        stacklevel=1,
     )
     return memory_reserved(device=device)
 
@@ -457,7 +460,8 @@ def max_memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
     warnings.warn(
         "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        FutureWarning, stacklevel=1
+        FutureWarning,
+        stacklevel=1,
     )
     return max_memory_reserved(device=device)
 

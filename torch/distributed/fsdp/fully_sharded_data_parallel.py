@@ -1162,7 +1162,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             warnings.warn(
                 f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
                 "gradients -- returning the total norm in the default dtype "
-                f"{total_norm.dtype}", stacklevel=1
+                f"{total_norm.dtype}",
+                stacklevel=1,
             )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(
@@ -1176,7 +1177,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if optim_input is not None:
             warnings.warn(
                 "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
-                "from your code without changing its functionality.", stacklevel=1
+                "from your code without changing its functionality.",
+                stacklevel=1,
             )
 
     @staticmethod
@@ -1195,7 +1197,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
-            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.", stacklevel=1
+            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
+            stacklevel=1,
         )
 
     @staticmethod

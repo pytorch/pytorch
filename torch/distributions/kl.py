@@ -131,7 +131,8 @@ def _dispatch_kl(type_p, type_q):
             "Ambiguous kl_divergence({}, {}). Please register_kl({}, {})".format(
                 type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__
             ),
-            RuntimeWarning, stacklevel=1
+            RuntimeWarning,
+            stacklevel=1,
         )
     return left_fun
 

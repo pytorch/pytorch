@@ -416,7 +416,8 @@ class OptimizeContext(_TorchDynamoContext):
                 else:
                     warnings.warn(
                         "changing options to `torch.compile()` may require "
-                        "calling `torch._dynamo.reset()` to take effect", stacklevel=1
+                        "calling `torch._dynamo.reset()` to take effect",
+                        stacklevel=1,
                     )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
@@ -697,7 +698,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f).", stacklevel=1
+            "conflict with future kwargs added to explain(f).",
+            stacklevel=1,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -1304,7 +1306,8 @@ def export(
         warnings.warn(
             "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f).", stacklevel=1
+            "conflict with future kwargs added to export(f).",
+            stacklevel=1,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
