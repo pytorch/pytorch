@@ -446,7 +446,7 @@ class SplitCatSimplifier:
         split_sections,
         next_users,
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
-    ) -> Optional[List[Tuple[int, int]]]:
+    ) -> Union[List[Tuple[int, int]], None]:
         ranges = set()
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             ranges |= {
@@ -467,7 +467,7 @@ class SplitCatSimplifier:
             return None
         split_ranges = self.fill_gaps(split_ranges, 0, cumulative_sizes[-1])
         if len(split_sections) == len(split_ranges):  # Simplification not possible
-            return # type: ignore[return-value]
+            return None
         counters["inductor"]["scmerge_split_sections_removed"] = len(
             split_sections
         ) - len(split_ranges)
@@ -522,7 +522,7 @@ class SplitCatSimplifier:
                     ]
                     # All sections should be equal
                     if len(set(subset_split_sections)) != 1:
-                        return # type: ignore[return-value]
+                        return None # type: ignore[return-value]
 
                     num_splits = len(subset_split_sections)
                     unflatten_params = (split_dim, (num_splits, -1))
@@ -742,7 +742,7 @@ class UnbindCatRemover(SplitCatSimplifier):
         split_sections,
         next_users,
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
-    ) -> Optional[List[Tuple[int, int]]]:
+    ) -> Union[List[Tuple[int, int]], None]:
         simplified_split_ranges = super().get_simplified_split_ranges(
             split_sections, next_users, user_inputs_list
         )
