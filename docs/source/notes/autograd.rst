@@ -849,9 +849,10 @@ Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
-The hooks that will be covered are: hooks registered to Tensor via
-:meth:`torch.tensor.register_hook`,
-post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
+The hooks that will be covered are: backward hooks registered to Tensor via
+:meth:`torch.tensor.register_hook`, post accumulate grad hooks registered to
+Tensor via :meth:`torch.tensor.register_post_accumulate_grad_hook`, post-hooks
+registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
 pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
 
 Whether a particular hook will be fired
@@ -862,6 +863,15 @@ are executed when gradients are being computed for that Tensor. (Note that this 
 the Tensor's grad_fn to be executed. For example, if the Tensor is passed
 as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
 the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
+
+Hooks registered to a Tensor via :meth:`torch.tensor.register_post_accumulate_grad_hook`
+are executed after the gradients have been accumulated for that Tensor, meaning the
+Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.tensor.register_hook`
+are run as gradients are being computed, hooks registered via :meth:`torch.tensor.register_post_accumulate_grad_hook`
+wait to trigger on the accumulation of all gradient updates on the Tensor during the backward
+pass. Similar to node hooks, post accumulate grad hooks are only fired for leaf Tensors for which
+the AccumulateGrad node has executed. Registering a hook via :meth:`torch.tensor.register_post_accumulate_grad_hook`
+on a non-leaf Tensor will do nothing, even if you call `backward(retain_graph=True)`.
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
@@ -890,11 +900,13 @@ The order in which the different hooks are fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The order in which things happen are:
-1. hooks registered to Tensor are executed
-2. pre-hook registered to Node are executed (if Node is executed).
-3. The ``.grad`` field is updated for Tensors that retain_grad
-4. Node is executed (subject to rules above)
-5. post-hook registered to Node are executed (if Node is executed)
+
+#. hooks registered to Tensor are executed
+#. pre-hooks registered to Node are executed (if Node is executed).
+#. The ``.grad`` field is updated for Tensors that retain_grad
+#. Node is executed (subject to rules above)
+#. If the Node is AccumulateGrad, post accumulate grad hooks registered to Tensor are executed (if Node is executed)
+#. post-hooks registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.
@@ -944,3 +956,9 @@ of that Tensor, so if that Tensor is then modified in-place,
 even though the Tensor now has a new grad_fn, hooks registered before it was
 modified in-place will continue to be associated with the old grad_fn, e.g. they will
 fire when that Tensor's old grad_fn is reached in the graph by the autograd engine.
+
+The one exception is post accumulate grad hooks, which receive the tensor that requires grad
+instead of the gradient and expect users to modify the tensor in-place. Ideally, the post
+grad accumulate hooks should be last to execute in the backward pass. The only contention
+would occur if you also registered a post-hook on the AccumulateGrad node, which is not
+recommended, and in that case, it is up to you to ensure sanity.
