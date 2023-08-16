@@ -69,6 +69,16 @@ except ImportError:
             return wrapped
 
 
+# global python state - whether profiler is currently enabled
+# useful for fast python checks to reduce latency
+_is_profiler_enabled: bool = False
+
+
+def _set_is_profiler_enabled(enable: bool):
+    global _is_profiler_enabled
+    _is_profiler_enabled = enable
+
+
 def _enable_dynamo_cache_lookup_profiler(enable: bool):
     from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
         clear_profiler_hooks,
@@ -283,6 +293,7 @@ class profile:
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
         _enable_dynamo_cache_lookup_profiler(True)
+        _set_is_profiler_enabled(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -298,6 +309,7 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        _set_is_profiler_enabled(False)
         _enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
