@@ -368,7 +368,12 @@ void gemm(
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
       auto offset = j * ldc + i;
-      c[offset] = beta * c[offset] + c10::convert<float>(bfloat_c[j * m + i]);
+      // beta == 0 won't propagate NaN from C
+      if (beta == 0.f) {
+        c[offset] = c10::convert<float>(bfloat_c[j * m + i]);
+      } else {
+        c[offset] = beta * c[offset] + c10::convert<float>(bfloat_c[j * m + i]);
+      }
     }
   }
 }
