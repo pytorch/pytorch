@@ -31,6 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestCompile(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return torch.cuda.device_count()
+
     @skip_if_lt_x_gpu(2)
     def test_compile(self):
         self.run_subtests(
@@ -39,6 +43,8 @@ class TestCompile(FSDPTest):
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.NO_SHARD,
+                    ShardingStrategy.HYBRID_SHARD,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2,
                 ],
                 "skip_fsdp_guards": [True, False],
                 "act_checkpoint": [True, False],

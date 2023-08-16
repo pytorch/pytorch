@@ -49,7 +49,7 @@ from .common import (
     PythonPrinter,
     SizeArg,
 )
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_of, signature_to_meta
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -474,8 +474,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        left = ops.where(ops.lt("0", x), 1, 0)
-        right = ops.where(ops.lt(x, "0"), 1, 0)
+        def to_int(s):
+            return f"{s}.to(tl.int8)"
+
+        left = to_int(ops.lt("0", x))
+        right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 
@@ -820,11 +823,14 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        names = list(
+            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
+        ) + ["rindex"]
         for i in range(len(self.numels)):
+            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
         for tree in self.range_trees:
@@ -1766,7 +1772,7 @@ class TritonKernel(Kernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "constants": {},
             "mutated_arg_names": mutated_args,
@@ -1777,7 +1783,9 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(
+                    sizearg, size_dtype=self.index_dtype
+                )
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -1893,6 +1901,13 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
+
+        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
+            sizes[0:3] = reversed(sizes[0:3])
+
+        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
+            sizes[0:2] = reversed(sizes[0:2])
+
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):
@@ -2004,13 +2019,10 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
-            return node1.can_fuse(node2)
-
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
-            return False
+            return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
@@ -2171,11 +2183,21 @@ class TritonScheduling:
     def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
         int_max = torch.iinfo(torch.int32).max
         size_hint = V.graph.sizevars.size_hint
-        if size_hint(numel) > int_max:
+        has_hint = V.graph.sizevars.shape_env.has_hint
+
+        def within_32bit(e):
+            # Allow for unhinted e as long as we can still statically prove
+            # (e.g., via ValueRanges) that it is still in bounds
+            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+                return True
+            # Otherwise, the hint MUST exist and be in range
+            return has_hint(e) and size_hint(e) <= int_max
+
+        if not within_32bit(numel):
             return False
 
         buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
-        if any(size_hint(size) > int_max for size in buf_sizes):
+        if not all(within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -2370,11 +2392,12 @@ class TritonScheduling:
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
-            render()  # warmup run to get the args right
+            partial_code = render()
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
-        src_code = render()
+        # finalize must be called after adding epilogue above
+        src_code = partial_code.finalize()
         node_schedule = [template_node, *epilogue_nodes]
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)

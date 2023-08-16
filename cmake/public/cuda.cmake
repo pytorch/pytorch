@@ -67,10 +67,6 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
 endif()
 
-if(NOT TARGET CUDA::nvToolsExt)
-  message(FATAL_ERROR "Failed to find nvToolsExt")
-endif()
-
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
@@ -216,9 +212,10 @@ endif()
 
 # nvToolsExt
 add_library(torch::nvtoolsext INTERFACE IMPORTED)
-set_property(
-    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvToolsExt)
+find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" "${CMAKE_CURRENT_LIST_DIR}/../../third_party/NVTX/c/include" NO_DEFAULT_PATH)
+find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
+target_include_directories(torch::nvtoolsext INTERFACE "${nvtx3_dir}")
+
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
@@ -267,6 +264,22 @@ if(CAFFE2_USE_CUDNN)
   endif()
 else()
   message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
+endif()
+
+if(CAFFE2_USE_CUSPARSELT)
+  find_package(CUSPARSELT)
+
+  if(NOT CUSPARSELT_FOUND)
+    message(WARNING
+      "Cannot find cuSPARSELt library. Turning the option off")
+    set(CAFFE2_USE_CUSPARSELT OFF)
+  else()
+    add_library(torch::cusparselt INTERFACE IMPORTED)
+    target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_PATH})
+    target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH})
+  endif()
+else()
+  message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
 endif()
 
 # curand
