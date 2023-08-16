@@ -437,7 +437,6 @@ def _make_elementwise_unary_reference(
                 extra_meta(a)
 
             out = prim(a)
-
             device = None
             from torch._subclasses.fake_tensor import FakeTensor
 
