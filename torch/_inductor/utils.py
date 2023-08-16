@@ -1013,5 +1013,9 @@ def try_find_schema(schemas, args, kwargs):
     return None
 
 
-def reduction_num_output(reduction_type):
-    return 3 if "welford" in reduction_type else 1
+def is_welford_reduction(reduction_type):
+    return reduction_type.startswith("welford")
+
+
+def reduction_num_outputs(reduction_type):
+    return 3 if is_welford_reduction(reduction_type) else 1

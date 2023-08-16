@@ -28,6 +28,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
+    is_welford_reduction,
     next_power_of_2,
     sympy_product,
     sympy_subs,
@@ -1412,8 +1413,12 @@ class TritonKernel(Kernel):
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
 
-        # The shape of the reduction dimension changes the output, so
-        # explicitly broadcast the input to the expected shape.
+        # Say we have
+        #     tmp0 = ops.constant(1, torch.int64)
+        #     tmp1 = ops.reduction(torch.int64, torch.int64, "sum", tmp0)
+        # tmp0 in the triton code is either a scalar, or single-element tensor
+        # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
+        # To avoid this, we broadcast to the expected shape first.
         dense_size_str = self.dense_size_str()
         value = self._map_tuple_or_scalar(
             lambda v: self.cse.generate(
@@ -1527,7 +1532,7 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
-            elif "welford" in reduction_type:
+            elif is_welford_reduction(reduction_type):
                 accumulator = f"{result_var}_mean"
                 accumulator_m2 = f"{result_var}_m2"
                 accumulator_weight = f"{result_var}_weight"

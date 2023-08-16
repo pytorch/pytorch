@@ -502,7 +502,7 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 ops.where(mask, a_index, b_index),
             )
 
-    elif reduction_type == "var_unnormalized":
+    elif reduction_type == "welford_combine":
 
         def combine_fn(a, b):
             a_mean, a_m2, a_weight = a
@@ -604,7 +604,6 @@ class Reduction(Loops):
             not in {
                 "argmax",
                 "argmin",
-                "var_unnormalized",
             }
             and config.split_reductions
             # We don't support unbacked symints
@@ -812,19 +811,6 @@ class Reduction(Loops):
                 )
 
             return lambda index: fn(index)[1]
-        elif reduction_type == "var_unnormalized":
-
-            def value_fn(index, rindex):
-                mean = inner_fn(index, rindex)
-                m2 = ops.constant(0, src_dtype)
-                weight = ops.constant(1, src_dtype)
-                return (mean, m2, weight)
-
-            def project_fn(index):
-                mean, m2, weight = fn(index)
-                return m2
-
-            return project_fn
         else:
             value_fn = inner_fn
             return fn
@@ -880,7 +866,7 @@ class Reduction(Loops):
 
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            if reduction_type in ("argmin", "argmax", "var_unnormalized"):
+            if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
                     return ops.constant(0, dst_dtype)

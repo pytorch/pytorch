@@ -11,7 +11,7 @@ from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import sympy_str, sympy_symbol
+from .utils import reduction_num_outputs, sympy_str, sympy_symbol
 
 threadlocal = local()
 
@@ -141,7 +141,7 @@ class KernelFormatterHandler:
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
-        num_values = 3 if "welford" in reduction_type else 1
+        num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
         self.output.writeline(f"{','.join(varnames)} = {line}")
         return tuple(varnames) if num_values > 1 else varnames[0]
