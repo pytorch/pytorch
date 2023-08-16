@@ -31,7 +31,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -2896,6 +2896,7 @@ else:
             self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @slowTestIf(TEST_WITH_TORCHINDUCTOR)
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_extreme_cases(self, device, dtype):
         # Test behaviour for inf and nan values
