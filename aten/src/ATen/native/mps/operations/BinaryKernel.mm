@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/mps/MPSProfiler.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/TensorIndexing.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -303,12 +303,8 @@ Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   if (length == 0) {
     return output;
   }
-  auto output_as_real = at::view_as_real(output).index({at::indexing::Ellipsis,0});
-  auto iter = TensorIteratorConfig()
-                  .add_output(output_as_real)
-                  .add_input(abs)
-                  .add_input(angle)
-                  .build();
+  auto output_as_real = at::view_as_real(output).index({at::indexing::Ellipsis, 0});
+  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
 
   mps::binary_mps_impl(iter, "polar");
   return output;
