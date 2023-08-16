@@ -1267,7 +1267,7 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
-def skipIfRocm(func=None, msg="test doesn't currently work on the ROCm stack"):
+def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
 
