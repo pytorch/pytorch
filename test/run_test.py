@@ -1424,7 +1424,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     with open(path) as f:
         test_times_file = cast(Dict[str, Any], json.load(f))
     build_environment = os.environ.get("BUILD_ENVIRONMEN", "random")
-    test_config = os.environ.get("TEST_CONFIG")
+    test_config = os.environ.get("TEST_COFIG")
     if test_config in test_times_file.get(build_environment, {}):
         print("Found test times from artifacts")
         return test_times_file[build_environment][test_config]
