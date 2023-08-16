@@ -28,9 +28,9 @@
 #include <iostream>
 #include <numeric>
 
-#include "bwd_device_gemm_launcher.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/bwd_device_gemm_launcher.h>
 
-#include "static_switch.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
 
 namespace bwd_device_gemm {
 class FlashBwdRunner {

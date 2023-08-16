@@ -26,9 +26,9 @@
 
 #include <iostream>
 
-#include "fwd_device_gemm_launcher_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/fwd_device_gemm_launcher_hip.h>
 
-#include "static_switch.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
 
 namespace fwd_device_gemm {
 class FlashFwdRunner {

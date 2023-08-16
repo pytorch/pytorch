@@ -17,7 +17,7 @@
 #include <c10/hip/HIPGuard.h>
 #include <c10/core/DeviceType.h>
 
-#include "utils.h"
+##include <ATen/native/transformers/hip/flash_attn_rocm/src/utils.h>
 
 constexpr int TOTAL_DIM = 0;
 constexpr int H_DIM = 1;

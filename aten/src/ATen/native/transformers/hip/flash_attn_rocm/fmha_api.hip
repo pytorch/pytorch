@@ -9,10 +9,10 @@
 
 #include <ATen/ATen.h>
 
-#include "flash_fwd_runner_gfx90a_hip.h"
-#include "flash_bwd_runner_gfx90a_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a_hip.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a_hip.h>
 
-#include "static_switch.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 

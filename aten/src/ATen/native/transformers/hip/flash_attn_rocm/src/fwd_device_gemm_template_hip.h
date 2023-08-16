@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "device_gemm_trait_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/device_gemm_trait_hip.h>
 
 namespace fwd_device_gemm {
 namespace device_op = ck::tensor_operation::device; // namespace alias for internal use

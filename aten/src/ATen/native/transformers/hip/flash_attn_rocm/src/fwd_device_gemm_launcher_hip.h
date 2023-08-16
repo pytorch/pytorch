@@ -26,8 +26,8 @@
 
 #include <iostream>
 
-#include "launch_params_hip.h"
-#include "fwd_device_gemm_template_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/launch_params_hip.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/fwd_device_gemm_template_hip.h>
 
 namespace fwd_device_gemm {
 template <template <typename> typename DeviceGemmTemplate, typename DeviceGemmTraits>

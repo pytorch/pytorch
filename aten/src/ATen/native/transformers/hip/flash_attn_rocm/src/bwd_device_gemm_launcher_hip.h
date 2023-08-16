@@ -29,8 +29,8 @@
 #include <iostream>
 #include <numeric>
 
-#include "launch_params_hip.h"
-#include "bwd_device_gemm_template_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/launch_params_hip.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/bwd_device_gemm_template_hip.h>
 
 namespace bwd_device_gemm {
 template <template <typename> typename DeviceGemmTemplate, typename DeviceGemmTraits>

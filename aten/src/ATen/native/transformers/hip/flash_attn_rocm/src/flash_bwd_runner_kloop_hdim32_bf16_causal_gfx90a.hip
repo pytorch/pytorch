@@ -22,7 +22,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 // EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "flash_bwd_runner_gfx90a_hip.h"
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a_hip.h>
 
 namespace bwd_device_gemm {
 // hdim 32, bf16, causal
