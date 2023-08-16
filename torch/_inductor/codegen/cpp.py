@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import functools
+import itertools
 import logging
 import math
 import re
@@ -13,6 +14,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
@@ -2584,20 +2586,17 @@ class CppKernelProxy(CppKernel):
             return
 
         def select_tiling_indices():
-            rw_index_exprs = []
-            all_index_exprs = []
+            all_index = []
             for node in nodes:
-                rw_index_exprs += [*node._body.reads, *node._body.writes]
-                all_index_exprs += list(node._body.indexing_exprs.values())
-
+                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+                all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
             contig_vars = set()
             contig_vars_list = []
             non_contig_stride_const = set()
             non_contig_stride_other = set()
-
-            for index_expr in rw_index_exprs:
-                for var in index_expr.free_symbols:
-                    if not re.search(r"^z\d+$", var.name):
+            for index in all_index:
+                for var in index.free_symbols:
+                    if not re.search(r"^d\d+$", var.name):
                         continue
                     stride = stride_at(var, index)
                     if stride == 1:
@@ -2607,18 +2606,6 @@ class CppKernelProxy(CppKernel):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))
-
-            # If there has index_expr, remove this var in index_expr from contig_vars
-            # to disable the vec.
-            for index_expr in all_index_exprs:
-                if index_expr in rw_index_exprs:
-                    continue
-                for var in index_expr.free_symbols:
-                    if not re.search(r"^z\d+$", var.name):
-                        continue
-                    if int(var.name[1:]) in contig_vars:
-                        contig_vars.remove(int(var.name[1:]))
-
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
@@ -2637,25 +2624,26 @@ class CppKernelProxy(CppKernel):
                 and contig_vars_sorted[-1] == len(self.itervars) - 1
             ):
                 return contig_vars_sorted
-            return sorted(
-                contig_vars_sorted,
-                key=lambda i: contig_vars_list.count(i),
-                reverse=True,
-            )[-1:]
+            return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
+                -1:
+            ]
 
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
-                with CppVecKernelChecker(
-                    deepcopy(self.kernel_group.args),
-                    parallel_num_threads(),
-                    tiling_factor,
-                    tiling_indices[-1],
-                ) as vec_checker:
-                    run(vec_checker)
-                if vec_checker.simd_vec:
+                could_vec = True
+                for tiling_indice in tiling_indices:
+                    with CppVecKernelChecker(
+                        deepcopy(self.kernel_group.args),
+                        parallel_num_threads(),
+                        tiling_factor,
+                        tiling_indice,
+                    ) as vec_checker:
+                        run(vec_checker)
+                        could_vec = could_vec and vec_checker.simd_vec
+                if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2:
