@@ -2934,7 +2934,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Unmatched tensor metadata from cond\(\) branches.",
+            r"Unmatched tensor metadata from cond\(\) branches.",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
@@ -3561,6 +3561,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             def __init__(self):
                 super().__init__()
                 self.register_buffer("buffer1", torch.zeros(5, 5))
+
             def forward(self, x):
                 self.buffer1.add_(1)
                 return x + self.buffer1
@@ -3579,6 +3580,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             def __init__(self):
                 super().__init__()
                 self.register_buffer("buffer2", torch.zeros(5))
+
             def forward(self, x):
                 return x.sum() + self.buffer2.sum()
 
@@ -3587,6 +3589,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
                 super().__init__()
                 self.register_buffer("buffer1", torch.zeros(5))
                 self.child = Child()
+
             def forward(self, x):
                 self.buffer1.add_(1)
                 self.child.buffer2.add_(2)

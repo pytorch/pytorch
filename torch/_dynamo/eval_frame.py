@@ -1157,16 +1157,6 @@ def export(
             fake_mode = _guards.detect_fake_mode()
             example_inputs = inner_example_inputs
 
-            # def result_capturing_wrapper(*graph_inputs):
-            #     nonlocal graph_captured_result
-            #     nonlocal graph_captured_input
-
-            #     graph_captured_input = graph_inputs
-            #     assert graph is not None
-
-            #     graph_captured_result = graph(*graph_inputs)
-            #     return graph_captured_result
-
             def result_capturing_wrapper(*graph_inputs):
                 nonlocal graph_captured_result
                 nonlocal graph_captured_input
@@ -1176,27 +1166,32 @@ def export(
 
                 named_parameters = dict(graph.named_parameters(remove_duplicate=False))
                 named_buffers = dict(graph.named_buffers(remove_duplicate=False))
-                params_and_buffers = {
-                    **dict(named_parameters),
-                    **dict(named_buffers),
-                }
-                params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
-                params_and_buffers_flat = tuple(params_and_buffers_flat)
-                params_len = len(params_and_buffers_flat)
 
-                def functional_call(*args, **kwargs):
-                    with torch.nn.utils.stateless._reparametrize_module(
-                        graph, pytree.tree_unflatten(args[:params_len], params_spec)
-                    ):
-                        out = torch.fx.Interpreter(graph).run(*args[params_len:], **kwargs)
-                        return out
+                ambient_fake_mode = (
+                    _guards.detect_fake_mode(graph_inputs)
+                    if _guards.detect_fake_mode(graph_inputs) is not None
+                    else fake_mode
+                )
 
-                fake_mode_new = _guards.detect_fake_mode(graph_inputs) if _guards.detect_fake_mode(graph_inputs) is not None else fake_mode
+                with ambient_fake_mode, enable_python_dispatcher():
+                    params_and_buffers = {
+                        **dict(named_parameters),
+                        **dict(named_buffers),
+                    }
+                    fake_params_buffers = dict()
 
-                with fake_mode_new:
-                    fake_params_buffers = pytree.tree_map(fake_mode_new.from_tensor, params_and_buffers_flat)
-                    fake_graph_inputs = pytree.tree_map(fake_mode_new.from_tensor, graph_inputs)
-                    graph_captured_result = functional_call(*fake_params_buffers, *fake_graph_inputs)
+                    for name, value in params_and_buffers.items():
+                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(
+                            value, static_shapes=True
+                        )
+
+                    fake_graph_inputs = pytree.tree_map(
+                        ambient_fake_mode.from_tensor, graph_inputs
+                    )
+                    graph_captured_result = torch.func.functional_call(
+                        graph, fake_params_buffers, fake_graph_inputs
+                    )
+
                 return graph_captured_result
 
             return result_capturing_wrapper
