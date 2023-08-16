@@ -208,13 +208,12 @@ class CheckPoints:
         
 
     
-    def dig_node(self, cur_node: SSNode, level=0, assign_all=True, target_node=False):
+    def dig_node(self, cur_node: SSNode, level=0, assign_all=True, target_node = False):
         """
         For each critical node, we use this function to assign a stream id to all its predecessors and successors.
         target_node: if True, we need special process for all its predecessors and successors.
         """
-        
-        # Section 1: Setting the this_time_node for level 0 and target_node case
+        # find which node is being assigned this time. The first node after done nodes is the one.
         if level == 0 and target_node:
             self.this_time_node = None
             for tmp_node in cur_node.predecessors.values():
@@ -222,7 +221,6 @@ class CheckPoints:
                     self.cur_node_pre_suc_done.append(tmp_node)
                 else:
                     self.this_time_node = tmp_node
-
             for tmp_node in cur_node.successors.values():
                 if tmp_node in self.ss_graph.critical_path:
                     continue
@@ -230,45 +228,66 @@ class CheckPoints:
                     self.cur_node_pre_suc_done.append(tmp_node)
                 elif not self.this_time_node:
                     self.this_time_node = tmp_node
-
             if self.this_time_node is None:
                 print(f"Info: no valid prede- or suc- cessors for node {cur_node.name}")
                 return
             self.done_nodes.add(self.this_time_node.name)
-        
-        # Section 2: Processing predecessors
+
         for predecessor in cur_node.predecessors.values():
             if predecessor.stream_id == -1:
-                should_assign_all = assign_all and (predecessor in self.cur_node_pre_suc_done or predecessor.name == self.this_time_node.name)
-                self.dig_node(predecessor, level + 1, should_assign_all, target_node)
-        
-        # Section 3: Assigning stream_id to the current node
+                # iterate all prede- and suc- cessors of the critical node
+                if level == 0 and target_node:
+                    if predecessor in self.cur_node_pre_suc_done or predecessor.name == self.this_time_node.name:
+                        self.dig_node(predecessor, level + 1, True, True)
+                    else:
+                        self.dig_node(predecessor, level + 1, False, True)
+                else:
+                    self.dig_node(predecessor, level + 1, assign_all, target_node)
         if cur_node.stream_id == -1:
             if cur_node in self.ss_graph.critical_path:
                 cur_node.stream_id = 0
+            # if the node has only one predecessor and the predecessor has only one successor, then we can assign the same stream_id to the node
             elif len(cur_node.predecessors) == 1:
                 predecessor = list(cur_node.predecessors.values())[0]
-                if len(predecessor.successors) == 1 and assign_all and "stream_assignment" in self.checkpoints[self.graph_name]:
-                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
-                    self.ss_graph.stream_pool[cur_node.stream_id] += 1
+                if len(predecessor.successors) == 1:
+                    if "stream_assignment" in self.checkpoints[self.graph_name]:
+                        assert self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name] == self.checkpoints[self.graph_name]["stream_assignment"][predecessor.name], f"stream_id of {cur_node.name} is not equal to its predecessor {predecessor.name}."
+                        cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                        self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                    else:
+                        cur_node.stream_id = 0
+                        assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
                 else:
-                    cur_node.stream_id = 0
+                    if assign_all:
+                        if "stream_assignment" in self.checkpoints[self.graph_name]:
+                            cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                            self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                        else:
+                            cur_node.stream_id = 0
+                            assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
+                    else:
+                        cur_node.stream_id = 0
             else:
-                if assign_all and "stream_assignment" in self.checkpoints[self.graph_name]:
-                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
-                    self.ss_graph.stream_pool[cur_node.stream_id] += 1
+                if assign_all:
+                    if "stream_assignment" in self.checkpoints[self.graph_name]:
+                        cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                        self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                    else:
+                        cur_node.stream_id = 0
+                        assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
                 else:
                     cur_node.stream_id = 0
-                    assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
-                
-        # Section 4: Processing successors
         for successor in cur_node.successors.values():
             if successor in self.ss_graph.critical_path:
                 continue
             if successor.stream_id == -1:
-                should_assign_all = assign_all and (successor in self.cur_node_pre_suc_done or successor.name == self.this_time_node.name)
-                self.dig_node(successor, level + 1, should_assign_all, target_node)
-
+                if level == 0 and target_node:
+                    if successor in self.cur_node_pre_suc_done or successor.name == self.this_time_node.name:
+                        self.dig_node(successor, level + 1, True, True)
+                    else:
+                        self.dig_node(successor, level + 1, False, True)
+                else:
+                    self.dig_node(successor, level + 1, assign_all, target_node)
 
 
 class SSGraph:
