@@ -22,7 +22,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 // EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a_hip.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a.h>
 
 namespace fwd_device_gemm {
 // hdim 128, fp16, causal

@@ -9,8 +9,8 @@
 
 #include <ATen/ATen.h>
 
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a_hip.h>
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a_hip.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a.h>
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a.h>
 
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
 
