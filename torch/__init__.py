@@ -948,7 +948,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if cond:
+    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -1618,11 +1618,16 @@ def compile(model: Optional[Callable] = None, *,
         By default (None), we automatically detect if dynamism has occurred and compile a more
         dynamic kernel upon recompile.
        backend (str or Callable): backend to be used
+
         - "inductor" is the default backend, which is a good balance between performance and overhead
+
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+
         - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
+
         - "default" is the default mode, which is a good balance between performance and overhead
 
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
@@ -1641,13 +1646,21 @@ def compile(model: Optional[Callable] = None, *,
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+
         - `max_autotune` which will profile to pick the best matmul configuration
+
         - `fallback_random` which is useful when debugging accuracy issues
+
         - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+
         - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+
         - `trace.enabled` which is the most useful debugging flag to turn on
+
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
