@@ -15,6 +15,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -217,6 +218,7 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+    @skipIfRocm
     def test_autotune_conv1x1(self):
         # Define the 1x1 convolutional layer
         # Assuming input has 3 channels and we want to produce 16 channels as output
