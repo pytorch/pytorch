@@ -9,6 +9,7 @@ from torch._C._functorch import (
     _wrap_functional_tensor,
     current_level,
     peek_interpreter_stack,
+    TransformType,
 )
 from torch._guards import Source
 
@@ -532,22 +533,43 @@ class MetaConverter:
                 # the to conversion isn't really right anyhow.
 
                 if torch._is_functional_tensor(t) and t.device.type != "lazy":
-                    reapply_views = torch._C._functionalization_reapply_views_tls()
-                    unwrap_t = _unwrap_functional_tensor(t, reapply_views)
                     st = peek_interpreter_stack()
-                    pop_st_ctx = (
-                        torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
-                        if st is not None
-                        else contextlib.nullcontext()
-                    )
-                    with pop_st_ctx:
-                        fake_t = self.meta_tensor(
-                            unwrap_t,
-                            shape_env=shape_env,
-                            callback=callback,
-                            source=source,
+                    assert (
+                        st is None or st.key() == TransformType.Functionalize
+                    ), "Expect st to be either None or have Functionalize transform key."
+                    if st is None:
+                        # the case of AOTAutograd
+                        torch._sync(t)
+                        unwrap_t = torch._from_functional_tensor(t)
+                        with torch._dispatch.python.suspend_functionalization():
+                            fake_t = self.meta_tensor(
+                                unwrap_t,
+                                shape_env=shape_env,
+                                callback=callback,
+                                source=source,
+                                dynamic_dims=dynamic_dims,
+                                constraint_dims=constraint_dims,
+                            )
+                        return torch._to_functional_tensor(
+                            fake_t, mirror_autograd_meta=True
                         )
-                    return _wrap_functional_tensor(fake_t, current_level())
+                    else:
+                        # torch.func.functionalize
+                        reapply_views = torch._C._functionalization_reapply_views_tls()
+                        unwrap_t = _unwrap_functional_tensor(t, reapply_views)
+                        pop_st_ctx = (
+                            torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
+                        )
+                        with pop_st_ctx:
+                            fake_t = self.meta_tensor(
+                                unwrap_t,
+                                shape_env=shape_env,
+                                callback=callback,
+                                source=source,
+                                dynamic_dims=dynamic_dims,
+                                constraint_dims=constraint_dims,
+                            )
+                        return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
                 return NotImplemented
             else:
