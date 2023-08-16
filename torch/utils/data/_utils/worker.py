@@ -228,8 +228,8 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             g.manual_seed(_generate_seed(generator=g) + worker_id)
 
         seed = base_seed + worker_id
-        torch.manual_seed(seed)
         random.seed(seed)
+        torch.manual_seed(seed)
         if HAS_NUMPY:
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
