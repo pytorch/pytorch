@@ -17,6 +17,7 @@ import torch
 import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.serialization import _open_zipfile_reader, _open_zipfile_writer
 from torch.utils._pytree import pytree_to_str, str_to_pytree
 
 from .schema import (  # type: ignore[attr-defined]
@@ -1339,3 +1340,24 @@ def deserialize(
         ExportedProgramDeserializer(expected_opset_version)
         .deserialize(serialized_exported_program, state_dict)
     )
+
+
+def save(
+    exported_program: ep.ExportedProgram,
+    path: str,
+    opset_version: Optional[Dict[str, int]] = None,
+) -> None:
+    program_bytes, state_bytes = serialize(exported_program, opset_version)
+    with _open_zipfile_writer(path) as zip_file:
+        zip_file.write_record('graph_module.json', program_bytes, len(program_bytes))
+        zip_file.write_record('state_dict.pt', state_bytes, len(state_bytes))
+
+
+def load(
+    path: str,
+    expected_opset_version: Optional[Dict[str, int]] = None,
+) -> ep.ExportedProgram:
+    with _open_zipfile_reader(path) as zip_file:
+        program_bytes = zip_file.get_record('graph_module.json')
+        state_bytes = zip_file.get_record('state_dict.pt')
+    return deserialize(program_bytes, state_bytes, expected_opset_version)

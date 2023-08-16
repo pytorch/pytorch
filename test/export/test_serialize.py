@@ -3,18 +3,18 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
+import torch.utils._pytree as pytree
 from torch._export import dynamic_dim, export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
-    deserialize,
-    serialize,
+    load,
+    save,
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -180,8 +180,10 @@ class TestDeserialize(TestCase):
         ep = export(fn, inputs, {}, constraints)
         ep.graph.eliminate_dead_code()
 
-        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
-        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        from tempfile import NamedTemporaryFile
+        with NamedTemporaryFile() as model_path:
+            save(ep, model_path.name, opset_version={"aten": 0})
+            deserialized_ep = load(model_path.name, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
