@@ -1,48 +1,29 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
-from enum import Enum
-from functools import reduce, cmp_to_key
 import operator
-import sympy
-import weakref
 import warnings
+import weakref
+
+from contextlib import nullcontext
+from enum import Enum
+from functools import cmp_to_key, reduce
+from typing import (
+    Any,
+    Callable,
+    cast,
+    List,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
+
+import sympy
+
 import torch
 from torch import sym_float, sym_int, sym_max
-
-try:
-    try:
-        from nvfuser import DataType  # type: ignore[import, attr-defined]
-    except ImportError:
-        from nvfuser._C import DataType  # type: ignore[import]
-
-    _torch_dtype_to_nvfuser_dtype_map = {
-        torch.cdouble: DataType.ComplexDouble,
-        torch.cfloat: DataType.ComplexFloat,
-        torch.double: DataType.Double,
-        torch.float: DataType.Float,
-        torch.half: DataType.Half,
-        torch.bfloat16: DataType.BFloat16,
-        torch.long: DataType.Int,
-        torch.int: DataType.Int32,
-        torch.uint8: DataType.Int32,
-        torch.bool: DataType.Bool,
-        # Python scalars
-        complex: DataType.ComplexDouble,
-        float: DataType.Double,
-        int: DataType.Int,
-        bool: DataType.Bool,
-    }
-except ImportError:
-    _torch_dtype_to_nvfuser_dtype_map = {}
-
-
-def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
-    """
-    Translates from torch.dtype to nvFuser's DataType enum
-    """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
 
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
@@ -69,6 +50,7 @@ Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.device,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
@@ -120,11 +102,11 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(b, TensorLike)
 
     if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
     if a.dtype != b.dtype:
-        msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
+        msg = f"Dtypes {a.dtype} and {b.dtype} are not equal!"
         raise AssertionError(msg)
 
     if a.device != b.device:
@@ -135,26 +117,18 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         ):
             pass
         else:
-            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            msg = f"Devices {a.device} and {b.device} are not equal!"
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
-            msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
-            )
+            msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
             raise RuntimeError(msg)
 
         if a.storage_offset() != b.storage_offset():
-            msg = (
-                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
-                    a.storage_offset(), b.storage_offset()
-                )
-            )
+            msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
     if a.is_conj() != b.is_conj():
@@ -175,7 +149,9 @@ def _check_strides_helper(
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
     # and for tensors with more than one element
-    if (not only_cuda or a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+    if (
+        not only_cuda or a.device.type == "cuda" or b.device.type == "cuda"
+    ) and a.numel() > 0:
         for idx in range(a.ndim):
             check = not significant_only or a.shape[idx] > 1
             if a.stride()[idx] != b.stride()[idx] and check:
@@ -183,10 +159,12 @@ def _check_strides_helper(
 
     return True, None
 
+
 def check_significant_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
 ) -> Tuple[bool, Optional[int]]:
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
+
 
 def check_all_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
@@ -226,7 +204,6 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
-
         length = a.shape[idx]
         if length == 1:
             continue
@@ -247,7 +224,6 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
-
         length = a.shape[idx]
         if length == 1:
             continue
@@ -335,13 +311,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
-    lengths_and_strides = sorted(
-        zip(a.shape, a.stride()), key=operator.itemgetter(1)
-    )
+    lengths_and_strides = sorted(zip(a.shape, a.stride()), key=operator.itemgetter(1))
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-
         if length == 1:
             continue
 
@@ -361,7 +334,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> List[int]:
+def compute_elementwise_output_logical_to_physical_perm(
+    *tensors, _skip_checks=False
+) -> List[int]:
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -372,7 +347,9 @@ def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=F
     # Filters the tensors to actual tensors
     if not _skip_checks:
         tensors = tuple(
-            a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+            a
+            for a in tensors
+            if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
         )
 
     # Short-circuits for CPU scalar case
@@ -392,7 +369,9 @@ def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=F
     # TODO: do channels last too
     is_contiguous = True
     for t in tensors:
-        is_contiguous = is_contiguous and t.is_contiguous(memory_format=torch.contiguous_format)
+        is_contiguous = is_contiguous and t.is_contiguous(
+            memory_format=torch.contiguous_format
+        )
 
     if is_contiguous:
         return list(range(ndim))
@@ -475,7 +454,9 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
     new_strides = make_contiguous_strides_for(permuted_shape)
-    permuted_strides = apply_perm(new_strides, invert_perm(logical_to_physical_perm))  # to logical
+    permuted_strides = apply_perm(
+        new_strides, invert_perm(logical_to_physical_perm)
+    )  # to logical
 
     return tuple(permuted_strides)
 
@@ -584,9 +565,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
-        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
-            -rank, rank - 1, idx
-        )
+        msg = f"Dimension out of range (expected to be in range of [{-rank}, {rank - 1}], but got {idx})"
         raise IndexError(msg)
 
     return _idx
@@ -595,7 +574,9 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
+def canonicalize_dims(
+    rank: int, indices: Sequence[int], wrap_scalar: bool = True
+) -> Tuple[int, ...]:
     pass
 
 
@@ -710,9 +691,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {0} is not the expected shape {1}!".format(
-                    arg.shape, shape
-                )
+                msg = f"Shape {arg.shape} is not the expected shape {shape}!"
                 raise RuntimeError(msg)
         else:
             msg = (
@@ -748,7 +727,9 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
 # Extracts dimensions that might be passed either as a list/tuple or as varargs.
 # A typical case is Tensor.permute .
-def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+def extract_dims_from_varargs(
+    dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]
+) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
         dims = cast(Tuple[DimsSequenceType], dims)
@@ -813,8 +794,10 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         shape = list(shape)
         torch._check(
             newsize != 0,
-            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
-                     f"unspecified dimension size -1 can be any value and is ambiguous"),
+            lambda: (
+                f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                f"unspecified dimension size -1 can be any value and is ambiguous"
+            ),
         )
         shape[dim] = numel // newsize
     return tuple(shape)
@@ -1062,11 +1045,15 @@ def get_higher_dtype(
 
 
 def check_pin_memory(pin_memory: bool):
-    torch._check_not_implemented(not pin_memory, lambda: "PrimTorch does not support pinned memory")
+    torch._check_not_implemented(
+        not pin_memory, lambda: "PrimTorch does not support pinned memory"
+    )
 
 
 def check_layout(layout: torch.layout):
-    torch._check_not_implemented(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}")
+    torch._check_not_implemented(
+        layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}"
+    )
 
 
 # TODO: maybe unify with can_cast_to?
@@ -1102,7 +1089,7 @@ def can_safe_cast_to(*, cast_to: torch.dtype, cast_from: torch.dtype) -> bool:
         if fn(cast_from):
             return False
 
-    raise ValueError("Received unknown dtypes {0}, {1}!".format(cast_to, cast_from))
+    raise ValueError(f"Received unknown dtypes {cast_to}, {cast_from}!")
 
 
 def check_same_dtype(*args):
@@ -1180,6 +1167,7 @@ _computation_dtype_map = {
 def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
+
 _cpu_acc_type_map = {
     torch.bfloat16: torch.float64,
     torch.float16: torch.float64,
@@ -1187,6 +1175,7 @@ _cpu_acc_type_map = {
     torch.complex32: torch.complex128,
     torch.complex64: torch.complex128,
 }
+
 
 def get_acc_type(dtype: torch.dtype, device: torch.device) -> torch.dtype:
     # Equivalent to at::toAccumulateType, prefer computation_dtype where possible
@@ -1339,11 +1328,7 @@ def elementwise_dtypes(
     highest_type: type = bool
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
-            msg = (
-                "Unexpected type {0} when computing elementwise type promotion!".format(
-                    str(type(x))
-                )
-            )
+            msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
@@ -1423,9 +1408,7 @@ def elementwise_dtypes(
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
         return get_computation_dtype(result_dtype), torch.bool
     else:
-        raise ValueError(
-            "Unknown type promotion kind {0}".format(str(type_promotion_kind))
-        )
+        raise ValueError(f"Unknown type promotion kind {str(type_promotion_kind)}")
 
 
 def reduction_dtypes(
@@ -1453,6 +1436,7 @@ def reduction_dtypes(
     else:  # ALWAYS_BOOL
         result_dtype = torch.bool
     return computation_dtype, result_dtype
+
 
 # This function's logic is borrowed from the following functions defined in C++:
 # batched_matrix_contiguous_strides and contiguous_strides
@@ -1648,8 +1632,8 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
-            "which requires a storage of size {4}".format(
+            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
+            "which requires a storage of size {}".format(
                 a.size(), storage_offset, str(shape), str(strides), required_length
             )
         )
@@ -1671,9 +1655,12 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
-    warnings.warn(DeprecationWarning((
-        "'torch._prims_common.check' will be removed in the future. Please use "
-        "'torch._check*' functions instead")))
+    warnings.warn(
+        DeprecationWarning(
+            "'torch._prims_common.check' will be removed in the future. Please use "
+            "'torch._check*' functions instead"
+        )
+    )
     torch._check_with(exc_type, b, s)
 
 
@@ -1762,8 +1749,8 @@ def get_aten_op(fn: Callable, name: str):
     """
     module = fn.__module__
     prefix = "torch._refs"
-    assert(module.startswith(prefix))
-    module = module[len(prefix):]
+    assert module.startswith(prefix)
+    module = module[len(prefix) :]
     # We want to go from .special / .nn.functional
     # to special and special_ / nn_functional_
     if module:
@@ -1796,12 +1783,42 @@ def clone_preserve_strides(x):
     # We should revisit this when we add a compositional as_strided op,
     # and also as part of https://github.com/pytorch/pytorch/issues/90507
     try:
-        old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
-        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
+        old = torch._C._dispatch_tls_is_dispatch_key_excluded(
+            torch._C.DispatchKey.ADInplaceOrView
+        )
+        torch._C._dispatch_tls_set_dispatch_key_excluded(
+            torch._C.DispatchKey.ADInplaceOrView, True
+        )
         buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
-        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
+        torch._C._dispatch_tls_set_dispatch_key_excluded(
+            torch._C.DispatchKey.ADInplaceOrView, old
+        )
+
+
+def alert_not_deterministic(caller: str):
+    if torch.are_deterministic_algorithms_enabled():
+        if torch.is_deterministic_algorithms_warn_only_enabled():
+            warnings.warn(
+                f"{caller} does not have a deterministic implementation, but you set "
+                f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+                f"You can file an issue at https://github.com/pytorch/pytorch/issues "
+                f"to help us prioritize adding deterministic support for this operation."
+            )
+        else:
+            torch._check(
+                False,
+                lambda: (
+                    f"{caller} does not have a deterministic implementation, but you set "
+                    f"'torch.use_deterministic_algorithms(True)'. You can turn off "
+                    f"determinism just for this operation, or you can use the "
+                    f"'warn_only=True' option, if that's acceptable for your application. "
+                    f"You can also file an issue at https://github.com/pytorch/pytorch/issues "
+                    f"to help us prioritize adding deterministic support for this operation."
+                ),
+            )
+
 
 class CUDARngStateHelper:
     @staticmethod

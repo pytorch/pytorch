@@ -186,6 +186,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_min,
         torch.sym_not,
         torch.sym_constrain_range,
+        torch.sym_constrain_range_for_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -1340,7 +1341,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.slice_scatter: lambda self, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
-        Tensor._sparse_mask_projection: lambda self, mask: -1,
+        Tensor._sparse_mask_projection: lambda self, mask, accumulate_matches=False: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
@@ -1570,7 +1571,7 @@ def handle_torch_function(
         if result is not NotImplemented:
             return result
 
-    func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
+    func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
         "no implementation found for '{}' on types that implement "
         '__torch_function__: {}'

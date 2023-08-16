@@ -10,7 +10,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
+    skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
@@ -284,11 +285,11 @@ class TestSparse(TestSparseBase):
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
             values_shape = torch.Size((nnz,) + shape[sparse_dim:])
-            printed.append("# shape: {}".format(torch.Size(shape)))
-            printed.append("# nnz: {}".format(nnz))
-            printed.append("# sparse_dim: {}".format(sparse_dim))
-            printed.append("# indices shape: {}".format(indices_shape))
-            printed.append("# values shape: {}".format(values_shape))
+            printed.append(f"# shape: {torch.Size(shape)}")
+            printed.append(f"# nnz: {nnz}")
+            printed.append(f"# sparse_dim: {sparse_dim}")
+            printed.append(f"# indices shape: {indices_shape}")
+            printed.append(f"# values shape: {values_shape}")
 
             indices = torch.arange(indices_shape.numel(), dtype=self.index_tensor(0).dtype,
                                    device=device).view(indices_shape)
@@ -307,7 +308,7 @@ class TestSparse(TestSparseBase):
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
-                printed.append("########## {} ##########".format(dtype))
+                printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
                 printed.append("# sparse tensor")
                 printed.append(str(x))
@@ -2140,6 +2141,39 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [2, 0], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
 
+    @dtypes(torch.double, torch.cdouble)
+    @skipIfCrossRef
+    def test_sparse_mask_backward(self, device, dtype):
+        from itertools import product, repeat
+
+        shape = (5, 5)
+        sparse_dims = len(shape)
+        nnzs = (0, 5, 15, 25)
+
+        lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
+        rhs_data = lhs_data.clone()
+
+        for nnz in nnzs:
+            for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
+                lhs = torch.sparse_coo_tensor(
+                    lhs_data._indices()[:, :nnz],
+                    lhs_data._values()[:nnz],
+                    lhs_data.shape
+                ).clone()._coalesced_(lhs_is_coalesced).requires_grad_(True)
+
+                rhs = torch.sparse_coo_tensor(
+                    lhs_data._indices()[:, -nnz:],
+                    lhs_data._values()[-nnz:],
+                    lhs_data.shape
+                ).clone()._coalesced_(rhs_is_coalesced)
+
+                # To test masked semantics we need to make sure that
+                # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
+                # lhs.sparse_mask(lhs_mask) accomplishes that.
+                lhs_mask = lhs.detach().clone()
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_zeros(self, device, dtype, coalesced):
@@ -3348,8 +3382,7 @@ class TestSparse(TestSparseBase):
                                                dtype=dtype, device=device)
             else:
                 raise ValueError(
-                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
-                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+                    f'`dim(={dim})` must be smaller than `sparse_dim(={sparse.sparse_dim()}) + dense_dim(={sparse.dense_dim()})`')
 
         def softmax_jacobian_analytic(x, dim):
             """Return Jacobian of softmax using analytic formula
@@ -3667,6 +3700,17 @@ class TestSparse(TestSparseBase):
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
 
+        def test_backward_noncontiguous():
+            # Sparse.mm backward used to wrong with non-contiguous grads,
+            # see https://github.com/pytorch/pytorch/issues/102493.
+            n_reps = 7
+            for _ in range(n_reps):
+                A = torch.eye(5).to_sparse().requires_grad_(True)
+                B = torch.eye(5).to_sparse()
+                out = torch.sparse.mm(A, B)
+                out.coalesce().values().sum().backward()
+                self.assertEqual(A.grad, A)
+
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):
@@ -3675,6 +3719,7 @@ class TestSparse(TestSparseBase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+        test_backward_noncontiguous()
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -4813,82 +4858,6 @@ class TestSparseAny(TestCase):
                     continue
                 raise
             self.assertEqual(result, dense)
-
-
-    @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @dtypes(torch.int8, torch.half, torch.bfloat16)
-    def test_structured_sparse_linear(self, device, dtype):
-        def make_tensor(shape, dtype):
-            if dtype.is_complex:
-                return torch.zeros(shape, dtype=dtype)
-            elif dtype.is_floating_point:
-                return torch.randn(shape, dtype=dtype) / 10
-            else:
-                return torch.randint(-5, 5, shape, dtype=dtype)
-
-        def random_mask_choice(i=None):
-            choices = [
-                [1, 1, 0, 0],
-                [1, 0, 1, 0],
-                [1, 0, 0, 1],
-                [0, 1, 1, 0],
-                [0, 1, 0, 1],
-                [0, 0, 1, 1]
-            ]
-            if i is None:
-                i = random.randint(0, len(choices) - 1)
-            return choices[i]
-
-        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
-            weight = make_tensor((m, k), dtype).to(device)
-            input = make_tensor((*batch_shape, n, k), dtype).to(device)
-            bias = make_tensor((m,), dtype_out).to(device) if add_bias else None
-
-            for meta_choice in (list(range(6)) + [None]):
-                mask_entries = [random_mask_choice(meta_choice) for i in range(m * (k // 4))]
-                mask = torch.tensor(mask_entries, dtype=torch.bool).view(m, k).to(device)
-                weight = weight.masked_fill(~mask, 0)
-
-                dtype_dense = torch.float
-                input_dense = input.to(dtype_dense)
-                weight_dense = weight.to(dtype_dense)
-                bias_dense = bias.to(dtype_dense) if add_bias else None
-                output0 = torch.nn.functional.linear(input_dense, weight_dense, bias=bias_dense)
-                if activation == "relu":
-                    relu = torch.nn.ReLU()
-                    output0 = relu(output0)
-                elif activation == "silu":
-                    silu = torch.nn.SiLU()
-                    output0 = silu(output0)
-
-                weight_sparse = weight.masked_select(mask).view(m, k // 2)
-
-                output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias, activation=activation)
-                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
-
-                output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias, activation=activation)
-                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
-
-        is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
-        if not is_sm8x:
-            return
-
-        batch_shapes = [[], [3], [3, 1]]
-        dtype_out = {torch.int8: torch.int32, torch.half: torch.half, torch.bfloat16: torch.bfloat16}
-        activations = [None, "relu", "silu"]
-        rtol, atol = 1e-3, 1e-3
-        if dtype == torch.bfloat16:
-            rtol, atol = 5e-3, 5e-3
-        for (batch_shape, m, n, k, add_bias, activation) in \
-                itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
-            if activation == "silu" and dtype == torch.int8:
-                continue  # SiLU not supported for integer inputs
-
-            m = 2 ** m * 32
-            n = 2 ** n * 32
-            k = 2 ** k * 128
-            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)

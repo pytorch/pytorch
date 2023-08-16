@@ -2,20 +2,11 @@ import contextlib
 import logging
 import math
 import warnings
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterator,
-    List,
-    no_type_check,
-    Tuple,
-)
+from typing import Any, Callable, cast, Dict, Generator, Iterator, no_type_check, Tuple
 
 import torch
 import torch.distributed as dist
+
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 
 import torch.nn as nn
@@ -25,7 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Replicate
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
@@ -33,7 +24,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     _has_fsdp_params,
     _is_composable,
-    _module_handles,
+    _module_handle,
     clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -77,9 +68,9 @@ def _param_name_infos(
 ) -> Iterator[Tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
-    for param_name, module_name in _module_handles(fsdp_state, module)[
-        0
-    ].param_module_names():
+    for param_name, module_name in _module_handle(
+        fsdp_state, module
+    ).param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -88,9 +79,9 @@ def _param_name_infos(
 def _shared_param_name_infos(
     module: nn.Module, fsdp_state
 ) -> Iterator[Tuple[str, str, str]]:
-    for param_name, module_name in _module_handles(fsdp_state, module)[
-        0
-    ].shared_param_module_names():
+    for param_name, module_name in _module_handle(
+        fsdp_state, module
+    ).shared_param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -259,8 +250,11 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            buffer_clean_fqns.append(clean_key)
-            buffers.append(state_dict[fqn])
+            # skip upcasting for ignored buffers
+            if clean_key not in fsdp_state._ignored_buffer_names:
+                buffer_clean_fqns.append(clean_key)
+                buffers.append(state_dict[fqn])
+
     if buffers:
         mixed_precision_enabled_for_buffers = (
             fsdp_state._mixed_precision_enabled_for_buffers()
@@ -388,7 +382,7 @@ def _local_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``local_state_dict`` can only be used when parameters are flatten "
@@ -418,8 +412,8 @@ def _local_post_state_dict_hook(
     # value as the flat_param but it is a pure Tensor because
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
-    assert _module_handles(fsdp_state, module), "Should have returned early"
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    assert _module_handle(fsdp_state, module), "Should have returned early"
+    flat_param = _module_handle(fsdp_state, module).flat_param
     # Constructs a ShardedTensor from the flat_param "without" padding.
     # Removing the padding allows users to change the number of ranks
     # when loading the local_state_dict.
@@ -479,7 +473,7 @@ def _local_pre_load_state_dict_hook(
     ), "Tensors in local_state_dict should be ShardedTensor."
 
     # Convert the ShardedTensor to a Tensor.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    flat_param = _module_handle(fsdp_state, module).flat_param
     assert flat_param is not None
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     shards = load_tensor.local_shards()
@@ -513,7 +507,7 @@ def _sharded_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``sharded_state_dict`` can only be used when parameters are flatten "
@@ -592,18 +586,13 @@ def _sharded_pre_load_state_dict_hook(
     if not _has_fsdp_params(fsdp_state, module):
         return
 
-    handle = _module_handles(fsdp_state, module)[0]
+    handle = _module_handle(fsdp_state, module)
     if not handle.uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
 
-    tensors_to_flatten: List[torch.Tensor] = []
-    shared_param_fqns = [
-        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
-    ]
-    loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
         if not _is_composable(fsdp_state):
@@ -611,43 +600,63 @@ def _sharded_pre_load_state_dict_hook(
         else:
             fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
-        # All-gather the param (ShardedTensor)
-        param, shards = _ext_pre_load_state_dict_transform(param)
 
-        loaded_shapes.append(param.size())
-        assert len(shards) < 2, (
-            "Expects 0 or 1 shard per rank "
-            f"but got {len(shards)} shards on rank {fsdp_state.rank}."
-        )
-        param_numel = param.size().numel()
-        dim_0_size = param.size()[0]
-        chunk_size = (
-            math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
-        )
-        if len(shards) == 1:
-            local_tensor = shards[0].tensor.flatten()
-            pg_device = _get_pg_default_device(fsdp_state.process_group)
-            if local_tensor.device.type != pg_device.type:
-                local_tensor = local_tensor.to(pg_device)
-            num_padding = chunk_size - local_tensor.numel()
-            if num_padding > 0:
-                local_tensor = F.pad(local_tensor, [0, num_padding])
-        else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
-        tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
-        )
-        if local_tensor.is_cpu:
-            tensor_list = list(
-                torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+        if not fsdp_state._state_dict_config.use_dtensor:
+            # All-gather the param (ShardedTensor)
+            param, shards = _ext_pre_load_state_dict_transform(param)
+
+            assert len(shards) < 2, (
+                "Expects 0 or 1 shard per rank "
+                f"but got {len(shards)} shards on rank {fsdp_state.rank}."
             )
-            dist.all_gather(tensor_list, local_tensor, group=fsdp_state.process_group)
-        else:
-            dist.all_gather_into_tensor(
-                tensor, local_tensor, group=fsdp_state.process_group
+            param_numel = param.size().numel()
+            dim_0_size = param.size()[0]
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size)
+                * param_numel
+                // dim_0_size
             )
-        tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        state_dict[fqn_from_global_root] = tensor
+            if len(shards) == 1:
+                local_tensor = shards[0].tensor.flatten()
+                pg_device = _get_pg_default_device(fsdp_state.process_group)
+                if local_tensor.device.type != pg_device.type:
+                    local_tensor = local_tensor.to(pg_device)
+                num_padding = chunk_size - local_tensor.numel()
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+            tensor = torch.empty(
+                chunk_size * fsdp_state.world_size,
+                dtype=local_tensor.dtype,
+                device=device,
+            )
+            if local_tensor.is_cpu:
+                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
+                # Convert to CPU so all_gather can work.
+                tensor_dev = tensor.device
+                tensor = tensor.cpu()
+                tensor_list = list(
+                    torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+                )
+                dist.all_gather(
+                    tensor_list, local_tensor, group=fsdp_state.process_group
+                )
+                tensor.to(tensor_dev)
+            else:
+                dist.all_gather_into_tensor(
+                    tensor, local_tensor, group=fsdp_state.process_group
+                )
+            tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
+            state_dict[fqn_from_global_root] = tensor
+        else:
+            if param.device != fsdp_state._device_mesh.device_type:
+                param = param.to(fsdp_state._device_mesh.device_type)
+
+            param = param.redistribute(
+                device_mesh=param.device_mesh, placements=[Replicate()]
+            )
+            state_dict[fqn_from_global_root] = param.to_local()
 
     _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
 
@@ -853,7 +862,8 @@ def _register_state_dict_hooks_base(
     if not _is_composable(state):
         getattr(state, hook_registration_fn_name)(hook, **hook_registration_fn_kwargs)
     else:
-        for handle in state._handles:
+        handle = state._handle
+        if handle:
             getattr(handle._fully_sharded_module, hook_registration_fn_name)(
                 hook, **hook_registration_fn_kwargs
             )

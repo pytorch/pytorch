@@ -175,6 +175,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
+        (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
@@ -327,7 +329,12 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
+    # This decomp runs before autograd.
+    (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
+    # Decomposition registered as Autograd
+    (None, None, "nn.functional.hardshrink"),
+    (None, None, "nn.functional.softshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
@@ -431,6 +438,44 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_rrelu_with_noise(self, device):
+        # rrelu_with_noise behavior depends on a) whether elements in the input
+        # are <= 0, and b) whether we're in training mode. Cover all cases:
+        dtype = torch.float64
+        x = torch.tensor(
+            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device,
+        )
+        lower = 1.0
+        upper = 4.0
+        training = False
+
+        torch.manual_seed(123)
+        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
+        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
+
+        torch.manual_seed(123)
+        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
+        res = torch._decomp.decompositions.rrelu_with_noise(
+            x, noise_res, lower, upper, training,
+        )
+        self.assertEqual(ref, res)
+        self.assertEqual(noise_ref, noise_res)
+
+        # Now with training=True:
+        training = True
+
+        torch.manual_seed(123)
+        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
+        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
+
+        torch.manual_seed(123)
+        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
+        res = torch._decomp.decompositions.rrelu_with_noise(
+            x, noise_res, lower, upper, training,
+        )
+        self.assertEqual(ref, res)
+        self.assertEqual(noise_ref, noise_res)
+
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
@@ -493,7 +538,7 @@ class TestDecomp(TestCase):
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
             in_place = func.name()[-1] == '_'
-            if func not in decomposition_table or func in [
+            ignored_ops = [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
                 torch.ops.aten.empty.memory_format,
@@ -503,7 +548,14 @@ class TestDecomp(TestCase):
                 torch.ops.aten.new_empty_strided.default,
                 torch.ops.aten.randn.default,
                 torch.ops.aten.native_dropout.default,
-            ] or any_unsupported(args, kwargs) or in_place:
+            ]
+            if (
+                    func not in decomposition_table or
+                    func in ignored_ops or
+                    torch.Tag.nondeterministic_seeded in func.tags or
+                    any_unsupported(args, kwargs) or
+                    in_place
+            ):
                 return func(*args, **kwargs)
 
             self.decomposed.add(func)
@@ -738,24 +790,25 @@ class HasDecompTest(TestCase):
         super().setUp()
         self.maxDiff = None
 
-    def test_has_decomposition(self):
+    @staticmethod
+    def _can_appear_in_trace(op: torch._ops.OpOverload) -> bool:
+        has_tensor_arg = any(
+            "Tensor" in str(a.type)
+            for a in itertools.chain(op._schema.arguments, op._schema.returns))
+        if not has_tensor_arg:
+            return False
 
-        def can_appear_in_trace(op) -> bool:
-            has_tensor_arg = any(
-                "Tensor" in str(a.type)
-                for a in itertools.chain(op._schema.arguments, op._schema.returns))
-            if not has_tensor_arg:
+        try:
+            # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+            return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+        except RuntimeError as e:
+            # has_key fails for some jit-registered ops, which shouldn't be
+            # relevant here anyway
+            if 'does not exist' in str(e):
                 return False
+            raise
 
-            try:
-                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
-            except RuntimeError as e:
-                # has_key fails for some jit-registered ops, which shouldn't be
-                # relevant here anyway
-                if 'does not exist' in str(e):
-                    return False
-                raise
+    def test_has_decomposition(self):
 
         def all_aten_overloads():
             for name in torch._C._dispatch_get_all_op_names():
@@ -777,10 +830,32 @@ class HasDecompTest(TestCase):
         # configurations, so would cause the test to fail
         allow_list = {aten.get_gradients.default}
 
-        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
+        overloads_wanting_decomp = {op for op in all_aten_overloads()
+                                    if self._can_appear_in_trace(op)}
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
+
+    def test_aten_core_operators(self):
+        # If a decomposition isn't included in the core decompositions,
+        # then it must decompose a core ATen operator.
+        #
+        # See NOTE [Core ATen Ops]
+        #
+        # If this test fails then either:
+        # - Add the decomposition to torch._decomp.core_aten_decompositions,
+        #   if decomposition should be used by inductor (not a core operator).
+        # - Run this test again with EXPECTTEST_ACCEPT=1 to update the list of
+        #   core ATen operators (and inductor will not use the decomposition).
+
+        # Some decompositions are registered for CompositeImplicitAutograd
+        # operators, which never appear in AOTAutograd's graph so are never used.
+        useful_decomps = {op for op in decomposition_table.keys()
+                          if self._can_appear_in_trace(op)}
+        core_decomps = torch._decomp.core_aten_decompositions().keys()
+        core_aten_ops = useful_decomps - core_decomps
+        self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
 
 if __name__ == "__main__":
     run_tests()
