@@ -3296,38 +3296,40 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    # '__torch__.torch.SymInt (of Python compilation unit at: 0x4c9c0e0)'
-    # object has no attribute or method '__ne__'
-    # NB: I don't think this ever can actually work, cuz TorchScript
-    # can't deal with SymInt inputs
-    @expectedFailureDynamic
-    @torch._dynamo.config.patch(raise_on_backend_change=True)
-    def test_change_backends(self):
-        @torch._dynamo.optimize("eager", nopython=True)
-        def fn1():
-            return x + 1
+    def test_backend_match_guard(self):
+        x = torch.randn([3, 4])
 
-        @torch._dynamo.optimize("ts")
-        def fn2():
-            return x + 2
+        def foo(x):
+            return x.sin() + x.cos()
 
-        @torch._dynamo.optimize("eager", nopython=False)
-        def fn3():
-            return x + 1
+        def foo_graph_break(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            b = x.cos()
+            return a + b
 
-        x = torch.tensor([3, 5])
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
 
-        fn1()
-        fn1()
-        fn3()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn2)
-        fn1()
-        torch._dynamo.reset()
-        fn2()
-        fn2()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn1)
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn3)
-        fn2()
+        # We intentionally don't reset dynamo for each backend so that we can test
+        # 1. dynamo doesn't recompile when backend stays the same
+        # 2. dynamo can recompile when backend changes
+        def test_recompile(foo, *, exp_frame_count):
+            for backend in backends:
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                eager_result = foo(x)
+                opt_result = torch._dynamo.optimize(backend=cnt)(foo)(x)
+                opt_result2 = torch._dynamo.optimize(backend=cnt)(foo)(x)
+                opt_result3 = torch._dynamo.optimize(backend=cnt)(foo)(x)
+                self.assertEqual(eager_result, opt_result)
+                self.assertEqual(cnt.frame_count, exp_frame_count)
+                self.assertEqual(eager_result, opt_result2)
+                self.assertEqual(cnt.frame_count, exp_frame_count)
+                self.assertEqual(eager_result, opt_result3)
+                self.assertEqual(cnt.frame_count, exp_frame_count)
+
+        test_recompile(foo, exp_frame_count=1)
+        test_recompile(foo_graph_break, exp_frame_count=2)
 
     def test_dynamo_min_operator_with_shape(self):
         @torch._dynamo.optimize("eager", nopython=True)

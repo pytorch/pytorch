@@ -61,7 +61,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
-from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -394,10 +394,6 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    @staticmethod
-    def _different_backend(old, new):
-        return not (old == new or old is None)
-
     def __init__(
         self,
         callback,
@@ -410,14 +406,6 @@ class OptimizeContext(_TorchDynamoContext):
     ):
         def on_enter():
             global most_recent_backend
-            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
-                if config.raise_on_backend_change:
-                    raise ResetRequired()
-                else:
-                    warnings.warn(
-                        "changing options to `torch.compile()` may require "
-                        "calling `torch._dynamo.reset()` to take effect"
-                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 

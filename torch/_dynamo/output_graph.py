@@ -278,6 +278,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
