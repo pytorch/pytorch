@@ -1,5 +1,4 @@
 import copy
-import warnings
 from typing import cast, List, NamedTuple, Optional, Tuple
 
 import torch
@@ -7,8 +6,6 @@ import torch.distributed as dist
 
 import torch.distributed._shard.sharding_spec as shard_spec
 import torch.distributed.distributed_c10d as c10d
-
-from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -24,6 +21,8 @@ from torch.distributed._tensor import (
     Shard as DShard,
 )
 from torch.distributed._tensor.placement_types import Placement
+
+from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
 
