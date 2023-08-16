@@ -606,7 +606,7 @@ class _BaseDataLoaderIter:
         # We do that by generating a base seed (one per Generator), and we then re-seed the Generators in `_worker_loop()`.
         # - For the default Generator, we sample its base seed just below (self._base_seed) via the `generator`
         #   parameter that was passed to `Dataloader(...)`.
-        #   We also use _default_base_seed to re-seed the numpy and builtin RNGs.
+        #   We also use this _base_seed to re-seed the numpy and builtin RNGs.
         # - For all other Generator objects g, their base seed should only depend on g, not on the `generator` parameter.
         #
         # We generate _base_seed for the default Generator here, but for the other Generators, we generate their seed
