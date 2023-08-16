@@ -1616,7 +1616,7 @@ def get_classifications(
             # when merging
             #
             # When overwrite_failed_run_attempt is False, only overwrite the job
-            # with the result from the latest attempt if the latest attemp failed.
+            # with the result from the latest attempt if the latest retry failed.
             # This option is for jobs from the merger_base where we want to record
             # failures for broken trunk
             if d[key_no_suffix][key]["id"] < val["id"] and (
