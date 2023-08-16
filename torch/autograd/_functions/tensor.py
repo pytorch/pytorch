@@ -10,7 +10,7 @@ class Type(Function):
     @staticmethod
     def forward(ctx, i, dest_type):
         warnings.warn(
-            "torch.autograd._functions.Type is deprec, stacklevel=1ated as of PyTorch 2.1, please use "
+            "torch.autograd._functions.Type is deprecated as of PyTorch 2.1, please use "
             "torch.tensor.to(dtype=dtype) instead.",
             stacklevel=1,
         )
