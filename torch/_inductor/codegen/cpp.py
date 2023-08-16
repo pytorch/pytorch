@@ -2551,6 +2551,7 @@ class CppKernelProxy(CppKernel):
 
         def codegen_kernel(cls, *args):
             with kernel_group.new_kernel(cls, *args) as kernel:
+                kernel.node_schedule = nodes
                 run(kernel)
 
                 # Ugly hack to maintain the metrics kernel count since
@@ -2744,7 +2745,6 @@ class CppScheduling:
         kernel_group = self.kernel_group
 
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
-        cpp_kernel_proxy.node_schedule = nodes
         cpp_kernel_proxy.codegen_nodes(nodes)
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
