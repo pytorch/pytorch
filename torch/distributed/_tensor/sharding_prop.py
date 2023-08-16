@@ -269,14 +269,14 @@ class _CachingPropagator(ShardingPropagator):
 
         # cache table for sharding propagation results, we might need to
         # limit the size of the cache table in the future
-        self.cached_prop_results: Dict[OpSchema, OutputSharding] = {}
+        self.cached_prop_results: Dict[int, OutputSharding] = {}
 
     def propagate(self, op_overload: OpOverload, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         Cache the propagation results to avoid running propagation again.
         """
-        op_schema_key = str(op_schema)
+        op_schema_key = hash(op_schema)
         if op_schema_key in self.cached_prop_results:
             return self.cached_prop_results[op_schema_key]
         else:
