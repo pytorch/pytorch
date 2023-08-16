@@ -100,28 +100,6 @@ void int8_gemm(
     int64_t mat2_ld,
     int32_t* result_ptr,
     int64_t result_ld);
-
-void scaled_gemm(
-    char transa,
-    char transb,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    const void* mat1_ptr,
-    const void* mat1_scale_ptr,
-    int64_t mat1_ld,
-    ScalarType mat1_dtype,
-    const void* mat2_ptr,
-    const void* mat2_scale_ptr,
-    int64_t mat2_ld,
-    ScalarType mat2_dtype,
-    const void* bias,
-    ScalarType bias_dtype,
-    void* result_ptr,
-    const void* result_scale_ptr,
-    int64_t result_ld,
-    ScalarType result_dtype,
-    void* amax_ptr);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
