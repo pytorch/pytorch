@@ -2,10 +2,10 @@ import functools
 import itertools
 import logging
 import operator
+from collections import namedtuple
 from typing import List, Optional, Union
 
 from sympy import Expr
-from collections import namedtuple
 
 import torch
 import torch._inductor as inductor
@@ -554,7 +554,6 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-
 def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
@@ -569,7 +568,7 @@ def reinplace_scatters(graph):
         if node.target == aten.copy_.default:
             copy_nodes[(node.args[0], node.args[1])] = node
             mutated_inputs.add(node.args[0])
-        elif node.op == 'output':
+        elif node.op == "output":
             pass
         else:
             break
@@ -580,9 +579,9 @@ def reinplace_scatters(graph):
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     }
     for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target, False)):
+        if inplaceable_op := inplaceable_ops.get(node.target, False):
             mutated_arg = node.args[inplaceable_op.mutated_arg]
-            if mutated_arg.op == 'placeholder':
+            if mutated_arg.op == "placeholder":
                 if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
                     continue
 
