@@ -147,6 +147,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
+        torch.export,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
