@@ -407,7 +407,6 @@ class TestForeach(TestCase):
     @ops(foreach_unary_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_unary_op(self, device, dtype, op, is_fastpath):
-        out_place_defined = op.name != "_foreach_zero"
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
         samples = op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
         disable_fastpath = op.name == "_foreach_abs" and dtype in complex_types()
@@ -415,7 +414,7 @@ class TestForeach(TestCase):
             zero_size = sample.kwargs.pop('zero_size')
             inputs = [sample.input]
             if zero_size:
-                if out_place_defined:
+                if not op.has_no_out_of_place:
                     wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
                 inplace_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
                 continue
@@ -423,7 +422,7 @@ class TestForeach(TestCase):
             disable_fastpath = (op.name == "_foreach_abs" and dtype in complex_types()) or sample.kwargs.pop(
                 "disable_fastpath"
             )
-            if out_place_defined:
+            if not op.has_no_out_of_place:
                 self.assertEqual(
                     ref(inputs),
                     wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size),
@@ -434,7 +433,7 @@ class TestForeach(TestCase):
             if op.supports_autograd and dtype in floating_types() and not zero_size:
                 tensors = [t.clone().detach().requires_grad_() for t in sample.input]
                 ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
-                if out_place_defined:
+                if not op.has_no_out_of_place:
                     out = wrapped_op.func(tensors)
                     # tensors have different shapes
                     torch.cat([t.view(-1) for t in out]).mean().backward()
@@ -528,7 +527,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, tensors)
 
     @ops(
-        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
@@ -547,7 +546,7 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     @ops(
-        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
         allowed_dtypes=[torch.float],
     )
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
@@ -565,7 +564,7 @@ class TestForeach(TestCase):
 
     @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(
-        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
@@ -631,7 +630,7 @@ class TestForeach(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
-        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
@@ -683,7 +682,7 @@ class TestForeach(TestCase):
             zero_size=False, alpha=None, scalar_self_arg=False)
 
     @ops(
-        filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db),
+        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
@@ -713,12 +712,12 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
-        out_place_defined = op.name != "_foreach_zero"
+        op.has_no_out_of_place = op.name != "_foreach_zero"
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
         tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2]))[0].input
         tensors[1] = tensors[1].to("cpu")
-        if out_place_defined:
+        if op.has_no_out_of_place:
             try:
                 actual = method((tensors,), False, False, zero_size=False)
             except RuntimeError as e:
@@ -734,13 +733,13 @@ class TestForeach(TestCase):
             with self.assertRaisesRegex(type(e), str(e)):
                 ref_inplace((tensors,))
         else:
-            if out_place_defined:
+            if op.has_no_out_of_place:
                 self.assertEqual(expected, tensors)
             else:
                 self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
 
     @onlyCUDA
-    @ops(filter(lambda op: op.name != "_foreach_copy", foreach_binary_op_db))
+    @ops(filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
@@ -919,8 +918,8 @@ class TestForeach(TestCase):
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
-        if op.name in {"_foreach_zero", "_foreach_copy"}:
-            self.skipTest(f"{op.name} does not have out-place implementation")
+        if op.has_no_out_of_place:
+            self.skipTest(f"{op.name} does not have out-of-place implementation")
         func, *_ = self._get_funcs(op)
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
         self.assertTrue(all(t.requires_grad for t in sample.input))
