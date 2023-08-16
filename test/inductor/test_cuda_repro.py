@@ -15,7 +15,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
-    skipIfRocm,
     TEST_WITH_ASAN,
 )
 
@@ -144,7 +143,6 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, ())
         assert compiled([])[0].device.type == "cuda"
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
@@ -173,7 +171,6 @@ class CudaReproTests(TestCase):
 
         self.common(Repro(), ())
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
@@ -187,7 +184,6 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(
         automatic_dynamic_shapes=True,
@@ -236,7 +232,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(real_out, compiled_out)
         torch._dynamo.reset()
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
@@ -250,8 +245,6 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    # TODO: enable
-    @skipIfRocm
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
@@ -836,7 +829,7 @@ class CudaReproTests(TestCase):
         """
 
         def fn(values, offsets):
-            return torch.ops.prims._inductor_bucketize(values, offsets)
+            return torch.bucketize(values, offsets)
 
         values = torch.rand((64, 64), device="cuda")
         offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")
@@ -929,7 +922,6 @@ class CudaReproTests(TestCase):
         ref = compiled(list(args))
         assert same(ref, correct)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_inplace_cudagraph(self):
         def fn(x, y, z):
@@ -950,7 +942,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_cudagraph(self):
         def fn(x, y, z):
@@ -971,7 +962,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_no_fallback_cudagraph(self):
         def fn(x, y, z):

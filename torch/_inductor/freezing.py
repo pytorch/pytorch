@@ -1,11 +1,13 @@
+import collections
 import itertools
+import logging
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
@@ -17,6 +19,8 @@ aten = torch.ops.aten
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+log = logging.getLogger(__name__)
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -53,7 +57,6 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     """
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
     fake_inp_nodes = params[: len(params)]
-    g = gm.graph
     preserved_arg_indices = []
     aliased_input_args = [
         out_info.base_idx
@@ -61,7 +64,7 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
         if out_info.base_idx is not None
     ]
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
+        if i in fw_metadata.mutated_inp_indices or i in aliased_input_args:
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
@@ -72,12 +75,27 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     return preserved_arg_indices
 
 
+def return_true(*args, **kwargs):
+    return True
+
+
 class ConstantFolder(torch.fx.Interpreter):
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(
+        self,
+        gm,
+        skip_constructors=False,
+        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
+    ):
         super().__init__(gm)
         self.node_replacements = {}
+        self.replaced_uses = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
+        self.insertable_tensor_check = (
+            insertable_tensor_check
+            if insertable_tensor_check is not None
+            else return_true
+        )
 
     def run_node(self, node):
         aten = torch.ops.aten
@@ -87,6 +105,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
 
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+
         if self.unknown_value in flattened_inputs:
             return self.unknown_value
 
@@ -116,9 +135,23 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = super().run_node(node)
 
-        # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if not self.insertable_tensor_check(out):
+                return out
+
             self.node_replacements[node] = out
+
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+
+            for n in flattened_node_inps:
+                if not isinstance(n, torch.fx.Node):
+                    continue
+
+                self.replaced_uses[n] += 1
+
+            for to_delete in self.user_to_last_uses.get(node, []):
+                if self.replaced_uses[to_delete] == len(to_delete.users):
+                    self.node_replacements.pop(to_delete, None)
 
         return out
 
@@ -193,13 +226,14 @@ def freeze(
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
     freezing_passes(aot_autograd_gm, aot_example_inputs)
 
-    # TODO - apply legalization in pattern matcher
-    torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
+
+    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+
     return aot_autograd_gm, preserved_arg_indices
 
 

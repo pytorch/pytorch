@@ -25,10 +25,10 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
-expecttest==0.1.3
+expecttest==0.1.6
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.1.3
+#Pinned versions: 0.1.6
 #test that import:
 
 flatbuffers==2.0
