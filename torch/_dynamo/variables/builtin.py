@@ -7,10 +7,6 @@ import operator
 import types
 from typing import Dict, List
 
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
 
 import torch
 from torch import sym_float, sym_int
@@ -682,6 +678,7 @@ class BuiltinVariable(VariableTracker):
             # convert min/max to torch ops
             if b.is_python_constant():
                 if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
                     fn = variables.NumpyVariable(np.clip)
                 else:
                     fn = variables.TorchVariable(torch.clamp)
@@ -689,6 +686,7 @@ class BuiltinVariable(VariableTracker):
                 result = fn.call_function(tx, [a], kwargs)
             else:
                 if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
                     fn = {max: np.maximum, min: np.minimum}[self.fn]
                     fn = variables.NumpyVariable(fn)
                 else:
