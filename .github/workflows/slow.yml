@@ -17,12 +17,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda12_1-py3-gcc9-slow-gradcheck-build:
-    name: linux-bionic-cuda12.1-py3-gcc9-slow-gradcheck
+  linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
+    name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3-gcc9-slow-gradcheck
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -32,22 +32,22 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda12_1-py3-gcc9-slow-gradcheck-test:
-    name: linux-bionic-cuda12.1-py3-gcc9-slow-gradcheck
+  linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
+    name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3-gcc9-slow-gradcheck-build
+    needs: linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build
     with:
-      build-environment: linux-bionic-cuda12.1-py3-gcc9-slow-gradcheck
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
 
-  linux-bionic-cuda12_1-py3_10-gcc9-sm86-build:
-    name: linux-bionic-cuda12.1-py3.10-gcc9-sm86
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -55,34 +55,34 @@ jobs:
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-sm86-test:
-    name: linux-bionic-cuda12.1-py3.10-gcc9-sm86
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc9-sm86-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-sm86-build
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
 
-  linux-bionic-py3_8-clang9-build:
-    name: linux-bionic-py3.8-clang9
+  linux-focal-py3_8-clang10-build:
+    name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.8-clang9
-      docker-image-name: pytorch-linux-bionic-py3.8-clang9
+      build-environment: linux-focal-py3.8-clang10
+      docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-py3_8-clang9-test:
-    name: linux-bionic-py3.8-clang9
+  linux-focal-py3_8-clang10-test:
+    name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_8-clang9-build
+    needs: linux-focal-py3_8-clang10-build
     with:
-      build-environment: linux-bionic-py3.8-clang9
-      docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.8-clang10
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
 
   linux-focal-rocm5_6-py3_8-build:
     name: linux-focal-rocm5.6-py3.8
@@ -107,12 +107,12 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-focal-py3_9-clang7-asan-build:
-    name: linux-focal-py3.9-clang7-asan
+  linux-jammy-py3_9-clang12-asan-build:
+    name: linux-jammy-py3.9-clang12-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3.9-clang7-asan
-      docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      build-environment: linux-jammy-py3.9-clang12-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
@@ -120,12 +120,12 @@ jobs:
         ]}
       sync-tag: asan-build
 
-  linux-focal-py3_9-clang7-asan-test:
-    name: linux-focal-py3.9-clang7-asan
+  linux-jammy-py3_9-clang12-asan-test:
+    name: linux-jammy-py3.9-clang12-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_9-clang7-asan-build
+    needs: linux-jammy-py3_9-clang12-asan-build
     with:
-      build-environment: linux-focal-py3.9-clang7-asan
-      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.9-clang12-asan
+      docker-image: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.test-matrix }}
       sync-tag: asan-test

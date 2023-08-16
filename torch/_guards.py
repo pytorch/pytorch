@@ -527,6 +527,22 @@ class TracingContext:
                 yield
             except Exception as e:
                 # Prevent real_stack from getting attached
+                #
+                # The invariant is that if an Exception as real_stack, we've
+                # appropriately attached a user stack and we no longer need to
+                # attach anything. Because we cannot conveniently interpose
+                # when an exception is thrown, we instead interpose everywhere
+                # we set what the user stack is set (using the context
+                # manager). However, our compiler stack does "tail calls"
+                # (when it calls into user compiler), at which point the
+                # parent exception frames would incorrectly attach an
+                # incorrect frame.
+                #
+                # However, if, somehow, someone raised an exception with this
+                # scope that had a stack (for example, because they are
+                # restoring the user stack state appropriately as they process
+                # node by node), we should respect it. Thus, we cannot
+                # unconditionally set None.
                 if not hasattr(e, "real_stack"):
                     e.real_stack = None  # type: ignore[attr-defined]
                 raise
@@ -592,7 +608,7 @@ def tracing(context: TracingContext):
     try:
         yield context
     except Exception as e:
-        if not hasattr(e, "real_stack"):
+        if not hasattr(e, "real_stack") and context is not None:
             e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
@@ -673,17 +689,3 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
-
-
-EXPORT_FAKE_MODE = None
-
-
-@contextlib.contextmanager
-def export_fake_mode(fake_mode):
-    global EXPORT_FAKE_MODE
-    assert EXPORT_FAKE_MODE is None
-    EXPORT_FAKE_MODE = fake_mode
-    try:
-        yield
-    finally:
-        EXPORT_FAKE_MODE = None

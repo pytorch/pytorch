@@ -2880,8 +2880,6 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
-    simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
     simd_vec: bool = False
     collapsed: bool = False
     reduction_var_map: Dict[str, str] = None
@@ -2891,6 +2889,18 @@ class LoopLevel:
     inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
     # kernel assigned to this loop level, only valid when it is a leaf
     kernel: CppKernel = None
+
+    def __post_init__(self):
+        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # vectorization ISA is a time-consuming and one-shot operation. It leads
+        # to taking a longer time to import `codegen.cpp` package because the
+        # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
+        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
+        # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
+        # `__post_init__`
+        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:
         """Get all kernel objects under this loop level"""
