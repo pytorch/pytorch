@@ -9,7 +9,7 @@
 import functools
 import logging
 import time
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from torch.distributed.logging_handlers import _log_handlers
 import torch.distributed as dist
@@ -40,18 +40,41 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
+def get_msg_dict(*args, **kwargs) -> Dict[str, Any]:
+    if dist.is_initialized():
+        msg_dict = {
+            "func_name": f"{func.__name__}",
+            "args": f"{args}, {kwargs}",
+            "pg_name": f"{_get_process_group_name(kwargs.get('group'))}",
+            "backend": f"{dist.get_backend(kwargs.get('group'))}",
+            "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
+            "group_size": f"{dist.get_world_size(kwargs.get('group'))}",
+            "global_rank": f"{dist.get_rank()}",
+            "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
+        }
+    else:
+        msg_dict = {
+            "func_name": f"{func.__name__}",
+            "args": f"{args}, {kwargs}",
+        }
+    return msg_dict
+
+
 def _exception_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as error:
+            from torch.distributed.distributed_c10d import _get_process_group_name
             if dist.is_initialized():
                 error_msg_dict = {
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
+                    "pg_name": f"{_get_process_group_name(kwargs.get('group'))}",
                     "backend": f"{dist.get_backend(kwargs.get('group'))}",
                     "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
+                    "group_size": f"{dist.get_world_size(kwargs.get('group'))}",
                     "global_rank": f"{dist.get_rank()}",
                     "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
                     "error": f"{error}",
