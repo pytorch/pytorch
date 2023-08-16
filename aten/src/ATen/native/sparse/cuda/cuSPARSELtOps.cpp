@@ -9,6 +9,7 @@
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cstdint>
+#include <iostream>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -77,6 +78,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
     auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     TORCH_CUDASPARSE_CHECK(cusparseLtSpMMACompress2(
         &handle,
@@ -86,7 +88,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         sparse_input.data_ptr(),
         compressed_tensor.data_ptr(),
         compressedBufferPtr.get(),
-        nullptr));
+        stream));
 
     return compressed_tensor;
 }
@@ -215,6 +217,7 @@ at::Tensor _cslt_sparse_mm(
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspacePtr = allocator.allocate(workspace_size);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmul(
       &handle,
@@ -226,8 +229,9 @@ at::Tensor _cslt_sparse_mm(
       res.data_ptr(),
       res.data_ptr(),
       workspacePtr.get(),
-      nullptr,
-      0));
+      // jank because of the way we want this to be an array of streams
+      &stream,
+      1));
 
 
   //destroy descriptors
@@ -238,6 +242,7 @@ at::Tensor _cslt_sparse_mm(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&res_descriptor));
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
+
   return res;
 }
 
