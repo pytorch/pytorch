@@ -634,11 +634,17 @@ def _flatten_optim_state(
             )
             # Shard the flattened tensor immediately to minimize max memory
             # usage
-            sharded_flat_tensor, _ = FlatParamHandle._get_shard(
-                flat_tensor,
-                fsdp_state.rank,
-                fsdp_state.world_size,
-            )
+            if (
+                fsdp_state.world_size != 1
+                and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
+            ):
+                sharded_flat_tensor, _ = FlatParamHandle._get_shard(
+                    flat_tensor,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                )
+            else:
+                sharded_flat_tensor = flat_tensor
             flat_state[state_name] = sharded_flat_tensor
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
