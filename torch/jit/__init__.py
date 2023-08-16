@@ -252,7 +252,7 @@ class strict_fusion:
 
     def __init__(self):
         if not torch._jit_internal.is_scripting():
-            warnings.warn("Only works in script mode")
+            warnings.warn("Only works in script mode", stacklevel=1)
         pass
 
     def __enter__(self):

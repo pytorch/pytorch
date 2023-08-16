@@ -311,7 +311,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
             warnings.warn(
                 "'{}' was found in ScriptModule constants, "
-                " but it is a non-constant {}. Consider removing it.".format(name, hint)
+                " but it is a non-constant {}. Consider removing it.".format(name, hint), stacklevel=1
             )
             continue
         if not hasattr(nn_module, name):
@@ -320,7 +320,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             warnings.warn(
                 "'{}' was found in ScriptModule constants, "
                 "but was not actually set in __init__. "
-                "Consider removing it.".format(name)
+                "Consider removing it.".format(name), stacklevel=1
             )
             continue
         value = getattr(nn_module, name)

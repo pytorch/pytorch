@@ -123,7 +123,7 @@ class GradScaler:
     ):
         if enabled and amp_definitely_not_available():
             warnings.warn(
-                "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling."
+                "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.", stacklevel=1
             )
             self._enabled = False
         else:
@@ -379,7 +379,7 @@ class GradScaler:
                     "GradScaler is going to stop passing itself as a keyword argument to the passed "
                     "optimizer. In the near future GradScaler registers `grad_scale: Tensor` and "
                     "`found_inf: Tensor` to the passed optimizer and let the optimizer use them directly.",
-                    FutureWarning,
+                    FutureWarning, stacklevel=1
                 )
                 kwargs_.update({"grad_scaler": self})
             else:

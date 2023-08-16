@@ -180,7 +180,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             "instance-level annotations on empty non-base "
             "types in `__init__`. Instead, either 1) use a "
             "type annotation in the class body, or 2) wrap "
-            "the type in `torch.jit.Attribute`."
+            "the type in `torch.jit.Attribute`.", stacklevel=1
         )
 
     def visit_Call(self, node):
@@ -244,5 +244,5 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             "instance-level annotations on empty non-base "
             "types in `__init__`. Instead, either 1) use a "
             "type annotation in the class body, or 2) wrap "
-            "the type in `torch.jit.Attribute`."
+            "the type in `torch.jit.Attribute`.", stacklevel=1
         )

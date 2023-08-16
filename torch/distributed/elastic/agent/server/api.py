@@ -92,7 +92,7 @@ class WorkerSpec:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
-                category=DeprecationWarning,
+                category=DeprecationWarning, stacklevel=1
             )
             self.entrypoint = self.fn
         assert self.entrypoint

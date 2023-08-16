@@ -189,7 +189,7 @@ def _check_capability():
             if current_arch < min_arch:
                 warnings.warn(
                     old_gpu_warn
-                    % (d, name, major, minor, min_arch // 10, min_arch % 10)
+                    % (d, name, major, minor, min_arch // 10, min_arch % 10), stacklevel=1
                 )
 
 
@@ -215,7 +215,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
             warnings.warn(
                 incompatible_device_warn.format(
                     device_name, capability, " ".join(arch_list), device_name
-                )
+                ), stacklevel=1
             )
 
 
@@ -608,12 +608,12 @@ def _raw_device_count_nvml() -> int:
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML")
+        warnings.warn("Can't initialize NVML", stacklevel=1)
         return -1
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count")
+        warnings.warn("Can't get nvml device count", stacklevel=1)
         return -1
     del nvml_h
     return dev_count.value
@@ -627,25 +627,25 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML")
+        warnings.warn("Can't initialize NVML", stacklevel=1)
         return None
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count")
+        warnings.warn("Can't get nvml device count", stacklevel=1)
         return None
     uuids: List[str] = []
     for idx in range(dev_count.value):
         dev_id = c_void_p()
         rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
         if rc != 0:
-            warnings.warn("Can't get device handle")
+            warnings.warn("Can't get device handle", stacklevel=1)
             return None
         buf_len = 96
         buf = create_string_buffer(buf_len)
         rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
         if rc != 0:
-            warnings.warn("Can't get device UUID")
+            warnings.warn("Can't get device UUID", stacklevel=1)
             return None
         uuids.append(buf.raw.decode("ascii").strip("\0"))
     del nvml_h

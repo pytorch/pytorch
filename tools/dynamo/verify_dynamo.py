@@ -91,20 +91,20 @@ def check_cuda():
     if cuda_ver != torch_cuda_ver:
         # raise VerifyDynamoError(
         warnings.warn(
-            f"CUDA version mismatch, `torch` version: {torch_cuda_ver}, env version: {cuda_ver}"
+            f"CUDA version mismatch, `torch` version: {torch_cuda_ver}, env version: {cuda_ver}", stacklevel=1
         )
 
     if torch_cuda_ver < MIN_CUDA_VERSION:
         # raise VerifyDynamoError(
         warnings.warn(
             f"(`torch`) CUDA version not supported: {torch_cuda_ver} "
-            f"- minimum requirement: {MIN_CUDA_VERSION}"
+            f"- minimum requirement: {MIN_CUDA_VERSION}", stacklevel=1
         )
     if cuda_ver < MIN_CUDA_VERSION:
         # raise VerifyDynamoError(
         warnings.warn(
             f"(env) CUDA version not supported: {cuda_ver} "
-            f"- minimum requirement: {MIN_CUDA_VERSION}"
+            f"- minimum requirement: {MIN_CUDA_VERSION}", stacklevel=1
         )
 
     return cuda_ver if torch.version.hip is None else "None"
@@ -125,17 +125,17 @@ def check_rocm():
     rocm_ver = get_rocm_version()
     if rocm_ver != torch_rocm_ver:
         warnings.warn(
-            f"ROCm version mismatch, `torch` version: {torch_rocm_ver}, env version: {rocm_ver}"
+            f"ROCm version mismatch, `torch` version: {torch_rocm_ver}, env version: {rocm_ver}", stacklevel=1
         )
     if torch_rocm_ver < MIN_ROCM_VERSION:
         warnings.warn(
             f"(`torch`) ROCm version not supported: {torch_rocm_ver} "
-            f"- minimum requirement: {MIN_ROCM_VERSION}"
+            f"- minimum requirement: {MIN_ROCM_VERSION}", stacklevel=1
         )
     if rocm_ver < MIN_ROCM_VERSION:
         warnings.warn(
             f"(env) ROCm version not supported: {rocm_ver} "
-            f"- minimum requirement: {MIN_ROCM_VERSION}"
+            f"- minimum requirement: {MIN_ROCM_VERSION}", stacklevel=1
         )
 
     return rocm_ver if torch.version.hip else "None"
@@ -216,7 +216,7 @@ def main():
     )
     for args in _SANITY_CHECK_ARGS:
         if sys.version_info >= (3, 12):
-            warnings.warn("Dynamo not yet supported in Python 3.12. Skipping check.")
+            warnings.warn("Dynamo not yet supported in Python 3.12. Skipping check.", stacklevel=1)
             continue
         check_dynamo(*args)
     print("All required checks passed")

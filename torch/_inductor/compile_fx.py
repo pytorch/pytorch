@@ -134,7 +134,7 @@ def _warn_tf32_disabled():
     ):
         warnings.warn(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
-            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance.", stacklevel=1
         )
 
 

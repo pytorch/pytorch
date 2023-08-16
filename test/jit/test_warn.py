@@ -56,7 +56,7 @@ class TestWarn(JitTestCase):
 
     def test_warn_only_once_in_loop_func(self):
         def w():
-            warnings.warn("I am warning you")
+            warnings.warn("I am warning you", stacklevel=1)
 
         @torch.jit.script
         def fn():

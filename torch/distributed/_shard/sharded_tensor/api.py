@@ -618,7 +618,7 @@ class ShardedTensor(ShardedTensorBase):
             if device_to.index != current_idx:
                 import warnings
                 warnings.warn("ShardedTensor.to only move tensor to its current device"
-                              "If you want to put to different device, use `reshard` instead.")
+                              "If you want to put to different device, use `reshard` instead.", stacklevel=1)
             device_to = torch.device(current_idx)
 
         copy_tensor = kwargs.get("copy", False)

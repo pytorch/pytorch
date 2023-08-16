@@ -1659,7 +1659,7 @@ def check(
         DeprecationWarning(
             "'torch._prims_common.check' will be removed in the future. Please use "
             "'torch._check*' functions instead"
-        )
+        ), stacklevel=1
     )
     torch._check_with(exc_type, b, s)
 
@@ -1804,7 +1804,7 @@ def alert_not_deterministic(caller: str):
                 f"{caller} does not have a deterministic implementation, but you set "
                 f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
                 f"You can file an issue at https://github.com/pytorch/pytorch/issues "
-                f"to help us prioritize adding deterministic support for this operation."
+                f"to help us prioritize adding deterministic support for this operation.", stacklevel=1
             )
         else:
             torch._check(
