@@ -18,6 +18,26 @@
 #include <c10/util/string_view.h>
 #include <cmath>
 #include <functional>
+#include <iostream>
+
+/**
+* Note [SDPA Runtime Dispatch]
+* SDPA relies on a runtime dispatch mechanism to select the appropriate
+* kernel. This file contains exposes this through the `select_sdp_backend`
+* The basic structure of this function is to call `priority_order` to get a
+* list of backends to try, and then iterate through them until one succeeds.
+* Each backend defines a use_<backend> function that returns true if the
+* backend can be run with the given SDP parameters. The use_<backend> function
+* will iterate over a list of "filters" that check for specific properties of
+* the SDP parameters. If all filters pass, the backend can be used and use_<backend>
+* returns true. If any filter fails, then use_<backend> returns false.
+*
+* In order to aid in debugging, each filter takes sdp_params and a debug flag.
+* If the debug flag is set, the filter will print a warning message if it fails.
+* The behavior of select_sdp_backend is to return the first backend that
+* succeeds. If no backend is viable then it will run each use_<backend> function
+* with debug=true and return SDPBackend::error.
+*/
 
 namespace sdp {
 namespace {
@@ -242,9 +262,9 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
 }
 
 bool check_for_attn_mask(sdp_params params, bool debug) {
-  if (params.has_attn_mask) {
+  if (params.attn_mask.has_value()) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("FlashAttention does not support non-null attn_mask.");
     }
     return false;
   }
@@ -530,6 +550,64 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   return true;
 }
 
+bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
+  if (has_for_nested_inputs(params)){
+    // Currently we do not support any masking with NestedTensors
+    // This is checked in validate_sdpa_input so this filter func
+    // Should have no actually bearing on the kernel selection
+    return true;
+  }
+  // In some cases people will pass in 0 sized tensors, this will
+  // cause the fused path to error with unaligned mask
+  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
+  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
+  if (zero_seq_len_q || zero_seq_len_k) {
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels do not support zero seq_len_q or seq_len_kv.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
+  if (has_for_nested_inputs(params)){
+    // The stride checking for NestedTensors is done within the kernel
+    // And .contiguous will be called if needed
+    return true;
+  }
+  // This function checks that the last dimension of the inputs to
+  // fused_attention have stride 1
+  bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
+      params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+  bool mask_stride_equal_1 = params.attn_mask.has_value()
+      ? params.attn_mask.value().sym_stride(-1) == 1
+      : true;
+  if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
+    if (debug) {
+      std::ostringstream epilogue_message;
+      if (params.attn_mask.has_value()) {
+        epilogue_message << ", Attn_mask.stride(-1): "
+                         << params.attn_mask.value().sym_stride(-1);
+      }
+      epilogue_message << " instead.";
+      TORCH_WARN(
+          "Both fused kernels require the last dimension of the input to have stride 1. ",
+          "Got Query.stride(-1): ",
+          params.query.sym_stride(-1),
+          ", Key.stride(-1): ",
+          params.key.sym_stride(-1),
+          ", Value.stride(-1): ",
+          params.value.sym_stride(-1),
+          epilogue_message.str());
+    }
+
+    return false;
+  }
+  return true;
+}
+
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
@@ -546,7 +624,9 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_head_dim_size,
       check_gpu_sm75_or_greater,
       check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90,
-      check_for_seq_len_0_nested_tensor);
+      check_for_seq_len_0_nested_tensor,
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -582,9 +662,10 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
-      check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_for_seq_len_0_nested_tensor);
+      check_for_seq_len_0_nested_tensor,
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

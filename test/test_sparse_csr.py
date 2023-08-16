@@ -19,8 +19,7 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
-    all_types_and_complex, floating_and_complex_types_and
-)
+    all_types_and_complex, floating_and_complex_types_and)
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -904,12 +903,14 @@ class TestSparseCompressed(TestCase):
 
         def is_view_of(base, other):
             # a shameless copy of TestViewOps.is_view_of
-            if ((not other._is_view() or
-                 other is base or
-                 other._base is not base or
-                 base.device != other.device)):
+            if (
+                not other._is_view() or
+                other is base or
+                other._base is not base or
+                base.device != other.device
+            ):
                 return False
-            if base.device.type == 'cpu' or base.device.type == 'cuda':
+            if base.device.type in ('cpu', 'cuda'):
                 if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
@@ -1815,8 +1816,8 @@ class TestSparseCSR(TestCase):
             yd = xd.transpose(-2, -1)
             zd = torch.rand(0, 0, device=device, dtype=dtype)
 
-            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
-            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
+            xls, yls, zls = (t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd))
+            xrs, yrs, zrs = (t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd))
 
             for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
                 res_sparse = ls @ rs
@@ -1979,13 +1980,11 @@ class TestSparseCSR(TestCase):
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
-    @skipCUDAIf(
-        not _check_cusparse_spgemm_available(),
-        "cuSparse Generic API SpGEMM is not available"
-    )
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
+        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
+            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)
@@ -2879,7 +2878,6 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
-
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @all_sparse_compressed_layouts()
@@ -3564,6 +3562,53 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, r"only row-major/col-major `out`"):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
+
+    @parametrize("block_size", [16, 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @precisionOverride({torch.float16: 1e-3})
+    def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
+        from functools import partial
+        from torch.sparse._triton_ops import _scaled_dot_product_attention
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
+
+        def broadcast_input(*ts):
+            batch_dims = torch.broadcast_shapes(*(t.shape[:-2] for t in ts))
+            yield from (torch.broadcast_to(t, batch_dims + t.shape[-2:]) for t in ts)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [128, 256, 0]
+
+        for bam, bq, bk, bv, m, n, k in itertools.product(batches, batches, batches, batches, size, size, size):
+            query = tensor(bq + (m, k))
+            key = tensor(bk + (n, k))
+            value = tensor(bv + (n, k))
+
+            # We make attn_mask block lower/upper triangular so that BSR and Strided
+            # function variants are directly comparable.
+            attn_mask = torch.ones(bam + (m, n), device=device, dtype=torch.bool)
+            attn_mask = self._to_block_triangular_inplace(attn_mask, block_size, block_size)
+            attn_mask_bsr = attn_mask.to_sparse_bsr(block_size)
+
+            # NOTE: only boolean mask is directly compatible with the Strided version
+            # without any pre-/post-processing. Hence we test against a boolean mask.
+            for scale in (None, 1. / 16):
+                if scale is None and query.size(-1) == 0:
+                    scale = 1
+                expected = torch.nn.functional.scaled_dot_product_attention(
+                    *broadcast_input(query, key, value, attn_mask), scale=scale
+                )
+
+                for mask_dtype in (torch.bool, dtype):
+                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
+                    self.assertEqual(res, expected)
+
 
     @parametrize("block_size", [16, 32, 64])
     @onlyCUDA

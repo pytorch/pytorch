@@ -165,7 +165,11 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  static py::exception<JITException> exc(m, "JITException");
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+  static py::handle exc =
+      py::exception<JITException>(m, "JITException").release();
 
   py::register_exception_translator([](std::exception_ptr p) {
     try {
@@ -179,7 +183,11 @@ void initJITBindings(PyObject* module) {
       const auto& originalMsg = e.getOriginalMsg();
       JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
       JITException::setCaughtPythonClassName(className.value_or(""));
-      exc(e.what());
+      // If we still had the py::exception<JITException> object, we could
+      // just call it. But we must get a handle to leak it and there is no
+      // way I can find to re-create it from the handle. So setting the
+      // exception manually
+      PyErr_SetString(exc.ptr(), e.what());
     }
   });
 
@@ -1202,22 +1210,25 @@ void initJITBindings(PyObject* module) {
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
       SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
-      // Intentionally don't set file line, as the
-      // Python backtrace matters more here
       .def(
           "guard_int",
-          [](c10::SymNode a) {
-            return a->guard_int(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_int(file, line);
           })
       .def(
           "guard_bool",
-          [](c10::SymNode a) {
-            return a->guard_bool(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_bool(file, line);
           })
       .def(
           "guard_float",
-          [](c10::SymNode a) {
-            return a->guard_float(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_float(file, line);
+          })
+      .def(
+          "expect_true",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_true(file, line);
           })
       .def(
           "has_hint",

@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1"]
 
 
-ROCM_ARCHES = ["5.4.2", "5.5"]
+ROCM_ARCHES = ["5.5", "5.6"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
@@ -49,7 +49,7 @@ WHEEL_CONTAINER_IMAGES = {
     },
     "cpu": "pytorch/manylinux-builder:cpu",
     "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "quay.io/pypa/manylinux2014_aarch64",
+    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
 }
 
 CONDA_CONTAINER_IMAGES = {
@@ -241,7 +241,7 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
                         "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cudnn-cu12==8.8.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
