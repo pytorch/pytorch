@@ -11,8 +11,9 @@ import logging
 import time
 from typing import Any, Dict, List, Tuple
 
-from torch.distributed.logging_handlers import _log_handlers
 import torch.distributed as dist
+
+from torch.distributed.logging_handlers import _log_handlers
 
 __all__: List[str] = []
 
@@ -40,21 +41,21 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def get_msg_dict(*args, **kwargs) -> Dict[str, Any]:
+def get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     if dist.is_initialized():
         msg_dict = {
-            "func_name": f"{func.__name__}",
+            "func_name": f"{func_name}",
             "args": f"{args}, {kwargs}",
-            "pg_name": f"{_get_process_group_name(kwargs.get('group'))}",
+            "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
             "backend": f"{dist.get_backend(kwargs.get('group'))}",
-            "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
+            "world_size": f"{dist.get_world_size()}",
             "group_size": f"{dist.get_world_size(kwargs.get('group'))}",
             "global_rank": f"{dist.get_rank()}",
             "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
         }
     else:
         msg_dict = {
-            "func_name": f"{func.__name__}",
+            "func_name": f"{func_name}",
             "args": f"{args}, {kwargs}",
         }
     return msg_dict
@@ -66,27 +67,11 @@ def _exception_logger(func):
         try:
             return func(*args, **kwargs)
         except Exception as error:
-            from torch.distributed.distributed_c10d import _get_process_group_name
-            if dist.is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "pg_name": f"{_get_process_group_name(kwargs.get('group'))}",
-                    "backend": f"{dist.get_backend(kwargs.get('group'))}",
-                    "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
-                    "group_size": f"{dist.get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{dist.get_rank()}",
-                    "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_logger.debug(error_msg_dict)
+            msg_dict = get_msg_dict(func.__name__, *args, **kwargs)
+            msg_dict["error"] = f"{error}"
+            _c10d_logger.debug(msg_dict)
             raise
+
     return wrapper
 
 
@@ -95,24 +80,10 @@ def _time_logger(func):
     def wrapper(*args, **kwargs):
         t1 = time.time_ns()
         func_return = func(*args, **kwargs)
-        t2 = time.time_ns()
+        time_spent = time.time_ns() - t1
 
-        if dist.is_initialized():
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "args": f"{args}, {kwargs}",
-                "backend": f"{dist.get_backend(kwargs.get('group'))}",
-                "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
-                "global_rank": f"{dist.get_rank()}",
-                "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
-                "time_spent": f"{t2-t1}ns",
-            }
-        else:
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "args": f"{args}, {kwargs}",
-                "time_spent": f"{t2-t1}",
-            }
+        msg_dict = get_msg_dict(func.__name__, *args, **kwargs)
+        msg_dict["time_spent"] = f"{time_spent}ns"
         _c10d_logger.debug(msg_dict)
 
         return func_return
