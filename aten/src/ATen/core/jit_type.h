@@ -898,6 +898,7 @@ struct TORCH_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofOptionalTensors();
   static ListTypePtr ofInts();
+  static ListTypePtr ofSymInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
