@@ -2643,6 +2643,8 @@ class CppKernelProxy(CppKernel):
                     ) as vec_checker:
                         run(vec_checker)
                         could_vec = could_vec and vec_checker.simd_vec
+                        if not could_vec:
+                            break
                 if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
