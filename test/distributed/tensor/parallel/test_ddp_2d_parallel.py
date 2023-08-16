@@ -42,7 +42,8 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
         twod_model, twod_mesh, PairwiseParallel(), tp_mesh_dim=1
     )
     pre_dp_module_transform(twod_model)
-    twod_model = DDP(twod_model, process_group=dp_pg, find_unused_parameters=True)
+    # TODO: Add tests when using gradient_as_bucket_view and static_graph for DDP.
+    twod_model = DDP(twod_model, process_group=dp_pg)
     return model, twod_model, dp_pg
 
 
@@ -86,10 +87,10 @@ class Test2dParallelIntegration(DTensorTestBase):
 
         optim.step()
         twod_optim.step()
+        self._check_module(model, twod_model)
 
         torch.manual_seed(input_seed + 1004)
         input = torch.rand(16, 10, device=self.device_type)
-        self._check_module(model, twod_model)
 
         output = model(input)
         twod_output = twod_model(input)

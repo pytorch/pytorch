@@ -6,6 +6,7 @@ import contextlib
 import difflib
 
 import io
+import logging
 import sys
 
 from typing import Any, Callable, Optional, Tuple
@@ -13,6 +14,7 @@ from typing import Any, Callable, Optional, Tuple
 import torch
 import torch.fx
 from torch._subclasses import fake_tensor
+from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
@@ -182,7 +184,8 @@ class Transform(abc.ABC):
         Scan through all nodes in graph and their meta['val'] to detect fake mode.
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
-        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+        with maybe_disable_fake_tensor_mode():
+            return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     def _maybe_fakefy_args(
         self, fake_mode: Optional[fake_tensor.FakeTensorMode], *args: Any
@@ -217,27 +220,45 @@ class Transform(abc.ABC):
             rule=diagnostics.rules.fx_pass
         )
         # Gather graph information before transform.
-        old_readable_graph = self.module.print_readable(print_output=False)
-        old_tabular = maybe_fx_graph_tabular(self.module.graph)
+        graph_diff_log_level = logging.DEBUG
+        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
+            # Cannot use LazyString because the graph may have been mutated at evaluation time.
+            old_readable_graph = self.module.print_readable(print_output=False)
+            old_tabular = maybe_fx_graph_tabular(self.module.graph)
+        else:
+            # Set to empty string to avoid unbound warning. This value should never be
+            # used since the log level is not enabled.
+            old_readable_graph = ""
+            old_tabular = ""
 
         module = self._run(*args, **kwargs)
 
         # Gather graph information after transform.
-        new_readable_graph = module.print_readable(print_output=False)
-        new_tabular = maybe_fx_graph_tabular(module.graph)
+        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
+            new_readable_graph = module.print_readable(print_output=False)
+            new_tabular = maybe_fx_graph_tabular(module.graph)
 
-        graph_diff = _unified_diff(old_readable_graph, new_readable_graph)
-        diagnostic.with_additional_message(f"### Graph diff:\n```\n{graph_diff}\n```")
+            with diagnostic.log_section(graph_diff_log_level, "Graph diff:"):
+                diagnostic.log(
+                    graph_diff_log_level,
+                    "```\n%s\n```",
+                    diagnostics.LazyString(
+                        _unified_diff, old_readable_graph, new_readable_graph
+                    ),
+                )
 
-        if old_tabular is None or new_tabular is None:
-            diagnostic.with_additional_message(
-                "### Tabular diff is not available because `tabulate` is not installed."
-            )
-        else:
-            tabular_diff = _unified_diff(old_tabular, new_tabular)
-            diagnostic.with_additional_message(
-                f"### Tabular diff:\n```\n{tabular_diff}\n```"
-            )
+            with diagnostic.log_section(graph_diff_log_level, "Tabular diff:"):
+                if old_tabular is None or new_tabular is None:
+                    diagnostic.log(
+                        graph_diff_log_level,
+                        "Tabular diff is not available because `tabulate` is not installed.",
+                    )
+                else:
+                    diagnostic.log(
+                        graph_diff_log_level,
+                        "```\n%s\n```",
+                        diagnostics.LazyString(_unified_diff, old_tabular, new_tabular),
+                    )
 
         return module
 

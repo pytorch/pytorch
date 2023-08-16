@@ -1,7 +1,10 @@
 from typing import Any, List, Tuple
 
 import torch.nn as nn
-from torch.distributed.tensor.parallel.fsdp import _flatten_tensor, _unflatten_tensor
+from torch.distributed.tensor.parallel._data_parallel_utils import (
+    _flatten_tensor,
+    _unflatten_tensor,
+)
 
 __all__ = ["pre_dp_module_transform"]
 
@@ -34,6 +37,7 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
     Recontruct DTensor parameters from local tensors
     """
     param_list = []
+    # TODO: To add perf optimizations to this iterations
     for name, t in module.named_parameters():
         if hasattr(t, "_st_info"):
             dtensor = _unflatten_tensor(t, t._st_info)
@@ -41,7 +45,7 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
     _update_module_param(param_list)  # type: ignore[arg-type]
 
 
-def _localize_dtensor(module: nn.Module, _input: Any, _output: Any):
+def _localize_dtensor(module: nn.Module, *_: Any):
     """
     Convert DTensor parameters to local tensors
     """
@@ -57,16 +61,16 @@ def _localize_dtensor(module: nn.Module, _input: Any, _output: Any):
 
 def pre_dp_module_transform(module: nn.Module):
     """
-    The API is to enable the composability between Tensor Parallelism (TP)
-    and Data Parallelism(DP) in PyTorch. We need to convert Parameters which
+    Enable the composability between Tensor Parallelism (TP) and Data
+    Parallelism(DP) in PyTorch when using DDP. We need to convert Parameters which
     are DTensors to local tensors before wrapping with data parallelism API.
     We then register two hooks, one for converting local tensors back to DTensor
     preforward and one to convert DTensors back to tensors after Forward. By
-    doing this, we can make DP api not to have special handle of DTensor parameters
-    and get DTensor's gradients propogated back to DP, e.g. gradient buckets of DDP.
+    integrating this way, we avoid any special handling of DTensor parameters by DDP
+    and get DTensor's gradients propagated back to DP, e.g. gradient buckets of DDP.
 
-    For now this API is only for ``DistributedDataParallel`` and we will merge
-    all other DP composability methonds into this API down the road.
+    For now, this API only works with ``DistributedDataParallel``. It will later support
+    other DP methods such as FSDP.
 
     Args:
         module (:class:`nn.Module`):
@@ -76,6 +80,7 @@ def pre_dp_module_transform(module: nn.Module):
         >>> # xdoctest: +SKIP("distributed")
         >>> from torch.distributed.tensor.parallel import parallelize_module, PairwiseParallel
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>> from torch.distributed.tensor.parallel.ddp import pre_dp_module_transform
         >>>
         >>> # Define the module.
         >>> m = module(...)
@@ -86,5 +91,6 @@ def pre_dp_module_transform(module: nn.Module):
     """
 
     _localize_dtensor(module, None, None)
+    # TODO: To add test cases and ensure that it works for nested modules
     module.register_forward_pre_hook(_reconstruct_dtensor)
     module.register_forward_hook(_localize_dtensor)
