@@ -223,6 +223,18 @@ class TestDynamoOnnxDiagnostics(common_utils.TestCase):
             )
             self.assertIn("hello world", diagnostic.additional_messages)
 
+    def test_log_diagnostic_to_diagnostic_context_raises_when_diagnostic_type_is_wrong(
+        self,
+    ):
+        with self.diagnostic_context:
+            # Dynamo onnx exporter diagnostic context expects fx_diagnostics.Diagnostic
+            # instead of base infra.Diagnostic.
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+            with self.assertRaises(TypeError):
+                self.diagnostic_context.log(diagnostic)
+
 
 class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the TorchScript ONNX export code."""
@@ -353,7 +365,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.rules = _RuleCollectionForTest()
         with contextlib.ExitStack() as stack:
-            self.context = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
+            self.context: infra.DiagnosticContext[
+                infra.Diagnostic
+            ] = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
@@ -590,6 +604,15 @@ class TestDiagnosticsInfra(common_utils.TestCase):
 
             self.assertIn("ValueError: original exception", diagnostic_message)
             self.assertIn("Traceback (most recent call last):", diagnostic_message)
+
+    def test_log_diagnostic_to_diagnostic_context_raises_when_diagnostic_type_is_wrong(
+        self,
+    ):
+        with self.context:
+            with self.assertRaises(TypeError):
+                # The method expects 'Diagnostic' or its subclasses as arguments.
+                # Passing any other type will trigger a TypeError.
+                self.context.log("This is a str message.")
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
