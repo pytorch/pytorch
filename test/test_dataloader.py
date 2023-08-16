@@ -1565,8 +1565,13 @@ except RuntimeError as e:
 
     @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
     def test_worker_generator_seed(self):
+        self._test_worker_generator_seed(pin_memory=False)
+        if TEST_CUDA:
+            self._test_worker_generator_seed(pin_memory=True)
+
+    def _test_worker_generator_seed(self, pin_memory):
         # Tests for the RNG seeding behaviour within _worker_loop.
-        # See Note [RNG re-seeding in Dataloader workers]
+        # See NOTE [RNG re-seeding in Dataloader workers]
 
         class MyDataset(SynchronizedDataset):
             def __getitem__(self, idx):
@@ -1582,23 +1587,28 @@ except RuntimeError as e:
         num_workers = 2
         dataset_len = 10
         dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
-        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=True)
+        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=pin_memory, multiprocessing_context="fork")
 
         # ALL DIFFERENT SEEDS
         torch.manual_seed(0)
         g1 = torch.Generator().manual_seed(1)
         g2 = torch.Generator().manual_seed(2)
 
+        # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
         for from_default, from_g1, from_g2 in dl:
-            # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
             self.assertEqual(len({from_default, from_g1, from_g2}), 3)
 
         # Make sure that the Generators' RNG is different across workers.
-        # We check that by making sure all the samples of a given Generator are different across Dataloader entry.
+        # We check that by making sure all the samples of a given Generator are different over the entire epoch.
         # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
         all_from_default, all_from_g1, all_from_g2 = zip(*dl)
         for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
-            self.assertEqual(len(set(all_from_generator)), dataset_len)
+            all_from_generator = {x.item() for x in all_from_generator}
+            self.assertEqual(len(all_from_generator), dataset_len)
+
+        del g1
+        del g2
+        gc.collect()
 
         # ALL EQUAL SEEDS
         torch.manual_seed(0)
@@ -1606,37 +1616,48 @@ except RuntimeError as e:
         g2 = torch.Generator().manual_seed(0)
 
         # All seeds are equal so we expect the RNG of all Generators to be the same.
-        # The RNG of user-made Generator are the same, but still different from the default RNG.
-        # That's due to different seeding strategies. It's OK, in general users shouldn't assume any guarantees
-        # regarding when / where the default RNG gets consumed anyway.
         for from_default, from_g1, from_g2 in dl:
             self.assertEqual(from_g1, from_g2)
-            self.assertNotEqual(from_default, from_g1)
+            self.assertEqual(from_default, from_g1)
 
         # Same check as when seeds are different: even if they're equal we still want the RNG of a given Generator
         # to be different across workers.
         all_from_default, all_from_g1, all_from_g2 = zip(*dl)
         for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
-            self.assertEqual(len(set(all_from_generator)), dataset_len)
+            all_from_generator = {x.item() for x in all_from_generator}
+            self.assertEqual(len(all_from_generator), dataset_len)
 
-        # BEHAVIOR ACROSS EPOCHS
+        # ASSERT DIFFERENT RNG ACROSS EPOCHS
         default_state_before_epoch = torch.random.get_rng_state()
         g1_state_before_epoch = g1.get_state()
         g2_state_before_epoch = g2.get_state()
 
         all_from_default_a, all_from_g1_a, all_from_g2_a = zip(*dl)
-        # The default RNG got consumed while the user-made Generators weren't
+        # All existing Generators should be consumed (in the main process) after an epoch
         self.assertNotEqual(default_state_before_epoch, torch.random.get_rng_state())
-        self.assertEqual(g1_state_before_epoch, g1.get_state())
-        self.assertEqual(g2_state_before_epoch, g2.get_state())
-        # All RNGs are still different across epoch, as expected: this is because
-        # all Generators' new seeds still depend on the `generator` parameter of
-        # the Dataloader, which by default is the default RNG, which got
-        # properly consumed in-between epochs.
+        self.assertNotEqual(g1_state_before_epoch, g1.get_state())
+        self.assertNotEqual(g2_state_before_epoch, g2.get_state())
+        # More importantly, the RNG of each Generator must be different across epochs
         all_from_default_b, all_from_g1_b, all_from_g2_b = zip(*dl)
         self.assertNotEqual(all_from_default_a, all_from_default_b)
         self.assertNotEqual(all_from_g1_a, all_from_g1_b)
         self.assertNotEqual(all_from_g2_a, all_from_g2_b)
+
+        del g1
+        del g2
+        gc.collect()
+
+        # FUN STUFF
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(0)
+        g2 = torch.Generator().manual_seed(0)
+        torch.randint(0, 100, size=(1,), generator=g1)  # consume g1
+        # We would expect g1 and g2 to yield different RNG, since g1 got consumed while g2 didn't.
+        # Yet, they both produce the same samples within the workers.
+        # Why? Because they have the same initial seed!
+        # See more details in the NOTE [RNG re-seeding in Dataloader workers]
+        for _, from_g1, from_g2 in dl:
+            self.assertEqual(from_g1, from_g2)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
@@ -1873,7 +1894,7 @@ except RuntimeError as e:
         self._test_sampler()
         self._test_sampler(num_workers=4)
         if not NO_MULTIPROCESSING_SPAWN:
-            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
+            self._test_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
         # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]

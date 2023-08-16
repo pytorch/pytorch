@@ -4,8 +4,9 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import torch
 import gc
+
+import torch
 import random
 import os
 import queue
@@ -207,7 +208,7 @@ def _generate_state(base_seed, worker_id):
     return state
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
-                 auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
+                 auto_collation, collate_fn, drop_last, default_base_seed, non_default_base_seeds, init_fn, worker_id,
                  num_workers, persistent_workers, shared_seed):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
@@ -222,23 +223,24 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         torch.set_num_threads(1)
 
-        # Note [RNG re-seeding in Dataloader workers]
-        # We need to explicitly re-seed all RNGs here (builtin random, numpy, torch) to ensure that the RNGs are
-        # different across workers.
-        # We have to seed the default RNG and the user-made ones differently otherwise the RNG of all Generators
-        # would be the same as the default one.
-        # For each Generator we have to draw a seed that depends on its current state (done in _generate_seed()),
-        # otherwise all Generator instances within a given worker would have the same RNG.
-        seed = base_seed + worker_id
-        random.seed(seed)
-        generators = [o for o in gc.get_objects() if isinstance(o, torch.Generator)]
-        for generator in generators:
-            if generator is torch.random.default_generator:
-                torch.manual_seed(seed)
-            elif generator.device.type != "cuda":
-                generator.manual_seed(_generate_seed(generator) + seed)
+        # See NOTE [RNG re-seeding in Dataloader workers]
+        non_default_cpu_generators = {
+            o for o in gc.get_objects()
+            if isinstance(o, torch.Generator) and
+            o is not torch.random.default_generator and
+            o.device.type == "cpu"
+        }
+        for g in non_default_cpu_generators:
+            base_seed = non_default_base_seeds.get(g.initial_seed())
+            # base_seed should never be None, but out of cautiousness we guard against it to avoid errors
+            if base_seed is not None:
+                g.manual_seed(base_seed + worker_id)
+
+        default_seed = default_base_seed + worker_id
+        torch.manual_seed(default_seed)
+        random.seed(default_seed)
         if HAS_NUMPY:
-            np_seed = _generate_state(base_seed, worker_id)
+            np_seed = _generate_state(default_base_seed, worker_id)
             import numpy as np
             np.random.seed(np_seed)
 
@@ -253,7 +255,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
-                                  seed=seed, dataset=dataset)
+                                  seed=default_seed, dataset=dataset)
 
         from torch.utils.data import _DatasetKind
 

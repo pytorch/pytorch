@@ -6,6 +6,7 @@ in `./_utils/worker.py`.
 """
 
 import functools
+import gc
 import itertools
 import logging
 import os
@@ -598,7 +599,38 @@ class _BaseDataLoaderIter:
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
+
+        # NOTE [RNG re-seeding in Dataloader workers]
+        # When num_workers > 0, we need to ensure that all RNGs are different across workers.
+        # That concerns the builtin random module, numpy RNG, and torch Generators.
+        # We do that by generating a base seed here (one per Generator), and we then re-seed the Generators in `_worker_loop()`.
+        # - For the default Generator, we sample its base seed (_default_base_seed) via the `generator` parameter that
+        #   was passed to `Dataloader(...)`. We also use _default_base_seed to re-seed the numpy and builtin RNGs.
+        # - For all other Generator objects g, their base seed should only depend on g, not on the `generator` parameter.
+        #   (We can retrieve all Generator instances via the gc).
+        #
+        # Why do we have to sample the base seeds here? Can't we do it in `_worker_loop()`? We could, but one critical side
+        # effect of sampling here is that it consumes the Generators. That's a *good* thing: it means we get
+        # different RNGs for consecutive epochs without forcing users to manually consume RNGs.
+        #
+        # So we need a way to tell `_worker_loop`: "here's the base seed you need to use for that Generator". Ideally,
+        # we would just pass a simple Generator -> base_seed dict to `_worker_loop()`. We can't do that because
+        # Generator objects aren't pickleable. So why not use id(Generator) -> base_seed dict? Because the id of an object
+        # may actually on some multiprocessing backends.
+        # Oh, and if you're wondering why we're separating _default_base_seed from _non_default_base_seeds:
+        # something something different initial_seed() for default Generator in "spawn" something something.
+        self._default_base_seed = _generate_seed(generator=loader.generator)
+        non_default_cpu_generators = {
+            o for o in gc.get_objects()
+            if isinstance(o, torch.Generator) and
+            o is not torch.random.default_generator and
+            # We can't handle CUDA generators as the CUDA context may not be initialized.
+            o.device.type == "cpu"
+        }
+        self._non_default_base_seeds = {}
+        for g in non_default_cpu_generators:
+            self._non_default_base_seeds[g.initial_seed()] = _generate_seed(generator=g)
+
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
@@ -1027,7 +1059,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self._dataset_kind, self._dataset, index_queue,
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
-                      self._base_seed, self._worker_init_fn, i, self._num_workers,
+                      self._default_base_seed, self._non_default_base_seeds, self._worker_init_fn, i, self._num_workers,
                       self._persistent_workers, self._shared_seed))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
@@ -1476,3 +1508,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def __del__(self):
         self._shutdown_workers()
+
+
+def _generate_seed(generator):
+    return torch.empty((), dtype=torch.int64, device="cpu").random_(generator=generator).item()
