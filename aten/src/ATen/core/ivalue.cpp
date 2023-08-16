@@ -250,7 +250,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      [[fallthrough]];
+      // the above is fatal, so there is no fallthrough
     default:
       // don't record scalars.
       break;
