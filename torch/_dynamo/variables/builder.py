@@ -49,6 +49,7 @@ from ..utils import (
     build_checkpoint_variable,
     clone_input,
     get_fake_value,
+    get_static_address_type,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -845,6 +846,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
+            or get_static_address_type(value) is not None
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(
@@ -898,12 +900,6 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
-
-        if not self.tx.output.export:
-            # Export has (supposedly) valid cases for fake tensors as inputs here.
-            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
-            # in real_value_tensor_positive_aliases in the common case)
-            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
 
         # We have accessed the SAME tensor from a different source.  In some
         # situations, it doesn't matter if you have the same tensor identity
