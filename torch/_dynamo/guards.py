@@ -266,6 +266,11 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
 
+    def DATA_PTR_MATCH(self, guard: Guard):
+        obj = self.get(guard.name)
+        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
+        self._produce_guard_code(guard, [code])
+
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
         assert m, f"invalid hasattr check {guard.name}"
