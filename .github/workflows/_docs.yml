@@ -39,7 +39,7 @@ jobs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ matrix.runner }}
-    environment: ${{ github.ref == "refs/heads/main" && "update-commit-hash" || "" }}
+    environment: ${{ github.ref == 'refs/heads/main' && 'update-commit-hash' || '' }}
     strategy:
       fail-fast: false
       matrix:
