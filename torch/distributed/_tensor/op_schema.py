@@ -254,7 +254,7 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
-    op_call: torch.ops.OpOverload
+    op_call: torch._ops.OpOverload
     schema: OpSchema
     flat_args_schema: ArgsType
     flat_kwargs_schema: KwargsType
