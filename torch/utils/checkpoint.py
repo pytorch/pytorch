@@ -319,11 +319,12 @@ def checkpoint(
 ):
     r"""Checkpoint a model or part of the model
 
-    Checkpointing is a technique that trades compute for memory. Instead of
-    storing all intermediate activations of the entire computation graph for
-    the backward pass, the checkpointed part omits saving intermediate
-    activations and recomputes them during the backward pass. This can be
-    applied to any part of a model.
+    Activation checkpointing is a technique that trades compute for memory.
+    Instead of keeping tensors needed for backward alive until they are used in
+    gradient computation during backward, forward computation in checkpointed
+    regions omits saving tensors for backward and recomputes them during the
+    backward pass. Activation checkpointing can be applied to any part of a
+    model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use
