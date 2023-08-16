@@ -139,7 +139,7 @@ def _gen_shard_strategy(
     util function to generate a shard strategy on shard_dim
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Shard(shard_dim)]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
         input_specs=input_specs,
     )
 
@@ -151,7 +151,7 @@ def _gen_replicate_strategy(
     util function to generate a replicate strategy
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Replicate()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
         input_specs=input_specs,
     )
 
@@ -169,7 +169,7 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     # for non-NCCL backend
     reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(_Partial(reduce_op),)),
     )
 
 
@@ -459,7 +459,7 @@ def build_data_parallel_strategies(
                             elif node_type == NodeType.PARAM:
                                 # param must be replicated
                                 input_specs.append(
-                                    DTensorSpec(mesh=mesh, placements=[Replicate()])
+                                    DTensorSpec(mesh=mesh, placements=(Replicate(),))
                                 )
                             else:
                                 raise RuntimeError(
