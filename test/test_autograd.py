@@ -996,7 +996,7 @@ class TestAutograd(TestCase):
             self.assertEqual(p_static, p)
             self.assertNotEqual(p_reference, p)
 
-    def test_post_grad_accumulate_hook_gets_cleaned_up(self):
+    def test_post_accumulate_grad_hook_gets_cleaned_up(self):
         def fun_stuff_with_hook():
             thing_to_put_in_hook = torch.rand(3)
 
@@ -1015,20 +1015,21 @@ class TestAutograd(TestCase):
             ref = fun_stuff_with_hook()
             self.assertIsNone(ref())  # thing_to_put_in_hook should have been cleaned
 
-    def test_post_grad_accumulate_hook_ordering(self):
+    def test_post_accumulate_grad_hook_ordering(self):
+        tensor = torch.rand(3, requires_grad=True)
+
         def pre_hook(grad):
             return grad.sub(2.)
 
         def acc_grad_node_pre_hook(grad_out):
-            return (grad_out[0].div_(5.),)
+            return (grad_out[0].div(5.),)
 
         def post_acc_grad_hook(tensor):
-            tensor.grad.mul_(10.)
+            tensor.grad.add_(0.5)
 
         def acc_grad_node_post_hook(grad_in, grad_out):
-            return (grad_out[0].add_(0.5),)
+            tensor.grad = grad_out[0].mul(10)
 
-        tensor = torch.rand(3, requires_grad=True)
         acc_grad = tensor.view_as(tensor).grad_fn.next_functions[0][0]
         tensor.register_hook(pre_hook)
         acc_grad.register_prehook(acc_grad_node_pre_hook)
@@ -1041,8 +1042,8 @@ class TestAutograd(TestCase):
         #   2. acc_grad prehook
         #   3. tensor post acc_grad hook
         #   4. acc_grad posthook
-        # so that would be (1 - 2) / 5 * 10 + 0.5 = -1.5
-        self.assertEqual(torch.tensor([-1.5, -1.5, -1.5]), tensor.grad)
+        # so that would be ((1 - 2) / 5 + 0.5) * 10 = 3
+        self.assertEqual(torch.tensor([3., 3., 3.]), tensor.grad)
 
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
