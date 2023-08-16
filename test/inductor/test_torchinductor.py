@@ -3275,6 +3275,13 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
+
+    @expectedFailureCodegenDynamic
+    def test_cat_single_empty(self):
+        # fails dynamic check for 'has a dynamic dimension'
+        def fn_2(*tensors):
+            return torch.cat(tensors)
+
         self.common(
             fn_2,
             (torch.ones([0]),),

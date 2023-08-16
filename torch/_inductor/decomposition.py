@@ -216,7 +216,7 @@ def cat(tensors, dim=0):
 
     if len(filtered_tensors) == 1:
         return tensors[0].clone()
-    elif len(filtered_tensors) > 1 and len(filtered_tensors) < len(tensors):
+    elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
     # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
