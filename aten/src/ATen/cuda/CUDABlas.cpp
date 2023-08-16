@@ -5,7 +5,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/cuda/CUDADataType.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -197,6 +196,7 @@ static size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -875,115 +875,6 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
-
-void scaled_gemm(
-    char transa,
-    char transb,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    const void* mat1_ptr,
-    const void* mat1_scale_ptr,
-    int64_t mat1_ld,
-    ScalarType mat1_dtype,
-    const void* mat2_ptr,
-    const void* mat2_scale_ptr,
-    int64_t mat2_ld,
-    ScalarType mat2_dtype,
-    const void* bias_ptr,
-    ScalarType bias_dtype,
-    void* result_ptr,
-    const void *result_scale_ptr,
-    int64_t result_ld,
-    ScalarType result_dtype,
-    void* amax_ptr) {
-  const auto computeType = CUBLAS_COMPUTE_32F;
-  const auto scaleType = CUDA_R_32F;
-  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
-  CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
-  CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
-  CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
-  if (bias_ptr) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_RELU_BIAS);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
-  }
-  size_t workspaceSize = _getWorkspaceSize();
-  auto workspace = at::empty(
-      {static_cast<int64_t>(workspaceSize)},
-      at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
-
-  CuBlasLtMatmulPreference preference;
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
-  cublasLtMatmulHeuristicResult_t heuristicResult = {};
-  int returnedResult = 0;
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Ddesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
-  if (returnedResult == 0) {
-    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-  }
-  float alpha_val = 1.0;
-  float beta_val = 0.0;
-  cublasStatus_t cublasStatus = cublasLtMatmul(
-      ltHandle,
-      computeDesc.descriptor(),
-      &alpha_val,
-      mat1_ptr,
-      Adesc.descriptor(),
-      mat2_ptr,
-      Bdesc.descriptor(),
-      &beta_val,
-      nullptr,
-      Cdesc.descriptor(),
-      result_ptr,
-      Ddesc.descriptor(),
-      &heuristicResult.algo,
-      workspace.data_ptr(),
-      workspaceSize,
-      at::cuda::getCurrentCUDAStream());
-  TORCH_CHECK(
-      cublasStatus == CUBLAS_STATUS_SUCCESS,
-      "CUDA error: ",
-      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
-      " when calling cublasLtMatmul with transpose_mat1 ",
-      transa,
-      " transpose_mat2 ",
-      transb,
-      " m ",
-      m,
-      " n ",
-      n,
-      " k ",
-      k,
-      " mat1_ld ",
-      mat1_ld,
-      " mat2_ld ",
-      mat2_ld,
-      " result_ld ",
-      result_ld,
-      " computeType ",
-      computeType,
-      " scaleType ",
-      scaleType);
-}
 
 void int8_gemm(
     bool transpose_mat1,
