@@ -1423,8 +1423,8 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
 
     with open(path) as f:
         test_times_file = cast(Dict[str, Any], json.load(f))
-    build_environment = os.environ.get("BUILD_ENVIRONMENt")
-    test_config = os.environ.get("TEST_COFIG", "random")
+    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
         print("Found test times from artifacts")
         return test_times_file[build_environment][test_config]
@@ -1641,7 +1641,6 @@ def main():
     }
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
-    return
     prioritized_tests = do_sharding(
         options, prioritized_tests, test_times_dict, sort_by_time=False
     )
