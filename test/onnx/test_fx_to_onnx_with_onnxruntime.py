@@ -889,6 +889,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_output.save(
                     tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
                 )
+
                 # Generate random inputs.
                 args = create_args()
                 kwargs = create_kwargs()
@@ -1002,7 +1003,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "From onnx.inliner, [ONNXRuntimeError] :  Missing opset in the model"
+        "Constant tensor is not supported in FakeTensorMode export."
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
@@ -1010,7 +1011,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_load_checkpoint_after_model_creation(
         "HF Bloom model does not need `model.load_state_dict` to work."
     )
-    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
+    def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
         from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
         model_name = "bigscience/bloom-560m"
