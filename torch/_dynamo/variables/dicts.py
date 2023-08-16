@@ -136,7 +136,7 @@ class ConstDictVariable(VariableTracker):
             k = ConstDictVariable.get_key(args[0])
 
             if istensor(k):
-                tx.store_dict_key(global_key_name(k), k)
+                tx.store_global_weakref(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
@@ -280,7 +280,7 @@ class DefaultDictVariable(ConstDictVariable):
                     raise KeyError(f"{k}")
                 else:
                     if istensor(k):
-                        tx.store_dict_key(global_key_name(k), k)
+                        tx.store_global_weakref(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var

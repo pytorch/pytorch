@@ -586,6 +586,22 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
+    @staticmethod
+    def module_key_name(*names):
+        # create a new unique name
+        name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        return name
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -689,17 +705,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # Strip the guard lookup L/G access
-        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
-        if not name or not name[0].isalpha():
-            name = "sub" + name
+        name = OutputGraph.module_key_name(names)
+
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
