@@ -76,7 +76,7 @@ CUDA_CLANG_VERSIONS: VersionMap = {
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
            "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
-           "verify_ninja_availability"]
+           "verify_ninja_availability", "remove_extension_h_precompiler_headers"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -1388,18 +1388,21 @@ def _check_and_build_extension_h_precompiler_headers(extra_cflags,
     def listToString(s):
         # initialize an empty string
         string = ""
+        if s is None:
+            return string
+
         # traverse in the string
         for element in s:
             string += (element + ' ')
         # return string
         return string
 
-    def format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags, extra_cflags, extra_include_paths):
+    def format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags, torch_include_dirs, extra_cflags, extra_include_paths):
         return re.sub(
             r"[ \n]+",
             " ",
             f"""
-                {compiler} -x c++-header {head_file} -o {head_file_pch} {extra_include_paths} {extra_cflags} {common_cflags}
+                {compiler} -x c++-header {head_file} -o {head_file_pch} {torch_include_dirs} {extra_include_paths} {extra_cflags} {common_cflags}
             """,
         ).strip()
 
@@ -1444,6 +1447,17 @@ def _check_and_build_extension_h_precompiler_headers(extra_cflags,
     extra_cflags_str = listToString(extra_cflags)
     extra_include_paths_str = listToString(extra_include_paths)
 
+    lib_include = os.path.join(_TORCH_PATH, 'include')
+    torch_include_dirs = [
+        "-I {}".format(lib_include),
+        # Python.h
+        "-I {}".format(sysconfig.get_path("include")),
+        # torch/all.h
+        "-I {}".format(os.path.join(lib_include, 'torch', 'csrc', 'api', 'include')),
+    ]
+
+    torch_include_dirs_str = listToString(torch_include_dirs)
+
     common_cflags = []
     if not is_standalone:
         common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
@@ -1453,7 +1467,7 @@ def _check_and_build_extension_h_precompiler_headers(extra_cflags,
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
-    pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, extra_cflags_str, extra_include_paths_str)
+    pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
     pch_sign = command_to_signature(pch_cmd)
 
     if os.path.isfile(head_file_pch) is not True:
@@ -1465,6 +1479,16 @@ def _check_and_build_extension_h_precompiler_headers(extra_cflags,
             build_precompile_header(pch_cmd)
             write_pch_signature_to_file(head_file_signature, pch_sign)
 
+def remove_extension_h_precompiler_headers():
+    def _remove_if_file_exists(path_file):
+        if os.path.exists(path_file):
+            os.remove(path_file)
+
+    head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
+    head_file_signature = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.sign')
+
+    _remove_if_file_exists(head_file_pch)
+    _remove_if_file_exists(head_file_signature)
 
 def load_inline(name,
                 cpp_sources,
@@ -1479,7 +1503,8 @@ def load_inline(name,
                 with_cuda=None,
                 is_python_module=True,
                 with_pytorch_error_handling=True,
-                keep_intermediates=True):
+                keep_intermediates=True,
+                use_pch=True):
     r'''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -1561,9 +1586,10 @@ def load_inline(name,
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
-    # Using PreCompile Header('torch/extension.h') to reduce compile time.
-    _check_and_build_extension_h_precompiler_headers(extra_cflags,
-                        extra_include_paths)
+    if use_pch is True:
+        # Using PreCompile Header('torch/extension.h') to reduce compile time.
+        _check_and_build_extension_h_precompiler_headers(extra_cflags,
+                            extra_include_paths)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
