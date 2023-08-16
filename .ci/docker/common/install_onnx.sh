@@ -36,6 +36,10 @@ pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
 # Higgingface models requirements
 pip_install einops==0.6.1 # mpt-7b
 
+# Need a PyTorch version for transformers to work
+pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+
+# Cache after installing PyTorch saves manually install some packages
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
@@ -46,9 +50,6 @@ as_jenkins echo 'transformers.AutoModel.from_pretrained("openai/whisper-tiny"); 
 as_jenkins echo 'transformers.AutoModel.from_pretrained("google/flan-t5-small"); transformers.AutoTokenizer.from_pretrained("google/flan-t5-small");' >> "${IMPORT_SCRIPT_FILENAME}"
 as_jenkins echo 'transformers.AutoModel.from_pretrained("databricks/dolly-v2-3b"); transformers.AutoTokenizer.from_pretrained("databricks/dolly-v2-3b");' >> "${IMPORT_SCRIPT_FILENAME}"
 
-
-# Need a PyTorch version for transformers to work
-pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
 conda_run python "${IMPORT_SCRIPT_FILENAME}"
