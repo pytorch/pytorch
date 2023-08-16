@@ -3,7 +3,7 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch._decomp import decomposition_table
+from torch._decomp import core_aten_decompositions, decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
@@ -44,17 +44,17 @@ def overload_to_aten_name(overload):
 
 # All operators that can have decomp tests
 decomposition_names = {overload_to_aten_name(k) for k in decomposition_table}
+core_decomposition_names = {overload_to_aten_name(k) for k in core_aten_decompositions()}
 _decomp_test_ops = [
     op
     for op in op_db
     if op.aten_name in decomposition_names
     or op.aten_backward_name in decomposition_names
 ]
-_decomp_test_ops_forward_autograd = [
+_decomp_test_ops_core_autograd = [
     op
     for op in op_db
-    if op.aten_name in decomposition_names
-    and ('backward' not in op.aten_name)
+    if op.aten_name in core_decomposition_names
     and op.supports_autograd
 ]
 
@@ -407,7 +407,7 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
-backward_failures = {
+core_backward_failures = {
 }
 
 
@@ -426,12 +426,12 @@ class TestDecomp(TestCase):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @skipOps('TestDecomp', 'test_quick_backward', backward_failures)
+    @skipOps('TestDecomp', 'test_quick_core_backward', core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
-    @ops(_decomp_test_ops_forward_autograd, allowed_dtypes=(torch.float64,))
-    def test_quick_backward(self, device, dtype, op):
+    @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
+    def test_quick_core_backward(self, device, dtype, op):
         for sample_input in op.sample_inputs(device, dtype, requires_grad=True):
             aten_name = op.decomp_aten_name or op.aten_name
             args = [sample_input.input] + list(sample_input.args)
