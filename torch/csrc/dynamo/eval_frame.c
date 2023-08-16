@@ -4,6 +4,13 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+// Problem in CPython includes when mixing core and non-core build
+// The fix was not backported to 3.12 so this is needed here
+// https://github.com/python/cpython/issues/105268
+#if IS_PYTHON_3_12_PLUS
+#undef _PyGC_FINALIZED
+#endif
+
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE

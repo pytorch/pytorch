@@ -17,6 +17,13 @@
 
 #if IS_PYTHON_3_11_PLUS
 
+// Problem in CPython includes when mixing core and non-core build
+// The fix was not backported to 3.12 so this is needed here
+// https://github.com/python/cpython/issues/105268
+#if IS_PYTHON_3_12_PLUS
+#undef _PyGC_FINALIZED
+#endif
+
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
