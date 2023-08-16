@@ -9,7 +9,7 @@ namespace torch::cuda::shared {
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  auto nvtx = m.def_submodule("_nvtx", "libNvToolsExt.so bindings");
+  auto nvtx = m.def_submodule("_nvtx", "nvtx3 bindings");
   nvtx.def("rangePushA", nvtxRangePushA);
   nvtx.def("rangePop", nvtxRangePop);
   nvtx.def("rangeStartA", nvtxRangeStartA);
