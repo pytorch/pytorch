@@ -49,6 +49,7 @@ from ..utils import (
     build_checkpoint_variable,
     clone_input,
     get_fake_value,
+    get_static_address_type,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -845,6 +846,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
+            or get_static_address_type(value) is not None
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(
