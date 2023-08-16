@@ -2870,7 +2870,7 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return map(V.graph.wrapper_code.val_to_str, self.constant_args)
+        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
@@ -2915,10 +2915,10 @@ class ExternKernel(InputsKernel):
                 ), "ordered_kwargs_for_cpp_kernel has to be provided"
                 for arg_name in self.ordered_kwargs_for_cpp_kernel:
                     v = self.get_kwargs_value(arg_name)
-                    kwargs.append(V.graph.wrapper_code.val_to_str(v))
+                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
             else:
                 kwargs = [
-                    f"{k}={V.graph.wrapper_code.val_to_str(v)}"
+                    f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
                     for k, v in self.kwargs.items()
                 ]
         return kwargs
@@ -3372,7 +3372,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
+        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
         return args
