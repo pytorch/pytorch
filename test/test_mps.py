@@ -77,6 +77,7 @@ def mps_ops_grad_modifier(ops):
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
+        'polar': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -502,7 +503,7 @@ def mps_ops_modifier(ops):
         'ormqr': None,
         'pca_lowrank': None,
         'pinverse': None,
-        'polar': None,
+        # 'polar': None,
         'polygamma': None,
         'polygammapolygamma_n_0': None,
         'polygammapolygamma_n_1': None,
