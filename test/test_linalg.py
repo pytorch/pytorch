@@ -990,6 +990,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(_get_torch_cuda_version() < (12, 1), "Test is fixed on cuda 12.1 update 1.")
     def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):
         # See https://github.com/pytorch/pytorch/issues/94772, https://github.com/pytorch/pytorch/issues/105359
         # This test crashes with `cusolver error: CUSOLVER_STATUS_EXECUTION_FAILED` on cuda 11.8,
