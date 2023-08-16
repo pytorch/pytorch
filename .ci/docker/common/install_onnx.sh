@@ -38,7 +38,7 @@ pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
 as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
 as_jenkins echo 'transformers.AutoModel.from_pretrained("bigscience/bloom-560m"); transformers.AutoTokenizer.from_pretrained("bigscience/bloom-560m");' >> "${IMPORT_SCRIPT_FILENAME}"
-as_jenkins echo 'transformers.AutoModelForCausalLM.from_pretrained("mosaicml/mpt-7b"); transformers.AutoTokenizer.from_pretrained("mosaicml/mpt-7b");' >> "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'transformers.AutoModelForCausalLM.from_pretrained("mosaicml/mpt-7b", trust_remote_code=True); transformers.AutoTokenizer.from_pretrained("mosaicml/mpt-7b", trust_remote_code=True);' >> "${IMPORT_SCRIPT_FILENAME}"
 as_jenkins echo 'transformers.AutoModel.from_pretrained("openai/whisper-tiny"); transformers.WhisperConfig.from_pretrained("openai/whisper-tiny");transformers.WhisperProcessor.from_pretrained("openai/whisper-tiny");' >> "${IMPORT_SCRIPT_FILENAME}"
 as_jenkins echo 'transformers.AutoModel.from_pretrained("google/flan-t5-small"); transformers.AutoTokenizer.from_pretrained("google/flan-t5-small");' >> "${IMPORT_SCRIPT_FILENAME}"
 as_jenkins echo 'transformers.AutoModel.from_pretrained("databricks/dolly-v2-3b"); transformers.AutoTokenizer.from_pretrained("databricks/dolly-v2-3b");' >> "${IMPORT_SCRIPT_FILENAME}"
