@@ -437,9 +437,10 @@ class BaseSchedulerNode:
 
             # if there is a resolved op, dry-run using fake mode and record flop count
             if op is not None:
+                from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                with V.graph.fake_mode, FlopCounterMode(
+                with FakeTensorMode(), FlopCounterMode(
                     display=False
                 ) as flop_counter_mode:
                     from .ir import ir_node_to_tensor
