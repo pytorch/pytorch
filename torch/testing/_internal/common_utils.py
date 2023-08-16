@@ -1984,6 +1984,7 @@ def new_check_if_enable(test: unittest.TestCase):
                         "If you're seeing this on your local machine and would like to enable this test, " \
                         "please make sure CI is not set and you are not using the flag --import-disabled-tests."
                     break
+        return should_skip
 
 
 def check_if_enable(test: unittest.TestCase):
