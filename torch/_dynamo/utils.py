@@ -27,7 +27,10 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch._logging
 import torch._numpy as tnp
@@ -36,14 +39,19 @@ from . import config
 
 
 # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+if np:
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-NP_TO_TNP_MODULE = {
-    np: tnp,
-    np.fft: tnp.fft,
-    np.linalg: tnp.linalg,
-    np.random: tnp.random,
-}
+    NP_TO_TNP_MODULE = {
+        np: tnp,
+        np.fft: tnp.fft,
+        np.linalg: tnp.linalg,
+        np.random: tnp.random,
+    }
+else:
+    NP_SUPPORTED_MODULES = {}
+
+    NP_TO_TNP_MODULE = {}
 
 import importlib
 
@@ -405,6 +413,9 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -421,6 +432,9 @@ def is_numpy_int_type(value):
 
 
 def is_numpy_float_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -432,6 +446,9 @@ def is_numpy_float_type(value):
 
 
 def is_numpy_ndarray(value):
+    if not np:
+        return False
+
     return istype(value, np.ndarray)
 
 

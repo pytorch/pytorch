@@ -7,7 +7,10 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch
 from torch import sym_float, sym_int
