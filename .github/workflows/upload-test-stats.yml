@@ -87,7 +87,7 @@ jobs:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
     continue-on-error: true
-    environment: update-commit-hash
+    environment: pytorchbot-env
     steps:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
