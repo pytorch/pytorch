@@ -530,7 +530,8 @@ class MetaConverter:
                 # instrumentation will see the meta conversions and the
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
-                if torch._is_functional_tensor(t):
+
+                if torch._is_functional_tensor(t) and t.device.type != "lazy":
                     reapply_views = torch._C._functionalization_reapply_views_tls()
                     unwrap_t = _unwrap_functional_tensor(t, reapply_views)
                     st = peek_interpreter_stack()
