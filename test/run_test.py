@@ -1418,9 +1418,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
-        print(
-            "::warning:: Failed to find test times file.  Using round robin sharding."
-        )
+        print("::warning:: Failed to find test times file. Using round robin sharding.")
         return {}
 
     with open(path) as f:
@@ -1432,17 +1430,16 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
         return test_times_file[build_environment][test_config]
     elif test_config in test_times_file["default"]:
         print(
-            f"::warning:: Gathered no stats from artifacts for build env {build_environment}"
-            f" and test config {test_config}. Using default build env and {test_config} test config instead."
+            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
+            f" and {test_config} test config. Using default build env and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
         print(
-            f"::warning:: Gathered no stats from artifacts for build env {build_environment}"
-            f" and test config {test_config}. Using default build env and default test config instead."
+            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
+            f" and {test_config} test config. Using default build env and default test config instead."
         )
         return test_times_file["default"]["default"]
-
 
 
 def do_sharding(
