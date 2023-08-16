@@ -38,8 +38,8 @@ def set_grad_fn_seq_nr(seq_nr):
 
     if should_preserve_node_meta:
         # The seq_nr is captured by eager mode in the grad_fn during forward
-        current_meta["prev_grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", -1)
-        current_meta["prev_in_grad_fn"] = current_meta.get("in_grad_fn", False)
+        current_meta["prev_grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", None)
+        current_meta["prev_in_grad_fn"] = current_meta.get("in_grad_fn", None)
         current_meta["grad_fn_seq_nr"] = seq_nr
         current_meta["in_grad_fn"] = True
 
@@ -51,6 +51,10 @@ def reset_grad_fn_seq_nr():
     global current_meta
 
     if should_preserve_node_meta:
+        if current_meta["prev_grad_fn_seq_nr"] is None:
+            assert current_meta["prev_in_grad_fn"] is None
+            del current_meta["grad_fn_seq_nr"]
+            del current_meta["in_grad_fn"]
         current_meta["grad_fn_seq_nr"] = current_meta["prev_grad_fn_seq_nr"]
         current_meta["in_grad_fn"] = current_meta["prev_in_grad_fn"]
 
