@@ -1357,6 +1357,12 @@ def main():
                 "include/tensorpipe/transport/uv/*.h",
             ]
         )
+        torch_package_data.extend(
+            [
+                "include/fmt/include/*.h",
+            ]
+        )
+    
     torchgen_package_data = [
         # Recursive glob doesn't work in setup.py,
         # https://github.com/pypa/setuptools/issues/1806
