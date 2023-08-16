@@ -12,6 +12,8 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
+    ArgsType,
+    KwargsType,
     OpInfo,
     OpSchema,
     OutputSharding,
@@ -83,11 +85,11 @@ def redistribute_local_args(
     # Need to fix all the ops before doing this.
     flatten_args_schema_to_reshard = tree_flatten(suggested_input_schema.args_schema)[0]
 
-    new_flat_local_args = []
+    new_flat_local_args: ArgsType = []
     for i, arg_spec in enumerate(op_info.flat_args_schema):
         reshard_arg_spec = flatten_args_schema_to_reshard[i]
         if isinstance(arg_spec, DTensorSpec):
-            local_tensor = op_info.flat_local_args[i]
+            local_tensor = cast(torch.Tensor, op_info.flat_local_args[i])
             if arg_spec != reshard_arg_spec:
                 resharded_local_tensor = redistribute_local_tensor(
                     local_tensor, arg_spec, reshard_arg_spec
@@ -120,10 +122,10 @@ def _operator_dispatch(
     # unwrap the op info from args/kwargs
     flat_args_list, args_spec = tree_flatten(args)
     flat_kwargs_list, kwargs_spec = tree_flatten(kwargs)
-    flat_args_schema = []
-    flat_local_args = []
-    flat_kwargs_schema = []
-    flat_local_kwargs = []
+    flat_args_schema: ArgsType = []
+    flat_local_args: ArgsType = []
+    flat_kwargs_schema: KwargsType = []
+    flat_local_kwargs: KwargsType = []
     mesh = None
 
     for arg in flat_args_list:
@@ -177,6 +179,7 @@ def _operator_dispatch(
 
     sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
+    assert output_sharding is not None
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
@@ -189,6 +192,7 @@ def _operator_dispatch(
         #   2. if the return type is Tensor or List[Tensor], return empty
         #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
+        ret_list = op_info.schema.func_schema.returns
 
         if spec is None:
             # For a scalar return type, the non-participating device has None
