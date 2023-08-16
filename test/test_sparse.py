@@ -28,7 +28,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-
+from torch.testing._internal.opinfo.refs import ReductionPythonRefInfo
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -38,7 +38,10 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_bsc)
 
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+reduction_ops_with_sparse_support = [
+    op for op in reduction_ops if 'masked.' not in op.name and
+    _op_supports_any_sparse(op) and not isinstance(op, ReductionPythonRefInfo)]
 
 binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
 
