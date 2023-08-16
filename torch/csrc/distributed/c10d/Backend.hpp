@@ -11,9 +11,9 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
 #include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
@@ -24,7 +24,6 @@ namespace c10d {
 
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
-
   // Backend Options is a base struct that defines the basic options
   // when constructing a Backend. Each Backend subclass should
   // extend this struct and define its options if it wants to provide more
@@ -53,16 +52,26 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this backend that can be used to correlate
+  // with its collectives.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), " does not implement startCoalescing"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not implement startCoalescing"));
   }
 
   virtual c10::intrusive_ptr<Work> endCoalescing() {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), " does not implement endCoalescing"));
+        c10::str(
+            "Backend ", getBackendName(), " does not implement endCoalescing"));
   }
 
   // Subclasses must override this method to return the backend name
@@ -84,6 +93,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not support allreduce"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -200,6 +217,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support _reduce_scatter_base"));
   }
 
+  // This function is a coalesced version of `reduce_scatter_tensor` (currently
+  // still named as `_reduce_scatter_base`). Each tensor in the vector
+  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& /* outputs */,
+      std::vector<at::Tensor>& /* inputs */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support reduce_scatter_tensor_coalesced"));
+  }
+
   virtual c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
@@ -264,7 +296,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* dstRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), " does not support send"));
+        false,
+        c10::str("Backend ", getBackendName(), " does not support send"));
   }
 
   virtual c10::intrusive_ptr<Work> recv(
@@ -272,7 +305,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* srcRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), " does not support recv"));
+        false,
+        c10::str("Backend ", getBackendName(), " does not support recv"));
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
@@ -291,6 +325,27 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support barrier"));
   }
 
+  virtual void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+    TORCH_CHECK(
+        false,
+        "Only ProcessGrouppNCCL supports onCompletion hook, but got ",
+        getBackendName(),
+        " backend.");
+  }
+
+  virtual void waitForPendingWorks() {
+    TORCH_CHECK(
+        false,
+        "Only ProcessGrouppNCCL supports waitForPendingWorks, but got ",
+        getBackendName(),
+        " backend.");
+  }
+
+  bool hasHooks() const {
+    return onCompletionHook_ != nullptr;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -303,6 +358,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+
+  std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 };
 
 } // namespace c10d

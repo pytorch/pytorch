@@ -3,6 +3,7 @@
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
 #include "caffe2/core/context_gpu.h"
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 
 #if defined(USE_ROCM)
@@ -68,14 +69,14 @@ __global__ void sparse_length_sum_kernel(
     int N,
     int post,
     int len_length,
-    int len_indices) {
+    int len_indices, TORCH_DSA_KERNEL_ARGS) {
   // len_length blocks
   int group = blockIdx.x;
 
   int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
   int end = prefix_sum_length_data[group];
-  CUDA_KERNEL_ASSERT(start <= len_indices);
-  CUDA_KERNEL_ASSERT(end <= len_indices);
+  CUDA_KERNEL_ASSERT2(start <= len_indices);
+  CUDA_KERNEL_ASSERT2(end <= len_indices);
 
   struct SharedMemory<OutType> smem;
   OutType* reduceVals = smem.getPointer();

@@ -599,7 +599,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     UsageStream to_record{stream.stream(), stream.device_index()};
     if (to_record == it->second.creation_stream) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Called record_stream on tensor whose original creation stream "
           "matches the recorded stream. This is unnecessary and has no effect.");
     } else {
@@ -618,7 +618,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
+      RecordContext when) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "

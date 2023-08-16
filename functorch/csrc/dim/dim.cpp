@@ -19,6 +19,7 @@
 #include <ATen/ATen.h>
 #include <memory>
 #include "arena.h"
+#include "dim.h"
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
@@ -51,7 +52,11 @@ mpy::handle torch_Tensor_split;
 bool pointwise_optimize = true;
 PyTypeObject* DimType = nullptr;
 
-static void maybeInitializeGlobals() {
+PyObject* Tensor_getitem(PyObject* self, PyObject* index);
+int Tensor_setitem(PyObject* self, PyObject* index, PyObject* value);
+
+namespace{
+void maybeInitializeGlobals() {
     // globals that depend on the python dim library,
     // which we can't lookup until we finish initializing the _C module
     if (_Tensor.ptr()) {
@@ -63,9 +68,6 @@ static void maybeInitializeGlobals() {
     _Tensor_sum = _Tensor.attr("sum");
     DimType = (PyTypeObject*) mpy::import("functorch.dim").attr("Dim").ptr();
 }
-
-PyObject* Tensor_getitem(PyObject* self, PyObject* index);
-int Tensor_setitem(PyObject* self, PyObject* index, PyObject* value);
 
 void replaceMappingIfMatches(mpy::handle tp) {
     auto T = (PyTypeObject*) tp.ptr();
@@ -87,7 +89,7 @@ void replaceMappingIfMatches(mpy::handle tp) {
     }
 }
 
-static void initializeGlobals(Arena & A) {
+void initializeGlobals(Arena & A) {
     auto torch = mpy::import("torch");
     torch_Tensor = (PyTypeObject*) torch.attr("Tensor").ptr();
     torch_Tensor___mul__ = torch.attr("Tensor").attr("__mul__");
@@ -105,7 +107,7 @@ static void initializeGlobals(Arena & A) {
 }
 
 mpy::handle DimensionBindError_;
-static mpy::handle DimensionBindError() {
+mpy::handle DimensionBindError() {
     if(!DimensionBindError_.ptr()) {
         DimensionBindError_ = mpy::import("functorch.dim").attr("DimensionBindError");
     }
@@ -171,6 +173,7 @@ private:
     at::Tensor batchtensor_;
 };
 
+
 struct DimEntry {
     // union of either a negative number indicating which dimension this is from the rhs,
     // or a pointer to a first-class dimension.
@@ -220,8 +223,25 @@ std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
 }
 
 // Dim wrapper methods
+DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
+    if (Dim::check(d)) {
+        if (keepdim) {
+            mpy::raise_error(PyExc_ValueError, "cannot preserve first-class dimensions with keepdim=True");
+        }
+        return Dim::unchecked_wrap(d);
+    } else if (mpy::is_int(d)) {
+        auto i = mpy::to_int(d);
+        while (i >= 0) {
+            i -= N;
+        }
+        return i;
+    } else {
+        return DimEntry();
+    }
+}
 
-static int Dim_init(mpy::hdl<Dim> self, PyObject *args, PyObject *kwds) {
+
+int Dim_init(mpy::hdl<Dim> self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
     static constexpr const char* kwlist[] = {"name", "size", nullptr};
     mpy::handle name;
@@ -234,7 +254,7 @@ static int Dim_init(mpy::hdl<Dim> self, PyObject *args, PyObject *kwds) {
     PY_END(-1)
 }
 
-static PyObject* Dim_repr(Dim* self) {
+PyObject* Dim_repr(Dim* self) {
     PY_BEGIN
     mpy::object name = (self->name_.ptr()) ? self->name_ : mpy::unicode_from_string("<uninitialized dim>");
     return name.release();
@@ -242,7 +262,7 @@ static PyObject* Dim_repr(Dim* self) {
 }
 
 
-static PyObject* Dim_getsize(Dim* self, void*) {
+PyObject* Dim_getsize(Dim* self, void*) {
     PY_BEGIN
     return mpy::from_int(self->size()).release();
     PY_END(nullptr)
@@ -255,34 +275,34 @@ int Dim_setsize(Dim* self, PyObject* size, void*) {
     PY_END(-1)
 }
 
-static PyObject* Dim_getis_bound(Dim* self, void*) {
+PyObject* Dim_getis_bound(Dim* self, void*) {
     return PyBool_FromLong(self->is_bound());
 }
 
-static PyObject* Dim_getlevel(Dim* self, void*) {
+PyObject* Dim_getlevel(Dim* self, void*) {
     return PyLong_FromLong(self->level_);
 }
 
-static PyObject* Dim_get_levels(Dim* self, void*) {
+PyObject* Dim_get_levels(Dim* self, void*) {
     mpy::tuple t(1);
     t.set(0, mpy::object::borrow(self->ptr()));
     return t.release();
 }
 
-static PyObject* Dim_get_has_device(Dim* self, void*) {
+PyObject* Dim_get_has_device(Dim* self, void*) {
     Py_RETURN_FALSE;
 }
 
-static PyObject* Dim_get_tensor(Dim* self, void*) {
+PyObject* Dim_get_tensor(Dim* self, void*) {
     return THPVariable_Wrap(self->range());
 }
 
-static PyObject* Dim_get_batchtensor(Dim* self, void*) {
+PyObject* Dim_get_batchtensor(Dim* self, void*) {
     return THPVariable_Wrap(self->batchtensor());
 }
 
 
-static PyGetSetDef Dim_getsetters[] = {
+PyGetSetDef Dim_getsetters[] = {
     {"size", (getter) Dim_getsize, (setter) Dim_setsize,
      "Dimension size", NULL},
     {"is_bound", (getter) Dim_getis_bound, NULL, "is_bound", NULL},
@@ -294,7 +314,7 @@ static PyGetSetDef Dim_getsetters[] = {
     {"ndim", (getter) [](PyObject* self, void*) -> PyObject* { return mpy::from_int(1).release(); }, NULL, "ndim", NULL},
     {NULL}  /* Sentinel */
 };
-
+}
 PyTypeObject Dim::Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "_C.Dim",               /* tp_name */
@@ -331,7 +351,7 @@ PyTypeObject Dim::Type = {
     0,                              /* tp_descr_get */
     0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
-    (initproc)(void*) Dim_init,     /* tp_init */
+    (initproc)(void*)static_cast<int(*)(mpy::hdl<Dim>,PyObject*,PyObject*)>(Dim_init),      /* tp_init */
     0,                              /* tp_alloc */
     Dim::new_stub,                      /* tp_new */
 };
@@ -452,7 +472,7 @@ static Py_ssize_t DimList_len(DimList* self) {
     PY_END(-1)
 }
 
-PyObject * DimList_item(DimList* self, Py_ssize_t idx) {
+static PyObject * DimList_item(DimList* self, Py_ssize_t idx) {
     PY_BEGIN
     if (!self->is_bound()) {
         mpy::raise_error(DimensionBindError(), "DimList not bound");
@@ -598,11 +618,40 @@ static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
 // Tensor -----------------------------
 
 PyTypeObject* TensorType = nullptr; // the python wrapper type.
-at::Tensor _add_batch_dims(Arena& A, at::Tensor t, Slice<DimEntry> levels_);
-static mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise);
-void free_levels_dims(Slice<DimEntry> levels);
+mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise);
 
-struct Tensor;
+namespace{
+
+at::Tensor _add_batch_dims(Arena& A, at::Tensor t, Slice<DimEntry> levels_) {
+    auto levels = Slice<DimEntry>();
+    levels.extend(A, levels_);
+    while (true) {
+        int64_t min_real_index = -1;
+        int64_t min_index = -1;
+        int64_t min_value = INT_MAX;
+        int64_t i = 0;
+        int64_t r = 0;
+        for (auto l : levels) {
+            if (!l.is_none()) {
+                if (!l.is_positional() && l.dim()->level_ < min_value) {
+                    min_value = l.dim()->level_;
+                    min_index = i;
+                    min_real_index = r;
+                }
+                ++i;
+            }
+            ++r;
+        }
+        if (min_index == -1) {
+            return t;
+        }
+        auto t2 = at::functorch::addBatchDim(std::move(t), min_index, min_value);
+        t = std::move(t2);
+        levels[min_real_index] = DimEntry();
+    }
+}
+
+
 
 struct DelayedOperator {
     DelayedOperator(mpy::object o, mpy::vector_args a)
@@ -631,6 +680,15 @@ struct DelayedOperator {
     mpy::object orig;
     mpy::vector_args args;
 };
+
+void free_levels_dims(Slice<DimEntry> levels) {
+    for(auto e : levels) {
+        if (!e.is_positional()) {
+            mpy::object::steal(e.dim());
+        }
+    }
+}
+}
 
 struct Tensor : public mpy::base<Tensor> {
 private:
@@ -695,57 +753,21 @@ public:
     friend struct EnableAllLayers;
 };
 
-at::Tensor _add_batch_dims(Arena& A, at::Tensor t, Slice<DimEntry> levels_) {
-    auto levels = Slice<DimEntry>();
-    levels.extend(A, levels_);
-    while (true) {
-        int64_t min_real_index = -1;
-        int64_t min_index = -1;
-        int64_t min_value = INT_MAX;
-        int64_t i = 0;
-        int64_t r = 0;
-        for (auto l : levels) {
-            if (!l.is_none()) {
-                if (!l.is_positional() && l.dim()->level_ < min_value) {
-                    min_value = l.dim()->level_;
-                    min_index = i;
-                    min_real_index = r;
-                }
-                ++i;
-            }
-            ++r;
-        }
-        if (min_index == -1) {
-            return t;
-        }
-        auto t2 = at::functorch::addBatchDim(std::move(t), min_index, min_value);
-        t = std::move(t2);
-        levels[min_real_index] = DimEntry();
-    }
-}
-
-void free_levels_dims(Slice<DimEntry> levels) {
-    for(auto e : levels) {
-        if (!e.is_positional()) {
-            mpy::object::steal(e.dim());
-        }
-    }
-}
-
+namespace{
 // version in header does a unnecessary refcount +/-
-inline at::functorch::BatchedTensorImpl* maybeGetBatchedImpl(const at::Tensor& tensor) {
+at::functorch::BatchedTensorImpl* maybeGetBatchedImpl(const at::Tensor& tensor) {
     if (at::functorch::isBatchedTensor(tensor)) {
         return static_cast<at::functorch::BatchedTensorImpl*>(tensor.unsafeGetTensorImpl());
     }
     return nullptr;
 }
 
-inline TensorRef unchecked_tensor_from(mpy::handle p) {
+TensorRef unchecked_tensor_from(mpy::handle p) {
     auto v = (THPVariable*) p.ptr();
     return TensorRef(*v->cdata);
 }
 
-int64_t ndim_of_levels(Slice<DimEntry> levels) {
+static int64_t ndim_of_levels(Slice<DimEntry> levels) {
     int64_t r = 0;
     for (auto l : levels) {
         if (l.is_positional()) {
@@ -792,36 +814,6 @@ struct TensorInfo {
 
 };
 
-mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry> levels, bool has_device) {
-    size_t seen_dims = 0;
-    int last = 0;
-    //auto sz = tensor.sizes();
-    for (auto i : levels.enumerate()) {
-        auto l = levels[i];
-        if (l.is_positional()) {
-            AT_ASSERT(last == 0 || last + 1 == l.position());
-            last = l.position();
-        } else {
-            mpy::object::borrow(l.dim()).release();
-            //AT_ASSERT(sz[i] == l.dim()->size());
-            ++seen_dims;
-        }
-    }
-    AT_ASSERT(last == 0 || last == -1);
-    if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
-    }
-
-    mpy::obj<Tensor> self = Tensor::create();
-    self->tensor_ = std::move(tensor);
-    AT_ASSERT(self->tensor_.dim() == levels.size());
-    self->levels_.set(levels, free_levels_dims);
-    self->has_device_ = has_device;
-    mpy::object r = std::move(self);
-    return r;
-}
-
-
 static PyObject* py_Tensor_from_positional(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
@@ -852,15 +844,47 @@ static PyObject* py_Tensor_from_positional(PyObject *self,
     return Tensor::from_positional(A, THPVariable_Unpack(tensor.ptr()), levels, has_device != 0).release();
     PY_END(nullptr)
 }
+}
+
+mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry> levels, bool has_device) {
+    size_t seen_dims = 0;
+    int last = 0;
+    //auto sz = tensor.sizes();
+    for (auto i : levels.enumerate()) {
+        auto l = levels[i];
+        if (l.is_positional()) {
+            AT_ASSERT(last == 0 || last + 1 == l.position());
+            last = l.position();
+        } else {
+            mpy::object::borrow(l.dim()).release();
+            //AT_ASSERT(sz[i] == l.dim()->size());
+            ++seen_dims;
+        }
+    }
+    AT_ASSERT(last == 0 || last == -1);
+    if (!seen_dims) {
+        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+    }
+
+    mpy::obj<Tensor> self = Tensor::create();
+    self->tensor_ = std::move(tensor);
+    AT_ASSERT(self->tensor_.dim() == levels.size());
+    self->levels_.set(levels, free_levels_dims);
+    self->has_device_ = has_device;
+    mpy::object r = std::move(self);
+    return r;
+}
+
 
 mpy::obj<Tensor> Tensor::create_delayed(mpy::object op, mpy::vector_args args, Slice<DimEntry> levels, bool has_device) {
     mpy::obj<Tensor> self = Tensor::create();
     self->capture_levels(levels);
     self->has_device_ = has_device;
-    self->delayed_ = std::make_unique<DelayedOperator>(op, args);
+    self->delayed_ = std::make_unique<DelayedOperator>(std::move(op), args);
     return self;
 }
 
+namespace{
 mpy::list slice_to_list(Slice<mpy::handle> h) {
     mpy::list lst(h.size());
     for (auto i : h.enumerate()) {
@@ -1005,7 +1029,7 @@ struct UnflattenArena {
     Unflatten unflatten;
 };
 
-static PyObject* py_unflatten(PyObject *self,
+PyObject* py_unflatten(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -1036,7 +1060,7 @@ void free_unflatten_arena(PyObject * pc) {
     delete (UnflattenArena*) PyCapsule_GetPointer(pc, "arena");
 }
 
-static PyObject* py_tree_flatten(PyObject *self,
+PyObject* py_tree_flatten(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -1058,7 +1082,7 @@ static PyObject* py_tree_flatten(PyObject *self,
 
 
 
-mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::handle agg) {
+mpy::object tree_map(Arena& A, const std::function<mpy::handle(mpy::handle)>& fn, mpy::handle agg) {
     Slice<mpy::handle> elements;
     auto unflatten = tree_flatten(A, agg, elements);
     for (auto i : elements.enumerate()) {
@@ -1068,7 +1092,7 @@ mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::
 }
 
 // prereq: isinstance(h, _Tensor)
-inline int64_t _Tensor_ndim(mpy::handle h) {
+int64_t _Tensor_ndim(mpy::handle h) {
     if (Tensor::check(h)) {
         int64_t r = 0;
         for (auto l : Tensor::unchecked_wrap(h)->levels()) {
@@ -1082,7 +1106,7 @@ inline int64_t _Tensor_ndim(mpy::handle h) {
     return 0;
 }
 
-inline mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
+mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
         t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
@@ -1091,7 +1115,7 @@ inline mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     }
     return A.autorelease(mpy::object::checked_steal(THPVariable_Wrap(*t)));
 }
-
+}
 struct EnableAllLayers {
     EnableAllLayers(Arena& A, Slice<DimEntry> levels) {
         std::vector<std::pair<int64_t, int64_t>> layers;
@@ -1167,6 +1191,7 @@ private:
     Slice<mpy::hdl<Dim>> levels_to_dim_;
 };
 
+namespace{
 TensorRef _match_levels(Arena& A, TensorRef v, Slice<DimEntry> from_levels, Slice<DimEntry> to_levels, bool drop_levels=false) {
     if (from_levels == to_levels) {
         return v;
@@ -1190,8 +1215,8 @@ TensorRef _match_levels(Arena& A, TensorRef v, Slice<DimEntry> from_levels, Slic
     }
     return A.autorelease(v->as_strided(at::IntArrayRef(nsz.begin(), nsz.end()), at::IntArrayRef(nsd.begin(), nsd.end()), v->storage_offset()));
 }
-
-static mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
+}
+mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
     if (!pointwise_optimize) {
         is_pointwise = false;
     }
@@ -1279,8 +1304,9 @@ static mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_ar
     }
 }
 
+namespace{
 
-static mpy::object __torch_function__(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
+mpy::object __torch_function__(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
     if (orig == torch_Tensor___mul__) {
         AT_ASSERT(args.nargs == 2 && !args.has_keywords());
         auto lhs = args[0];
@@ -1327,7 +1353,7 @@ mpy::vector_args as_vector_args(Arena& A, mpy::handle args, mpy::handle kwargs) 
     return mpy::vector_args(all_args.begin(), pos_n, A.autorelease(slice_to_tuple(kwnames)));
 }
 
-static PyObject* py___torch_function__(PyObject *self,
+PyObject* py___torch_function__(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -1360,7 +1386,7 @@ PyObject* Tensor_ndim(Tensor* self, void*) {
     return mpy::from_int(i).release();
 }
 
-static PyGetSetDef Tensor_getsetters[] = {
+PyGetSetDef Tensor_getsetters[] = {
    {"_has_device", (getter) [](PyObject* self, void*) -> PyObject* { return mpy::from_bool(((Tensor*)self)->has_device()).release(); }, NULL},
    {"_tensor", (getter) [](PyObject* self, void*) -> PyObject* {
        Arena A;
@@ -1377,9 +1403,10 @@ static PyGetSetDef Tensor_getsetters[] = {
     {NULL}  /* Sentinel */
 };
 
-static PyMethodDef Tensor_methods[] = {
+PyMethodDef Tensor_methods[] = {
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
+}
 
 
 PyTypeObject Tensor::Type = {
@@ -1426,7 +1453,7 @@ PyTypeObject Tensor::Type = {
 
 // dim() --------------------
 
-bool relevant_op(_Py_CODEUNIT c) {
+static bool relevant_op(_Py_CODEUNIT c) {
     switch(c) {
         case STORE_NAME:
         case STORE_GLOBAL:
@@ -1438,7 +1465,7 @@ bool relevant_op(_Py_CODEUNIT c) {
     }
 }
 
-mpy::object create_dim(mpy::object name, mpy::handle size) {
+static mpy::object create_dim(mpy::object name, mpy::handle size) {
     auto d = Dim::create(std::move(name));
     if (!mpy::is_none(size)) {
         d->set_size(mpy::to_int(size));
@@ -1446,7 +1473,7 @@ mpy::object create_dim(mpy::object name, mpy::handle size) {
     return std::move(d);
 }
 
-mpy::object create_dimlist(mpy::object name, mpy::handle size) {
+static mpy::object create_dimlist(mpy::object name, mpy::handle size) {
     auto d = DimList::create(std::move(name));
     if (!mpy::is_none(size)) {
         if (mpy::is_int(size)) {
@@ -1469,6 +1496,7 @@ mpy::object create_dimlist(mpy::object name, mpy::handle size) {
 #define _PyCode_CODE(CO) ((_Py_CODEUNIT*)PyBytes_AS_STRING((CO)->co_code))
 #endif
 
+namespace{
 struct PyInstDecoder {
     PyInstDecoder(PyCodeObject* code_object, int lasti)
     : code_object_(code_object), code_(_PyCode_CODE(code_object)), offset_(lasti / sizeof(_Py_CODEUNIT))  {}
@@ -1597,7 +1625,7 @@ static PyObject* _dims(PyObject *self,
     PY_END(nullptr)
 }
 
-int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
+static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
     for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
         if (dims[i].ptr() == dim.ptr()) {
             return i;
@@ -1621,7 +1649,7 @@ static at::ArrayRef<T> as_array_ref(Slice<T> t) {
     return at::ArrayRef<T>(t.begin(), t.end());
 }
 
-TensorRef dot_prepare(Arena& A, std::initializer_list<DotPart> parts, const TensorInfo& t) {
+static TensorRef dot_prepare(Arena& A, std::initializer_list<DotPart> parts, const TensorInfo& t) {
     Slice<DimEntry> new_levels;
     bool needs_reshape = false;
     for (auto p : parts) {
@@ -1641,7 +1669,7 @@ TensorRef dot_prepare(Arena& A, std::initializer_list<DotPart> parts, const Tens
     return A.autorelease(r->reshape(at::IntArrayRef(view.begin(), view.end())));
 }
 
-mpy::object dot_finish(Arena& A, std::initializer_list<DotPart> parts, at::Tensor r) {
+static mpy::object dot_finish(Arena& A, std::initializer_list<DotPart> parts, at::Tensor r) {
     Slice<DimEntry> result_levels;
     bool needs_reshape = false;
     for (auto p : parts) {
@@ -1662,7 +1690,7 @@ mpy::object dot_finish(Arena& A, std::initializer_list<DotPart> parts, at::Tenso
 
 
 
-mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry> sum) {
+static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry> sum) {
     auto lhs_strides = lhs.tensor->strides();
     auto rhs_strides = rhs.tensor->strides();
 
@@ -1788,7 +1816,6 @@ static PyObject* test_c(PyObject *self,
     PY_END(nullptr);
 }
 
-static DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim);
 
 static PyObject* order(PyObject *_,
                       PyObject *const *args,
@@ -1978,7 +2005,7 @@ static PyObject* expand(PyObject *_,
 }
 
 
-void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
+static void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
                         Slice<mpy::hdl<Dim>> dims, Slice<int64_t>& nsz, Slice<int64_t>& nsd) {
     int64_t rhs_prod = 1;
     for (auto i : dims.enumerate()) {
@@ -2022,7 +2049,7 @@ void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
     }
 }
 
-inline bool has_dims(mpy::handle d) {
+static bool has_dims(mpy::handle d) {
     return Dim::check_exact(d) || Tensor::check_exact(d);
 }
 
@@ -2034,13 +2061,16 @@ struct IndexingInfo {
     Slice<DimEntry> result_levels;
     bool has_device;
 };
+}
 
-static Slice<mpy::handle> as_slice(mpy::tuple_view tv) {
+IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> input, Slice<DimEntry> keys, Slice<mpy::handle> values, bool has_dimpacks_or_none);
+namespace{
+Slice<mpy::handle> as_slice(mpy::tuple_view tv) {
     PyObject** begin = &PyTuple_GET_ITEM(tv.ptr(),0);
     return Slice<mpy::handle>((mpy::handle*)begin, (mpy::handle*) (begin + tv.size()));
 }
 
-static Slice<mpy::handle> as_slice(mpy::list_view tv) {
+Slice<mpy::handle> as_slice(mpy::list_view tv) {
     PyObject** begin = &PyList_GET_ITEM(tv.ptr(),0);
     return Slice<mpy::handle>((mpy::handle*)begin, (mpy::handle*) (begin + tv.size()));
 }
@@ -2071,10 +2101,23 @@ bool is_dimpack(mpy::handle s) {
     return maybe_dimpack(e, s);
 }
 
-IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> input, Slice<DimEntry> keys, Slice<mpy::handle> values, bool has_dimpacks_or_none);
-static mpy::object invoke_getitem(Arena& A, const IndexingInfo& iinfo);
+mpy::object invoke_getitem(Arena& A, const IndexingInfo& iinfo) {
+    at::Tensor rtensor;
+    if (iinfo.advanced_indexing) {
+        auto self_hdl = handle_from_tensor(A, iinfo.self);
+        auto tup = slice_to_tuple(iinfo.flat_inputs);
+        // std::cout << "calling original getindex " << self_hdl << " " << tup << "\n";
+        auto pytensor = mpy::object::checked_steal(THPVariable_getitem(self_hdl.ptr(), tup.ptr()));
+        rtensor = THPVariable_Unpack(pytensor.ptr());
+    } else {
+        // std::cout << "skipping original getindex\n";
+        rtensor = *iinfo.self;
+    }
+    // std::cout << "returning (from_positional)\n";
+    return Tensor::from_positional(A, std::move(rtensor), iinfo.result_levels, iinfo.has_device);
+}
 
-static mpy::object index(Arena& A, mpy::handle self, mpy::handle dims, mpy::handle indices) {
+mpy::object index(Arena& A, mpy::handle self, mpy::handle dims, mpy::handle indices) {
     maybeInitializeGlobals();
     Slice<mpy::handle> dims_list;
     Slice<mpy::handle> indices_list;
@@ -2235,7 +2278,7 @@ bool extractIndices(Arena& A, mpy::handle index, Slice<mpy::handle>& indices) {
     return false;
 }
 
-static IndexingInfo getsetitem(Arena & A, mpy::handle self, mpy::handle index, bool tensors_have_dims) {
+IndexingInfo getsetitem(Arena & A, mpy::handle self, mpy::handle index, bool tensors_have_dims) {
     bool can_call_original_getitem = !tensors_have_dims;
 
     Slice<mpy::handle> input;
@@ -2338,7 +2381,7 @@ static IndexingInfo getsetitem(Arena & A, mpy::handle self, mpy::handle index, b
 
     return getsetitem_flat(A, self_info, input, Slice<DimEntry>(), Slice<mpy::handle>(), has_dimpacks_or_none);
 }
-
+}
 IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> input, Slice<DimEntry> keys, Slice<mpy::handle> values, bool has_dimpacks_or_none) {
     // At this point:
     // ..., DimList have been eliminated
@@ -2563,24 +2606,8 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> 
 
     return IndexingInfo {false, requires_getindex, self_info.tensor, flat_inputs, result_levels, self_info.has_device};
 }
-
-static mpy::object invoke_getitem(Arena& A, const IndexingInfo& iinfo) {
-    at::Tensor rtensor;
-    if (iinfo.advanced_indexing) {
-        auto self_hdl = handle_from_tensor(A, iinfo.self);
-        auto tup = slice_to_tuple(iinfo.flat_inputs);
-        // std::cout << "calling original getindex " << self_hdl << " " << tup << "\n";
-        auto pytensor = mpy::object::checked_steal(THPVariable_getitem(self_hdl.ptr(), tup.ptr()));
-        rtensor = THPVariable_Unpack(pytensor.ptr());
-    } else {
-        // std::cout << "skipping original getindex\n";
-        rtensor = *iinfo.self;
-    }
-    // std::cout << "returning (from_positional)\n";
-    return Tensor::from_positional(A, std::move(rtensor), iinfo.result_levels, iinfo.has_device);
-}
-
-static mpy::object __getitem__(Arena & A, mpy::handle self, mpy::handle index) {
+namespace{
+mpy::object __getitem__(Arena & A, mpy::handle self, mpy::handle index) {
     maybeInitializeGlobals();
     auto iinfo = getsetitem(A, self, index, has_dims(self));
     if (iinfo.can_call_original) {
@@ -2591,14 +2618,8 @@ static mpy::object __getitem__(Arena & A, mpy::handle self, mpy::handle index) {
 }
 
 
-PyObject* Tensor_getitem(PyObject* self, PyObject* index) {
-    Arena A;
-    PY_BEGIN
-    return __getitem__(A, self, index).release();
-    PY_END(nullptr);
-}
 
-static void __setitem__(Arena & A, mpy::handle self, mpy::handle index, mpy::handle rhs) {
+void __setitem__(Arena & A, mpy::handle self, mpy::handle index, mpy::handle rhs) {
     maybeInitializeGlobals();
     auto iinfo = getsetitem(A, self, index, has_dims(self) || has_dims(rhs));
     if (iinfo.can_call_original) {
@@ -2634,7 +2655,14 @@ static void __setitem__(Arena & A, mpy::handle self, mpy::handle index, mpy::han
         torch_Tensor_copy_.call(self, rhs);
     }
 }
+}
 
+PyObject* Tensor_getitem(PyObject* self, PyObject* index) {
+    Arena A;
+    PY_BEGIN
+    return __getitem__(A, self, index).release();
+    PY_END(nullptr);
+}
 
 int Tensor_setitem(PyObject* self, PyObject* index, PyObject* value) {
     Arena A;
@@ -2644,7 +2672,8 @@ int Tensor_setitem(PyObject* self, PyObject* index, PyObject* value) {
     PY_END(-1);
 }
 
-static PyObject* py___getitem__(PyObject *_,
+namespace{
+PyObject* py___getitem__(PyObject *_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -2655,7 +2684,7 @@ static PyObject* py___getitem__(PyObject *_,
     PY_END(nullptr)
 }
 
-static PyObject* py___setitem__(PyObject *_,
+PyObject* py___setitem__(PyObject *_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -2668,7 +2697,7 @@ static PyObject* py___setitem__(PyObject *_,
 }
 
 
-static PyObject* py_index(PyObject *_,
+PyObject* py_index(PyObject *_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -2682,7 +2711,7 @@ static PyObject* py_index(PyObject *_,
 }
 
 
-static PyObject* py_stack(PyObject *_,
+PyObject* py_stack(PyObject *_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -2726,7 +2755,7 @@ static PyObject* py_stack(PyObject *_,
     PY_END(nullptr)
 }
 
-static PyObject* py_split(PyObject *_,
+PyObject* py_split(PyObject *_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -2824,25 +2853,7 @@ static PyObject* py_split(PyObject *_,
     PY_END(nullptr)
 }
 
-
-static DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
-    if (Dim::check(d)) {
-        if (keepdim) {
-            mpy::raise_error(PyExc_ValueError, "cannot preserve first-class dimensions with keepdim=True");
-        }
-        return Dim::unchecked_wrap(d);
-    } else if (mpy::is_int(d)) {
-        auto i = mpy::to_int(d);
-        while (i >= 0) {
-            i -= N;
-        }
-        return i;
-    } else {
-        return DimEntry();
-    }
-}
-
-static Slice<DimEntry> _wrap_dims(Arena& A, mpy::handle d, size_t N, bool keepdim) {
+Slice<DimEntry> _wrap_dims(Arena& A, mpy::handle d, size_t N, bool keepdim) {
     auto de = _wrap_dim(d, N, keepdim);
     Slice<DimEntry> r;
     if (!de.is_none()) {
@@ -2889,6 +2900,7 @@ struct WrappedOperator : public mpy::base<WrappedOperator> {
     }
 
 };
+}
 
 PyTypeObject WrappedOperator::Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2931,7 +2943,8 @@ PyTypeObject WrappedOperator::Type = {
     WrappedOperator::new_stub,                      /* tp_new */
 };
 
-static PyObject* patched_dim_method(PyObject * self_,
+namespace{
+PyObject* patched_dim_method(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3024,7 +3037,7 @@ static PyObject* patched_dim_method(PyObject * self_,
     PY_END(nullptr)
 }
 
-static PyObject* _wrap(PyObject * self_,
+PyObject* _wrap(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3061,7 +3074,7 @@ static PyObject* _wrap(PyObject * self_,
     PY_END(nullptr)
 }
 
-static PyObject* call_torch_function(PyObject *self,
+PyObject* call_torch_function(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3073,7 +3086,7 @@ static PyObject* call_torch_function(PyObject *self,
     PY_END(nullptr)
 }
 
-static PyObject* _wrap_method(PyObject *self,
+PyObject* _wrap_method(PyObject *self,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3092,7 +3105,7 @@ static PyObject* _wrap_method(PyObject *self,
 }
 
 
-static PyObject* Tensor_sum(PyObject * self_,
+PyObject* Tensor_sum(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3121,7 +3134,7 @@ static PyObject* Tensor_sum(PyObject * self_,
     PY_END(nullptr)
 }
 
-static PyObject* _parse_test(PyObject * self_,
+PyObject* _parse_test(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3146,7 +3159,7 @@ static PyObject* _parse_test(PyObject * self_,
     PY_END(nullptr)
 }
 
-static PyObject* _set_pointwise_optimize(PyObject * self_,
+PyObject* _set_pointwise_optimize(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3159,7 +3172,7 @@ static PyObject* _set_pointwise_optimize(PyObject * self_,
     PY_END(nullptr)
 }
 
-static PyObject* _patch_tensor_class(PyObject * self_,
+PyObject* _patch_tensor_class(PyObject * self_,
                       PyObject *const *args,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
@@ -3189,7 +3202,7 @@ Example::
     >>> batch, channel, width, height = dims(sizes=[None, 3, 224, 224])
 )""";
 
-static PyMethodDef methods[] = {
+PyMethodDef methods[] = {
     {"dims", (PyCFunction)(void*) _dims<create_dim>, METH_FASTCALL | METH_KEYWORDS, dims_doc},
     {"dimlists", (PyCFunction)(void*) _dims<create_dimlist>, METH_FASTCALL | METH_KEYWORDS},
     {"_test_c", (PyCFunction)(void*) test_c, METH_FASTCALL | METH_KEYWORDS},
@@ -3212,7 +3225,7 @@ static PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
-static struct PyModuleDef module_def = {
+struct PyModuleDef module_def = {
     PyModuleDef_HEAD_INIT,
     "_C",   /* name of module */
     NULL, /* module documentation, may be NULL */
@@ -3220,8 +3233,9 @@ static struct PyModuleDef module_def = {
                  or -1 if the module keeps state in global variables. */
     methods
 };
+}
 
-PyObject* Dim_init(void) {
+PyObject* Dim_init() {
     Arena A;
     try {
         mpy::object mod = mpy::object::checked_steal(PyModule_Create(&module_def));

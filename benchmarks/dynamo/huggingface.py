@@ -179,6 +179,10 @@ ONLY_EVAL_MODE = {
     "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
 }
 
+FP32_ONLY_MODELS = {
+    "GoogleFnet",
+}
+
 
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
@@ -402,6 +406,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     @property
     def skip_models_for_cpu(self):
         return SKIP_FOR_CPU
+
+    @property
+    def fp32_only_models(self):
+        return FP32_ONLY_MODELS
 
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:

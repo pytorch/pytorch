@@ -21,6 +21,7 @@
 #else
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -368,6 +369,18 @@ Tensor isreal(const Tensor& self) {
   return at::imag(self) == 0;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)                          \
+        AT_DISPATCH_FLOATING_TYPES_AND3( kHalf, kBFloat16, kFloat8_e5m2, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)           \
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -380,7 +393,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -396,7 +409,7 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
@@ -408,6 +421,15 @@ void _assert_async_cpu(const Tensor& self) {
 void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
+
+Tensor _functional_assert_async_msg_cpu(
+  const Tensor& self,
+  c10::string_view assert_msg,
+  const Tensor& dep_token) {
+  _assert_async_msg_cpu(self, assert_msg);
+  return dep_token.clone();
+}
+
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -760,10 +782,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {

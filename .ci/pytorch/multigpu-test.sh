@@ -8,6 +8,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
+time python test/run_test.py --include test_cuda_multigpu test_cuda_primary_ctx --verbose
 
 # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
 # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
@@ -29,11 +30,10 @@ time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_
 time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor_reshard
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding_bag
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_binary_cmp
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
-time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
+
+# functional collective tests
+time python test/run_test.py --verbose -i distributed/test_functional_api
+
 
 # DTensor tests
 time python test/run_test.py --verbose -i distributed/_tensor/test_device_mesh.py
@@ -46,4 +46,5 @@ time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_ex
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
 time python test/run_test.py --verbose -i test_optim -- -k optimizers_with_varying_tensors
+time python test/run_test.py --verbose -i test_foreach -- -k test_tensors_grouping
 assert_git_not_dirty

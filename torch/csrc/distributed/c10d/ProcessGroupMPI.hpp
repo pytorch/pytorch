@@ -33,8 +33,7 @@ struct WorkEntry {
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
-        run(std::move(run)) {
+      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()), run(std::move(run)) {
     if (srcPtr) {
       src = *srcPtr;
     }
@@ -72,8 +71,8 @@ struct WorkEntry {
 // group. In other words, no more than 1 process group can be created globally.
 //
 // If you would like to use multiple ProcessGroupMPI, it requires your MPI
-// implementation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
-// multiple threads may call MPI, with no restriction.
+// implementation to have a thread support value of MPI_THREAD_MULTIPLE, that
+// is, multiple threads may call MPI, with no restriction.
 //
 // Also note that ProcessGroupMPI only supports a single Tensor operation. In
 // other words, the size of the input Tensor vector should always be 1.
@@ -118,7 +117,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
-    virtual ~AsyncWork();
+    ~AsyncWork() override;
 
     bool isCompleted() override;
 
@@ -144,7 +143,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Constructor will spawn up the worker thread loop
   explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
-  virtual ~ProcessGroupMPI();
+  ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
@@ -244,7 +243,8 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> enqueue(
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
+      const c10::optional<std::vector<at::Tensor>>& inputTensors =
+          c10::nullopt);
 
   bool stop_;
 

@@ -139,7 +139,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -179,6 +179,18 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
       });
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void abs_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (dtype == kComplexHalf) {
@@ -186,7 +198,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+    _AT_DISPATCH_ABS_TYPES(iter.dtype(), "abs_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return abs_impl(a); },
@@ -243,7 +255,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void frac_kernel(TensorIteratorBase& iter) {
+static void frac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -252,7 +264,7 @@ void frac_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void logical_not_kernel(TensorIteratorBase& iter) {
+static void logical_not_kernel(TensorIteratorBase& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
@@ -283,7 +295,7 @@ void neg_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void sign_kernel(TensorIteratorBase& iter){
+static void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
@@ -432,31 +444,57 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   }
 }
 
+template<typename scalar_t>
+inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
+  return at::_isnan(a)
+    ? nan_replacement
+    : (a == std::numeric_limits<scalar_t>::infinity()
+      ? pos_inf_replacement
+      : (a == -std::numeric_limits<scalar_t>::infinity()
+        ? neg_inf_replacement
+        : a));
+}
+
 static void nan_to_num_kernel(
     TensorIteratorBase& iter,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
-    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-    scalar_t pos_inf_replacement = pos_inf.has_value()
-        ? static_cast<scalar_t>(pos_inf.value())
-        : std::numeric_limits<scalar_t>::max();
-    scalar_t neg_inf_replacement = neg_inf.has_value()
-        ? static_cast<scalar_t>(neg_inf.value())
-        : std::numeric_limits<scalar_t>::lowest();
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
+      using value_t = scalar_t::value_type;
+      value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
+      value_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<value_t>(pos_inf.value())
+          : std::numeric_limits<value_t>::max();
+      value_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<value_t>(neg_inf.value())
+          : std::numeric_limits<value_t>::lowest();
 
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return (
-          at::_isnan(a)
-              ? nan_replacement
-              : (a == std::numeric_limits<scalar_t>::infinity()
-                     ? pos_inf_replacement
-                     : (a == -std::numeric_limits<scalar_t>::infinity()
-                            ? neg_inf_replacement
-                            : a)));
+      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        value_t res_real = _nan_to_num_replace(
+          a.real(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
+        value_t res_imag = _nan_to_num_replace(
+          a.imag(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
+        return scalar_t(res_real, res_imag);
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
+      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<scalar_t>(pos_inf.value())
+          : std::numeric_limits<scalar_t>::max();
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<scalar_t>(neg_inf.value())
+          : std::numeric_limits<scalar_t>::lowest();
+
+      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return _nan_to_num_replace(
+          a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+      });
+    });
+  }
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
@@ -561,7 +599,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
-void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
@@ -691,7 +729,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
   inline namespace CPU_CAPABILITY {                                                 \
-  void op##_kernel(TensorIteratorBase& iter) {                                      \
+  static void op##_kernel(TensorIteratorBase& iter) {                               \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
       constexpr int64_t grain_size = 2048;                                          \
@@ -705,6 +743,19 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
+        constexpr int64_t grain_size = 2048;                                                     \
+        iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
+    });                                                                                          \
+    iter.cast_outputs();                                                                         \
+  }                                                                                              \
+  }                                                                                              \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
+  inline namespace CPU_CAPABILITY {                                                              \
+  static void op##_kernel(TensorIteratorBase& iter) {                                            \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
         constexpr int64_t grain_size = 2048;                                                     \
@@ -761,51 +812,28 @@ REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(acos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(asin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(atan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(atan)
 IMPLEMENT_FLOAT_KERNEL(ceil)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(cos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(cos)
 IMPLEMENT_FLOAT_KERNEL(erf)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfinv)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(exp)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(expm1)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(exp)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1)
 IMPLEMENT_FLOAT_KERNEL(floor)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log10)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log1p)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log2)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log10)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log2)
 IMPLEMENT_FLOAT_KERNEL(i0)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(round)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(sin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(sin)
 IMPLEMENT_COMPLEX_KERNEL(sqrt)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tanh)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tan)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh)
 IMPLEMENT_FLOAT_KERNEL(trunc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(lgamma)
 
 } // namespace at::native

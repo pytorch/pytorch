@@ -5,11 +5,11 @@ from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_to_meta
 
 
 class ForeachKernel(Kernel):
-    MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
+    MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
 
     @staticmethod
     def horizontal_partition(nodes):
@@ -84,10 +84,13 @@ class ForeachKernel(Kernel):
         return sub_kernel
 
     def jit_line(self):
+        can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
+        index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -112,6 +115,7 @@ class ForeachKernel(Kernel):
                 import triton.language as tl
                 from torch._inductor.triton_heuristics import foreach
                 from torch._inductor.utils import instance_descriptor
+                from torch._inductor import triton_helpers
             """
         )
         argdefs, _, _ = self.args.python_argdefs()
@@ -121,13 +125,6 @@ class ForeachKernel(Kernel):
         with code.indent():
             code.splice("pid = tl.program_id(0)")
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
-
-            # Initialize all range variables to avoid a triton bug
-            # with defining vars in if/else blocks
-            for i in range(next(self.iter_vars_count)):
-                code.splice("# Note: initialize vars to work around triton bug")
-                code.splice(f"x{i} = tl.arange(0, XBLOCK)")
-                code.splice("xmask = tl.arange(0, XBLOCK) > XBLOCK")
 
             for sub_kernel in self.sub_kernels:
                 num_elems = int(sympy_product(sub_kernel.numels))

@@ -17,6 +17,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch._refs import (
+    _make_alias,
     _make_elementwise_binary_reference,
     _make_elementwise_unary_reference,
 )
@@ -84,7 +85,7 @@ def erfcx(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias for sigmoid
-expit = torch.sigmoid
+expit = _make_alias(torch.sigmoid, "expit")
 
 
 @_make_elementwise_unary_reference(

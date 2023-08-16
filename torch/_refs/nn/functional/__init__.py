@@ -24,38 +24,48 @@ from torch._refs import _make_inplace
 __all__ = [
     "alpha_dropout",
     "celu",
+    "celu_",
     "dropout",
     "elu",
+    "elu_",
+    "gelu",
+    "glu",
+    "group_norm",
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "huber_loss",
     "l1_loss",
-    "smooth_l1_loss",
+    "layer_norm",
+    "leaky_relu",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
-    "nll_loss",
+    "mish_",
     "mse_loss",
+    "nll_loss",
+    "pairwise_distance",
+    "pdist",
     "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
     "selu",
+    "selu_",
+    "smooth_l1_loss",
     "softmax",
     "softmin",
     "softplus",
     "softshrink",
     "tanhshrink",
     "threshold",
+    "threshold_",
     "triplet_margin_loss",
-    "glu",
-    "pairwise_distance",
-    "pdist",
 ]
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _dropout_helper(
@@ -115,7 +125,7 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def inplace_wrapper(fn):
+def _inplace_wrapper(fn):
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
@@ -138,7 +148,7 @@ def inplace_wrapper(fn):
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
 @register_decomposition(aten.celu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -158,11 +168,7 @@ def celu(
     if alpha is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
@@ -172,7 +178,7 @@ def celu(
 
 
 @register_decomposition(aten.dropout)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
@@ -201,7 +207,7 @@ def dropout(
 
 
 @register_decomposition(aten.elu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -239,7 +245,7 @@ def elu(
 
 
 @register_decomposition(aten.relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -310,7 +316,7 @@ def layer_norm(
 
 
 @register_decomposition(aten.leaky_relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -334,7 +340,7 @@ def leaky_relu(
 
 
 @register_decomposition(aten.mish)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -351,7 +357,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(aten.selu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -405,7 +411,7 @@ def softmin(
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(aten.softplus)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -428,9 +434,7 @@ def softplus(
     if beta is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(beta), python_type):
-            msg = "beta argument of type {0} cannot be safely cast to type {1}!".format(
-                type(beta), python_type
-            )
+            msg = f"beta argument of type {type(beta)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         scaled_input = a * beta
         rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type: ignore[arg-type]
@@ -442,6 +446,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
+@aten.hardshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -449,9 +454,10 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return torch.where(torch.logical_and(a >= -lambd, a <= lambd), 0, a)
+    return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
+@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -463,12 +469,9 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         lambd >= 0,
         lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
     )
-    ge_mask = a > lambd
-    le_mask = a < -lambd
-    zero_mask = torch.logical_not(torch.logical_or(ge_mask, le_mask))
-    result = torch.where(ge_mask, a - lambd, a)
-    result = torch.where(le_mask, a + lambd, result)
-    return torch.where(zero_mask, 0, result)
+    # We implement this in one torch.where to generate better code in the backward
+    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
+    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, 0)
 
 
 # Losses
@@ -601,11 +604,9 @@ def margin_ranking_loss(
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
-            (
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(
-                    input1.shape, input2.shape, target.shape
-                )
+            "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            "input1: {}, input2: {}, target: {} ".format(
+                input1.shape, input2.shape, target.shape
             )
         )
     _check_reduction_value(reduction)
@@ -858,7 +859,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.threshold)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -959,7 +960,7 @@ def _triplet_margin_with_distance_loss(
 
 
 @register_decomposition(aten.hardtanh)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -1103,7 +1104,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.relu6)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """

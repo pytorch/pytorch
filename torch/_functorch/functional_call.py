@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ def functional_call(
     module: "torch.nn.Module",
     parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
     args: Union[Any, Tuple],
-    kwargs: Dict[str, Any] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,

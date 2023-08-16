@@ -63,7 +63,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
+  std::tie(dq, dk, dv, grad_softmax) = pytorch_fmha::mha_bwd(
           contiguous_grad_out,
           query,
           key,
@@ -112,20 +112,16 @@ _efficient_attention_backward(
     int64_t max_seqlen_k,
     const at::Tensor& logsumexp,
     double dropout_p, // dropout probability
-    const at::Tensor& rng_seed_tensor, // seed using for generating random numbers for dropout
-    const at::Tensor& rng_offset_tensor, // offset into random number sequence
+    const at::Tensor& philox_seed, // seed using for generating random numbers for dropout
+    const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
+    const bool bias_requires_grad,
     const c10::optional<double> scale,
     c10::optional <int64_t> num_splits_key) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
-  // TODO_DRISS utilize these tensor correctly
-  // Appease the compilier for now.e These values
-  // will never be used Until we wire up dropout
-  int64_t rng_seed = *rng_seed_tensor.data_ptr<int64_t>();
-  int64_t rng_offset = *rng_offset_tensor.data_ptr<int64_t>();
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
@@ -192,8 +188,6 @@ _efficient_attention_backward(
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
-  const bool bias_requires_grad = bias.has_value() && bias->requires_grad();
-
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   grad_q = at::empty(query.sizes(), query.options());
   grad_k = at::empty(key.sizes(), key.options());
@@ -211,7 +205,22 @@ _efficient_attention_backward(
   at::Tensor workspace;
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-  at::PhiloxCudaState rng_engine_inputs(rng_seed, rng_offset);
+
+  // See Note [Seed and Offset Device]
+  at::PhiloxCudaState rng_engine_inputs;
+  if (use_dropout) {
+    if (at::cuda::currentStreamCaptureStatus() ==
+        at::cuda::CaptureStatus::None) {
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
+    } else { // dropout + capture
+      rng_engine_inputs = at::PhiloxCudaState(
+          philox_seed.data_ptr<int64_t>(),
+          philox_offset.data_ptr<int64_t>(),
+          0);
+    }
+  }
 
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
   const int computeCapability = p->major * 10 + p->minor;
@@ -334,7 +343,13 @@ _efficient_attention_backward(
 
       // assign strides for bias, viewed as:
       // (batch_sz, n_heads, n_queries, n_keys)
-      const at::Tensor bias_4d_view = get_bias_4d_view(*bias, B, nH, M, N);
+      // We make sure to expand prior to calling the kernel
+      const at::Tensor& bias_4d_view = *bias;
+      TORCH_CHECK(bias_4d_view.dim()==4);
+      TORCH_CHECK(bias_4d_view.size(0)==B);
+      TORCH_CHECK(bias_4d_view.size(1)==nH);
+      TORCH_CHECK(bias_4d_view.size(2)==M);
+      TORCH_CHECK(bias_4d_view.size(3)==N);
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
@@ -349,8 +364,14 @@ _efficient_attention_backward(
         // different values of Q will point to the same memory
         // locations, meaning bias.stride(1) == 0, while we'd want
         // grad_bias.stride(1) == nK
-        const at::Tensor grad_bias_4d_view =
-            get_bias_4d_view(grad_bias, B, nH, M, N);
+        // We have expanded the input prior to calling the forward kernel
+        const at::Tensor& grad_bias_4d_view = grad_bias;
+        TORCH_CHECK(grad_bias_4d_view.dim()==4);
+        TORCH_CHECK(grad_bias_4d_view.size(0)==B);
+        TORCH_CHECK(grad_bias_4d_view.size(1)==nH);
+        TORCH_CHECK(grad_bias_4d_view.size(2)==M);
+        TORCH_CHECK(grad_bias_4d_view.size(3)==N);
+
         ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias_4d_view.stride(0));
         ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias_4d_view.stride(1));
         ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias_4d_view.stride(2));
@@ -484,7 +505,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-
   int64_t Nnz_q{batch_size * max_seqlen_batch_q};
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 
@@ -521,18 +541,24 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
+    const at::Tensor& attn_bias,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    double dropout_p,
+    std::array<bool, 4> grad_input_mask,
     bool causal,
-    bool chunk_grad_outputs,
-    c10::optional<double> scale){
+    c10::optional<double> scale) {
+
   if (!grad_out_.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out = grad_out_.transpose(1, 2);
   auto out_t = out.transpose(1, 2);
@@ -542,30 +568,28 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // TODO_DRISS
-  // These are place holders unitl we add support for dropout and bias
-  auto bias = c10::nullopt;
-  Tensor seed_t = at::empty({}, at::dtype(at::kLong));
-  Tensor offset_t = at::empty({}, at::dtype(at::kLong));
-
+  // This is needed because SaveVarible automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> kernel_bias;
+  if (attn_bias.defined()) {
+    kernel_bias = attn_bias;
+  }
   // Will add with signauter changes for dropout and bias
   // We are only handiling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);
-  double dropout_p = 0.0;
 
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-
   std::tie(grad_q, grad_k, grad_v, grad_bias) =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
           k_t,
           v_t,
-          bias,
+          kernel_bias,
           out_t,
           c10::nullopt,
           c10::nullopt,
@@ -573,13 +597,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
           max_seqlen_k,
           logsumexp,
           dropout_p,
-          seed_t,
-          offset_t,
+          philox_seed,
+          philox_offset,
           static_cast<int64_t>(custom_mask_type),
+          grad_input_mask[3],
           scale,
           c10::nullopt);  // num_split_keys
   return std::make_tuple(
-      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }
 
 } // namespace native
