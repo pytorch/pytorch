@@ -39,7 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -50,7 +50,6 @@ from .utils import (
     dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
-    HAS_NUMPY,
     is_guard_failure_reporting_enabled,
     istype,
     np,
@@ -86,6 +85,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
+        ("__as_tensor", torch.as_tensor),
     ]
 )
 
@@ -266,6 +266,11 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
 
+    def DATA_PTR_MATCH(self, guard: Guard):
+        obj = self.get(guard.name)
+        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
+        self._produce_guard_code(guard, [code])
+
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
         assert m, f"invalid hasattr check {guard.name}"
@@ -285,21 +290,17 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         np_types = (
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-                np.float16,
-                np.float32,
-                np.float64,
-            )
-            if HAS_NUMPY
-            else ()
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+            np.float16,
+            np.float32,
+            np.float64,
         )
         ok_types = (
             int,
@@ -574,12 +575,16 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard):
+    def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            value = self.get(guard.name)
+            if isinstance(value, TensorWeakRef):
+                value = value()
+
+            value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
+
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
@@ -607,15 +612,18 @@ class GuardBuilder(GuardBuilderBase):
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
-                    "device.type",
-                    "device.index",
+                    "device",
                     "requires_grad",
                     "ndimension()",
                 ]
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
-                    code.append(f"{tensor_name}.{term} == {real_value}")
+                    if istype(real_value, (torch.device, torch.dtype)):
+                        # copy pasted from EQUALS_MATCH
+                        code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
+                    else:
+                        code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)

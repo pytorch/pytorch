@@ -9,13 +9,7 @@ import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 # All public APIs from dtensor package
 __all__ = [
@@ -40,7 +34,7 @@ def _dtensor_init_helper(
     kwargs["device"] = device_mesh.device_type
 
     # set default placements to replicated if not specified
-    placements = placements or [Replicate() for _ in range(device_mesh.ndim)]
+    placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
 
     # check device_mesh againts placements
     assert device_mesh.ndim == len(
@@ -62,10 +56,12 @@ def _dtensor_init_helper(
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
         requires_grad = kwargs.get("requires_grad", False)
+
+        from torch.distributed._tensor.placement_types import DTensorSpec
+        from torch.fx.passes.shape_prop import TensorMetadata
+
         tensor_meta = TensorMetadata(size, dtype, requires_grad, (0,), None, False, {})
-        spec = DTensorSpec(
-            device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
-        )
+        spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         # TODO: we need to unify the initialization of tracker at multiple places
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
             random._rng_tracker = random.OffsetBasedRNGTracker()
@@ -79,7 +75,7 @@ def _dtensor_init_helper(
     return DTensor(
         local_tensor=local_tensor,
         device_mesh=device_mesh,
-        placements=placements,
+        placements=tuple(placements),
         shape=size,
         dtype=local_tensor.dtype,
         stride=torch_stride,
