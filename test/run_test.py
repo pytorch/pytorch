@@ -983,6 +983,7 @@ def get_pytest_args(
     pytest_args = [
         "-vv",
         "-rfEX",
+        "-s",
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python

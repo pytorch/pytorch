@@ -1924,7 +1924,7 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
     return test_name
 
 
-def check_if_enable(test: unittest.TestCase):
+def new_check_if_enable(test: unittest.TestCase):
     classname = str(test.__class__).split("'")[1].split(".")[-1]
     sanitized_testname = remove_device_and_dtype_suffixes(test._testMethodName)
 
@@ -1984,6 +1984,65 @@ def check_if_enable(test: unittest.TestCase):
                         "If you're seeing this on your local machine and would like to enable this test, " \
                         "please make sure CI is not set and you are not using the flag --import-disabled-tests."
                     break
+
+
+def check_if_enable(test: unittest.TestCase):
+    test_suite = str(test.__class__).split('\'')[1]
+    raw_test_name = f'{test._testMethodName} ({test_suite})'
+    if raw_test_name in slow_tests_dict:
+        getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        if not TEST_WITH_SLOW:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
+    if not IS_SANDCASTLE:
+        should_skip = False
+        skip_msg = ""
+
+        for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
+            disable_test_parts = disabled_test.split()
+            if len(disable_test_parts) > 1:
+                disabled_test_name = disable_test_parts[0]
+                disabled_test_suite = disable_test_parts[1][1:-1]
+                # if test method name or its sanitized version exactly matches the disabled test method name
+                # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU)
+                if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
+                   and disabled_test_suite in test_suite:
+                    platform_to_conditional: Dict = {
+                        "mac": IS_MACOS,
+                        "macos": IS_MACOS,
+                        "win": IS_WINDOWS,
+                        "windows": IS_WINDOWS,
+                        "linux": IS_LINUX,
+                        "rocm": TEST_WITH_ROCM,
+                        "asan": TEST_WITH_ASAN,
+                        "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
+                        "slow": TEST_WITH_SLOW,
+                    }
+
+                    invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
+                    if len(invalid_platforms) > 0:
+                        invalid_plats_str = ", ".join(invalid_platforms)
+                        valid_plats = ", ".join(platform_to_conditional.keys())
+
+                        print(f"Test {disabled_test} is disabled for some unrecognized ",
+                              f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
+                              "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                              f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
+
+                        # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
+                        platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
+
+                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
+                        should_skip = True
+                        skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                            f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                            "If you're seeing this on your local machine and would like to enable this test, " \
+                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
+                        break
+
+        if new_check_if_enable(test) != should_skip:
+            print("AAAHHH does not match")
 
         if should_skip and not RERUN_DISABLED_TESTS:
             # Skip the disabled test when not running under --rerun-disabled-tests verification mode
