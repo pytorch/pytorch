@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -711,6 +712,116 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cuda(self, mat2, result);
+}
+
+// Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
+// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
+// If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only works if matrices sizes are divisible by 32
+std::tuple<Tensor&, Tensor&>
+_scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
+          const c10::optional<at::Tensor>& bias,
+          c10::optional<c10::ScalarType> out_dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result,
+          Tensor& out, Tensor& amax) {
+  // Check sizes
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  TORCH_CHECK(!scale_a || (scale_a->numel() == 1 && scale_a->scalar_type() == kFloat),
+       "scale_a must be float scalar");
+  TORCH_CHECK(!scale_b || (scale_b->numel() == 1 && scale_b->scalar_type() == kFloat),
+       "scale_b must be a float scalar");
+  TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+       "scale_result must be a float scalar");
+  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
+       " but got ", bias->numel());
+  TORCH_CHECK(mat1.sizes()[0] % 16 == 0 && mat1.sizes()[1] % 16 == 0, "mat1 shape (", mat1.sizes()[0], "x",
+       mat1.sizes()[1], " must be divisible by 16");
+  TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
+       mat2.sizes()[1], " must be divisible by 16");
+  // Check types
+  TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
+  TORCH_CHECK(amax.scalar_type() == kFloat, "amax must be a float scalar");
+  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat1.scalar_type());
+  // Type restrictions imposed by CuBLASLt as of CUDA-12.1
+  TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
+        "Multiplication of two Float8_e5m2 matrices is not supported");
+  if (bias) {
+    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
+         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
+    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
+          bias->scalar_type() == ScalarType::BFloat16,
+          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
+          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+  }
+  {
+    auto bias_ = bias.value_or(Tensor());
+    auto scale_a_ = scale_a.value_or(Tensor());
+    auto scale_b_ = scale_b.value_or(Tensor());
+    auto scale_result_ = scale_result.value_or(Tensor());
+    TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3},
+                      {bias_, "bias", 4}, {scale_a_, "scale_a", 5}, {scale_b_, "scale_b", 6},
+                      {scale_result_, "scale_result", 7}};
+    checkAllSameGPU(__func__, targs);
+  }
+
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+  at::native::resize_output(amax, {});
+
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
+  cublasCommonArgs args(mat1, mat2, out);
+  const auto out_dtype_ = args.result->scalar_type();
+  TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  at::cuda::blas::scaled_gemm(
+      args.transa,
+      args.transb,
+      args.m,
+      args.n,
+      args.k,
+      args.mata->data_ptr(),
+      scale_a ? scale_a->data_ptr() : nullptr,
+      args.lda,
+      args.mata->scalar_type(),
+      args.matb->data_ptr(),
+      scale_b ? scale_b->data_ptr() : nullptr,
+      args.ldb,
+      args.matb->scalar_type(),
+      bias ? bias->data_ptr(): nullptr,
+      bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
+      args.result->data_ptr(),
+      scale_result ? scale_result->data_ptr() : nullptr,
+      args.result_ld,
+      out_dtype_,
+      amax.data_ptr());
+#else
+  TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
+#endif
+
+  return {out, amax};
+}
+
+std::tuple<Tensor, Tensor>
+_scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+          const c10::optional<at::Tensor>& bias,
+          c10::optional<c10::ScalarType> out_dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result) {
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
+  Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, out ,amax);
 }
 
 } // namespace at::native

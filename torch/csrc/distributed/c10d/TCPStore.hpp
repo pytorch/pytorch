@@ -79,15 +79,15 @@ class TORCH_API TCPStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
-  void append(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
 
-  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
 
   void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values) override;
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
 

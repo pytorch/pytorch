@@ -19,12 +19,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  parallelnative-linux-focal-py3_8-gcc7-build:
-    name: parallelnative-linux-focal-py3.8-gcc7
+  parallelnative-linux-jammy-py3_8-gcc11-build:
+    name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: parallelnative-linux-focal-py3.8-gcc7
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      build-environment: parallelnative-linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -32,21 +32,21 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
 
-  parallelnative-linux-focal-py3_8-gcc7-test:
-    name: parallelnative-linux-focal-py3.8-gcc7
+  parallelnative-linux-jammy-py3_8-gcc11-test:
+    name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-focal-py3_8-gcc7-build
+    needs: parallelnative-linux-jammy-py3_8-gcc11-build
     with:
-      build-environment: parallelnative-linux-focal-py3.8-gcc7
-      docker-image: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.test-matrix }}
+      build-environment: parallelnative-linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_8-py3_9-gcc7-build:
-    name: linux-bionic-cuda11.8-py3.9-gcc7
+  linux-focal-cuda11_8-py3_9-gcc9-build:
+    name: linux-focal-cuda11.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda11.8-py3.9-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -54,21 +54,21 @@ jobs:
         ]}
       build-with-debug: false
 
-  linux-bionic-cuda11_8-py3_9-gcc7-test:
-    name: linux-bionic-cuda11.8-py3.9-gcc7
+  linux-focal-cuda11_8-py3_9-gcc9-test:
+    name: linux-focal-cuda11.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_9-gcc7-build
+    needs: linux-focal-cuda11_8-py3_9-gcc9-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda11.8-py3.9-gcc9
+      docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-debug-build:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-debug
+  linux-focal-cuda11_8-py3_10-gcc9-debug-build:
+    name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-debug
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -79,14 +79,14 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-debug-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-debug
+  linux-focal-cuda11_8-py3_10-gcc9-debug-test:
+    name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-debug-build
+    needs: linux-focal-cuda11_8-py3_10-gcc9-debug-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-debug
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
+      docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.test-matrix }}
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
@@ -183,25 +183,25 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-20.04-16x" },
         ]}
 
-  linux-vulkan-bionic-py3_11-clang9-build:
-    name: linux-vulkan-bionic-py3.11-clang9
+  linux-vulkan-focal-py3_11-clang10-build:
+    name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-vulkan-bionic-py3.11-clang9
-      docker-image-name: pytorch-linux-bionic-py3.11-clang9
+      build-environment: linux-vulkan-focal-py3.11-clang10
+      docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-vulkan-bionic-py3_11-clang9-test:
-    name: linux-vulkan-bionic-py3.11-clang9
+  linux-vulkan-focal-py3_11-clang10-test:
+    name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-vulkan-bionic-py3_11-clang9-build
+    needs: linux-vulkan-focal-py3_11-clang10-build
     with:
-      build-environment: linux-vulkan-bionic-py3.11-clang9
-      docker-image: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.test-matrix }}
+      build-environment: linux-vulkan-focal-py3.11-clang10
+      docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.test-matrix }}
 
   linux-focal-rocm5_6-py3_8-build:
     name: linux-focal-rocm5.6-py3.8
