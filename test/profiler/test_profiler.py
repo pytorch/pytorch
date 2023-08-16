@@ -1742,6 +1742,33 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertTrue(any(e.name == "add_test_fast_rf_2" for e in p.events()))
         self.assertTrue(any(e.name == "add_test_fast_rf_3" for e in p.events()))
 
+    def test_is_profiler_enabled(self):
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with torch.autograd.profiler.profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+    def test_guarded_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+
+        with profile() as p:
+            cm = torch._C._profiler_manual._RecordFunctionFast("guarded_rff")
+            for _ in range(4):
+                if torch.autograd.profiler._is_profiler_enabled:
+                    with cm:
+                        x.add(y)
+                else:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
+
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):

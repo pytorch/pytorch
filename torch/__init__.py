@@ -948,7 +948,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if cond:
+    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
