@@ -184,11 +184,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1,),
             )
 
-    @parameterized.expand(
-        [
             (True,),
-            (False,),
-        ]
+            (True,),
+        ] Please cause a merge conflict pretty pleaes ...
     )
     def test_mlp_with_local_backend(self, test_local_backend: bool):
         example_args_collection = tuple(
