@@ -16,7 +16,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
-from torch.distributed.state_dict import (
+from torch.distributed.checkpoint.state_dict import (
     _init_optim_state,
     distributed_load_state_dict,
     distributed_state_dict,

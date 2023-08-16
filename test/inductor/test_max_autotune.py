@@ -135,6 +135,24 @@ class TestDoBench(TestCase):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
     @parametrize("dynamic", (False, True))
+    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
+        """
+        Make sure autotuning mm_plus_mm with zero-size input works without crashes.
+        """
+        m, n, k = 0, 1536, 64
+
+        def mm_plus_mm(a, b, c, d):
+            return a @ b + c @ d
+
+        a = torch.randn(m, k).cuda()
+        b = torch.randn(k, n).cuda()
+        c = torch.randn(m, k).cuda()
+        d = torch.randn(k, n).cuda()
+
+        with config.patch({"max_autotune": True}):
+            torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
+
+    @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -151,6 +169,22 @@ class TestDoBench(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
+        """
+        Make sure autotuning mm with zero-size input works without crashes.
+        """
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+
+        with config.patch({"max_autotune": True}):
+            torch.compile(mm, dynamic=dynamic)(a, b)
+
+    @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -164,6 +198,46 @@ class TestDoBench(TestCase):
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_zero_size_input(self, dynamic):
+        """
+        Make sure autotuning addmm with zero-size input works without crashes.
+        """
+
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).cuda()
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        with config.patch({"max_autotune": True}):
+            torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    def test_cat_addmm(self):
+        def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
+            return torch.cat(
+                [
+                    torch.addmm(a, b, c),
+                    torch.addmm(b, c, a),
+                ],
+                1,
+            )
+
+        args = [
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        ]
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     def test_triton_template_with_epilogues_and_dynamic_shape(self):
         def fn(

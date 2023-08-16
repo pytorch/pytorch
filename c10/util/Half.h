@@ -428,10 +428,9 @@ struct alignas(4) complex<Half> {
 // The overflow checks may involve float to int conversion which may
 // trigger precision loss warning. Re-enable the warning once the code
 // is fixed. See T58053069.
-#ifdef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 
 // bool can be converted to any type.
@@ -475,9 +474,7 @@ overflows(From f) {
   return f < limit::lowest() || f > limit::max();
 }
 
-#ifdef __clang__
-#pragma GCC diagnostic pop
-#endif
+C10_CLANG_DIAGNOSTIC_POP()
 
 #ifdef _MSC_VER
 #pragma warning(pop)
