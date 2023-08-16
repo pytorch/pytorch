@@ -1017,7 +1017,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   py::tuple args = py::cast(args_vec);
 
   // Handle __torch_function__ dispatch
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto& arg : args) {
     is_tensor_and_append_overloaded(arg.ptr(), &overloaded_args);
