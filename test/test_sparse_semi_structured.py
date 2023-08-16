@@ -306,7 +306,7 @@ class TestSparseSemiStructured(TestCase):
             A_sparse = to_sparse_semi_structured(A)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize("backend", ["cutlass"])
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_linear_cutlass(self, device, dtype, backend):
         if dtype is not torch.float32:
@@ -353,7 +353,7 @@ class TestSparseSemiStructured(TestCase):
                 run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize("backend", ["cutlass"])
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype, backend):
         if dtype is not torch.float32:
@@ -383,7 +383,7 @@ class TestSparseSemiStructured(TestCase):
                 run_test(r, c, device, dtype)
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize("backend", ["cutlass"])
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions_all_patterns(self, device, dtype, backend):
         if dtype is not torch.float32:
