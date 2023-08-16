@@ -776,6 +776,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+    @pytorch_test_common.xfail(
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
+        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
+        "https://github.com/huggingface/transformers/issues/21013"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
@@ -966,6 +971,11 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
+    @pytorch_test_common.xfail(
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
+        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
+        "https://github.com/huggingface/transformers/issues/21013"
+    )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 

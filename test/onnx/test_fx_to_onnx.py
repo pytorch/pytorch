@@ -471,24 +471,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     # TODO: From Config/Model
-    @pytorch_test_common.skip_in_ci(
-        "SymFloat in OnnxFUnction attribute is not supported yet."
-    )
-    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
-        model_name = "databricks/dolly-v2-3b"
-        with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = transformers.AutoModel.from_pretrained(model_name)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
-                model, **inputs, export_options=export_options
-            )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
-
-    # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_google_flan_t5_small(self):
         model_name = "google/flan-t5-small"
         with torch.onnx.enable_fake_mode() as fake_context:
@@ -538,9 +520,29 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
+    # TODO: From Config/Model
+    @pytorch_test_common.skip_in_ci(
+        "Skip this test in CI because of memory issue."
+        "SymFloat in OnnxFUnction attribute is not supported yet."
+    )
+    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
+        model_name = "databricks/dolly-v2-3b"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+            model = transformers.AutoModel.from_pretrained(model_name)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, **inputs, export_options=export_options
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
     @pytorch_test_common.skip_in_ci(
         "AssertionError: Mutating module attribute seq_len_cached during export."
         "self.seq_len_cached = seq_len"
+        "Skip this test in CI because of memory issue."
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
         config = transformers.FalconConfig()
@@ -562,7 +564,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     @pytorch_test_common.skip_in_ci(
-        "transformers==4.25.1 needs flash-attn, which consumes CUDA."
+        "Skip this test in CI because of memory issue."
+        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment. "
+        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow"
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
         model_name = "mosaicml/mpt-7b"
