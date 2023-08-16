@@ -302,7 +302,7 @@ def _multi_tensor_rprop(
         # to keep referring to the buffer as grouped_grads.
         torch._foreach_copy_(grouped_prevs, grouped_grads)
         if maximize:
-            torch._foreach_neg_(grouped_prevs)            
+            torch._foreach_neg_(grouped_prevs)
         grouped_grads = grouped_prevs
 
         torch._foreach_sign_(signs)
