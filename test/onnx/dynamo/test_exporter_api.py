@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 import io
-import logging
 import os
 
 import onnx
@@ -31,7 +30,7 @@ class TestExportOptionsAPI(common_utils.TestCase):
         with self.assertRaises(expected_exception_type):
             ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
-            ExportOptions(logger="DEBUG")  # type: ignore[arg-type]
+            ExportOptions(diagnostic_options="DEBUG")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
@@ -47,15 +46,6 @@ class TestExportOptionsAPI(common_utils.TestCase):
         options = ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
         self.assertFalse(options.dynamic_shapes)
 
-    def test_logger_default(self):
-        options = ResolvedExportOptions(None)
-        self.assertEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
-    def test_logger_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
-        self.assertEqual(options.logger, logging.getLogger())
-        self.assertNotEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
 
 class TestDynamoExportAPI(common_utils.TestCase):
     def test_default_export(self):
@@ -69,7 +59,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 SampleModel(),
                 torch.randn(1, 1, 2),
                 export_options=ExportOptions(
-                    logger=logging.getLogger(),
                     dynamic_shapes=True,
                 ),
             ),
@@ -122,10 +111,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 self.assertEqual(fp.read(), expected_buffer)
 
     def test_save_sarif_log_to_file_with_successful_export(self):
-        with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(
-                path
-            )
+        with common_utils.TemporaryFileName(suffix=".sarif") as path:
+            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save_diagnostics(path)
             self.assertTrue(os.path.exists(path))
 
     def test_save_sarif_log_to_file_with_failed_export(self):
@@ -136,6 +123,43 @@ class TestDynamoExportAPI(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
         self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+
+    def test_export_output_accessible_from_exception_when_export_failed(self):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        self.assertIsInstance(cm.exception, torch.onnx.OnnxExporterError)
+        self.assertIsInstance(cm.exception.export_output, ExportOutput)
+
+    def test_access_export_output_model_proto_raises_when_export_output_is_emitted_from_failed_export(
+        self,
+    ):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        export_output = cm.exception.export_output
+        with self.assertRaises(RuntimeError):
+            export_output.model_proto
+
+    def test_raise_from_diagnostic_warning_when_diagnostic_option_warning_as_error_is_true(
+        self,
+    ):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
+            dynamo_export(
+                SampleModel(),
+                torch.randn(1, 1, 2),
+                export_options=ExportOptions(
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        warnings_as_errors=True
+                    )
+                ),
+            )
 
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
