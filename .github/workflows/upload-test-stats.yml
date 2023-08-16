@@ -10,6 +10,7 @@ jobs:
   # the conclusion field in the github context is sometimes null
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
+    environment: test-stats
     runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
@@ -23,6 +24,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-test-stats:
+    environment: test-stats
     needs: get_workflow_conclusion
     if:
       github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
@@ -84,6 +86,7 @@ jobs:
           python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
   check-api-rate:
+    environment: test-stats
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
     continue-on-error: true
