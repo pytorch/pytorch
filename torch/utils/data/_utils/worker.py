@@ -224,14 +224,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         torch.set_num_threads(1)
 
         # See NOTE [RNG re-seeding in Dataloader workers]
-        non_default_cpu_generators = {
-            o for o in gc.get_objects()
-            if isinstance(o, torch.Generator) and
-            o is not torch.random.default_generator and
-            # We can't handle CUDA generators as the CUDA context may not be initialized.
-            o.device.type == "cpu"
-        }
-        for g in non_default_cpu_generators:
+        for g in _non_default_cpu_generators():
             g.manual_seed(_generate_seed(generator=g) + worker_id)
 
         seed = base_seed + worker_id
@@ -342,5 +335,16 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         data_queue.cancel_join_thread()
         data_queue.close()
 
+
 def _generate_seed(generator):
     return torch.empty((), dtype=torch.int64, device="cpu").random_(generator=generator).item()
+
+
+def _non_default_cpu_generators():
+    return {
+        o for o in gc.get_objects()
+        if isinstance(o, torch.Generator) and
+        o is not torch.random.default_generator and
+        # We can't handle CUDA generators as the CUDA context may not be initialized.
+        o.device.type == "cpu"
+    }

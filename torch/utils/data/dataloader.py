@@ -614,14 +614,7 @@ class _BaseDataLoaderIter:
         # a Generator -> base_seed mapping, and that is really difficult to do (a simple dict would fail because Generators
         # can't be pickled, and other solutions get very complex very fast).
         self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
-        non_default_cpu_generators = {
-            o for o in gc.get_objects()
-            if isinstance(o, torch.Generator) and
-            o is not torch.random.default_generator and
-            # We can't handle CUDA generators as the CUDA context may not be initialized.
-            o.device.type == "cpu"
-        }
-        for g in non_default_cpu_generators:
+        for g in _utils.worker._non_default_cpu_generators():
             # We just consume the RNG here. This is to ensure different RNGs for consecutive epochs.
             # The base seed for those generators will be generated with _worker_loop().
             _utils.worker._generate_seed(generator=g)
