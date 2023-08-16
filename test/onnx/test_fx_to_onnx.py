@@ -561,10 +561,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    @pytorch_test_common.xfail(
-        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment."
-        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow."
-        "if attention_mask is not None and attention_mask[:, 0].sum() != attention_mask.shape[0] and self.training:"
+    @pytorch_test_common.skip_in_ci(
+        "transformers==4.25.1 needs flash-attn, which consumes CUDA."
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
         model_name = "mosaicml/mpt-7b"
