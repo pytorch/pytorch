@@ -1,4 +1,5 @@
 name,accuracy,graph_breaks
+torchrec_dlrm,pass,8
 BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
@@ -8,19 +9,20 @@ basic_gnn_edgecnn,pass,23
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
+clip,pass,8
 dcgan,pass,8
+dlrm,pass,8
 drq,pass,7
-fastNLP_Bert,pass,13
+fastNLP_Bert,pass,12
 functorch_dp_cifar10,pass,8
 functorch_maml_omniglot,pass,8
 hf_Albert,pass,7
 hf_Bart,pass,7
-hf_Bert,pass,7
-hf_Bert_large,pass,7
 hf_DistilBert,pass,7
 hf_GPT2,pass,7
-hf_Reformer,pass,64
+hf_Reformer,pass,27
 hf_T5_large,pass_due_to_skip,0
+hf_Whisper,pass,7
 lennard_jones,pass,8
 maml_omniglot,pass,8
 mnasnet1_0,pass,8
@@ -40,6 +42,7 @@ shufflenet_v2_x1_0,pass,8
 soft_actor_critic,pass,7
 speech_transformer,pass,18
 squeezenet1_1,pass,8
+stable_diffusion,pass,7
 timm_efficientnet,pass,8
 timm_regnet,pass,8
 timm_resnest,pass,8
@@ -48,5 +51,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,8
 tts_angular,pass,10
 vgg16,pass,8
-vision_maskrcnn,fail_accuracy,56
-yolov3,pass,11
+vision_maskrcnn,fail_accuracy,40
+yolov3,pass,10

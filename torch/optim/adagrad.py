@@ -23,19 +23,17 @@ class Adagrad(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= lr_decay:
-            raise ValueError("Invalid lr_decay value: {}".format(lr_decay))
+            raise ValueError(f"Invalid lr_decay value: {lr_decay}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= initial_accumulator_value:
             raise ValueError(
-                "Invalid initial_accumulator_value value: {}".format(
-                    initial_accumulator_value
-                )
+                f"Invalid initial_accumulator_value value: {initial_accumulator_value}"
             )
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
 
         defaults = dict(
             lr=lr,
@@ -162,7 +160,7 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
 
     For further details regarding the algorithm we refer to `Adaptive Subgradient Methods for Online Learning
     and Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -171,14 +169,14 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adagrad(
@@ -323,9 +321,6 @@ def _multi_tensor_adagrad(
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
 
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 
         if device_has_sparse_grad:
@@ -343,27 +338,38 @@ def _multi_tensor_adagrad(
                 differentiable=differentiable,
             )
 
-        # Update steps
-        torch._foreach_add_(device_state_steps, 1)
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
-        if weight_decay != 0:
-            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
-
-        minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in device_state_steps]
-
+        # Handle complex parameters
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_state_sums = [
             torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
         ]
+        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+
+        # Update steps
+        torch._foreach_add_(device_state_steps, 1)
+
+        if weight_decay != 0:
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+
+        minus_clr = [-lr / (1 + (_get_value(step) - 1) * lr_decay) for step in device_state_steps]
+
         torch._foreach_addcmul_(device_state_sums, device_grads, device_grads, value=1)
-        std = torch._foreach_add(torch._foreach_sqrt(device_state_sums), eps)
-        toAdd = torch._foreach_div(torch._foreach_mul(device_grads, minus_clr), std)
-        toAdd = [
-            torch.view_as_complex(x) if torch.is_complex(device_params[i]) else x
-            for i, x in enumerate(toAdd)
-        ]
-        torch._foreach_add_(device_params, toAdd)
-        device_state_sums = [
-            torch.view_as_complex(x) if torch.is_complex(device_params[i]) else x
-            for i, x in enumerate(device_state_sums)
-        ]
+
+        std = torch._foreach_sqrt(device_state_sums)
+        torch._foreach_add_(std, eps)
+
+        if weight_decay != 0 or maximize:
+            # Again, re-use the intermediate memory (device_grads) already allocated
+            torch._foreach_mul_(device_grads, minus_clr)
+            numerator = device_grads
+        else:
+            numerator = torch._foreach_mul(device_grads, minus_clr)
+
+        torch._foreach_addcdiv_(device_params, numerator, std)
