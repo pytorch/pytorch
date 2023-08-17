@@ -137,7 +137,7 @@ class PyProcessGroup : public ProcessGroup {
   }
 };
 
-class TORCH_API PythonOnCompletionHook {
+class TORCH_PYTHON_API PythonOnCompletionHook {
  public:
   // Wraps a py::object hook and acquires Python GIL in dtor before
   // destructing the hook object.

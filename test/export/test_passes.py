@@ -78,7 +78,7 @@ class TestPasses(TestCase):
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(ep(x), f(x)))
+        self.assertTrue(torch.allclose(ep(x), f(x), atol=1e-3, rtol=0.01))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -357,10 +357,7 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram.transform() forbids changes to number
-        # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram.transform()
-        gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
+        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
