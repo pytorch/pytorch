@@ -220,6 +220,9 @@ class BaseSchedulerNode:
     def get_nodes(self) -> List["BaseSchedulerNode"]:
         return [self]
 
+    def get_node_indices(self) -> List[int]:
+        return [node.node_idx for node in self.get_nodes()]
+
     def get_device(self):
         return self.node.get_device()
 
@@ -881,9 +884,10 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        # do this before creating foreach nodes or fusion
+        self.compute_buffer_users()
         self.create_foreach_nodes()
         self.topological_sort_schedule()
-        self.compute_buffer_users()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)

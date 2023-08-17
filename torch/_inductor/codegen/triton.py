@@ -2272,14 +2272,24 @@ class TritonScheduling:
             wrapper.writeline(origins)
 
         if config.debug_fusion:
-            from torch._inductor.scheduler import BaseSchedulerNode
-
-            node_ids = [
-                n.node_idx for n in node_schedule if isinstance(n, BaseSchedulerNode)
-            ]
-            wrapper.writeline(
-                f"{wrapper.comment} Fused node idx list: {', '.join(map(str, node_ids))}"
+            from torch._inductor.scheduler import (
+                BaseSchedulerNode,
+                ForeachKernelSchedulerNode,
             )
+
+            if not any(
+                isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
+            ):
+                # We probablly should look what are the nodes inside a foreach
+                # schedule node
+                node_ids = [
+                    n.node_idx
+                    for n in node_schedule
+                    if isinstance(n, BaseSchedulerNode)
+                ]
+                wrapper.writeline(
+                    f"{wrapper.comment} Fused node idx list: {', '.join(map(str, node_ids))}"
+                )
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
@@ -2292,7 +2302,6 @@ class TritonScheduling:
             mutations=mutations,
             index_dtype=index_dtype,
         )
-        kernel.node_schedule = node_schedule
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
@@ -2331,6 +2340,7 @@ class TritonScheduling:
             return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
 
         with kernel:
+            kernel.node_schedule = node_schedule
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
             for node in node_schedule:
@@ -2393,6 +2403,7 @@ class TritonScheduling:
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
+        kernel.node_schedule = [template_node, *epilogue_nodes]
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
