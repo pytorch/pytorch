@@ -383,6 +383,13 @@ class TestTryMerge(TestCase):
             all(conclusions[name].status == "SUCCESS" for name in lint_checks)
         )
 
+    def test_get_review_comment_by_id(self, *args: Any) -> None:
+        """Tests that even if the comment requested was actually a review instead of a simple comment, we can still find it"""
+        pr = GitHubPR("pytorch", "pytorch", 107070)
+        review_comment_id = 1582767635
+        comment = pr.get_comment_by_id(review_comment_id)
+        self.assertIsNotNone(comment)
+
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(True, False))
     @mock.patch("trymerge.try_revert", side_effect=mock_revert)
