@@ -533,6 +533,11 @@ class MetaConverter:
                 # the to conversion isn't really right anyhow.
 
                 if torch._is_functional_tensor(t) and t.device.type != "lazy":
+                    if t._is_view():
+                        raise RuntimeError(
+                            "Cannot safely fakify a view because this process drops the view information right now."
+                        )
+
                     st = peek_interpreter_stack()
                     assert (
                         st is None or st.key() == TransformType.Functionalize
