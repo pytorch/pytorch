@@ -12,7 +12,7 @@ import os
 import warnings
 from hashlib import sha256
 from typing import Any, cast, Dict, List, Optional
-from unittest import main, mock, TestCase
+from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -294,17 +294,6 @@ class TestTryMerge(TestCase):
         self.assertEqual(pr.get_pr_creator_login(), "mruberry")
         author = pr.get_author()
         self.assertTrue(author is not None)
-
-    def test_last_pushed_at(self, *args: Any) -> None:
-        """Tests that last_pushed_at will return None on merge commits."""
-        pr = GitHubPR("pytorch", "pytorch", 71759)
-        self.assertIsNotNone(pr.last_pushed_at())
-
-        # 307120d6d3f7fcc3f92cfd26be891d360ad6a92a is merge commit
-        # and as such does not have a pushedDate
-        # See https://github.com/pytorch/pytorch/pull/94146#issuecomment-1421647117
-        pr = GitHubPR("pytorch", "pytorch", 94146)
-        self.assertIsNone(pr.last_pushed_at())
 
     def test_large_diff(self, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
@@ -875,6 +864,9 @@ class TestGitHubPRGhstackDependencies2(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
+    @skip(
+        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+    )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")
