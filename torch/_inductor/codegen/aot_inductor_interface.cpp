@@ -1,6 +1,5 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
-#include <torch/script.h>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -144,33 +143,6 @@ AOTInductorError AOTInductorModelContainerGetMaxOutputShape(
     *output_shape =
         AOTInductorParamShape(max_output_shape.data(), max_output_shape.size());
   })
-}
-
-AOTInductorError AOTInductorModelContainerSetConstants(
-  std::map<std::string, at::Tensor>& constantTensors) {
-
-    std::string currentFilePath = __FILE__;
-
-    // Get the constants file (current path + file name + "_constants.pt")
-    std::string constantsFilePath = currentFilePath;
-    size_t pos = constantsFilePath.find_last_of(".");
-    if (pos != std::string::npos) {
-      constantsFilePath = constantsFilePath.substr(0, pos);
-    }
-    constantsFilePath += "_constants.pt";
-
-    // Load the list of constant tensors from the constants file
-    CONVERT_EXCEPTION_TO_ERROR_CODE({
-      auto module = torch::jit::load(constantsFilePath);
-      if (module.hasattr("state_dict")) {
-        for (const auto& item : module.attr("state_dict").toGenericDict()) {
-          auto& key = item.key();
-          auto& val = item.value();
-
-          constantTensors[key.toStringRef()] = val.toTensor();
-        }
-      }
-    })
 }
 
 } // extern "C"

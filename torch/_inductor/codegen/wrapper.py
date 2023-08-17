@@ -1004,7 +1004,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
                     self.prefix.writeline(
-                        f"""at::Tensor {constants_key} = constants_info_["{constants_key}"];"""
+                        f"""at::Tensor {constants_key} = constants_->at("{constants_key}");"""
                     )
                 else:
                     constants_idx = inputs_len + idx
@@ -1041,14 +1041,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         num_inputs = len(V.graph.graph_inputs)
         num_outputs = len(V.graph.graph_outputs)
+        num_constants = len(V.graph.constants)
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel()
-                : AOTInductorModelBase({num_inputs}, {num_outputs}) {{
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map)
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}) {{
             """
         )
 
         with self.prefix.indent():
+            from .cpp import DTYPE_TO_ATEN
+
             for idx, name in enumerate(V.graph.graph_inputs.keys()):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
@@ -1064,6 +1067,44 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f"inputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
 
+            if V.graph.aot_mode:
+                curr_offset = 0
+                for idx, (name, tensor) in enumerate(V.graph.constants.items()):
+                    assert isinstance(tensor, torch.Tensor)
+                    self.prefix.writeline(
+                        f"""constants_info_[{idx}].name = "{name}";"""
+                    )
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].dtype = {DTYPE_TO_ATEN[tensor.dtype]};"
+                    )
+                    tensor = tensor.contiguous()
+                    data_size = tensor.nelement() * tensor.element_size()
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].offset = {curr_offset};"
+                    )
+                    curr_offset += data_size
+                    if data_size == 0:
+                        V.graph.aot_constants.append(b"")
+                    else:
+                        import ctypes
+
+                        tensor = tensor.cpu().detach()
+                        raw_array = ctypes.cast(
+                            tensor.data_ptr(),
+                            ctypes.POINTER(ctypes.c_ubyte * data_size),
+                        )
+                        V.graph.aot_constants.append(bytes(raw_array.contents))
+
+                    sizes = tensor.shape
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].shape.reserve({len(sizes)});"
+                    )
+                    for size in sizes:
+                        self.prefix.writeline(
+                            f"constants_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
+                        )
+                self.prefix.writeline("constants_ = constants_map;")
+
             for idx, output in enumerate(V.graph.graph_outputs):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
@@ -1078,11 +1119,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.writeline(
                         f"outputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
-
-            if V.graph.aot_mode:
-                self.prefix.writeline(
-                    "AOTInductorModelContainerSetConstants(constants_info_);"
-                )
 
         self.prefix.writeline("}")
 

@@ -40,9 +40,9 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_inductor_model_container.h>
 
-        torch::aot_inductor::AOTInductorModel model;
+        torch::aot_inductor::AOTInductorModelContainer model(1);
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,

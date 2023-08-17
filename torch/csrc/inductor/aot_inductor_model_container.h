@@ -6,6 +6,27 @@
 
 #include <torch/csrc/inductor/aot_inductor_model.h>
 
+// At codegen time, we write out a binary file called constants.bin.
+// We then turn the raw binary to an object file that exposes this
+// symbol and link it into the final .so.
+// For information on the binary format, see `man objcopy`, under
+// the "binary-architecture" flag:
+// https://man7.org/linux/man-pages/man1/objcopy.1.html
+// todo: use #embed in C++ 23 once available
+extern const uint8_t _binary_constants_bin_start[];
+extern const uint8_t _binary_constants_bin_end[];
+
+namespace {
+using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
+CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
+  void* data_ptr;
+  C10_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { C10_CUDA_CHECK(cudaFree(ptr)); };
+  return CUDAPtr(data_ptr, deleter);
+}
+} // anonymous namespace
+
 namespace torch {
 namespace aot_inductor {
 
@@ -16,10 +37,11 @@ class AOTInductorModelContainer {
               << " model instances";
     TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
 
+    constants_ = std::make_shared<ConstantMap>();
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create());
+      models_.push_back(AOTInductorModel::Create(constants_));
       available_models_.push_back(models_.back().get());
     }
 
@@ -47,6 +69,23 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
       max_output_shapes_.emplace_back(model->max_output_shape(i));
     }
+
+    prepare_constants_to_gpu();
+    size_t num_constants = model->num_constants();
+    constants_->reserve(num_constants);
+    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+    for (size_t i = 0; i < num_constants; i++) {
+      std::string name = model->constant_name(i);
+      size_t offset = model->constant_offset(i);
+      auto dtype = model->constant_type(i);
+      auto size = model->max_constant_shape(i);
+      constants_->emplace(
+          std::move(name),
+          at::from_blob(
+              constants_ptr + offset,
+              size,
+              at::device(at::kCUDA).dtype(dtype)));
+    }
   }
 
   void run(
@@ -69,6 +108,21 @@ class AOTInductorModelContainer {
       pending_models_.push_back(model);
     }
     pending_models_available_.notify_one();
+  }
+
+  void prepare_constants_to_gpu() {
+    // Allocate GPU memory for constants.
+    const auto binary_constants_bin_size = static_cast<size_t>(
+        _binary_constants_bin_end - _binary_constants_bin_start);
+    constant_blob_ = RAII_cudaMalloc(binary_constants_bin_size);
+
+    // Copy constants from host to GPU
+    auto* gpu_ptr = static_cast<uint8_t*>(constant_blob_.get());
+    C10_CUDA_CHECK(cudaMemcpy(
+        gpu_ptr,
+        _binary_constants_bin_start,
+        binary_constants_bin_size,
+        cudaMemcpyHostToDevice));
   }
 
   size_t num_inputs() const {
@@ -108,6 +162,13 @@ class AOTInductorModelContainer {
 
   // Holds the upper-bound value for each dimension of any output shape.
   std::vector<std::vector<int64_t>> max_output_shapes_;
+
+  // Holds the blob storage for constants' at::Tensor.
+  CUDAPtr constant_blob_;
+
+  // Holds the mapping of constants to at::Tensor.
+  // The underlying data of at::Tensor is in constant_blob_.
+  std::shared_ptr<ConstantMap> constants_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;

@@ -198,6 +198,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
         self.aot_mode = aot_mode
+        self.aot_constants: List[bytes] = []
         self.graph_id = graph_id
         self.scheduler = None
         self.nodes_prefer_channels_last = (
