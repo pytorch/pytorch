@@ -647,10 +647,11 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       cudaDataType_t type,
       uint64_t rows,
       uint64_t cols,
-      int64_t ld) {
+      int64_t ld,
+      bool t = false) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
-        cublasLtMatrixLayoutCreate(&raw_descriptor, type, rows, cols, ld));
+        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
     descriptor_.reset(raw_descriptor);
   }
 };
@@ -724,10 +725,8 @@ void gemm_and_bias(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
 
-  CuBlasLtMatrixLayout Adesc(
-      abcType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
-  CuBlasLtMatrixLayout Bdesc(
-      abcType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
+  CuBlasLtMatrixLayout Adesc(abcType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abcType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
@@ -903,10 +902,8 @@ void int8_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
 
 
-  CuBlasLtMatrixLayout Adesc(
-      abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
-  CuBlasLtMatrixLayout Bdesc(
-      abType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
   cublasLtHandle_t ltHandle =

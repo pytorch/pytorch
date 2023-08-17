@@ -48,6 +48,7 @@ from common_utils import (
     DisableVmapFallback,
 )
 import types
+import os
 from collections import namedtuple
 import contextlib
 
@@ -1545,6 +1546,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
+    @skipIf(TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10',
+            "Segfauls with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173")
     @parametrize('case', [
         subtest(_make_case(torch.add), name='add'),
         subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
@@ -3798,7 +3801,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
         # because svd isn't unique. To test that the svd is correct, we multiply
-        # U @ diag(S) @ Vh and check that that the output from vmap matches the
+        # U @ diag(S) @ Vh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             U, S, Vh = out
@@ -3820,7 +3823,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Given the same input, it may return different tensors,
         # because the eig decomposition isn't unique.
         # To test that eigh is correct, we multiply
-        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # Q @ diag(L) @ Qh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             L, Q = out
@@ -5034,6 +5037,11 @@ class TestRandomness(TestCase):
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
+        if (device == 'cpu' and transform in ['grad', 'vmap'] and
+                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10'):
+            raise unittest.SkipTest("Unexpected successes on focal with dynamo," +
+                                    " see https://github.com/pytorch/pytorch/issues/107173")
+
         class Test(torch.autograd.Function):
             @staticmethod
             def forward(_, input):

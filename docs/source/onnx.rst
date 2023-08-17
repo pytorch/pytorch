@@ -736,6 +736,7 @@ Preview: torch.onnx TorchDynamo Exporter
     :nosignatures:
     :template: classtemplate.rst
 
+    torch.onnx.DiagnosticOptions
     torch.onnx.ExportOptions
     torch.onnx.ExportOutput
     torch.onnx.ExportOutputSerializer
