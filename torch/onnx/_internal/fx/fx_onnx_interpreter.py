@@ -17,6 +17,7 @@ import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
+    _pass,
     diagnostics,
     onnxfunction_dispatcher,
     op_validation,
@@ -459,8 +460,28 @@ class FxOnnxInterpreter:
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
         """
+        if parent_onnxscript_graph is not None:
+            # If parent_onnxscript_graph is provided, we assume fx_graph_module is a
+            # submodule representing a forward call of an nn.Module.
+            # Compose package and version where the nn.Module is defined as domain name
+            # for the local function.
+
+            onnx_meta: Optional[_pass.GraphModuleOnnxMeta] = fx_graph_module.meta.get(
+                "onnx"
+            )
+            if onnx_meta is None:
+                raise RuntimeError(
+                    f"ONNX meta is not found in submodule {fx_graph_module._get_name()}. "
+                    f"Only submodules produced by `Modularize` pass is supported in ONNX export."
+                )
+
+            onnx_domain = onnx_meta.package_info.to_onnx_domain_string()
+        else:
+            # Leave as default domain name for the root module.
+            onnx_domain = None
+
         onnxscript_graph = onnxscript_graph_building.TorchScriptGraph(
-            parent_onnxscript_graph
+            parent_onnxscript_graph, domain_name=onnx_domain
         )
         onnxscript_tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
             onnxscript_graph

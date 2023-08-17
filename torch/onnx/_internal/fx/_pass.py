@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 
 import contextlib
+import dataclasses
 import difflib
 
 import io
@@ -17,6 +18,31 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
+
+
+@dataclasses.dataclass
+class PackageInfo:
+    package_name: str
+    version: str
+    commit_hash: Optional[str]
+
+    def to_onnx_domain_string(self) -> str:
+        if self.commit_hash is None:
+            return f"{self.package_name} {self.version}"
+        return f"{self.package_name} {self.version}@{self.commit_hash}"
+
+    @classmethod
+    def from_python_class(cls, python_class: type) -> PackageInfo:
+        package_name = python_class.__module__.split(".")[0]
+        package = __import__(package_name)
+        version = package.__version__
+        # TODO: Figure out how to retrieve commit hash.
+        return cls(package_name, version, commit_hash)
+
+
+@dataclasses.dataclass
+class GraphModuleOnnxMeta:
+    package_info: PackageInfo
 
 
 @contextlib.contextmanager
