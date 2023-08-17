@@ -93,6 +93,7 @@ def allow_in_graph(fn):
     assert callable(fn), "allow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.add(id(fn))
     allowed_functions._disallowed_function_ids.remove(id(fn))
+    allowed_functions._allowed_user_defined_function_ids.add(id(fn))
     return fn
 
 
@@ -108,6 +109,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
             )
         allowed_functions._allowed_function_ids.remove(id(fn))
         allowed_functions._disallowed_function_ids.add(id(fn))
+        allowed_functions._allowed_user_defined_function_ids.remove(id(fn))
         return fn
 
     return inner
@@ -234,6 +236,23 @@ def mark_static(t, index=None):
         assert isinstance(index, (list, tuple))
         for i in index:
             mark_static(t, i)
+
+
+@forbid_in_graph
+def mark_static_address(t, guard=True):
+    """
+    Marks an input tensor whose data_ptr will not change across multiple calls
+    to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
+    is not needed for this input. The data_ptr will be guarded if guard=True. Note:
+    Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
+    """
+    if not isinstance(t, torch.Tensor):
+        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+
+    if guard:
+        t._dynamo_static_input_type = "guarded"
+    else:
+        t._dynamo_static_input_type = "unguarded"
 
 
 # Note: it's preferable to not make `import torch` eagerly import other libs.
