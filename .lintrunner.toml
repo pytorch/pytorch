@@ -63,6 +63,7 @@ include_patterns = [
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
+    'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
@@ -195,6 +196,7 @@ include_patterns = [
     'torch/_inductor/lowering.py',
     'torch/_inductor/metrics.py',
     'torch/_inductor/select_algorithm.py',
+    'torch/_inductor/wrapper_benchmark.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]

@@ -74,7 +74,6 @@ def export_to_onnx(
     return onnx_model
 
 
-@common_utils.instantiate_parametrized_tests
 class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
@@ -1187,27 +1186,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 custom_opsets={"torch_scatter": 1},
                 do_constant_folding=True,
             )
-
-    @common_utils.parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
-    def test_fp8_export(self, fp8_dtype: torch.dtype):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x.to(torch.float32)
-
-        x = torch.randn(2, 3).to(fp8_dtype)
-
-        f = io.BytesIO()
-        torch.onnx.export(Model(), x, f, opset_version=19)
-        onnx.checker.check_model(f.getvalue())
-
-        onnx_type = {
-            torch.float8_e4m3fn: 17,
-            torch.float8_e5m2: 19,
-        }  # From https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3#L512-L521
-        loaded_model = onnx.load_from_string(f.getvalue())
-        self.assertEqual(
-            loaded_model.graph.input[0].type.tensor_type.elem_type, onnx_type[fp8_dtype]
-        )
 
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
