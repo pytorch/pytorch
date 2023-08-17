@@ -810,39 +810,40 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             seq_table,
             dedent(
                 """\
-            SeqNr|OrigAten|SrcFn
-            0|aten.convolution.default|l__self___conv1
-            0|aten.add.Tensor|l__self___bn1
-            1|aten._native_batch_norm_legit_functional.default|l__self___bn1
-            2|aten.relu.default|l__self___relu1
-            3|aten.add.Tensor|add
-            4|aten.view.default|flatten
-            5|aten.t.default|l__self___fc1
-            6|aten.unsqueeze.default|l__self___fc1
-            7|aten.mm.default|l__self___fc1
-            8|aten.squeeze.dim|l__self___fc1
-            9|aten.add.Tensor|l__self___fc1
-            10|aten.sub.Tensor|l__self___loss_fn
-            11|aten.abs.default|l__self___loss_fn
-            12|aten.mean.default|l__self___loss_fn
-            12|aten.ones_like.default|
-            12|aten.expand.default|
-            12|aten.div.Scalar|
-            11|aten.sgn.default|
-            11|aten.mul.Tensor|
-            8|aten.unsqueeze.default|
-            7|aten.t.default|
-            7|aten.mm.default|
-            7|aten.t.default|
-            7|aten.t.default|
-            7|aten.mm.default|
-            6|aten.squeeze.dim|
-            5|aten.t.default|
-            4|aten.view.default|
-            2|aten.threshold_backward.default|
-            1|aten.native_batch_norm_backward.default|
-            0|aten.convolution_backward.default|
-            """
+SeqNr|OrigAten|SrcFn
+0|aten.convolution.default|l__self___conv1
+0|aten.add.Tensor|l__self___bn1
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1
+2|aten.relu.default|l__self___relu1
+3|aten.add.Tensor|add
+4|aten.view.default|flatten
+5|aten.view.default|l__self___fc1
+6|aten.t.default|l__self___fc1
+7|aten.addmm.default|l__self___fc1
+8|aten.view.default|l__self___fc1
+9|aten.sub.Tensor|l__self___loss_fn
+10|aten.abs.default|l__self___loss_fn
+11|aten.mean.default|l__self___loss_fn
+11|aten.ones_like.default|
+11|aten.expand.default|
+11|aten.div.Scalar|
+10|aten.sgn.default|
+10|aten.mul.Tensor|
+8|aten.view.default|
+7|aten.t.default|
+7|aten.mm.default|
+7|aten.t.default|
+7|aten.mm.default|
+7|aten.t.default|
+7|aten.sum.dim_IntList|
+7|aten.view.default|
+6|aten.t.default|
+5|aten.view.default|
+4|aten.view.default|
+2|aten.threshold_backward.default|
+1|aten.native_batch_norm_backward.default|
+0|aten.convolution_backward.default|
+"""
             ),
         )
 
