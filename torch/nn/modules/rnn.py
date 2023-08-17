@@ -1181,6 +1181,8 @@ class RNNCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"RNNCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1372,6 +1374,8 @@ class GRUCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"GRUCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)

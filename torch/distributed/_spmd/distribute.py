@@ -129,8 +129,12 @@ def _dispatch_with_local_tensors(
             is_quantized=arg.is_quantized,
             qparams={},
         )
-        current_spec = DTensorSpec(mesh, current_placement, tensor_meta=tensor_meta)
-        target_spec = DTensorSpec(mesh, target_placement, tensor_meta=tensor_meta)
+        current_spec = DTensorSpec(
+            mesh, tuple(current_placement), tensor_meta=tensor_meta
+        )
+        target_spec = DTensorSpec(
+            mesh, tuple(target_placement), tensor_meta=tensor_meta
+        )
 
         return (
             redistribute_local_tensor(arg, current_spec, target_spec)  # type: ignore[index]
@@ -435,6 +439,7 @@ def _get_dtensor_dispatch_graph(
         # TODO: this is broken when kwargs contains tensors
         # or if a non-tensor kwarg was modified by the sharding propagation
         # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
+        assert output_sharding.schema_suggestions is not None
         target_schema = output_sharding.schema_suggestions[0]
         updated_args_spec, unflattened_args = _update_specs_for_redistribute(
             args, target_schema, output_sharding.needs_redistribute
