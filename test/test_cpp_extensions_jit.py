@@ -18,7 +18,7 @@ import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
-
+from torch.utils.cpp_extension import _TORCH_PATH, remove_extension_h_precompiler_headers
 
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
@@ -918,6 +918,37 @@ class TestCppExtensionJIT(common.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.func.grad(identity_m.identity)(t)
+
+
+    def test_gen_extension_h_pch(self):
+        source = """
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+            return x.sin() + y.sin();
+        }
+        """
+
+        head_file_pch = os.path.join(_TORCH_PATH, "include", "torch", "extension.h.gch")
+        head_file_signature = os.path.join(
+            _TORCH_PATH, "include", "torch", "extension.h.sign"
+        )
+
+        remove_extension_h_precompiler_headers()
+        pch_exist = os.path.exists(head_file_pch)
+        signature_exist = os.path.exists(head_file_signature)
+        self.assertEqual(pch_exist, False)
+        self.assertEqual(signature_exist, False)
+
+        torch.utils.cpp_extension.load_inline(
+            name="inline_extension_with_pch",
+            cpp_sources=[source],
+            functions=["sin_add"],
+            verbose=True,
+            use_pch=True,
+        )
+        pch_exist = os.path.exists(head_file_pch)
+        signature_exist = os.path.exists(head_file_signature)
+        self.assertEqual(pch_exist, True)
+        self.assertEqual(signature_exist, True)
 
 if __name__ == "__main__":
     common.run_tests()
