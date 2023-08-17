@@ -61,6 +61,43 @@
 
 namespace at::native {
 
+#define FOREACH_BINARY_OP_TENSOR(OP)                            \
+  void foreach_tensor_##OP##_tensor_kernel_slow_(               \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    for (auto& t : tensors) {                                   \
+      t.OP##_(scalar);                                          \
+    }                                                           \
+  }                                                             \
+                                                                \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow( \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    std::vector<Tensor> result;                                 \
+    result.reserve(tensors.size());                             \
+    for (const auto& t : tensors) {                             \
+      result.emplace_back(t.OP(scalar));                        \
+    }                                                           \
+                                                                \
+    return result;                                              \
+  }
+
 #define FOREACH_BINARY_OP_SCALAR(OP)                            \
   void foreach_tensor_##OP##_scalar_kernel_slow_(               \
       TensorList tensors, const Scalar& scalar) {               \
@@ -255,6 +292,8 @@ namespace at::native {
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
+
+FOREACH_BINARY_OP_TENSOR(mul);
 
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
