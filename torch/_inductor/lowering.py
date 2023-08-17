@@ -428,28 +428,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args
             )
 
-        def has_type_promotion(*args):
-            if len(args) < 2:
-                return False
-            else:
-                dtype = None
-                for t in args:
-                    if isinstance(t, TensorBox):
-                        if dtype is None:
-                            dtype = t.data.get_dtype()  # type: ignore[attr-defined]
-                        elif dtype != t.data.get_dtype():
-                            return True
-                return False
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
-        # Note: we'll fallback on type promotion until
-        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
-        # is in the pytorch triton version
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                use_foreach = not is_dynamic(*args)
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -4479,6 +4463,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
+register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 def register_inplace(aten_op, outplace_op):
