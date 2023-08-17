@@ -3136,6 +3136,12 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
+        if isinstance(expr, sympy.Eq):
+            lhs, rhs = expr.args
+            if isinstance(lhs, Mod) and rhs == 0:
+                base, divisor = lhs.args
+                if base.is_integer and divisor.is_integer and base % divisor == 0:
+                    return sympy.true
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
         # the non-recursive replacement doesn't work, and
