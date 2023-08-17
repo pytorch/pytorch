@@ -14,7 +14,7 @@ graph {
     name: "Log_1"
     op_type: "Log"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Sigmoid_0"
     type {
