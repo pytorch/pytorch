@@ -821,7 +821,11 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
             }
         } else {
             // Putting this causal masking right after acc_s is *much* slower for some reason.
-            if (m_block * kBlockM < (n_block + 1) * kBlockN) {
+            // TD [2023-08-16]: We need the 2nd condition because if seqlen_q is long and seqlen_k is short
+            // (e.g., 256 and 2), the 2nd block of seqlen_q (from 128 to 255), we're not doing causal masking.
+            // But we still want to mask out elements not beyond actual_seqlen_k.
+            if (m_block * kBlockM < (n_block + 1) * kBlockN
+                || (!Is_even_MN && (n_block + 1) * kBlockN >= binfo.actual_seqlen_k)) {
                 pytorch_flash::apply_mask_causal(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
                                          binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
                                          // binfo.actual_seqlen_k, m_block * kBlockM + (tidx / 32) % AtomLayoutMS * 16 + (tidx % 32) / 4,

@@ -1326,7 +1326,7 @@ class TestSDPAFailureModes(NNTestCase):
             # The embed dim per head is not divisible by 8 for flash attention
             dtype = torch.float16
             make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
-            size = (2, 2, 3, 9)
+            size = (2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else (2, 2, 3, 257)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
