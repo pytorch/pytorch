@@ -145,9 +145,11 @@ class Guard:
     guarded_class_weakref: Optional[type] = None
 
     stack = None
+    user_stack = None
 
     def __post_init__(self):
         self.stack = CapturedTraceback.extract(skip=2)
+        self.user_stack = TracingContext.extract_stack()
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))

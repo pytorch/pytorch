@@ -67,6 +67,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
@@ -537,7 +538,19 @@ def _compile(
                     for code in guard.code_list
                 ]
             )
-            guards_log.debug(guard_str)
+            guards_log.debug("%s", guard_str)
+
+        if verbose_guards_log.isEnabledFor(logging.DEBUG):
+            for guard in sorted(output.guards):
+                if guard.code_list is None:
+                    continue
+                code = " and ".join(guard.code_list)
+                verbose_guards_log.debug(
+                    "GUARD: %s\nStack:\n%sUser Stack:\n%s",
+                    code,
+                    "".join(guard.stack.format()),
+                    "".join(guard.user_stack.format()),
+                )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
