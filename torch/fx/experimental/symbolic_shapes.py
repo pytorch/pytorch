@@ -2946,8 +2946,10 @@ class ShapeEnv:
             # Add value range bound guards for all symbols with no trivial bounds.
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
+            #
+            # NB: do NOT use runtime var ranges, they're unsound!  You will
+            # only get correct TV with the compile-time ranges.
             for sym, vr in self.var_to_range.items():
-                vr = self.runtime_var_to_range.get(sym, vr)
                 if vr.lower != -sympy.oo:
                     self._add_target_expr(sympy.Le(vr.lower, sym))
                 if vr.upper != sympy.oo:
