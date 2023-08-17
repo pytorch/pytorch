@@ -17,7 +17,6 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
-#include <iostream>
 #include <utility>
 
 namespace at {

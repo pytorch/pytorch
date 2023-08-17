@@ -17,8 +17,6 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
-#include <iostream>
-
 namespace at {
 namespace functorch {
 
@@ -259,7 +257,6 @@ static Tensor safeStack(TensorList tensors) {
 // - Each result obtained from the previous step is a slice of the total result,
 //   so we stack those tensors together to form the final result.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cerr << "NORMAL FALLBACK CALLED" << std::endl;
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
@@ -400,7 +397,6 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 }
 
 void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cerr << "NT FALLBACK CALLED" << std::endl;
   // batchedTensorForLoopFallback(op, stack);
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
