@@ -319,7 +319,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.timestamp = 0
 
         # A list of create_finalizer_fns to apply to the output graph module
-        self.create_finalizer_fns = []
+        self.create_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
