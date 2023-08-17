@@ -75,7 +75,7 @@ def _create_tensor_proto_with_external_data(
         # No need to call "seek" because offset is 0.
         # data_file.seek(0)
         # Write tensor content to the file.
-        data_file.write(tensor.numpy().tobytes())
+        data_file.write(tensor.detach().numpy().tobytes())
 
     return tensor_proto
 
