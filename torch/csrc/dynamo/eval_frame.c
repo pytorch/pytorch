@@ -428,7 +428,7 @@ inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) 
   //  - extra_state: Stolen
   // return
   //  - there is no return, but the extra_state is stolen, so it becomes
-  //  set_extra_state responsibility to clean it up. It will be deleled during
+  //  set_extra_state responsibility to clean it up. It will be deleted during
   //  the reset_code/skip, when the set_extra_state is called with
   //  NULL/SKIP_CODE.
 
@@ -584,12 +584,10 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // move it to the head
     if (prev != NULL) {
         ExtraState* extra = get_extra_state(frame->f_code);
-        CacheEntry* old_cache_entry = extract_cache_entry(extra);
-
+        // Override the extra state to reflect the updated cache line.
+        CacheEntry* old_cache_entry = extra->cache_entry;
         prev->next = e->next;
         e->next = old_cache_entry;
-
-        // Override the extra state to reflect the updated cache line.
         extra->cache_entry = e;
     }
     return (PyObject*)e->code;
@@ -894,16 +892,20 @@ static PyObject* _custom_eval_frame(
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
-    CacheEntry* new_cache_entry = create_cache_entry(cache_entry, result);
+
+    // NB: We could use extract_cache_entry to get the cache_entry, but
+    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
+    // reference seems wrong. Therefore, we directly access the
+    // extra->cache_entry. extra wont be NULL here.
+    extra->cache_entry = create_cache_entry(extra->cache_entry, result);
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
     // ptr. As a result, extra now becomes the owner of CacheEntry object. This
     // will be cleaned up when set_extra_state is called.
-    extra->cache_entry = new_cache_entry;
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, new_cache_entry->code, throw_flag);
+    return eval_custom_code(tstate, frame, extra->cache_entry->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
