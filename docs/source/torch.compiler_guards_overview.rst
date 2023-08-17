@@ -16,16 +16,19 @@ Where a complete example looks like this:
    from typing import List
    import torch
    from torch import _dynamo as torchdynamo
+
    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
        print("my_compiler() called with FX graph:")
        gm.graph.print_tabular()
        return gm.forward  # return a python callable
+
    @torchdynamo.optimize(my_compiler)
    def toy_example(a, b):
        x = a / (torch.abs(a) + 1)
        if b.sum() < 0:
            b = b * -1
        return x * b
+
    for _ in range(100):
        toy_example(torch.randn(10), torch.randn(10))
 
@@ -69,9 +72,10 @@ At a very high level, the flow can be summarized like this:
    translation.
 3. For the objects captured in (2), TorchDynamo creates tracking objects that
    are:
-   * tracked on an output graph, which is an internal specialization
-   of a `torch.fx.Tracer`
-   * guards
+
+   - tracked on an output graph, which is an internal specialization of a `torch.fx.Tracer`
+   - guards
+
 4. TorchDynamo processes the guard objects created in (3), turning them into a
    generated Python function, `check_fn`, associated with a piece of code.
 5. The `check_fn` is evaluated whenever we encounter this code a
@@ -132,11 +136,9 @@ Here is what this function does:
    1. New code is produced through ``transform_code_object``.
 
    2. An FX tracer named ``output`` is produced through
-      ``InstructionTranslator``.
-
-      This can be a bit confusing,
+      ``InstructionTranslator``. This can be a bit confusing,
       as ``InstructionTranslator`` is not an `fx` tracer, but its stored
-      in a variable named tracer, and its output*\ **is**\ *an `fx`tracer.*
+      in a variable named tracer, and its output **is** an `fx` tracer.
 
    3. The function produces guards and stores them on ``output`` above.
 
@@ -224,10 +226,10 @@ unimplemented.
 For the ``LOAD_CONST`` example, we can see that we do indeed support it,
 with a relatively straightforward definition:
 
-::
+.. code-block:: python
 
-   def  LOAD_CONST(self, inst):
-   self.push(ConstantVariable(value=inst.argval))
+   def LOAD_CONST(self, inst):
+       self.push(ConstantVariable(value=inst.argval))
 
 We can see that this function creates a new instance of the class
 ``ConstantVariable`` , with a value, in our example case, -1, and then
@@ -245,7 +247,7 @@ what Variables are, and get a little closer to understanding guards.
 Variables
 ---------
 
-A ``ConstantVariable`` is an instance of\ ``VariableTracker``.
+A ``ConstantVariable`` is an instance of ``VariableTracker``.
 ``VariableTracker`` represents a tracked Python local or stack value.
 
 When it comes to representing an object inside TorchDynamo, a
@@ -298,7 +300,7 @@ Instead of passing in ``count``, we pass in an object with a little
 extra bookkeeping, and of course, we deal with turning regular old
 python objects into TorchDynamo notions:
 
-::
+.. code-block:: python
 
    def BUILD_TUPLE(self, inst):
        items = self.popn(inst.argval)
@@ -353,7 +355,7 @@ in more detail.
 Looking at the definition of the dataclass (and therefore, ctor
 signature), we see that it has a name, a source, and a create function.
 
-::
+.. code-block:: python
 
    @dataclasses.dataclass
    class Guard:
@@ -376,7 +378,7 @@ whether we can safely read from the code cache or not.
 
 The most common code paths for getting an instance of a guard are
 through ``make_guards`` on ``VariableTracker``.
-``make_guards``->``source.make_guard``->``return Guard(self.name(), self.guard_source(), fn)``
+``make_guards`` -> ``source.make_guard`` -> ``return Guard(self.name(), self.guard_source(), fn)``
 
 Or, in a concrete example:
 
@@ -447,7 +449,7 @@ At its simplest, ``EQUALS_MATCH`` appends just one line of code:
 ``self.code.append(f"{ref} == {val!r}")``. Where ``ref`` is the name of
 the variable, and ``val`` is the value. It might produce code like this:
 
-.. code-block::
+.. code-block:: python
 
    y == 2
 
@@ -456,7 +458,7 @@ functions and then combine them all with
 ``and`` in between each statement (as we do), we might get something
 like this:
 
-.. code-block::
+.. code-block:: python
 
    ___guarded_code.valid and ___check_type_id(y, 94367738391392) and y == 2 and ___check_tensors(x)
 
@@ -501,7 +503,7 @@ Summary
 In this section, we have reviewed:
 
 - The role of ``.valid`` and invalidation around weak references (and potentially soon to be NN Moduleinvalidations).
-- How the C++ side of guard functions (``___check_type_id``, ``___check_tensors``, etc) operate
+- How the C++ side of guard functions (``___check_type_id``, ``___check_tensors``, etc) operate.
 - What happens when guards fail.
 - What happens if we produce invalid guard code.
 
