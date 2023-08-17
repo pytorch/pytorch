@@ -604,7 +604,11 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (global_out_shape, shard_out, shardable_dims,) = propagate_shape_and_sharding(
+        (
+            global_out_shape,
+            shard_out,
+            shardable_dims,
+        ) = propagate_shape_and_sharding(
             input_dtensor_spec.placements,
             tuple(global_in_shape),
             rules,
