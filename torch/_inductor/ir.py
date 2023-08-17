@@ -302,6 +302,9 @@ class IRNode:
     def get_numel(self):
         return sympy_product(self.get_size())
 
+    def is_zero_elements(self):
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+
     def realize(self):
         """
         If the IRNode refers to data which has not been materialized (e.g.,
@@ -386,9 +389,6 @@ class Loops(IRNode):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
-    def is_zero_elements(self):
-        return any(r == 0 for r in self.ranges)
-
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -404,8 +404,19 @@ class Loops(IRNode):
                 ).reads
 
 
+def nop_loader_fn(idx, *, dtype):
+    if dtype.is_floating_point:
+        return ops.constant(float("nan"), dtype)
+    else:
+        return ops.constant(0, dtype)
+
+
 class Pointwise(Loops):
     def make_loader(self):
+        # Make zero-element loops into a no-op
+        if self.is_zero_elements():
+            return partial(nop_loader_fn, dtype=self.dtype)
+
         return self.inner_fn
 
     def get_reduction_size(self):
@@ -415,7 +426,8 @@ class Pointwise(Loops):
         return None
 
     def store_output(self, output_name, indexer, vars):
-        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
+        loader = self.make_loader()
+        return ops.store(output_name, indexer(vars), loader(vars))
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -443,10 +455,11 @@ class Scatter(Pointwise):
         )
 
     def store_output(self, output_name, indexer, vars):
+        loader = self.make_loader()
         return ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
-            self.inner_fn(vars),
+            loader(vars),
             mode=self.scatter_mode,
         )
 
@@ -984,9 +997,15 @@ class Reduction(Loops):
 
         return reduction_hint
 
-    @staticmethod
+    @classmethod
     def _multilayer_wrap_loader(
-        loader, reduction_ranges, reduction_numel, split, block_size
+        cls,
+        loader,
+        reduction_ranges,
+        reduction_numel,
+        split,
+        block_size,
+        default,
     ):
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
@@ -1006,7 +1025,7 @@ class Reduction(Loops):
                     ops.index_expr(indices, torch.int32),
                     ops.index_expr(reduction_numel, torch.int32),
                 )
-                return ops.masked(mask, body, 0)
+                return ops.masked(mask, body, default)
             else:
                 return body()
 
@@ -1032,8 +1051,9 @@ class Reduction(Loops):
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
+        default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
-            inner_fn, reduction_ranges, reduction_numel, split, block_size
+            inner_fn, reduction_ranges, reduction_numel, split, block_size, default
         )
 
         # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
@@ -1293,7 +1313,12 @@ class WelfordReduction(Reduction):
             dtype,
             tuple(
                 cls._multilayer_wrap_loader(
-                    loader, reduction_ranges, reduction_numel, split, block_size
+                    loader,
+                    reduction_ranges,
+                    reduction_numel,
+                    split,
+                    block_size,
+                    default=0,
                 )
                 for loader in inner_fns
             ),
@@ -2346,7 +2371,14 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
+    def is_zero_elements(self):
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+
     def make_loader(self):
+        # Loading from a zero-element buffer is a no-op
+        if self.is_zero_elements():
+            return partial(nop_loader_fn, dtype=self.get_dtype())
+
         def loader(index):
             indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
@@ -3224,7 +3256,11 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
+        kernel_name = getattr(self, "kernel", None)
         lines = [
+            f"kernel={kernel_name!r}",
+        ]
+        lines += [
             f"{field.name}={getattr(self, field.name)}"
             for field in dataclasses.fields(self)
         ]

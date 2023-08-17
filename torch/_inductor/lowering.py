@@ -223,7 +223,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) <= 3
+        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -423,28 +423,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args
             )
 
-        def has_type_promotion(*args):
-            if len(args) < 2:
-                return False
-            else:
-                dtype = None
-                for t in args:
-                    if isinstance(t, TensorBox):
-                        if dtype is None:
-                            dtype = t.data.get_dtype()  # type: ignore[attr-defined]
-                        elif dtype != t.data.get_dtype():
-                            return True
-                return False
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
-        # Note: we'll fallback on type promotion until
-        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
-        # is in the pytorch triton version
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                use_foreach = not is_dynamic(*args)
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -4440,8 +4424,8 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-clamp_min = register_lowering(aten.clamp_min)(maximum)
-clamp_max = register_lowering(aten.clamp_max)(minimum)
+register_lowering(aten.clamp_min)(maximum)
+register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
@@ -4488,17 +4472,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
-
-
-def _clamp_impl(v, min=None, max=None):
-    if min is not None:
-        v = clamp_min(v, min)
-    if max is not None:
-        v = clamp_max(v, max)
-    return v
-
-
-register_foreach_pointwise(aten._foreach_clamp, _clamp_impl)
+register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 def register_inplace(aten_op, outplace_op):
