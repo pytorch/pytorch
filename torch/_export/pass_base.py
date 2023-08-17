@@ -101,7 +101,12 @@ class _ExportPassBase(PassBase):
                         assert self.fake_tensor_mode is not None
                         # TODO we should allocate static shapes
                         # for param/buffer values
-                        fake_tensor = self.fake_tensor_mode.from_tensor(x)
+                        if isinstance(x, torch.nn.Parameter):
+                            fake_tensor = self.fake_tensor_mode.from_tensor(
+                                x, static_shapes=True
+                            )
+                        else:
+                            fake_tensor = self.fake_tensor_mode.from_tensor(x)
                     except UnsupportedFakeTensorException:
                         # TODO: This is just a workaround to get over the
                         # x.as_subclass error
@@ -251,7 +256,12 @@ class _ExportPassBase(PassBase):
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
-        res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy)
+
+        name = None
+        if isinstance(target, torch._ops.OpOverload):
+            name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
+
+        res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
         res_proxy.node.meta.update(meta.data)
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
