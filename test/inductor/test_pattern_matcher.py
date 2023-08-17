@@ -80,16 +80,20 @@ class TestPaternMatcher(TestCase):
         ]
 
         if torch.cuda.is_bf16_supported():
-            args_list.extend([
-                (
-                    torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
-                    torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
-                ),
-                (
-                    torch.randn(8, 8, device="cuda", dtype=torch.float32),
-                    torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
-                ),
-            ])
+            args_list.extend(
+                [
+                    (
+                        torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                        torch.randint(
+                            -128, 127, (2, 8), dtype=torch.int8, device="cuda"
+                        ),
+                    ),
+                    (
+                        torch.randn(8, 8, device="cuda", dtype=torch.float32),
+                        torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+                    ),
+                ]
+            )
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
@@ -115,12 +119,14 @@ class TestPaternMatcher(TestCase):
         ]
 
         if torch.cuda.is_bf16_supported():
-            args_list.append((
-                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
-                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
-                torch.randn(8, device="cuda", dtype=torch.bfloat16),
-                torch.randn(8, device="cuda", dtype=torch.bfloat16),
-            ))
+            args_list.append(
+                (
+                    torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                    torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
+                    torch.randn(8, device="cuda", dtype=torch.bfloat16),
+                    torch.randn(8, device="cuda", dtype=torch.bfloat16),
+                )
+            )
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
