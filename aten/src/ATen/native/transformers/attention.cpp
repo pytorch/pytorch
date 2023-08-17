@@ -33,6 +33,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
+REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
 DEFINE_DISPATCH(flash_attention_kernel);
 DEFINE_DISPATCH(flash_attention_backward_kernel);
@@ -487,22 +488,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
-  auto backend = sdp::select_sdp_backend_cpp(kernel_params);
-  if (backend == sdp::SDPBackend::error) {
-    TORCH_CHECK(
-        false,
-        "No viable backend for scaled_dot_product_attention was found. ",
-        "This is likely due to turning off both the math kernel and the fused kernels.");
-  }
-  return static_cast<int64_t>(backend);
+  return static_cast<int64_t>(sdp::SDPBackend::math);
 }
-
-REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp);
-REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 
 int64_t _fused_sdp_choice_meta(
     const Tensor& query_,
@@ -670,8 +657,7 @@ Tensor scaled_dot_product_attention(
     c10::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU){
+  if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
@@ -785,34 +771,28 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  const auto dtype = query.scalar_type();
+
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
   int64_t headSize = query.size(3);
 
-  TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
-    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
-  TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-    "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
-  TORCH_CHECK(dropout_p < 1e-5,
-    "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
-  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
-    "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
-  TORCH_CHECK(return_debug_mask == false,
-    "scaled_dot_product_attention_flash_attention: Currently do not support 'return_debug_mask'");
+  bool is_training =
+      (query.requires_grad() || key.requires_grad() ||
+      value.requires_grad());
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
-  at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
+  at::Tensor logsumexp = at::empty({batchSize, is_training ? qSize : 0, num_head},
       query.options().dtype(accumulate_dtype));
-  at::Tensor cum_seq_q = at::empty({}, at::kLong);
-  at::Tensor cum_seq_k = at::empty({}, at::kLong);
+  at::Tensor cum_seq_q = Tensor();
+  at::Tensor cum_seq_k = Tensor();
   int64_t max_q = 0;
   int64_t max_k = 0;
-  at::Tensor philox_seed = at::empty({}, at::kLong);
-  at::Tensor philox_offset = at::empty({}, at::kLong);
-  at::Tensor debug_attn_mask = at::empty({}, query.options());
+  at::Tensor philox_seed = Tensor();
+  at::Tensor philox_offset = Tensor();
+  at::Tensor debug_attn_mask = Tensor();
 
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
       max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
@@ -822,8 +802,8 @@ _scaled_dot_product_flash_attention_cpu(
   logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp),
-      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
-      std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
+      cum_seq_q, cum_seq_k, max_q, max_k,
+      philox_seed, philox_offset, debug_attn_mask);
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
@@ -844,6 +824,7 @@ _scaled_dot_product_flash_attention_backward_cpu(
     const Tensor& philox_offset,
     c10::optional<double> scale) {
   if (!grad_out.defined()) {
+    std::cout << "!grad_out.defined()" << std::endl;
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out_t = grad_out.transpose(1, 2);
