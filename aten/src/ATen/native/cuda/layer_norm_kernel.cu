@@ -241,26 +241,24 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     // No tail, N is guaranteed to be multiple of vec size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
-      vec_t gamma_crnt = gamma_vec[i];
-      vec_t beta_crnt = beta_vec[i];
       vec_t out;
 
       // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
-      if (gamma != nullptr && beta != nullptr) {
+      if (gamma_vec != nullptr && beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma_crnt.val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
-            + static_cast<T_ACC>(beta_crnt.val[ii]);
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+            + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
-      } else if (gamma != nullptr) {
+      } else if (gamma_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma_crnt.val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
         }
-      } else if (beta != nullptr) {
+      } else if (beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_crnt.val[ii]);
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
       } else {
         #pragma unroll
