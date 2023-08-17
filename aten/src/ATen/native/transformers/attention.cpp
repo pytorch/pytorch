@@ -784,7 +784,7 @@ _scaled_dot_product_flash_attention_cpu(
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
-  at::Tensor logsumexp = at::empty({batchSize, is_training ? qSize : 0, num_head, num_head},
+  at::Tensor logsumexp = at::empty({batchSize, is_training ? qSize : 0, num_head},
       query.options().dtype(accumulate_dtype));
   at::Tensor cum_seq_q = Tensor();
   at::Tensor cum_seq_k = Tensor();
