@@ -3727,7 +3727,7 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    assert not divisor_override
+    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
     if not stride:
         stride = kernel_size
     if not padding:
@@ -3834,7 +3834,9 @@ def avg_pool2d_backward(
                 ph = ops.add(phstart, ops.constant(ph_, torch.int32))
                 pw = ops.add(pwstart, ops.constant(pw_, torch.int32))
 
-                if count_include_pad or not had_padding:
+                if divisor_override is not None:
+                    scale = divisor_override
+                elif count_include_pad or not had_padding:
                     scale = kernel_size[0] * kernel_size[1]
                 else:
                     scale = compute_pool_size_without_padding(ph, pw)
