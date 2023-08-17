@@ -47,7 +47,7 @@ junitparser==2.1.1
 #Pinned versions: 2.1.1
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11"
+librosa<=0.10.0,>=0.6.2 ; python_version < "3.11"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
