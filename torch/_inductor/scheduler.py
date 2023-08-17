@@ -17,7 +17,7 @@ from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton, get_origin_op_info
+from .utils import cache_on_self, cmp, free_symbol_has, get_origin_op_info, has_triton
 from .virtualized import V
 
 
@@ -1544,7 +1544,7 @@ class Scheduler:
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
-                ## Insert marker info
+                # Insert marker info
                 op_info = get_origin_op_info([node])
                 V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)

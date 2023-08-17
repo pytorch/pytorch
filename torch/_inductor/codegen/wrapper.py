@@ -506,7 +506,9 @@ class WrapperCodeGen(CodeGen):
             origin_info_list = []
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
-                    self.wrapper_call.writeline(f"# MemPlanning Type {type(line)} : Origin ")
+                    self.wrapper_call.writeline(
+                        f"# MemPlanning Type {type(line)} : Origin "
+                    )
                     line.codegen(self.wrapper_call)
                 elif isinstance(
                     line,
@@ -525,7 +527,9 @@ class WrapperCodeGen(CodeGen):
                     with contextlib.ExitStack() as k_stack:
                         if origin_info_list:
                             marker_string = str(origin_info_list)
-                            self.wrapper_call.writeline(f"with record_function(\"triton_info: {marker_string}\"):")
+                            self.wrapper_call.writeline(
+                                f'with record_function("triton_info: {marker_string}"):'
+                            )
                             k_stack.enter_context(self.wrapper_call.indent())
                     self.wrapper_call.writeline(line)
                     # Reset the list after the marker is written
