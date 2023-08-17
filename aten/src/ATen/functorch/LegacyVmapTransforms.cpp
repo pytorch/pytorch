@@ -17,8 +17,7 @@ namespace functorch {
 // and then returns a physical version of the Tensor.
 static Tensor permuteBatchDimsToFront(const BatchedTensorImpl* batched) {
   const Tensor& physical_tensor = batched->value();
-  // Nested tensors only support a single batch dim at the front
-  if (batched->bdim() == 0 || physical_tensor.is_nested()) {
+  if (batched->bdim() == 0) {
     return physical_tensor;
   }
   const auto sizes = physical_tensor.sizes();
