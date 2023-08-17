@@ -33,6 +33,9 @@ pip_install onnx-weekly==1.15.0.dev20230717
 # TODO: change this when onnx-script is on testPypi
 pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
 
+# Transformers requires packages
+pip_install datasets==2.14.4
+
 # Cache after installing PyTorch saves manually install some packages
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
