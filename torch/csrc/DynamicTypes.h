@@ -25,9 +25,7 @@ namespace torch {
 void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
-TORCH_PYTHON_API PyObject* createPyObject(
-    const at::Storage& storage,
-    bool always_create_python_storage = false);
+TORCH_PYTHON_API PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
 at::Storage createStorageGetType(
     PyObject* obj,
