@@ -672,6 +672,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 if input_arg_spec != desired_spec:
                     input_arg_spec.tensor_meta = input_arg.meta["tensor_meta"]
                     desired_spec.tensor_meta = input_arg.meta["tensor_meta"]
+                    input_arg_tensor = input_arg.meta["val"]
 
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:

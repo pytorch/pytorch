@@ -238,10 +238,10 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
     schema: OpSchema
-    flat_args_schema: ArgsType
-    flat_kwargs_schema: KwargsType
-    flat_local_args: ArgsType
-    flat_local_kwargs: KwargsType
+    flat_args_schema: List[object]
+    flat_kwargs_schema: List[object]
+    flat_local_args: List[object]
+    flat_local_kwargs: List[object]
     args_tree_spec: TreeSpec
     kwargs_tree_spec: TreeSpec
 
