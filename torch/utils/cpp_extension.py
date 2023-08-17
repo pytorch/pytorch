@@ -1504,7 +1504,7 @@ def load_inline(name,
                 is_python_module=True,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True,
-                use_pch=True):
+                use_pch=False):
     r'''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 

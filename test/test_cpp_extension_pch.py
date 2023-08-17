@@ -1,10 +1,12 @@
 import time
+
 import torch.testing._internal.common_utils as common
 
 from torch.utils.cpp_extension import (
-    load_inline, 
-    remove_extension_h_precompiler_headers
+    load_inline,
+    remove_extension_h_precompiler_headers,
 )
+
 
 def load_inline_without_pch():
     source_orig = """
@@ -15,13 +17,14 @@ def load_inline_without_pch():
     remove_extension_h_precompiler_headers()
     start = time.time()
     module = load_inline(
-        name='inline_extension_orig',
+        name="inline_extension_orig",
         cpp_sources=[source_orig],
-        functions=['sin_add_orig'],
-        use_pch=False
-        )
+        functions=["sin_add_orig"],
+        use_pch=False,
+    )
     end = time.time()
     return end - start
+
 
 def load_inline_with_pch():
     source_pch = """
@@ -31,12 +34,14 @@ def load_inline_with_pch():
     """
     start = time.time()
     module = load_inline(
-        name='inline_extension_pch',
+        name="inline_extension_pch",
         cpp_sources=[source_pch],
-        functions=['sin_add_pch']
-        )
+        functions=["sin_add_pch"],
+        use_pch=True,
+    )
     end = time.time()
     return end - start
+
 
 def load_inline_gen_pch():
     source_gen = """
@@ -46,10 +51,11 @@ def load_inline_gen_pch():
     """
     start = time.time()
     module = load_inline(
-        name='inline_extension_gen',
+        name="inline_extension_gen",
         cpp_sources=[source_gen],
-        functions=['sin_add_gen']
-        )
+        functions=["sin_add_gen"],
+        use_pch=True,
+    )
     end = time.time()
     return end - start
 
