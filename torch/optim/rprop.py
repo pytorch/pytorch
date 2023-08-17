@@ -293,11 +293,19 @@ def _multi_tensor_rprop(
         grouped_params = _view_complex_as_real(grouped_params)
         grouped_step_sizes = _view_complex_as_real(grouped_step_sizes)
 
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
-
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
-        signs = [s.sign() for s in signs]
+        if maximize:
+            torch._foreach_neg_(signs)
+
+        # At the end of the step, grouped_prevs will contain the current grads, so we reuse
+        # grouped_prevs memory instead of creating a new buffer, but, for clarity, we reassign
+        # to keep referring to the buffer as grouped_grads.
+        torch._foreach_copy_(grouped_prevs, grouped_grads)
+        if maximize:
+            torch._foreach_neg_(grouped_prevs)
+        grouped_grads = grouped_prevs
+
+        torch._foreach_sign_(signs)
         for sign in signs:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus
@@ -312,12 +320,15 @@ def _multi_tensor_rprop(
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i] = grouped_grads[i].clone(memory_format=torch.preserve_format)
             grouped_grads[i][signs[i].eq(etaminus)] = 0
+
+        # explicitly del signs as it's not used after here to save memory
+        del signs
 
         # update parameters
         grad_signs = [grad.sign() for grad in grouped_grads]
         torch._foreach_addcmul_(grouped_params, grad_signs, grouped_step_sizes, value=-1)
 
-        for i in range(len(grouped_prevs)):
-            grouped_prevs[i].copy_(grouped_grads[i])
+        # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
+        # basically already happened since we've been using grouped_prevs' memory to store
+        # updated grouped_grads!

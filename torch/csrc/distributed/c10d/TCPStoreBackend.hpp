@@ -4,8 +4,8 @@
 #include <thread>
 #include <vector>
 
-#include <torch/csrc/distributed/c10d/socket.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/socket.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -42,37 +42,31 @@ enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 // shutdown sequence for the thread
 class BackgroundThread {
  public:
-  explicit BackgroundThread(Socket&& storeListenSocket);
+  explicit BackgroundThread();
 
   virtual ~BackgroundThread() = 0;
   virtual std::uint16_t port() const = 0;
 
+  void start();
+  bool stop_requested();
+
  protected:
   void dispose();
-
-  Socket storeListenSocket_;
-  std::thread daemonThread_{};
-  std::vector<Socket> sockets_{};
-#ifdef _WIN32
-  const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
-  HANDLE ghStopEvent_{};
-#else
-  std::array<int, 2> controlPipeFd_{{-1, -1}};
-#endif
+  virtual void run() = 0;
+  virtual void stop() = 0;
+  bool is_running() {
+    return is_running_.load();
+  }
 
  private:
-  // Initialization for shutdown signal
-  void initStopSignal();
-  // Triggers the shutdown signal
-  void stop();
-  // Joins the thread
-  void join();
-  // Clean up the shutdown signal
-  void closeStopSignal();
+  std::atomic<bool> is_running_;
+  std::thread daemonThread_{};
 };
 
-std::unique_ptr<BackgroundThread> create_tcpstore_backend(const TCPStoreOptions& opts);
-std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(const TCPStoreOptions& opts);
+std::unique_ptr<BackgroundThread> create_tcpstore_backend(
+    const TCPStoreOptions& opts);
+std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
+    const TCPStoreOptions& opts);
 bool is_libuv_tcpstore_backend_available();
 
 } // namespace detail

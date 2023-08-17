@@ -11,6 +11,7 @@ import typing
 import torch._custom_ops as custom_ops
 
 import torch.testing._internal.custom_op_db
+import torch.testing._internal.optests as optests
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
@@ -19,10 +20,10 @@ from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
 
 
-@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-class TestCustomOpTesting(TestCase):
+class CustomOpTestCaseBase(TestCase):
+    test_ns = "_test_custom_op"
+
     def setUp(self):
-        self.test_ns = "_test_custom_op"
         self.libraries = []
 
     def tearDown(self):
@@ -34,7 +35,7 @@ class TestCustomOpTesting(TestCase):
                 continue
             torch._custom_op.impl.global_registry[key]._destroy()
         if hasattr(torch.ops, self.test_ns):
-            del torch.ops._test_custom_op
+            delattr(torch.ops, self.test_ns)
         for lib in self.libraries:
             del lib.m
         del self.libraries
@@ -48,8 +49,46 @@ class TestCustomOpTesting(TestCase):
         return result
 
     def get_op(self, qualname):
-        ns, name = qualname.split("::")
-        return getattr(getattr(torch.ops, ns), name).default
+        return torch._custom_op.impl.get_op(qualname)
+
+
+@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+class TestCustomOpTesting(CustomOpTestCaseBase):
+    @parametrize("check_gradients", (False, "auto"))
+    @parametrize("dynamic", (True, False))
+    def test_aot_autograd_check_degenerate_cases(
+        self, device, dynamic, check_gradients
+    ):
+        def simple(x):
+            return x.clone()
+
+        # Should not raise
+        x = torch.randn(3, device=device)
+        optests.aot_autograd_check(
+            simple, (x,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+
+        def outputs_dont_require_grad(x):
+            return x.detach()
+
+        # Should not raise
+        y = torch.randn(3, device=device, requires_grad=True)
+        optests.aot_autograd_check(
+            simple, (y,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+
+        def no_outputs(x):
+            return x.detach()
+
+        # Should not raise
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = torch.randn(3, device=device, requires_grad=False)
+        optests.aot_autograd_check(
+            no_outputs, (x,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+        optests.aot_autograd_check(
+            no_outputs, (y,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
 
     def test_incorrect_schema_mutation(self, device):
         lib = self.lib()
@@ -335,6 +374,81 @@ class TestCustomOpTesting(TestCase):
                 lambda x: self.get_op(f"{self.test_ns}::foo")(x), (x,), {}
             )
 
+    def test_autograd_registration_check_autograd_kernel(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return op(x)
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", Foo.apply, "Autograd")
+        lib.impl("foo", foo_impl, "CPU")
+        lib.impl("foo", foo_impl, "CUDA")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        # Should not raise
+        optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_compositeimplicitautograd(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        def foo_impl(x):
+            return x.sin().cos()
+
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        # Should not raise
+        optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_incorrect_composite(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        def foo_impl(x):
+            return x.sin().cos()
+
+        lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
+            optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_incorrect(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.sin(x)
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        lib.impl("foo", Foo.apply, "CPU")
+        lib.impl("foo", Foo.apply, "CUDA")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
+            optests.autograd_registration_check(op, (x,), {})
+
     def test_assert_raises_regex(self, device):
         from torch.testing._internal.optests.aot_autograd import assert_raises_regex
 
@@ -353,27 +467,18 @@ class TestCustomOpTesting(TestCase):
                 raise RuntimeError("abcd")
 
 
-class TestCustomOp(TestCase):
+class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
-
-    def tearDown(self):
-        import torch._custom_op
-
-        keys = list(torch._custom_op.impl.global_registry.keys())
-        for key in keys:
-            if not key.startswith(f"{TestCustomOp.test_ns}::"):
-                continue
-            torch._custom_op.impl.global_registry[key]._destroy()
-
-    def get_op(self, qualname):
-        ns, name = qualname.split("::")
-        return getattr(getattr(torch.ops, ns), name).default
 
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
+
+    def test_invalid_qualname(self):
+        with self.assertRaisesRegex(ValueError, "overload"):
+            custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo.Tensor", "() -> ()")
 
     def test_name_must_match(self):
         with self.assertRaisesRegex(ValueError, "to have name"):
@@ -513,23 +618,7 @@ class TestCustomOp(TestCase):
 
             del foo
 
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
-
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor) -> int:
-                raise NotImplementedError()
-
-            del foo
-
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
-
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor) -> Tuple[Tensor, int]:
-                raise NotImplementedError()
-
-            del foo
-
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
+        with self.assertRaisesRegex(ValueError, "unsupported"):
 
             @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -537,41 +626,89 @@ class TestCustomOp(TestCase):
 
             del foo
 
-    def test_supported_param_types(self):
-        def generate_examples(typ):
-            if typ is int:
-                return [17]
-            if typ is float:
-                return [3.14]
-            if typ is bool:
-                return [True]
-            if typ is str:
-                return ["foo"]
-            if typ is torch.dtype:
-                return [torch.float32]
-            if typ is torch.device:
-                return [torch.device("cpu")]
-            if typ == torch.types.Number:
-                return [2.718]
-            if typ is torch.Tensor:
-                return [torch.tensor(3)]
-            if typ == Optional[torch.types.Number]:
-                return [None, 2.718]
-            origin = typing.get_origin(typ)
-            if origin is Union:
-                args = typing.get_args(typ)
-                assert len(args) == 2 and (
-                    args[0] is type(None) or args[1] is type(None)
-                )
-                elt = args[0] if args[1] is type(None) else args[1]
-                return generate_examples(elt) + [None]
-            if origin is collections.abc.Sequence:
-                args = typing.get_args(typ)
-                assert len(args) == 1
-                examples = generate_examples(args[0])
-                return list(itertools.product(examples, examples)) + []
-            raise AssertionError(f"unsupported param type {typ}")
+    def _generate_examples(self, typ):
+        if typ is int:
+            return [17]
+        if typ is float:
+            return [3.14]
+        if typ is bool:
+            return [True]
+        if typ is str:
+            return ["foo"]
+        if typ is torch.dtype:
+            return [torch.float32]
+        if typ is torch.device:
+            return [torch.device("cpu")]
+        if typ == torch.types.Number:
+            return [2.718]
+        if typ is torch.Tensor:
+            return [torch.tensor(3)]
+        if typ == Optional[torch.types.Number]:
+            return [None, 2.718]
+        origin = typing.get_origin(typ)
+        if origin is Union:
+            args = typing.get_args(typ)
+            assert len(args) == 2 and (args[0] is type(None) or args[1] is type(None))
+            elt = args[0] if args[1] is type(None) else args[1]
+            return self._generate_examples(elt) + [None]
+        if origin is list:
+            args = typing.get_args(typ)
+            assert len(args) == 1
+            elt = args[0]
+            return [
+                self._generate_examples(elt),
+                self._generate_examples(elt),
+                self._generate_examples(elt),
+            ]
+        if origin is collections.abc.Sequence:
+            args = typing.get_args(typ)
+            assert len(args) == 1
+            examples = self._generate_examples(args[0])
+            return list(itertools.product(examples, examples)) + []
+        raise NotImplementedError(
+            f"testrunner cannot generate instanstance of type {typ}"
+        )
 
+    def test_supported_return_types_single_return(self):
+        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+            for example in self._generate_examples(typ):
+                try:
+
+                    @custom_ops.custom_op(f"{self.test_ns}::foo")
+                    def foo(x: Tensor) -> typ:
+                        raise NotImplementedError()
+
+                    @custom_ops.impl(f"{self.test_ns}::foo")
+                    def foo_impl(x: Tensor) -> typ:
+                        return example
+
+                    op = self.get_op(f"{self.test_ns}::foo")
+                    result = op(torch.randn([]))
+                    self.assertEqual(result, example, msg=f"{typ} {example}")
+                finally:
+                    custom_ops._destroy(f"{self.test_ns}::foo")
+
+    def test_supported_return_types_multi_return(self):
+        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+            for example in self._generate_examples(typ):
+                try:
+
+                    @custom_ops.custom_op(f"{self.test_ns}::foo")
+                    def foo(x: Tensor) -> Tuple[typ, typ]:
+                        raise NotImplementedError()
+
+                    @custom_ops.impl(f"{self.test_ns}::foo")
+                    def foo_impl(x: Tensor) -> Tuple[typ, typ]:
+                        return (example, example)
+
+                    op = self.get_op(f"{self.test_ns}::foo")
+                    result = op(torch.randn([]))
+                    expected = (example, example)
+                    self.assertEqual(result, expected, msg=f"{typ} {example}")
+                finally:
+                    custom_ops._destroy(f"{self.test_ns}::foo")
+
+    def test_supported_param_types(self):
         for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -587,7 +724,7 @@ class TestCustomOp(TestCase):
                 return x.clone()
 
             try:
-                for example in generate_examples(typ):
+                for example in self._generate_examples(typ):
                     op = self.get_op(f"{self.test_ns}::foo")
                     op(torch.randn([]), example)
                     self.assertEqual(yeet, example, msg=f"{typ} {example}")
@@ -1110,6 +1247,56 @@ class TestCustomOp(TestCase):
             def foo_backward(ctx, saved, grad):
                 return {"xs": None}
 
+    def test_backward_output_differentiability_tensorlist(self):
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: Tensor) -> Tuple[List[Tensor], Tensor]:
+            raise NotImplementedError()
+
+        @custom_ops.impl(f"{self.test_ns}::foo")
+        def foo_impl(x):
+            return [x.clone(), x.clone()], x.clone()
+
+        @custom_ops.impl_save_for_backward(f"{TestCustomOp.test_ns}::foo")
+        def foo_save_for_backward(inputs, output):
+            return []
+
+        @custom_ops.impl_backward(
+            f"{TestCustomOp.test_ns}::foo", output_differentiability=[False, True]
+        )
+        def foo_backward(ctx, saved, grad_lst, grad):
+            return {"x": grad}
+
+        op = self.get_op(f"{self.test_ns}::foo")
+        x = torch.randn(3, requires_grad=True)
+        [a, b], c = op(x)
+        self.assertFalse(a.requires_grad)
+        self.assertFalse(b.requires_grad)
+        self.assertTrue(c.requires_grad)
+
+    def test_backward_output_differentiability_non_tensor(self):
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: Tensor) -> Tuple[Tensor, int]:
+            raise NotImplementedError()
+
+        @custom_ops.impl(f"{self.test_ns}::foo")
+        def foo_impl(x):
+            return x.clone(), 3
+
+        @custom_ops.impl_save_for_backward(f"{TestCustomOp.test_ns}::foo")
+        def foo_save_for_backward(inputs, output):
+            return []
+
+        @custom_ops.impl_backward(
+            f"{TestCustomOp.test_ns}::foo", output_differentiability=[True, True]
+        )
+        def foo_backward(ctx, saved, grad0, grad1):
+            return {"x": grad0}
+
+        op = self.get_op(f"{self.test_ns}::foo")
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
+            op(x)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -1336,9 +1523,348 @@ def forward(self, x_1):
 
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @torch._custom_ops.impl(qualname)
+        def foo_impl(x):
+            return x.sin()
+
+        op = self.get_op(qualname)
+        x = torch.randn(3)
+        result = op(x)
+        self.assertEqual(result, x.sin())
+
+    @parametrize(
+        "key", ["CPU", "CUDA", "CompositeImplicitAutograd", "CompositeExplicitAutograd"]
+    )
+    def test_impl_on_existing_op_with_cpu_registration(self, key):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, key)
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
+            custom_ops.impl(qualname, func=foo_impl)
+
+    def test_abstract_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @torch._custom_ops.impl_abstract(qualname)
+        def foo_impl(x):
+            return x.sin()
+
+        op = self.get_op(qualname)
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(3)
+            result = op(x)
+            self.assertEqual(result.shape, x.shape)
+            self.assertEqual(result.stride(), x.stride())
+
+    def test_abstract_impl_on_existing_op_with_meta(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "Meta")
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
+            custom_ops.impl_abstract(qualname, func=foo_impl)
+
+    def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            custom_ops.impl_abstract(qualname, func=foo_impl)
+
+    def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+        op = self.get_op(qualname)
+
+        custom_ops.impl_abstract(qualname, func=lambda x: x.sum())
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(10)
+            result = op(x)
+            self.assertEqual(result.shape, ())
+
+    def _test_backward_impl_raises(self, qualname, err_regex):
+        with self.assertRaisesRegex(RuntimeError, err_regex):
+
+            @custom_ops.impl_save_for_backward(qualname)
+            def foo2(x):
+                return
+
+        with self.assertRaisesRegex(RuntimeError, err_regex):
+
+            @custom_ops.impl_backward(qualname)
+            def foo3(x):
+                return
+
+    def test_backward_impl_on_existing_op_incorrect_schema_views(self):
+        lib = self.lib()
+        lib.define("foo(Tensor(a) x) -> Tensor(a)")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "operator that returns views")
+
+    def test_backward_impl_on_existing_op_incorrect_schema_mutable(self):
+        lib = self.lib()
+        lib.define("foo(Tensor(a!) x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "non-functional")
+
+    def test_backward_impl_on_existing_op_incorrect_schema_no_output(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> ()")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "no returns")
+
+    def test_backward_impl_on_existing_op_CompositeImplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        lib.impl("foo", lambda x: x.sin().cos(), "CompositeImplicitAutograd")
+        self._test_backward_impl_raises(qualname, "CompositeImplicitAutograd")
+
+    @parametrize("key", ["Autograd", "AutogradCPU", "AutogradCUDA"])
+    def test_backward_impl_on_existing_op_with_key(self, key):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        lib.impl("foo", lambda x: x.sin().cos(), key)
+        self._test_backward_impl_raises(qualname, key)
+
+    def test_backward_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @custom_ops.impl(qualname)
+        def foo_impl(x):
+            with torch.no_grad():
+                return x.sin()
+
+        @custom_ops.impl_save_for_backward(qualname)
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @custom_ops.impl_backward(qualname)
+        def foo_backward(ctx, saved, grad_out):
+            return {"x": grad_out * saved.cos()}
+
+        op = self.get_op(qualname)
+        x = torch.randn([], requires_grad=True)
+        y = op(x)
+        (gx,) = torch.autograd.grad(y, x)
+        self.assertEqual(gx, x.cos())
+
+
+class MiniOpTest(CustomOpTestCaseBase):
+    test_ns = "mini_op_test"
+
+    def _op_with_incorrect_schema(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x[:], "CompositeExplicitAutograd")
+        return self.get_op(qualname)
+
+    def _op_delayed_backward_error(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x.clone(), "CompositeExplicitAutograd")
+        op = self.get_op(qualname)
+
+        class Op(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return op(x)
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise NotImplementedError()
+
+        def autograd_impl(x):
+            return Op.apply(x)
+
+        lib.impl(name, autograd_impl, "Autograd")
+        return op
+
+    def _op_with_no_abstract_impl(self, name):
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::{name}"
+        lib.impl(name, lambda x: x.clone(), "CPU")
+        return self.get_op(qualname)
+
+    def test_mm(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(3, 5)
+        result = torch.ops.aten.mm.default(x, y)
+        self.assertEqual(result, x @ y)
+
+    def test_mm_errors(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(4, 5)
+        with self.assertRaisesRegex(RuntimeError, "cannot be multiplied"):
+            result = torch.ops.aten.mm.default(x, y)
+
+    def test_nonzero(self):
+        x = torch.tensor([0, 1, 2, 0, 0])
+        y = torch.ops.aten.nonzero.default(x)
+        self.assertEqual(y, torch.tensor([[1], [2]]))
+
+    def test_inplace(self):
+        x = torch.randn(3)
+        x_clone = x.clone()
+        y = torch.ops.aten.sin_(x)
+        self.assertEqual(x, x_clone.sin())
+
+    def test_incorrect_schema(self):
+        op = self._op_with_incorrect_schema("incorrect_schema")
+        x = torch.randn(3)
+        op(x)
+
+    def test_no_abstract(self):
+        op = self._op_with_no_abstract_impl("no_abstract")
+        x = torch.randn(3)
+        op(x)
+
+    def test_delayed_error(self):
+        op = self._op_delayed_backward_error("delayed_error")
+        x = torch.randn([], requires_grad=True)
+        y = op(x)
+        with self.assertRaises(NotImplementedError):
+            y.sum().backward()
+
+    def test_delayed_error_no_requires_grad(self):
+        op = self._op_delayed_backward_error("delayed_error")
+        x = torch.randn([])
+        y = op(x)
+
+
+mini_op_test_failures_dict = {
+    "aten::nonzero": {
+        # Nonzero doesn't support static shapes
+        "test_aot_dispatch_static__test_nonzero": "xfail",
+    },
+    "mini_op_test::delayed_error": {
+        "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+        "test_aot_dispatch_static__test_delayed_error": "xfail",
+    },
+    "mini_op_test::incorrect_schema": {
+        # "skip" just to test the skip mechanism
+        "test_schema__test_incorrect_schema": "skip",
+    },
+    "mini_op_test::no_abstract": {
+        "test_aot_dispatch_dynamic__test_no_abstract": "xfail",
+        "test_aot_dispatch_static__test_no_abstract": "xfail",
+        "test_faketensor__test_no_abstract": "xfail",
+    },
+}
+
+mini_op_test_checks = [
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_static",
+    "test_aot_dispatch_dynamic",
+]
+
+optests.generate_opcheck_tests(
+    MiniOpTest,
+    ["aten", "MiniOpTest"],
+    mini_op_test_failures_dict,
+    [],
+    mini_op_test_checks,
+)
+
+
+class TestGenerateOpcheckTests(TestCase):
+    def test_MiniOpTest(self):
+        for orig_test in ["test_mm", "test_nonzero"]:
+            for test in mini_op_test_checks:
+                expected_test = f"{test}__{orig_test}"
+                self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
+
+    def test_failures_dict_validation(self):
+        from torch.testing._internal.optests.generate_tests import (
+            validate_failures_dict,
+        )
+
+        failures = {
+            "mini_op_test::incorrect_schema": {},
+            "mini_op_test::delayed_error": {},
+        }
+        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error": "xfail",
+                "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error": "XFAIL",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "got value=XFAIL"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch__test_delayed_error": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "should begin with one of"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+        failures = {
+            "mini_op_test::incorrect_schema": {
+                "test_aot_dispatch_static__test_delayed_error_nopenopenope": "xfail",
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
+            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
+instantiate_parametrized_tests(TestCustomOp)
 
 if __name__ == "__main__":
     run_tests()

@@ -201,9 +201,8 @@ Diagnosing TorchInductor Errors
 If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
 error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
-There are `different
-choices <https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backends>`__
-for backend compilers for TorchDynamo, with TorchInductor or nvfuser
+There are `different choices <./torch.compiler.rst>`__
+for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other
 backend compilers.
@@ -587,13 +586,13 @@ TorchDynamo will attempt to compile all of the torch/tensor operations
 within some_fun into a single FX graph, but it may fail to capture
 everything into one graph.
 
-Some graph break reasons are insurmountable to TorchDynamo, and can’t be
+Some graph break reasons are insurmountable to TorchDynamo, and can't be
 easily fixed. - calling into a C extension other than torch is invisible
 to torchdynamo, and could do arbitrary things without TorchDynamo being
-able to introduce necessary `guards <./GuardsOverviewPt1.md>`__ to
+able to introduce necessary `guards <./torch.compiler_guards_overview.rst>`__ to
 ensure that the compiled program would be safe to reuse. Graph breaks
 can hinder performance if the resulting fragments are small. To maximize
-performance, it’s important to have as few graph breaks as possible.
+performance, it's important to have as few graph breaks as possible.
 
 Identifying the Cause of a Graph Break
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
