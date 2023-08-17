@@ -18,6 +18,11 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
@@ -54,7 +59,6 @@ from .utils import (
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
-    np,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -315,19 +319,22 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        np_types = (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-            np.float16,
-            np.float32,
-            np.float64,
-        )
+        if np:
+            np_types = (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
+            )
+        else:
+            np_types = ()  # type: ignore[assignment]
         ok_types = (
             int,
             float,
