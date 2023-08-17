@@ -9,7 +9,8 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
-from torch.testing._internal.common_utils import munge_exc
+from torch.testing._internal.common_device_type import skipIf
+from torch.testing._internal.common_utils import munge_exc, TEST_Z3
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -187,6 +188,53 @@ Graph break: call_function graph_break in skip_files _dynamo/decorators.py from 
             """\
 backend='relu_compile_error_TESTING_ONLY' raised:
 ReluCompileError:""",
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
+    @torch._dynamo.config.patch(
+        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
+        assume_static_by_default=False,
+        translation_validation=True,
+        suppress_errors=False,
+    )
+    def test_trigger_on_error(self):
+        from torch.fx.experimental.validator import ValidationException
+
+        @torch.compile
+        def fn(x):
+            return x.reshape(-1, 4)
+
+        self.assertExpectedInlineMunged(
+            ValidationException,
+            lambda: fn(torch.randn(20)),
+            """\
+translation validation failed.
+
+Model:
+  ==> L['x'].storage_offset(): 0
+  ==> s0: 4
+  ==> L['x'].stride()[0]: 1
+  ==> L['x'].size()[0]: 4
+
+Assertions:
+  ==> (== L['x'].size()[0] s0)
+  ==> (> s0 1)
+  ==> (Not (And (< L['x'].size()[0] 4) (>= L['x'].size()[0] 0)))
+  ==> (== 0 L['x'].storage_offset())
+  ==> (== 1 L['x'].stride()[0])
+  ==> (True)
+
+Target Expressions:
+  ==> (>= 9223372036854775806 s0)
+  ==> (== 4 L['x'].size()[0])
+  ==> (== 0 L['x'].storage_offset())
+  ==> (> s0 0)
+  ==> (== 1 L['x'].stride()[0])
+  ==> (<= 2 s0)
+  ==> (== 4 s0)
+
+Failed Source Expressions:
+  ==> (!= 4 L['x'].size()[0])""",
         )
 
 

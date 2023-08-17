@@ -152,7 +152,9 @@ FILENAME_ALLOWLIST |= {
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
-)
+) | {
+    _module_dir(torch) + "_export/wrappers.py",
+}
 
 # torch.func: need to allow this file to be able to look at functorch transforms
 FILENAME_ALLOWLIST |= {

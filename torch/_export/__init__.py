@@ -3,8 +3,9 @@ import inspect
 import re
 import weakref
 from collections import OrderedDict
-from unittest.mock import patch
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -12,19 +13,21 @@ import torch
 import torch._dynamo
 import torch.fx
 import torch.fx._pytree as fx_pytree
-from torch.fx._compatibility import compatibility
 
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
+from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import traceback as fx_traceback
+from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -50,6 +53,7 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from .wrappers import _wrap_submodules
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -167,9 +171,11 @@ def capture_pre_autograd_graph(
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -185,6 +191,9 @@ def export(
         constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+            calling conventions are preserved as metadata.
+
     Returns:
         An ExportedProgram containing the traced method.
     """
@@ -197,6 +206,7 @@ def export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
+            module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO horrible hack to skip dynamo when retracing
 
             def _safe_to_skip(gm: torch.fx.GraphModule):
@@ -208,15 +218,16 @@ def export(
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip(f):
                 gm_torch_level = f
             else:
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    constraints=constraints,
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                )(
-                    *args,
-                    **kwargs,
-                )
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        constraints=constraints,
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                    )(
+                        *args,
+                        **kwargs,
+                    )
 
             params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
@@ -298,12 +309,10 @@ def export(
                                     params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
             # Fix the graph output signature to be tuple if scalar
-            # because aot_export expects a tuple as return type
-            return_val = f(*args, **kwargs)
             out_spec = orig_out_spec = gm_torch_level._out_spec
-            # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple)):
-                out_spec = pytree.tree_flatten((return_val,))[1]
+            # aot_export expect the return type to always be a tuple.
+            if out_spec.type not in (list, tuple):
+                out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
@@ -389,11 +398,14 @@ def export(
                 params_buffers,
                 range_constraints,
                 equality_constraints,
+                [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
             )
 
             exported_program = exported_program.transform(
                 _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
             )
+            if len(preserve_module_call_signature) > 0:
+                exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:
