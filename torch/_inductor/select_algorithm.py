@@ -24,7 +24,7 @@ from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
-from .codegen.triton_utils import config_of, signature_of
+from .codegen.triton_utils import config_of, signature_to_meta
 
 from .utils import do_bench, sympy_dot, sympy_product, unique
 from .virtualized import V
@@ -114,8 +114,9 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
