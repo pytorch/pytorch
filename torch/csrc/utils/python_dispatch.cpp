@@ -120,11 +120,11 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // to double dispatch
 
     // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-    const auto maybe_mode =
-        c10::impl::TorchDispatchModeTLS::maybe_highest_mode();
-    if (maybe_mode != c10::nullopt) {
-      (*maybe_mode)
-          ->pyinterpreter()
+    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+    if (mode_stack_len > 0) {
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      cur_torch_dispatch_mode_state->pyinterpreter()
           ->python_op_registration_trampoline(op, dispatch_key_, stack);
       return;
     }
@@ -764,6 +764,12 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
+
+  using c10::impl::TorchDispatchModeKey;
+  py::enum_<TorchDispatchModeKey>(m, "TorchDispatchModeKey")
+      .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
+      .value("PROXY", TorchDispatchModeKey::PROXY)
+      .value("FAKE", TorchDispatchModeKey::FAKE);
 }
 
 // TODO: dedupe with the kernel

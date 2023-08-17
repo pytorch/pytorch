@@ -91,7 +91,11 @@ class TORCH_API TensorMaker {
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
   c10::optional<Device> device_{};
   TensorOptions opts_{};
-  bool resizeable_{}; // Allows the storage of this tensor to be resized
+  // Allows the storage of this tensor to be resized
+  // Note: this is won't actually resize anything (we use a meta allocator).
+  // This is only useful because at::for_blob is used by wrapper tensor subclasses,
+  // which we need to be able to advertise as resizeable.
+  bool resizeable_{};
 };
 
 inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {
