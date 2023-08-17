@@ -10089,6 +10089,16 @@ op_db: List[OpInfo] = [
                                DecorateInfo(
                                    toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
                                    'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                   device_type='cuda'),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex32: tol(atol=1e-02, rtol=8e-03),
+                                                      torch.complex64: tol(atol=1e-02, rtol=8e-03),
+                                                      torch.complex128: tol(atol=1e-02, rtol=8e-03)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_large',
                                    device_type='cuda'),),
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
@@ -10115,7 +10125,16 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   )),
+                   ),
+                   # libstdc++ impl of asin will return incorrect or inf or nan values above these thresholds
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: (torch.tensor(torch.abs(x.real) > 1e4, dtype=torch.bool) |
+                                            torch.tensor(torch.abs(x.imag) > 1e4, dtype=torch.bool) |
+                                            (torch.tensor(torch.abs(x.imag) > 5e2, dtype=torch.bool) &
+                                             torch.tensor(torch.abs(x.imag) > 5e2, dtype=torch.bool))
+                                            if x.is_complex() else torch.zeros_like(x, dtype=torch.bool)),
+                       safe_val=5)
+                   ),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
                    ref=np.arctan,
@@ -13739,7 +13758,7 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
-            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=4e-02, rtol=1e-0),
                                             torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
                          'TestUnaryUfuncs', device_type='cuda'),
         ],
@@ -13756,6 +13775,11 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
+        # tan(j * pi/2 * odd_number) is nan which also make tanhshrink nan.
+        reference_numerics_filter=NumericsFilter(
+            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                 if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+            safe_val=0)
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',

@@ -21,7 +21,7 @@ void tan_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto tan_string = jiterator_stringify(
-        template <typename T> T tan_impl(T a) { return thrust::tan(a); });
+        template <typename T> T tan_impl(T a) { return std::tan(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "tan_name", [&]() {
           jitted_gpu_kernel<

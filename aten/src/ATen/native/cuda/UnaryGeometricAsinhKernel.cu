@@ -21,7 +21,7 @@ void asinh_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto asinh_string = jiterator_stringify(
-        template <typename T> T asinh_impl(T a) { return thrust::asinh(a); });
+        template <typename T> T asinh_impl(T a) { return std::asinh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "asinh_name", [&]() {
           jitted_gpu_kernel<
