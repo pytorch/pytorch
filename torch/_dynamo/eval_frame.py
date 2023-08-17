@@ -93,6 +93,8 @@ unset = Unset.token
 
 compile_lock = threading.RLock()
 most_recent_backend: Optional[CompilerFn] = None
+# Mapping id of a CompilerFn to itself
+guarded_backend_cache: Dict[int, CompilerFn] = {}
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -407,6 +409,7 @@ class OptimizeContext(_TorchDynamoContext):
         def on_enter():
             global most_recent_backend
             most_recent_backend = compiler_fn
+            guarded_backend_cache[id(most_recent_backend)] = most_recent_backend
             install_generation_tagging_init()
 
         compiler_fn = innermost_fn(callback)

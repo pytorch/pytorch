@@ -3313,7 +3313,7 @@ def fn():
 
         # We intentionally don't reset dynamo for each backend so that we can test
         # 1. dynamo doesn't recompile when backend stays the same
-        # 2. dynamo can recompile when backend changes
+        # 2. dynamo recompiles when backend changes
         def test_recompile(foo, *, exp_frame_count):
             for backend in backends:
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
