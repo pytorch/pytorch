@@ -77,6 +77,14 @@ bool SymBool::guard_bool(const char* file, int64_t line) const {
   return a->guard_bool(file, line);
 }
 
+bool SymBool::expect_true(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->expect_true(file, line);
+}
+
 bool SymBool::has_hint() const {
   if (!is_symbolic()) {
     return true;

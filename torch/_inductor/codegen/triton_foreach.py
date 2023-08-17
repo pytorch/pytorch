@@ -90,6 +90,7 @@ class ForeachKernel(Kernel):
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
