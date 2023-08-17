@@ -731,17 +731,29 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "mock_merge_base": "436d035dc74db9c703297a62163b0cad0c546665",
+                "unrelated_failure_count": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "mock_merge_base": "194fe1d12f9860734cc28ed21bdabda2fbb06336",
+                "unrelated_failure_count": 1,
+            },
+            {
+                # The failure on the merge base was retried successfully and
+                # its conclusion changed from failure to success. We want to
+                # keep the failure record from the merge base so that it can
+                # be used to detect broken trunk
+                "pr_num": 107160,
+                "mock_merge_base": "a5d841ef01e615e2a654fb12cf0cd08697d12ccf",
+                "unrelated_failure_count": 4,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             mock_merge_base = case["mock_merge_base"]
+            unrelated_failure_count = case["unrelated_failure_count"]
 
             pr = GitHubPR("pytorch", "pytorch", cast(int, pr_num))
             with mock.patch(
@@ -762,7 +774,7 @@ class TestBypassFailures(TestCase):
                     checks, list(checks.keys()), ok_failed_checks_threshold=0
                 )
                 self.assertTrue(len(pending) == 0)
-                self.assertTrue(len(failed) == 1)
+                self.assertTrue(len(failed) == unrelated_failure_count)
 
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
