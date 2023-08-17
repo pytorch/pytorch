@@ -14,7 +14,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
+from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
+from .apis import vmap
 
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -32,9 +33,7 @@ from torch._C._functorch import (
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed
 )
-from torch._functorch.utils import exposed_in
-
-argnums_t = Union[int, Tuple[int, ...]]
+from torch._functorch.utils import exposed_in, argnums_t
 
 
 def lazy_dynamo_disable(func):

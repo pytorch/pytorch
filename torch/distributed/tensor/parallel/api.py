@@ -89,7 +89,7 @@ def parallelize_module(  # type: ignore[return]
         is_rng_supported_mesh(device_mesh) and
         not isinstance(random._rng_tracker, TensorParallelRNGTracker)
     ):
-        random._rng_tracker = TensorParallelRNGTracker()
+        random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
         # TODO: we should allow user to pass in the default seed from a config
         random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
         # By default we execute random ops in non-tensor-parallel region. If users want

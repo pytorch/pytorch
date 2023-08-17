@@ -8,9 +8,9 @@ from torchgen.api.python import (
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from torchgen.gen import parse_native_yaml
+from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
-from torchgen.model import DispatchKey, Variant
+from torchgen.model import DispatchKey, TorchDispatchModeKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -1230,6 +1230,17 @@ def gen_pyi(
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [
+        f"{k.name}: TorchDispatchModeKey = ..." for k in TorchDispatchModeKey
+    ]
+
+    # Tags Enum type hints
+    # ~~~~~~~~~~~~~~~~~~~~
+
+    tag_names = sorted(parse_tags_yaml(tags_yaml_path))
+    tag_attributes = "\n".join(
+        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+    )
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -1242,7 +1253,9 @@ def gen_pyi(
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
+        "torch_dispatch_mode_key_hints": torch_dispatch_mode_key_hints,
         "all_directive": all_directive,
+        "tag_attributes": tag_attributes,
     }
     fm.write_with_template(
         "torch/_C/__init__.pyi",
