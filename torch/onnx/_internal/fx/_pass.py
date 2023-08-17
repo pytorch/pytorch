@@ -37,6 +37,7 @@ class PackageInfo:
         package = __import__(package_name)
         version = package.__version__
         # TODO: Figure out how to retrieve commit hash.
+        commit_hash = None
         return cls(package_name, version, commit_hash)
 
 
