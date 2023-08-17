@@ -4323,15 +4323,16 @@ fallback_cumprod = fallback_handler(aten.cumprod)
 
 @register_lowering(aten.cumsum)
 def cumsum(x, axis=None, dtype=None):
-    if x.get_device().type != "cuda":
-        return fallback_cumsum(x, dim=axis, dtype=dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    return ir.Scan.create(**kwargs, scan_op="sum")
+    result = ir.Scan.create(**kwargs, scan_op="sum")
+    if result is None:
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    return result
 
 
 @register_lowering(aten.cumprod)
@@ -4344,7 +4345,10 @@ def cumprod(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    return ir.Scan.create(**kwargs, scan_op="prod")
+    result = ir.Scan.create(**kwargs, scan_op="prod")
+    if result is None:
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    return result
 
 
 @register_lowering(aten.prod)
@@ -4571,6 +4575,14 @@ register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+
+
+@register_lowering(aten.sym_constrain_range)
+def sym_constrain_range(a, min, max):
+    tracing_context = torch._guards.TracingContext.get()
+    assert tracing_context is not None
+    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    return a
 
 
 @register_lowering(aten.sym_size)

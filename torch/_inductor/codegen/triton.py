@@ -820,11 +820,14 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        names = list(
+            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
+        ) + ["rindex"]
         for i in range(len(self.numels)):
+            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
         for tree in self.range_trees:
@@ -1943,6 +1946,13 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
+
+        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
+            sizes[0:3] = reversed(sizes[0:3])
+
+        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
+            sizes[0:2] = reversed(sizes[0:2])
+
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):
@@ -2118,8 +2128,11 @@ class TritonScheduling:
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule = []
-        current_loop_writes = set()
-        is_current_reductions = set()
+
+        # Writes with a reduced shape, meaning they are only present once the
+        # reduction loop has ended
+        current_loop_reduced_writes = set()
+        current_loop_has_writes = False
         done = set()
 
         def fits_in_main_body(n):
@@ -2132,9 +2145,24 @@ class TritonScheduling:
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def schedule_node_in_loop(n):
+            nonlocal current_loop_has_writes
+            done.add(n)
+            node_schedule.append(n)
+            current_loop_has_writes = True
+            # A scan is modelled as a reduction in the scheduler but has a
+            # full sized output that can be used inside the loop body
+            if (
+                    n.is_reduction()
+                    and isinstance(n, scheduler.SchedulerNode)
+                    and not isinstance(n.node.data, ir.Scan)
+            ):
+                current_loop_reduced_writes.add(n.get_name())
+
         @contextlib.contextmanager
         def end_current_reduction_loop():
-            if current_loop_writes:
+            nonlocal current_loop_has_writes
+            if current_loop_has_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
                     if (
@@ -2144,10 +2172,7 @@ class TritonScheduling:
                             current_loop_writes & other_node.recursive_predecessors
                         )
                     ):
-                        done.add(node)
-                        current_loop_writes.add(node.get_name())
-                        is_current_reductions.add(node.is_reduction())
-                        node_schedule.append(node)
+                        schedule_node_in_loop(node)
 
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
@@ -2155,8 +2180,8 @@ class TritonScheduling:
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
-            current_loop_writes.clear()
-            is_current_reductions.clear()
+            current_loop_reduced_writes.clear()
+            current_loop_has_writes = False
 
         for index, node in enumerate(nodes):
             if node in done:
@@ -2166,20 +2191,19 @@ class TritonScheduling:
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_writes & node.recursive_predecessors:
+                if not current_loop_reduced_writes & node.recursive_predecessors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)
                 )
-                return True in is_current_reductions
+                return bool(current_loop_reduced_writes)
 
             if fits_in_main_body(node):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
-                current_loop_writes.add(node.get_name())
-                is_current_reductions.add(node.is_reduction())
-                node_schedule.append(node)
+
+                schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
                     node_schedule.append(node)

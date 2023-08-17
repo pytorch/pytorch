@@ -1128,10 +1128,14 @@ class Scan(Loops):
         axis: int,
         scan_op: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ):
+    ) -> Optional["Scan"]:
         assert scan_op in {"sum", "prod", "min", "max"}
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
+
+        if device.type != "cuda":
+            # TODO: CPU support
+            return None
 
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
@@ -1168,10 +1172,9 @@ class Scan(Loops):
             )
 
         def reindex(index, scan_index):
-            assert len(scan_ranges) == len(scan_ranges)
+            assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
-            new_index = [*index[:axis], *scan_index, *index[axis:]]
-            return new_index
+            return [*index[:axis], *scan_index, *index[axis:]]
 
         result = TensorBox.create(
             Scan(
@@ -1244,15 +1247,14 @@ class Scan(Loops):
             sympy.Eq(scan_numel % split, 0)
         )
 
-        reindex = View.dynamic_reshape_indexer(scan_ranges, [scan_numel])
-
         intermediate_dtype = (
             dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
         )
         default = Reduction.default_value(scan_op, intermediate_dtype)
 
-        def wrapper_fn(index):
-            *pw_index, block_idx, elem_idx = index
+        def wrapper_fn(index, reduction_index):
+            *pw_index, block_idx = index
+            elem_idx, = reduction_index
             scan_index = block_size * block_idx + elem_idx
             original_idx = [*pw_index[:axis], scan_index, *pw_index[axis:]]
 
@@ -1273,14 +1275,11 @@ class Scan(Loops):
                 return body()
 
         # Reduce each block of elements
-        def reduce_inner_fn(idx, reduction_idx):
-            return wrapper_fn([*idx, *reduction_idx])
-
         intermediate_reduce = Reduction.create(
             device=device,
             dst_dtype=intermediate_dtype,
             src_dtype=intermediate_dtype,
-            inner_fn=reduce_inner_fn,
+            inner_fn=wrapper_fn,
             ranges=[*pointwise_ranges, split],
             reduction_ranges=[block_size],
             reduction_type=scan_op,
@@ -1313,36 +1312,46 @@ class Scan(Loops):
         )
         intermediate_scan_loader = intermediate_scan.make_loader()
 
-        # Fine grained scan within a block
-        intra_block_scan = Scan.create(
-            device=device,
-            dtype=intermediate_dtype,
-            inner_fn=wrapper_fn,
-            size=[*pointwise_ranges, split, block_size],
-            axis=len(pointwise_ranges) + 1,
-            scan_op=scan_op,
-            reduction_hint=reduction_hint,
+        # Fine grained scan within a block, then combine with intermediate scan
+        final_result = TensorBox.create(
+            ScanWithInitialValue(
+                device=device,
+                dtype=intermediate_dtype,
+                inner_fn=lambda idx: wrapper_fn(idx[:-1], idx[-1:]),
+                size=[*pointwise_ranges, split, block_size],
+                ranges=[*pointwise_ranges, split],
+                scan_ranges=[block_size],
+                scan_op=scan_op,
+                reindex=lambda pw_index, scan_index: [*pw_index, *scan_index],
+                reduction_hint=reduction_hint,
+                iv_loader=intermediate_scan.make_loader(),
+            )
         )
-        intra_block_scan_loader = intra_block_scan.make_loader()
+        final_result.realize()
 
-        # Final result
-        combine_fn = REDUCTION_COMBINE_FN[scan_op]
-
-        def final_combine_fn(idx):
+        # Finally view [*, split, block_size] as the original size
+        def final_reindex(idx):
             pointwise_idx = [*idx[:axis], *idx[axis + 1 :]]
-            elem_idx = idx[axis] % block_size
+            elem_idx = ModularIndexing(idx[axis], 1, block_size)
             block_idx = FloorDiv(idx[axis], block_size)
 
-            a = intra_block_scan_loader([*pointwise_idx, block_idx, elem_idx])
-            b = intermediate_scan_loader([*pointwise_idx, block_idx])
-            return combine_fn(a, b)
+            return [*pointwise_idx, block_idx, elem_idx]
 
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=final_combine_fn,
-            ranges=size,
-        )
+        return TensorBox.create(GenericView.create(final_result, size, final_reindex))
+
+# This is a hack to manually fuse tha last two steps of a multilayer scan.
+# Currently the scheduler can't fuse loops with different dimensionality, and
+# simple pointwise loops are usually coalesced into 1D loops.
+@dataclasses.dataclass
+class ScanWithInitialValue(Scan):
+    iv_loader: Callable
+
+    def store_reduction(self, output_name, indexer, vars, scan_vars):
+        idx = self.reindex(vars, scan_vars)
+        value = ops.scan(self.dtype, self.scan_op, self.inner_fn(idx))
+        combine_fn = get_reduction_combine_fn(self.scan_op, self.dtype)
+        result = combine_fn(value, self.iv_loader(vars))
+        return ops.store(output_name, indexer(idx), result)
 
 
 def is_storage_and_layout(x):
