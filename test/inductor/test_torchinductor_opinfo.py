@@ -187,6 +187,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq": {f32, f64},
     # This pair of strings denotes a test variant
     ("linalg.lstsq", "grad_oriented"): {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "linspace": {b8, f16, f32, f64, i32, i64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "logspace": {b8, f16, f32, f64, i32, i64},
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
@@ -291,6 +295,10 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.householder_product": {f32, f64},
     "linalg.lstsq": {f32, f64},
     ("linalg.lstsq", "grad_oriented"): {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "linspace": {b8, f16, f32, f64, i32, i64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "logspace": {b8, f16, f32, f64, i32, i64},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     ("max", "reduction_with_dim"): {b8},
