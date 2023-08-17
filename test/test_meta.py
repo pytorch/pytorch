@@ -607,6 +607,7 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
+    torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
@@ -803,6 +804,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
 # these always fail
 meta_dispatch_expected_failures = {
+    aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten.cholesky.default : {c64, c128, f64, f32},
     aten.cholesky.out : {c64, c128, f64, f32},
     aten.cholesky_inverse.default : {c64, c128, f64, f32},
