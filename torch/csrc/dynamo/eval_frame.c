@@ -186,7 +186,6 @@ inline static void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-static void ignored(void* obj) {}
 static PyObject* _custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -396,7 +395,11 @@ inline static ExtraState* get_extra_state(PyCodeObject* code) {
   return extra;
 }
 
-inline static void destroy_extra_state(PyCodeObject* code) {
+inline static void destroy_extra_state(void* obj) {
+  // This is passed as freefunc to _PyEval_RequestCodeExtraIndex. This acts as a
+  // deleter for the object on extra scratch space. This function is called
+  // internally in _PyCode_SetExtra and also during the code deallocation.
+
   // Destroys the extra state by deleting cache_entry, frame state and finally
   // freeing the constructed extra state.
 
@@ -404,10 +407,7 @@ inline static void destroy_extra_state(PyCodeObject* code) {
   // directly inside set_extra_state. If you are in a situation trying to call
   // this function, consider if set_extra_state should be called.
 
-  // Ownership contract
-  // args
-  //  - code: Borrowed
-  ExtraState* extra = get_extra_state(code);
+  ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
     CacheEntry* cache_entry = extra->cache_entry;
     FrameState* frame_state = extra->frame_state;
@@ -418,8 +418,10 @@ inline static void destroy_extra_state(PyCodeObject* code) {
 }
 
 inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
-  // Clears the existing object sitting on the extra scratch space and sets it
-  // up with the new state.
+  // Clears the existing object sitting on the extra scratch spance and sets it
+  // up with the new state. Note that _PyCode_SetExtra calls the
+  // destroy_extra_state deleter internally, and therefore we don't call it
+  // explicity here.
 
   // Ownership contract
   // args
@@ -436,7 +438,6 @@ inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) 
   // scratch space.
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(old_extra_state == NULL || old_extra_state == SKIP_CODE || old_extra_state != extra_state);
-  destroy_extra_state(code);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
@@ -1066,8 +1067,9 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-  extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  extra_index = _PyEval_RequestCodeExtraIndex(destroy_extra_state);
   if (extra_index < 0) {
     PyErr_SetString(PyExc_RuntimeError,
                     "dynamo: unable to register extra index");
