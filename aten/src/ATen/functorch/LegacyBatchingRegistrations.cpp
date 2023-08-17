@@ -706,6 +706,7 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+// TODO: Remove this before committing; this is for debug use only
 Tensor nested_tensor_size_batching_rule(const Tensor& self) {
   auto* maybe_batched_impl = maybeGetBatchedImpl(self);
   if (!maybe_batched_impl) {
@@ -720,6 +721,7 @@ Tensor nested_tensor_size_batching_rule(const Tensor& self) {
   return nt_impl->get_nested_sizes();
 }
 
+// TODO: Remove this before committing; this is for debug use only
 Tensor nested_to_padded_tensor_batching_rule(
     const Tensor& self,
     double padding,
@@ -813,6 +815,7 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 
 // TODO: Move this somewhere better
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
+  // TODO: Remove these two
   m.impl("_nested_tensor_size", nested_tensor_size_batching_rule);
   m.impl("nested_to_padded_tensor", nested_to_padded_tensor_batching_rule);
   m.impl("cat", nested_cat_batching_rule);

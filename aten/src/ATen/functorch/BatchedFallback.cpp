@@ -259,6 +259,7 @@ static Tensor safeStack(TensorList tensors) {
 // - Each result obtained from the previous step is a slice of the total result,
 //   so we stack those tensors together to form the final result.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  std::cerr << "NORMAL FALLBACK CALLED" << std::endl;
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
@@ -399,6 +400,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 }
 
 void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  std::cerr << "NT FALLBACK CALLED" << std::endl;
   // batchedTensorForLoopFallback(op, stack);
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
@@ -454,10 +456,11 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
 
   std::vector<std::vector<Tensor>> unbound;
   for (auto iter = batched_tensor_inputs.begin(); iter != batched_tensor_inputs.end(); ++iter) {
-    TORCH_INTERNAL_ASSERT(iter->is_nested(),
-        "Fallback not supported for mixed nested / non-nested arguments");
+    auto *batched_impl = maybeGetBatchedImpl(*iter);
+    TORCH_INTERNAL_ASSERT(batched_impl->value().is_nested() || batched_impl->bdim() == 0,
+        "Fallback not supported for mixed nested / non-nested arguments without bdim=0");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
-    auto this_unbound = maybeGetBatchedImpl(*iter)->value().unbind();
+    auto this_unbound = batched_impl->value().unbind();
     if (unbound.size() > 0) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "Fallback not supported for differently-sized nested arguments");
@@ -499,6 +502,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   }
 
   // For each output Tensor, stack the shards of the tensor together to form a nested return
+  // TODO: Determine when the output needs to be nested and when it can be non-nested
   torch::jit::drop(stack, num_arguments);
   auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_components);
   for (const auto return_idx : c10::irange(0, num_returns)) {

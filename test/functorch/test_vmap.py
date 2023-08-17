@@ -5152,6 +5152,114 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
         check_vmap_fallback(self, test, torch._test_check_tensor)
 
+class TestVmapNestedTensor(Namespace.TestVmapBase):
+    def _vmap_test(self, *args, **kwargs):
+        return _vmap_test(self, *args, **kwargs)
+
+    # dims should be something like [5, None, 10], with None indicating that a
+    # random ragged structure should be used
+    def _create_nt(self, dims, device):
+        sizes = [
+            [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
+            for d in range(dims[0])
+        ]
+        return torch.nested.nested_tensor([
+            torch.randn(*size) for size in sizes
+        ], device=device)
+
+    @allowVmapFallbackUsage
+    def test_fallback_unary(self, device):
+        def f(x):
+            return x.sin() * 5. + 4.
+
+        nt = self._create_nt([4, None, 3], device=device)
+        with self.assertRaisesRegex(NotImplementedError, "Could not run"):
+            f(nt)
+        vmap_output = vmap(f)(nt)
+        for i, component in enumerate(nt):
+            output_component = vmap_output[i]
+            self.assertEqual(f(component), output_component)
+
+    @allowVmapFallbackUsage
+    def test_fallback_binary(self, device):
+        def f(x, y):
+            return x @ y
+
+        x = self._create_nt([5, None, 3], device=device)
+        y = self._create_nt([5, 3, None], device=device)
+        normal_output = f(x, y)
+        vmap_output = vmap(f)(x, y)
+        self.assertEqual(normal_output, vmap_output)
+
+    @allowVmapFallbackUsage
+    def test_fallback_binary_nt_and_unbatched_dense(self, device):
+        def f(x, y):
+            return x @ y
+
+        x = self._create_nt([5, None, 3], device=device)
+        y = torch.randn(3, 4, device=device)
+
+        # This isn't supported in normal eager mode for NT
+        with self.assertRaisesRegex(RuntimeError, "Expected both to be nested"):
+            f(x, y)
+
+        vmap_output = vmap(f, in_dims=(0, None))(x, y)
+        for i, component in enumerate(x):
+            output_component = vmap_output[i]
+            self.assertEqual(f(component, y), output_component)
+
+    @allowVmapFallbackUsage
+    def test_fallback_binary_nt_and_batched_dense(self, device):
+        def f(x, y):
+            return x @ y
+
+        x = self._create_nt([5, None, 3], device=device)
+        y = torch.randn(5, 3, 4, device=device)
+
+        # This isn't supported in normal eager mode for NT
+        with self.assertRaisesRegex(RuntimeError, "Expected both to be nested"):
+            f(x, y)
+
+        vmap_output = vmap(f)(x, y)
+        for i, component in enumerate(x):
+            output_component = vmap_output[i]
+            self.assertEqual(f(component, y[i]), output_component)
+
+    # .shape calls don't work on NTs
+    # TODO: Fix this somehow?
+    @unittest.expectedFailure
+    def test_shape_call(self, device):
+        def f(x):
+            x.shape[0]
+            return x
+
+        x = self._create_nt([3, None, 2])
+        vmap_output = vmap(f)(x)
+        self.assertEqual(x, vmap_output)
+
+    def test_nt_with_nonzero_bdim_errors(self, device):
+        def f(x):
+            return x
+
+        x = self._create_nt([3, None, 2], device=device)
+        with self.assertRaisesRegex(
+                RuntimeError, "Only bdim=0 is supported when vmapping over nested tensors"):
+            vmap(f, in_dims=2)(x)
+
+    @allowVmapFallbackUsage
+    def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_fails(self, device):
+        def f(x, y):
+            return x @ y
+
+        x = self._create_nt([5, None, 3], device=device)
+        y = torch.randn(3, 5, 4, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Fallback not supported for mixed nested / non-nested arguments without bdim=0"
+        ):
+            vmap(f, in_dims=(0, 1))(x, y)
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
@@ -5163,6 +5271,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
+instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()

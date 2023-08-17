@@ -16,10 +16,7 @@ namespace functorch {
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
       key_set.add(
-          value.is_nested() ? DispatchKeySet({
-              DispatchKey::NestedTensor,
-              DispatchKey::BatchedNestedTensor
-          }) : DispatchKeySet({DispatchKey::FuncTorchBatched})),
+          value.is_nested() ? DispatchKey::BatchedNestedTensor : DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )
@@ -28,6 +25,8 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
   , bdim_(bdim)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  TORCH_CHECK(!value_.is_nested() || bdim_ == 0,
+      "Only bdim=0 is supported when vmapping over nested tensors");
   set_storage_access_should_throw();
   set_custom_sizes_strides(
       value_.is_nested() ? SizesStridesPolicy::CustomSizes : SizesStridesPolicy::CustomStrides);
