@@ -2,7 +2,7 @@ import functools
 import itertools
 import logging
 import operator
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from typing import List, Optional, Union
 
 from sympy import Expr
@@ -554,6 +554,10 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
+def _get_node_storage(node):
+    return node.meta["val"].storage()._cdata
+
+
 def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
@@ -564,14 +568,15 @@ def reinplace_scatters(graph):
 
     copy_nodes = {}
     mutated_inputs = set()
+    storage_to_nodes = defaultdict(list)
     for node in reversed(graph.nodes):
+        if isinstance(node.meta["val"], torch.Tensor):
+            storage_to_nodes[_get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
             copy_nodes[(node.args[0], node.args[1])] = node
             mutated_inputs.add(node.args[0])
         elif node.op == "output":
             pass
-        else:
-            break
 
     InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
@@ -581,8 +586,14 @@ def reinplace_scatters(graph):
     for node in graph.nodes:
         if inplaceable_op := inplaceable_ops.get(node.target, False):
             mutated_arg = node.args[inplaceable_op.mutated_arg]
+            shared_view_nodes = storage_to_nodes[_get_node_storage(mutated_arg)]
             if mutated_arg.op == "placeholder":
                 if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
+                    continue
+
+                if (
+                    len(shared_view_nodes) > 2
+                ):  # Arg aliases another node other than copy_
                     continue
 
                 # Check for any uses other than current node and copy_ epilogue
@@ -592,7 +603,11 @@ def reinplace_scatters(graph):
                 graph.erase_node(copy_node)
                 node.target = inplaceable_op.inplace_op
             else:
-                if len(mutated_arg.users) > 1:
+                # NB: This condition could be relaxed if none of the aliases
+                # are used after this mutation op. But that's trickier.
+                if len(shared_view_nodes) > 1:  # Arg aliases another node
+                    continue
+                if len(mutated_arg.users) > 1:  # Arg used somewhere else
                     continue
                 node.target = inplaceable_op.inplace_op
 

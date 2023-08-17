@@ -468,6 +468,17 @@ class MinCutPartitioningTests(TestCase):
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
 
+class InplacingTests(TestCase):
+    def test_inplace_scatter(self):
+        def f(a, b):
+            a = a.cos()
+            a[b] = 1
+            return a
+
+        inp = (T(10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """26""")
+
+
 # Test cases where we don't do the right thing yet.
 class WouldBeNiceIfItWorked:
     def test_horizontal(self):
