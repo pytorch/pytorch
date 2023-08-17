@@ -211,6 +211,15 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(f_out, ff_out)
         self.assertEqual(f_out, aot_ff_out)
 
+        try:
+            torch._enable_functionalization(reapply_views=False)
+            xf = pytree.tree_map(to_fun, x)
+            x_view = xf.t()
+            with self.assertRaisesRegex(RuntimeError, "Cannot safely fakify a view"):
+                f(x_view)
+        finally:
+            torch._disable_functionalization()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
