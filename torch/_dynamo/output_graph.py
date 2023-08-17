@@ -222,6 +222,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         root_tx,
         export: bool,
         export_constraints,
+        frame,
         frame_state,
         local_scope: Scope,
         global_scope: Scope,
@@ -234,6 +235,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
+        self.frame = frame
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
 
@@ -332,6 +334,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
+        func_context = getattr(frame.f_func, "_torchdynamo_context", None)
+        if func_context is not None:
+            module = func_context.get("orig_graphmodule", None)
+            if module and isinstance(module, torch.fx.GraphModule):
+                self._orig_gm_meta = [nd.meta for nd in module.graph.nodes]
+                self._orig_gm_lineno_map = module._lineno_map
 
     @property
     def root_tracer(self):
@@ -1218,16 +1229,15 @@ class SubgraphTracer(fx.Tracer):
                 self.prev_inst = cur_inst
 
         # preserve original meta if it is available
-        if tx._fx_node_meta_context is not None:
-            breakpoint()
+        if self.output_graph._orig_gm_meta:
             lineno = tx.current_instruction.starts_line
             node_idx = None
             if lineno is not None:
-                node_idx = tx._fx_node_meta_context.lineno_map[
+                node_idx = self.output_graph._orig_gm_lineno_map[
                     lineno - tx.f_code.co_firstlineno
                 ]
             if node_idx is not None:
-                meta = tx._fx_node_meta_context.node_metas[node_idx]
+                meta = self.output_graph._orig_gm_meta[node_idx]
                 for key in ("nn_module_stack", "source_fn", "stack_trace"):
                     if key in meta:
                         rv.node.meta[key] = meta[key]

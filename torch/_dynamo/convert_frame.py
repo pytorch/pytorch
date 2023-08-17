@@ -424,6 +424,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
+            frame=frame,
             frame_state=frame_state,
         )
 

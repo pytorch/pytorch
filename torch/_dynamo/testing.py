@@ -166,6 +166,7 @@ def debug_insert_nops(frame, cache_size, hooks, _):
         root_tx=None,
         export=False,
         export_constraints=None,
+        frame=frame,
         frame_state={"_id": 0},
         # TODO: shouldn't this be f_locals/f_globals from frame?
         local_scope=locals(),

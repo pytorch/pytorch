@@ -3618,6 +3618,19 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             self.assertEqual(nd1.meta["source_fn"], nd2.meta["source_fn"])
             self.assertEqual(nd1.meta["stack_trace"], nd2.meta["stack_trace"])
 
+    def test_reexport_preserves_fx_node_metadata_recompile(self):
+        def fn(x):
+            return torch.sin(x)
+
+        gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
+        do_export = torch._dynamo.export(gm)
+        torch._dynamo.optimize("eager")(fn)(torch.randn(3, 3))
+        gm1, _ = do_export(torch.randn(3, 3))
+        gm2, _ = do_export(torch.randn(5, 3))
+
+        self.assertIn("return torch.sin(x)", gm1.print_readable(print_output=False))
+        self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

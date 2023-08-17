@@ -141,7 +141,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
 
         # Populate the stack trace with dummy vals to respect IR
         for node in val.graph_module.graph.nodes:
-            if True or not hasattr(node.meta, "stack_trace"):
+            if False and not hasattr(node.meta, "stack_trace"):
                 node.meta["stack_trace"] = traceback.format_exc(-1)
 
         return PassResult(val.graph_module, val.modified)
