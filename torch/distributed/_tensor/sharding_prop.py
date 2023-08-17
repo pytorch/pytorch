@@ -32,7 +32,7 @@ class ShardingPropagator:
             OpOverload,
             Callable[[Node, DeviceMesh, Dict[Node, StrategyType]], StrategyType],
         ] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
