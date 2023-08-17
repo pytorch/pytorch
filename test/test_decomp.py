@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skipOps
+from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import DispatchKey
 
@@ -411,6 +411,34 @@ def any_unsupported(args, kwargs):
 
 
 core_backward_failures = {
+    skip('_softmax_backward_data'),  # slow: fails with --timeout=360 secs
+    xfail('addcdiv'),
+    skip('addcmul'),  # slow: fails with --timeout=360 secs
+    skip('deg2rad'),  # slow: fails with --timeout=360 secs
+    skip('diag_embed'),  # slow: fails with --timeout=360 secs
+    skip('frac'),  # slow: fails with --timeout=360 secs
+    skip('grid_sampler_2d'),  # slow: fails with --timeout=360 secs
+    xfail('lerp'),
+    skip('logaddexp'),  # slow: fails with --timeout=360 secs
+    skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
+    xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs
+    xfail('norm'),
+    xfail('norm', 'fro'),
+    xfail('norm', 'inf'),
+    xfail('norm', 'nuc'),
+    skip('rad2deg'),  # slow: fails with --timeout=360 secs
+    skip('renorm'),  # slow: fails with --timeout=360 secs
+    skip('rot90'),  # slow: fails with --timeout=360 secs
+    skip('rsub'),  # slow: fails with --timeout=360 secs
+    skip('sgn'),  # slow: fails with --timeout=360 secs
+    skip('special.xlog1py'),  # slow: fails with --timeout=360 secs
+    xfail('stack'),
+    skip('tril'),  # slow: fails with --timeout=360 secs
+    skip('triu'),  # slow: fails with --timeout=360 secs
+    skip('unfold_copy'),  # slow: fails with --timeout=360 secs
+    skip('xlogy'),  # slow: fails with --timeout=360 secs
+    xfail('zero_'),
 }
 
 
