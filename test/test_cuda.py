@@ -3438,6 +3438,32 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    def test_memory_plots_free_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(context=context)
+                x = None
+
+                def thealloc():
+                    nonlocal x
+                    x = torch.rand(3, 4, device='cuda')
+
+                def thefree():
+                    nonlocal x
+                    del x
+
+                thealloc()
+                thefree()
+                ss = json.dumps(torch.cuda.memory._snapshot())
+                self.assertTrue(('thefree' in ss) == (context == 'all'))
+                self.assertTrue(('thealloc' in ss) == (context != 'state'))
+            finally:
+                torch.cuda.memory._record_memory_history(None)
+
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()

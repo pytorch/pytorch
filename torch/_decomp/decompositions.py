@@ -19,7 +19,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int
+from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -179,11 +179,6 @@ def hardtanh_backward(
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
-@register_decomposition(aten.hardshrink_backward)
-def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
-
-
 @register_decomposition(aten.hardswish)
 @pw_cast_for_opmath
 def hardswish(self: Tensor) -> Tensor:
@@ -267,11 +262,6 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
-@register_decomposition(aten.softshrink_backward)
-def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
-
-
 @register_decomposition(aten._prelu_kernel)
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self > 0, self, weight * self)
@@ -286,6 +276,43 @@ def _prelu_kernel_backward(
     input_grad = torch.where(self > 0, grad_output, weight * grad_output)
     weight_grad = torch.where(self > 0, 0.0, self * grad_output)
     return (input_grad, weight_grad)
+
+
+@register_decomposition(aten.rrelu_with_noise)
+@aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    assert generator is None
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper)
+        output = torch.where(not_positive, self * r, self)
+        noise.copy_(torch.where(not_positive, r, 1))
+        return output
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope)
+
+
+@register_decomposition(aten.rrelu_with_noise_)
+@aten.rrelu_with_noise_.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise_(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -690,12 +717,12 @@ def slice_forward(
 
     if start_val < 0:
         start_val = 0
-    elif start_val >= sizes[dim]:
+    elif start_val > sizes[dim]:
         start_val = sizes[dim]
 
     if end_val < start_val:
         end_val = start_val
-    elif end_val >= sizes[dim]:
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -1145,15 +1172,23 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
-    if sum(split_sizes) != self.shape[dim]:
-        raise ValueError(
-            "Split sizes don't add up to the tensor's size in the given dimension"
-        )
+    torch._check_with(
+        ValueError,
+        sum(split_sizes) == self.shape[dim],
+        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+    )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
+        torch._check(
+            length >= 0,
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
+        # We know this is true thanks to the sum, but this assertion helps
+        # out our internal reasoning
+        expect_true(start_idx + length <= self.shape[dim])
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
