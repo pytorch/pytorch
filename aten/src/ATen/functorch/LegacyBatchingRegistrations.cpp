@@ -17,6 +17,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <iostream>
 #include <utility>
 
 namespace at {
@@ -719,6 +720,63 @@ Tensor nested_tensor_size_batching_rule(const Tensor& self) {
   return nt_impl->get_nested_sizes();
 }
 
+Tensor nested_to_padded_tensor_batching_rule(
+    const Tensor& self,
+    double padding,
+    OptionalIntArrayRef output_size) {
+  auto* maybe_batched_impl = maybeGetBatchedImpl(self);
+  if (!maybe_batched_impl) {
+    TORCH_INTERNAL_ASSERT(false,
+        "Tried to run batching rule for nested_to_padded_tensor() on a non-batched tensor")
+  }
+  // TODO: do this better; why does output->vec() return garbage?
+  auto nt = maybe_batched_impl->value();
+  std::vector<int64_t> new_output_size;
+  if (output_size.has_value()) {
+    new_output_size.push_back(static_cast<int64_t>(nt.size(0)));
+    for (auto iter = output_size->begin(); iter != output_size->end(); ++iter) {
+      new_output_size.push_back(*iter);
+    }
+    output_size = new_output_size;
+  }
+  // TODO: Fix args
+  return makeBatched(at::nested_to_padded_tensor(nt, padding, output_size), 0, 1);
+}
+
+Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+
+  std::vector<std::vector<Tensor>> unbound;
+  for (auto tensor_iter = tensors.begin(); tensor_iter != tensors.end(); ++tensor_iter) {
+    auto* maybe_batched_impl = maybeGetBatchedImpl(*tensor_iter);
+    TORCH_CHECK(maybe_batched_impl, "Tried to run batching rule for cat() on a non-batched tensor");
+    auto nt = maybe_batched_impl->value();
+    TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
+    auto this_unbound = nt.unbind();
+    if (unbound.size() > 0) {
+      TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
+          "cat() not supported for differently-sized nested arguments");
+    }
+    unbound.push_back(this_unbound);
+  }
+
+  // Do a cat for each set of zipped unbound components
+  const auto num_components = unbound.front().size();
+  std::vector<Tensor> outputs;
+  for (auto i : c10::irange(num_components)) {
+    std::vector<Tensor> arg_list;
+    for (auto j : c10::irange(unbound.size())) {
+      arg_list.push_back(unbound[j][i]);
+    }
+    outputs.push_back(at::cat(arg_list, dim));
+  }
+
+  // NB: NTs only support batching over dim 0
+  auto out_nt = at::_nested_tensor_from_tensor_list(outputs);
+  return makeBatched(out_nt, 0, get_current_level());
+}
+
 }
 
 TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
@@ -756,6 +814,8 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 // TODO: Move this somewhere better
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
   m.impl("_nested_tensor_size", nested_tensor_size_batching_rule);
+  m.impl("nested_to_padded_tensor", nested_to_padded_tensor_batching_rule);
+  m.impl("cat", nested_cat_batching_rule);
 }
 } // namespace functorch
 } // namespace at

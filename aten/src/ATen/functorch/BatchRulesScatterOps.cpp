@@ -505,6 +505,7 @@ void index_put__batch_rule(
 Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indices
 , const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+  c10::impl::ExcludeDispatchKeyGuard nt_guard(DispatchKey::BatchedNestedTensor);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "index_put__plumbing");
   int64_t cur_level = maybe_layer->layerId();
@@ -1222,6 +1223,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // With the for loop fallback, each input tensor is a slice into
   // the larger batched tensor.
   m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
+}
+
+TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
+  m.impl("index_put_", index_put__plumbing);
 }
 
 }}

@@ -69,6 +69,34 @@ void BatchedTensorImpl::checkInvariants() const {
   TORCH_INTERNAL_ASSERT(level_ > -1);
 }
 
+int64_t BatchedTensorImpl::size_custom(int64_t d) const {
+  if (!value_.is_nested()) {
+    return size(d);
+  }
+  // TODO: Error messages will mention the actualDim, which could be confusing; fix this
+  auto actual_dim = actualDim(d, /*wrap_dim=*/ true);
+  return value_.size(actual_dim);
+}
+
+c10::SymInt BatchedTensorImpl::sym_size_custom(int64_t d) const {
+  if (!value_.is_nested()) {
+    return sym_size(d);
+  }
+  // TODO: Error messages will mention the actualDim, which could be confusing; fix this
+  auto actual_dim = actualDim(d, /*wrap_dim=*/ true);
+  return value_.sym_size(actual_dim);
+}
+
+IntArrayRef BatchedTensorImpl::sizes_custom() const {
+  TORCH_CHECK(!value_.is_nested(), "sizes() is not supported for batched nested tensors");
+  return sizes_default();
+}
+
+SymIntArrayRef BatchedTensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(!value_.is_nested(), "sizes() is not supported for batched nested tensors");
+  return sym_sizes_default();
+}
+
 // The following are publically exposed as methods of Tensor
 
 IntArrayRef BatchedTensorImpl::strides_custom() const {
