@@ -544,7 +544,7 @@ def _compile(
             for guard in sorted(output.guards):
                 if guard.code_list is None:
                     continue
-                code = " and ".join(guard.code_list)
+                code = " and ".join(map(str, guard.code_list))
                 verbose_guards_log.debug(
                     "GUARD: %s\nStack:\n%sUser Stack:\n%s",
                     code,
