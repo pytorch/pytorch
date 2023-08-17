@@ -1600,23 +1600,47 @@ def get_classifications(
     if merge_base is not None:
 
         def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+            d: Dict[str, Dict[str, Dict[str, Any]]],
+            key: str,
+            val: Dict[str, Any],
+            overwrite_failed_run_attempt: bool,
         ) -> None:
             key_no_suffix = remove_job_name_suffix(key)
             if key not in d[key_no_suffix]:
                 d[key_no_suffix][key] = val
                 return
 
-            if d[key_no_suffix][key]["id"] < val["id"]:
+            # When overwrite_failed_run_attempt is set to True, always overwrite
+            # the job with the result from the latest attempt. This option is for
+            # jobs from the pull request head_sha where the latest retry is used
+            # when merging
+            #
+            # When overwrite_failed_run_attempt is False, only overwrite the job
+            # with the result from the latest attempt if the latest retry failed.
+            # This option is for jobs from the merger_base where we want to record
+            # failures for broken trunk
+            if d[key_no_suffix][key]["id"] < val["id"] and (
+                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
+            ):
                 d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
             if rockset_result["head_sha"] == head_sha:
-                insert(head_sha_jobs, name, rockset_result)
+                insert(
+                    head_sha_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=True,
+                )
             else:
-                insert(merge_base_jobs, name, rockset_result)
+                insert(
+                    merge_base_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=False,
+                )
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
