@@ -29,7 +29,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
-from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
+from ..allowed_functions import (
+    is_allowed,
+    is_builtin_callable,
+    is_numpy,
+    is_user_defined_allowed,
+)
 from ..exc import unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -448,6 +453,8 @@ class VariableBuilder:
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(
                 value,
                 source=self.source,
@@ -1584,6 +1591,8 @@ class SourcelessBuilder:
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)

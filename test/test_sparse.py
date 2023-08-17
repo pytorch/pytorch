@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
-from distutils.version import LooseVersion
+from packaging import version
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
@@ -58,7 +58,7 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradcheck = torch.sparse.enable_sparse_outputs(gradcheck)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
-    IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
+    IS_WINDOWS and torch.version.cuda and version.parse(torch.version.cuda) > version.parse("11.2")
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
@@ -4480,6 +4480,75 @@ class TestSparseAny(TestCase):
                                         f' nontrivial_blocksize={nontrivial_blocksize},'
                                         f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
         assert not untested_combinations, untested_combinations
+
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_constructor_autograd(self, device, layout):
+
+        def specific_constructor(*args, **kwargs):
+            if layout is torch.sparse_csr:
+                return torch.sparse_csr_tensor(*args, **kwargs)
+            elif layout is torch.sparse_csc:
+                return torch.sparse_csc_tensor(*args, **kwargs)
+            elif layout is torch.sparse_bsc:
+                return torch.sparse_bsc_tensor(*args, **kwargs)
+            elif layout is torch.sparse_bsr:
+                return torch.sparse_bsr_tensor(*args, **kwargs)
+            elif layout is torch.sparse_coo:
+                return torch.sparse_coo_tensor(*args, **kwargs)
+            else:
+                raise NotImplementedError(layout)
+
+        def generic_constructor(*args, **kwargs):
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                kwargs.update(layout=layout)
+                return torch.sparse_compressed_tensor(*args, **kwargs)
+            elif layout is torch.sparse_coo:
+                return torch.sparse_coo_tensor(*args, **kwargs)
+            else:
+                raise NotImplementedError(layout)
+
+        if layout is torch.sparse_coo:
+            constructors = (specific_constructor,)
+        else:
+            constructors = (specific_constructor, generic_constructor)
+
+        for args, kwargs in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_hybrid=layout is torch.sparse_coo,  # TODO: remove after gh-107373 is resolved
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+                output_tensor=False):
+            values_offset = 1 if layout is torch.sparse_coo else 2
+
+            for cnstr in constructors:
+                for requires_grad in (False, True):
+                    values = args[values_offset].detach().requires_grad_(requires_grad)
+                    args = (*args[:values_offset], values, *args[values_offset + 1:])
+                    kwargs_ = dict(kwargs)
+                    args_ = args + (kwargs_.pop('size'),)
+
+                    sparse = cnstr(*args, **kwargs)
+
+                    self.assertEqual(sparse.requires_grad, requires_grad)
+
+                    if requires_grad:
+                        for masked in (False, True):
+                            if layout is torch.sparse_coo:
+                                torch.autograd.gradcheck(
+                                    lambda i, v: cnstr(i, v, **kwargs).to_dense(masked_grad=masked),
+                                    args, masked=masked)
+                                torch.autograd.gradcheck(
+                                    lambda i, v, sz: cnstr(i, v, sz, **kwargs_).to_dense(masked_grad=masked),
+                                    args_, masked=masked)
+                            else:
+                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                                    # TODO: remove this if-block after gh-107370 is resolved
+                                    continue
+                                torch.autograd.gradcheck(
+                                    lambda ci, pi, v: cnstr(ci, pi, v, **kwargs).to_dense(masked_grad=masked),
+                                    args, masked=masked)
+                                torch.autograd.gradcheck(
+                                    lambda ci, pi, v, sz: cnstr(ci, pi, v, sz, **kwargs_).to_dense(masked_grad=masked),
+                                    args_, masked=masked)
 
     @all_sparse_layouts('from_layout', include_strided=False)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
