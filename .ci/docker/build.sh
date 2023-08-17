@@ -85,9 +85,10 @@ _UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
+# test dummy commit
 case "$image" in
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.1.1
+    CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
