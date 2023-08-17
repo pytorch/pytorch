@@ -1055,3 +1055,22 @@ def try_find_schema(schemas, args, kwargs):
             return schema
 
     return None
+
+
+def get_device_tflops(dtype):
+    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
+    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    if dtype in (torch.float16, torch.bfloat16):
+        return get_max_tensorcore_tflops(dtype)
+
+    if torch.backends.cuda.matmul.allow_tf32:
+        return get_max_tensorcore_tflops(torch.float32)
+    else:
+        return get_max_simd_tflops(torch.float32)
+
+
+def get_gpu_dram_gbps():
+    from triton.testing import get_dram_gbps
+
+    return get_dram_gbps()
