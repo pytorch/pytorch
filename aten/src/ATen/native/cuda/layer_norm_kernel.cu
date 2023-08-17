@@ -730,7 +730,7 @@ void LayerNormKernelImplInternal(
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
-  bool can_vec_X = can_vectorize(X_data, aligment);
+  bool can_vec_X = can_vectorize(X_data, alignment);
   bool can_vec_Y = can_vectorize(Y_data, alignment);
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
