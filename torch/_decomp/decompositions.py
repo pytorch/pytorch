@@ -1214,7 +1214,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     torch._check(
         split_dim == 1 or split_dim == 0,
         lambda: "tensor_split expected tensor_indices_or_sections to be a zero-dimensional "
-        f"or one-dimensional tensor, but got a tensor with {split_dim} dims"
+        f"or one-dimensional tensor, but got a tensor with {split_dim} dims",
     )
     if split_dim == 0:
         sections = tensor_indices_or_sections.item()
