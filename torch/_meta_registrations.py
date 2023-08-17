@@ -4696,7 +4696,7 @@ def meta__scaled_dot_product_flash(
 
     if device_hint(query) == "cpu":
         logsumexp = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads),
+            (batch_size, max_seqlen_batch_q if query.requires_grad_() else 0, num_heads),
             dtype=torch.float,
             device=query.device,
         ).transpose(1, 2)
