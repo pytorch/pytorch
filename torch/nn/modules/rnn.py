@@ -1283,6 +1283,10 @@ class LSTMCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if input.dim() not in (1, 2):
             raise ValueError(f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None:
+            for idx, value in enumerate(hx):
+                if value.dim() not in (1, 2):
+                    raise ValueError(f"LSTMCell: Expected hidden{idx} to be 1D or 2D, got {value.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
