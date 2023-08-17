@@ -152,6 +152,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool expect_true(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  };
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };

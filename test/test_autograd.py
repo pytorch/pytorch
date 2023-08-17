@@ -1972,24 +1972,37 @@ class TestAutograd(TestCase):
         with torch.no_grad():
             w = x + y
 
-        @torch.no_grad()
         def adder(x, y):
             return x + y
 
-        z = adder(x, y)
+        adders = [torch.no_grad()(adder), torch.no_grad(adder)]
 
-        self.assertFalse(w.requires_grad)
-        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
-        self.assertIsNone(w.grad_fn)
-        self.assertFalse(z.requires_grad)
-        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
-        self.assertIsNone(z.grad_fn)
+        for adder in adders:
+            z = adder(x, y)
+
+            self.assertFalse(w.requires_grad)
+            self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+            self.assertIsNone(w.grad_fn)
+            self.assertFalse(z.requires_grad)
+            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertIsNone(z.grad_fn)
 
         # test nested decorator and with-statement on no_grad
         with torch.no_grad():
             self.assertFalse(torch.is_grad_enabled())
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
+
+    def test_enable_grad_decorator_no_paren(self):
+        x = torch.ones(1, requires_grad=True)
+
+        @torch.enable_grad
+        def doubler(x):
+            return x * 2
+
+        with torch.no_grad():
+            z = doubler(x)
+        self.assertTrue(z.requires_grad)
 
     def test_set_grad_generator_functions(self):
         @torch.no_grad()
@@ -3786,16 +3799,39 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             return out
 
         x = torch.ones(2, 2, requires_grad=True)
+
+        # Test as a context manager
+        with torch.autograd._force_original_view_tracking(False):
+            out = f(x)
+            self.assertTrue("AsStridedBackward" in str(out.grad_fn))
+            self.assertFalse(torch.autograd.is_view_replay_enabled())
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
+
         with torch.autograd._force_original_view_tracking(True):
             out = f(x)
-
-        # view-replay was enabled, so we should see ViewBackward in the graph
-        # instead of AsStridedBackward.
-        self.assertTrue("ViewBackward" in str(out.grad_fn))
-
-        # Without view-replay we should as an AsStridedBackward
+            self.assertTrue("ViewBackward" in str(out.grad_fn))
+            self.assertTrue(torch.autograd.is_view_replay_enabled())
         out = f(x)
         self.assertTrue("AsStridedBackward" in str(out.grad_fn))
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
+
+        with torch.autograd._force_original_view_tracking(False):
+            torch.autograd._force_original_view_tracking(True)
+            out = f(x)
+            self.assertTrue("ViewBackward" in str(out.grad_fn))
+            self.assertTrue(torch.autograd.is_view_replay_enabled())
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
+
+        # Test as a function
+        torch.autograd._force_original_view_tracking(False)
+        out = f(x)
+        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
+
+        torch.autograd._force_original_view_tracking(True)
+        out = f(x)
+        self.assertTrue("ViewBackward" in str(out.grad_fn))
+        self.assertTrue(torch.autograd.is_view_replay_enabled())
 
     def test_unsafe_set_version_counter(self):
         x = torch.ones(2, requires_grad=True).clone()
@@ -10137,15 +10173,19 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        for mode in (True, False):
-            @torch.inference_mode(mode)
-            def func(x):
-                self.assertEqual(torch.is_inference_mode_enabled(), mode)
-                return x * x
+        def func(x):
+            self.assertEqual(torch.is_inference_mode_enabled(), mode)
+            return x * x
+        for mode in (True, False, None):
+            if mode is None:
+                decorated = torch.inference_mode(func)
+                mode = True
+            else:
+                decorated = torch.inference_mode(mode)(func)
 
             for requires_grad in (True, False):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-                d = func(c)
+                d = decorated(c)
                 self.assertTrue(not mode or torch.is_inference(d))
                 self.assertEqual(d.requires_grad, requires_grad and not mode)
 
@@ -11300,7 +11340,6 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
-from autograd.test_fallback import TestAutogradFallback  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(
