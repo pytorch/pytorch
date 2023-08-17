@@ -1128,8 +1128,8 @@ class Scan(Loops):
         axis: int,
         scan_op: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ) -> Optional["Scan"]:
-        assert scan_op in {"sum", "prod", "min", "max"}
+    ) -> Optional["TensorBox"]:
+        assert scan_op in {"sum", "prod"}
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -1146,7 +1146,7 @@ class Scan(Loops):
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
-                ranges=(*ranges, scan_ranges),
+                ranges=size,
             )
 
         reduction_hint, num_splits = cls.num_splits(
@@ -1234,7 +1234,7 @@ class Scan(Loops):
         """
         Break a large scan into multiple smaller scans and reductions
         """
-        assert scan_op in {"sum", "prod", "min", "max"}
+        assert scan_op in {"sum", "prod"}
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
