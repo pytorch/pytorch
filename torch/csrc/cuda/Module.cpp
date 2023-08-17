@@ -36,6 +36,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
+#include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
@@ -856,14 +857,6 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static std::shared_ptr<c10::GatheredContext> gather() {
-  return CapturedTraceback::gather(true, true, false);
-}
-
-static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
-  return CapturedTraceback::gather(true, true, true);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -894,22 +887,17 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 
   m.def(
-      "_cuda_recordMemoryHistory",
-      [](bool enabled,
-         bool record_context,
-         bool record_context_cpp,
-         Py_ssize_t alloc_trace_max_entries,
-         bool alloc_trace_record_context) {
-        if (enabled && record_context_cpp) {
-          unwind::unwind(); // warm up the library
-        }
-        c10::cuda::CUDACachingAllocator::recordHistory(
-            enabled,
-            record_context ? (record_context_cpp ? gather_with_cpp : gather)
-                           : nullptr,
-            alloc_trace_max_entries,
-            alloc_trace_record_context);
-      });
+      "_cuda_record_memory_history_legacy",
+      static_cast<void (*)(bool, bool, int64_t, bool, bool)>(
+          torch::cuda::_record_memory_history));
+
+  m.def(
+      "_cuda_record_memory_history",
+      static_cast<void (*)(
+          c10::optional<std::string>,
+          c10::optional<std::string>,
+          std::string,
+          size_t)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1210,9 +1198,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           freed_pointer_set.insert((ptr));
         }
         // that block has already been freed,
-        // so even those this will error, so too will the allcoator
+        // so even those this will error, so too will the allocator
         // when the corresponding tensor dies because there is no
-        // live tensor correponding to it
+        // live tensor corresponding to it
         TORCH_CHECK(
             ptr_set.size() >= definite_freed_count,
             "Any stale tensors which are being manually freed"
