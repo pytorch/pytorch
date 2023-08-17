@@ -1,7 +1,10 @@
 import time
 import torch.testing._internal.common_utils as common
 
-from torch.utils.cpp_extension import load_inline, remove_extension_h_precompiler_headers
+from torch.utils.cpp_extension import (
+    load_inline, 
+    remove_extension_h_precompiler_headers
+)
 
 def load_inline_without_pch():
     source_orig = """
@@ -11,12 +14,14 @@ def load_inline_without_pch():
     """
     remove_extension_h_precompiler_headers()
     start = time.time()
-    module = load_inline(name='inline_extension_orig',
-                            cpp_sources=[source_orig],
-                            functions=['sin_add_orig'],
-                            use_pch=False)
+    module = load_inline(
+        name='inline_extension_orig',
+        cpp_sources=[source_orig],
+        functions=['sin_add_orig'],
+        use_pch=False
+        )
     end = time.time()
-    return (end - start)
+    return end - start
 
 def load_inline_with_pch():
     source_pch = """
@@ -25,11 +30,13 @@ def load_inline_with_pch():
     }
     """
     start = time.time()
-    module = load_inline(name='inline_extension_pch',
-                            cpp_sources=[source_pch],
-                            functions=['sin_add_pch'])
+    module = load_inline(
+        name='inline_extension_pch',
+        cpp_sources=[source_pch],
+        functions=['sin_add_pch']
+        )
     end = time.time()
-    return (end - start)
+    return end - start
 
 def load_inline_gen_pch():
     source_gen = """
@@ -38,23 +45,24 @@ def load_inline_gen_pch():
     }
     """
     start = time.time()
-    module = load_inline(name='inline_extension_gen',
-                            cpp_sources=[source_gen],
-                            functions=['sin_add_gen'])
+    module = load_inline(
+        name='inline_extension_gen',
+        cpp_sources=[source_gen],
+        functions=['sin_add_gen']
+        )
     end = time.time()
-    return (end - start)
+    return end - start
 
 
 class TestCppExtensionPCH(common.TestCase):
-
     def test_pch(self):
         # genarate PCH
         time_gen_pch = load_inline_gen_pch()
-        print("compile time, gen pch: {}".format(time_gen_pch))
+        print(f"compile time, gen pch: {time_gen_pch}")
 
         time_pch = load_inline_with_pch()
         time_orig = load_inline_without_pch()
-        print("compile time, origin: {}, with pch: {}".format(time_orig, time_pch))
+        print(f"compile time, origin: {time_orig}, with pch: {time_pch}")
 
 
 if __name__ == "__main__":
