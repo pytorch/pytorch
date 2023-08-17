@@ -108,6 +108,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
     def test_deterministic_dropout_1d(self):
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
+        # The DTensor random ops will use the same random seed even though the
+        # torch random generator keeps different seeds on ranks.
         torch.cuda.manual_seed(self.rank)
         # TODO: add test before/after enabling distribute region
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -295,6 +297,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
+        # The DTensor random ops will use the same random seed even though the
+        # torch random generator keeps different seeds on ranks. This ensures
+        # that Replicate DTensor will have the same initialized results
+        # across ranks.
         torch.cuda.manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
