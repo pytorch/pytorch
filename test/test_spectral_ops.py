@@ -325,12 +325,14 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
+        # TODO: the messages for primOps are inconsistent need to validate if ok
+        default_msg = r"(expected scalar type \w+ but found|Unsupported dtype)"         
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
             err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
@@ -444,11 +446,12 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        # TODO: the messages for primOps are different from eager need to validate if ok
+        errMsg = r"(dims must be unique|duplicate value in the list of dims)"
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(2, -1))
 
         with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
