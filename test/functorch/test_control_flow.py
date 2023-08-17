@@ -497,9 +497,9 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_input = torch.ones(5, 5)
-        example_input_func = to_fun(example_input)
-        torch._enable_functionalization(reapply_views=False)
         try:
+            example_input_func = to_fun(example_input)
+            torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
                 f(example_input_func)
         finally:
