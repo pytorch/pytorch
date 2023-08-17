@@ -351,9 +351,9 @@ class BaseSchedulerNode:
                     .replace("}", "}}")
                     .replace("\n", "\\")
                 )
-                if "seq_id" in o.meta:
-                    seq_id = o.meta["seq_id"]
-                    out_lines.append(f"#pragma CMT Seq ID {seq_id}")
+                if "seq_nr" in o.meta:
+                    seq_nr = o.meta["seq_nr"]
+                    out_lines.append(f"#pragma CMT Seq ID {seq_nr}")
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
 
@@ -1545,7 +1545,7 @@ class Scheduler:
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 # Insert marker info
-                op_info = get_origin_op_info([node])
+                op_info = get_origin_op_info([node], config.triton.descriptive_names)
                 V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)
             elif node.is_foreach():

@@ -2286,7 +2286,7 @@ class TritonScheduling(BaseScheduling):
             # Then pass the new data structure to writeline
             # This will cause a with record_function to be emitted on the
             # next line
-            op_info = get_origin_op_info(node_origins)
+            op_info = get_origin_op_info(node_origins, config.triton.descriptive_names)
             origin_ops = [(op.op_type, op.mod_name, op.torch_op) for op in op_info]
             wrapper.writeline(op_info)
             wrapper.writeline(origins)

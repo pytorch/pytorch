@@ -360,8 +360,8 @@ def get_origin_op_info(node_schedule, descriptive_names):
     return sources
 
 
-def get_fused_kernel_name(node_schedule):
-    sources = get_origin_op_info(node_schedule)
+def get_fused_kernel_name(node_schedule, descriptive_names):
+    sources = get_origin_op_info(node_schedule, descriptive_names)
     # op_info is a tuple of (op_type, mod_name)
     op_types = [op_info.op_type for op_info in sources]
     # op_types = set(op_types)
