@@ -18,7 +18,7 @@ import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
-from torch.utils.cpp_extension import _TORCH_PATH, remove_extension_h_precompiler_headers
+from torch.utils.cpp_extension import _TORCH_PATH, remove_extension_h_precompiler_headers, get_cxx_compiler, check_compiler_is_gcc
 
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
@@ -947,8 +947,11 @@ class TestCppExtensionJIT(common.TestCase):
         )
         pch_exist = os.path.exists(head_file_pch)
         signature_exist = os.path.exists(head_file_signature)
-        self.assertEqual(pch_exist, True)
-        self.assertEqual(signature_exist, True)
+
+        compiler = get_cxx_compiler()
+        if check_compiler_is_gcc(compiler):
+            self.assertEqual(pch_exist, True)
+            self.assertEqual(signature_exist, True)
 
 if __name__ == "__main__":
     common.run_tests()

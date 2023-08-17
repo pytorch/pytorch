@@ -251,7 +251,7 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-def _get_cxx_compiler():
+def get_cxx_compiler():
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
     else:
@@ -893,7 +893,7 @@ class BuildExtension(build_ext):
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
         else:
-            compiler = _get_cxx_compiler()
+            compiler = get_cxx_compiler()
         _, version = get_compiler_abi_compatibility_and_version(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
@@ -1343,6 +1343,21 @@ def _get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
+def check_compiler_is_gcc(compiler):
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C'  # Don't localize output
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    # Check for 'gcc' or 'g++' for sccache wrapper
+    pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
+    results = re.findall(pattern, version_string)
+    if len(results) != 1:
+        return False
+    compiler_path = os.path.realpath(results[0].strip())
+    # On RHEL/CentOS c++ is a gcc compiler wrapper
+    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+        return True
+    return False
+
 def _check_and_build_extension_h_precompiler_headers(
         extra_cflags,
         extra_include_paths,
@@ -1361,22 +1376,7 @@ def _check_and_build_extension_h_precompiler_headers(
     if not IS_LINUX:
         return
 
-    def check_compiler_is_gcc(compiler):
-        env = os.environ.copy()
-        env['LC_ALL'] = 'C'  # Don't localize output
-        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        # Check for 'gcc' or 'g++' for sccache wrapper
-        pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
-        results = re.findall(pattern, version_string)
-        if len(results) != 1:
-            return False
-        compiler_path = os.path.realpath(results[0].strip())
-        # On RHEL/CentOS c++ is a gcc compiler wrapper
-        if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
-            return True
-        return False
-
-    compiler = _get_cxx_compiler()
+    compiler = get_cxx_compiler()
 
     b_is_gcc = check_compiler_is_gcc(compiler)
     if b_is_gcc is False:
@@ -1744,7 +1744,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda: Optional[bool]) -> None:
     verify_ninja_availability()
 
-    compiler = _get_cxx_compiler()
+    compiler = get_cxx_compiler()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -1787,7 +1787,7 @@ def _write_ninja_file_and_build_library(
         is_standalone: bool = False) -> None:
     verify_ninja_availability()
 
-    compiler = _get_cxx_compiler()
+    compiler = get_cxx_compiler()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -2290,7 +2290,7 @@ def _write_ninja_file(path,
     assert len(sources) == len(objects)
     assert len(sources) > 0
 
-    compiler = _get_cxx_compiler()
+    compiler = get_cxx_compiler()
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
