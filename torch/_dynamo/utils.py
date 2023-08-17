@@ -27,39 +27,23 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
+import numpy as np
+
 import torch._logging
+import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
-try:
-    import numpy as np
 
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
+# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-try:
-    import torch_np
-
-    HAS_NUMPY_TORCH_INTEROP = True
-except ModuleNotFoundError:
-    torch_np = None
-    HAS_NUMPY_TORCH_INTEROP = False
-
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random) if HAS_NUMPY else tuple()
-
-NP_TO_TORCH_NP_MODULE = (
-    {
-        np: torch_np,
-        np.fft: torch_np.fft,
-        np.linalg: torch_np.linalg,
-        np.random: torch_np.random,
-    }
-    if HAS_NUMPY_TORCH_INTEROP
-    else {}
-)
+NP_TO_TNP_MODULE = {
+    np: tnp,
+    np.fft: tnp.fft,
+    np.linalg: tnp.linalg,
+    np.random: tnp.random,
+}
 
 import importlib
 
@@ -79,8 +63,11 @@ nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
-# profiling compilation time
-compilation_metrics = collections.OrderedDict()
+# profiling compilation time by function
+compilation_time_metrics = collections.OrderedDict()
+
+# profiling compilation time by frame phase
+frame_phase_timing = collections.OrderedDict()
 
 timer_counter = itertools.count()
 
@@ -117,8 +104,6 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-frame_phase_timing = collections.OrderedDict()
-
 curr_frame = 0
 
 
@@ -132,6 +117,7 @@ def increment_frame():
 def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
+    compilation_time_metrics.clear()
     curr_frame = 0
 
 
@@ -167,7 +153,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
@@ -187,14 +173,13 @@ def dynamo_timed(original_function=None, phase_name=None):
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
+            if key not in compilation_time_metrics:
+                compilation_time_metrics[key] = []
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(time_spent)
+            compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
@@ -233,8 +218,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_metrics
+            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_time_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -242,9 +227,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-            for v in compilation_metrics.values()
+            for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_metrics.keys())
+        headers = list(compilation_time_metrics.keys())
         return headers, values
 
 
@@ -420,43 +405,34 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
 
 
 def is_numpy_float_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.float16,
-                np.float32,
-                np.float64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
 
 
 def is_numpy_ndarray(value):
-    if HAS_NUMPY:
-        return istype(value, np.ndarray)
-    else:
-        return False
+    return istype(value, np.ndarray)
 
 
 def istensor(obj):
@@ -502,6 +478,22 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         ) from e
+
+
+@dataclasses.dataclass
+class CompilationMetrics:
+    frame_key: str
+    co_name: str
+    co_filename: str
+    co_firstlineno: int
+    cache_size: int
+    guard_count: Optional[int]
+    graph_op_count: Optional[int]
+    graph_node_count: Optional[int]
+    graph_input_count: Optional[int]
+    entire_frame_compile_time_s: Optional[float]
+    backend_compile_time_s: Optional[float]
+    fail_reason: Optional[str]
 
 
 @dataclasses.dataclass
@@ -1656,8 +1648,8 @@ def nnmodule_has_hooks(
 
 
 def to_numpy_helper(value):
-    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
         return value.cpu().numpy()
@@ -1668,8 +1660,10 @@ def to_numpy_helper(value):
 
 
 def numpy_to_tensor(value):
-    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, np.ndarray):
+        return torch.as_tensor(value)
+    if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):
         return type(value)(numpy_to_tensor(obj) for obj in value)
@@ -1691,16 +1685,16 @@ class numpy_to_tensor_wrapper:
 
 
 def numpy_attr_wrapper(obj, name):
-    if isinstance(obj, torch_np.ndarray):
+    if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
     elif isinstance(obj, torch.Tensor):
-        out = getattr(torch_np.ndarray(obj), name)
+        out = getattr(tnp.ndarray(obj), name)
         return numpy_to_tensor(out)
 
 
 class numpy_method_wrapper:
-    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+    """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
     def __init__(self, method: str):
         self.method = method
@@ -1712,7 +1706,7 @@ class numpy_method_wrapper:
     def __call__(self, *args, **kwargs):
         obj = args[0]
         if isinstance(obj, torch.Tensor):
-            obj = torch_np.ndarray(obj)
+            obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
         return numpy_to_tensor(out)
@@ -2045,3 +2039,10 @@ def is_guard_failure_reporting_enabled():
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
+
+
+def get_static_address_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None
