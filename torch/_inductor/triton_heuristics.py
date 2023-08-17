@@ -252,7 +252,7 @@ class CachingAutotuner(KernelInterface):
         def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
-                    {*zip(self.arg_names, args), *launcher.config.kwargs}
+                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
             cloned_args = self.clone_args(*args)
@@ -397,7 +397,7 @@ class CachingAutotuner(KernelInterface):
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
-                {*zip(self.arg_names, args), *launcher.config.kwargs}
+                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
         return launcher(
             *args,
