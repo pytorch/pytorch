@@ -116,7 +116,7 @@ def new_factory_strategy(
 ) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
-    replica_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+    replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replica_spec)])
 
 
@@ -132,7 +132,7 @@ def gen_bucketize_strategy(
     assert isinstance(input_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
         arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
-        replica_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         bucketize_strategy.strategies.append(
             PlacementStrategy(
                 output_spec=arg_spec, input_specs=(arg_spec, replica_spec)
@@ -197,7 +197,7 @@ def gen_slice_strategy(
 
 def unshard_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Sequence[Placement]:
+) -> Tuple[Placement, ...]:
     """Disallow the given tensor dimension to be sharded"""
     return tuple(
         p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
@@ -207,7 +207,7 @@ def unshard_tensor_dim(
 
 def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Sequence[Placement]:
+) -> Tuple[Placement, ...]:
     """Force the given tensor dimension to be replicated"""
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
@@ -268,7 +268,7 @@ def replica_only_strategy(
     _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
 ) -> StrategyType:
     """Only allow replication on the input/ouput"""
-    replicate_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+    replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
@@ -409,10 +409,12 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                     args_schema=(
                         DTensorSpec(
                             mesh=values_spec.mesh,
-                            placements=[
-                                Replicate() if need_reshard_on_values[i] else v
-                                for i, v in enumerate(values_spec.placements)
-                            ],
+                            placements=tuple(
+                                [
+                                    Replicate() if need_reshard_on_values[i] else v
+                                    for i, v in enumerate(values_spec.placements)
+                                ]
+                            ),
                             tensor_meta=values_spec.tensor_meta,
                         ),
                         multi_indices_spec,
@@ -534,7 +536,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
                 tensor_list_specs_after.append(
                     DTensorSpec(
                         mesh=spec.mesh,
-                        placements=new_placements,
+                        placements=tuple(new_placements),
                         tensor_meta=spec.tensor_meta,
                     )
                 )

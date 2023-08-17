@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -20,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, all_types_and, floating_and_complex_types,
+    all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
     float_to_corresponding_complex_type_map
 )
@@ -513,6 +514,7 @@ class TestTensorCreation(TestCase):
         a = torch.cat([w[:2], w[4:6]])
         b = torch.cat([w[:2], w[4:6]], out=w[6:10])
         self.assertEqual(a, b)
+        self.assertEqual(a, w[6:10])
         self.assertEqual(w[:6], y.view(-1)[:6])
 
         # Case:
@@ -540,6 +542,68 @@ class TestTensorCreation(TestCase):
 
             self.assertEqual(y, expected_y)
             self.assertEqual(x, expected_x)
+
+    @dtypes(*all_types_and_complex())
+    def test_cat_out_fast_path_dim0_dim1(self, device, dtype):
+        x = torch.zeros((0), device=device, dtype=dtype)
+        if dtype in integral_types():
+            y = torch.randint(low=0, high=100, size=(4, 6), device=device, dtype=dtype)
+        else:
+            y = torch.randn((4, 6), device=device, dtype=dtype)
+        # Test concat on dimension 0
+        w = y.view(-1).clone()
+        a = torch.cat([w[:2], w[4:6]])
+        b = torch.cat([w[:2], w[4:6]], out=w[6:10])
+        # Note that there is no guarantee that slicing here will result in
+        # contiguous tensors
+        self.assertEqual(a, b)
+        self.assertEqual(a, w[6:10])
+        self.assertEqual(w[:6], y.view(-1)[:6])
+        # If inputs are contiguous tensors, then fast concat paths will be invoked
+        a_fastcat = torch.cat([w[:2].contiguous(), w[4:6].contiguous()])
+        self.assertEqual(a_fastcat, a)
+        # Test concat on dimension 1
+        w = y.clone()
+        w_slices = torch.tensor_split(w, (2, 4), dim=1)
+        # Note that the tensor in w_slices[] here may not be a contiguous
+        # tensor and we need to make sure this is not broken by fast concat
+        b = torch.cat([w_slices[0], w_slices[1]], dim=1)
+        expected_b = torch.index_select(w, 1, torch.tensor([0, 1, 2, 3], device=device))
+        self.assertEqual(b, expected_b)
+        # If inputs are contiguous tensors, then fast concat paths will be invoked
+        b_fastcat = torch.cat([w_slices[0].contiguous(), w_slices[1].contiguous()], dim=1)
+        self.assertEqual(b_fastcat, expected_b)
+        # Finally, we need to make sure backward is not broken
+        # Integral types will not have grad
+        if dtype not in integral_types():
+            a = torch.randn((4, 3), device=device, dtype=dtype, requires_grad=True)
+            b = torch.randn((2, 3), device=device, dtype=dtype, requires_grad=True)
+            c = torch.randn((5, 3), device=device, dtype=dtype, requires_grad=True)
+            d = torch.randn((5, 2), device=device, dtype=dtype, requires_grad=True)
+            expected_a_grad = torch.ones((4, 3), device=device, dtype=dtype)
+            expected_b_grad = torch.ones((2, 3), device=device, dtype=dtype)
+            expected_c_grad = torch.ones((5, 3), device=device, dtype=dtype)
+            expected_d_grad = torch.ones((5, 2), device=device, dtype=dtype)
+            # All the new tensors should be contiguous here. Let us make sure
+            # to explicitly set them contiguous to enforce fast cat
+            dim0_cat = torch.cat([a.contiguous(), b.contiguous()], dim=0)
+            if dtype in complex_types():
+                dim0_cat.sum().abs().backward()
+                self.assertEqual(a.grad.abs(), expected_a_grad.abs())
+                self.assertEqual(b.grad.abs(), expected_b_grad.abs())
+            else:
+                dim0_cat.sum().backward()
+                self.assertEqual(a.grad, expected_a_grad)
+                self.assertEqual(b.grad, expected_b_grad)
+            dim1_cat = torch.cat([c.contiguous(), d.contiguous()], dim=1)
+            if dtype in complex_types():
+                dim1_cat.sum().abs().backward()
+                self.assertEqual(c.grad.abs(), expected_c_grad.abs())
+                self.assertEqual(d.grad.abs(), expected_d_grad.abs())
+            else:
+                dim1_cat.sum().backward()
+                self.assertEqual(c.grad, expected_c_grad)
+                self.assertEqual(d.grad, expected_d_grad)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
@@ -3966,6 +4030,27 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dim(), 0)
         self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
+
+    def test_default_device(self, device):
+        original = torch.arange(5)
+
+        examples: List[Tuple[Any, Dict]] = [
+            (3, {}),
+            (original, {}),
+            (to_numpy(original), {}),
+            (to_memview(original), {"dtype": original.dtype}),
+        ]
+
+        for data, kwargs in examples:
+            with torch.device(device):
+                tensor = torch.asarray(data, **kwargs)
+                self.assertEqual(tensor.device, torch.device(device))
+
+                # Check the contents of the tensor.
+                if isinstance(data, int):
+                    self.assertEqual(data, tensor.item())
+                else:
+                    self.assertEqual(data, tensor)
 
 
 instantiate_device_type_tests(TestTensorCreation, globals())
