@@ -1208,10 +1208,13 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
 ) -> List[Tensor]:
+    assert tensor_indices_or_sections.device.type == "cpu"
+    assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
-    assert split_dim == 1 or split_dim == 0, (
-        "tensor_split expected tensor_indices_or_sections to be a zero-dimensional or "
-        f"one-dimensional tensor, but got a tensor with {split_dim} dims"
+    torch._check(
+        split_dim == 1 or split_dim == 0,
+        lambda: "tensor_split expected tensor_indices_or_sections to be a zero-dimensional "
+        f"or one-dimensional tensor, but got a tensor with {split_dim} dims"
     )
     if split_dim == 0:
         sections = tensor_indices_or_sections.item()
