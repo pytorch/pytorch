@@ -136,8 +136,8 @@ def shorten_filename(fn):
     directory is "obvious" and doesn't need to be shown to user.
     """
     # Truncate torch/foo.py to foo.py
-    prefix = os.path.commonpath([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
-    return fn[len(prefix) + 1:]
+    prefix = os.path.commonprefix([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
+    return fn[len(prefix):]
 
 def format_frame(frame):
     """
