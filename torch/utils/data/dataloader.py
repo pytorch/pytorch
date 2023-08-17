@@ -6,7 +6,6 @@ in `./_utils/worker.py`.
 """
 
 import functools
-import gc
 import itertools
 import logging
 import os
