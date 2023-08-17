@@ -299,6 +299,11 @@ if __name__ == "__main__":
         help="Head branch of the workflow",
     )
     parser.add_argument(
+        "--head-repository",
+        required=True,
+        help="Head repository of the workflow",
+    )
+    parser.add_argument(
         "--circleci",
         action="store_true",
         help="If this is being run through circleci",
@@ -355,7 +360,7 @@ if __name__ == "__main__":
         failed_tests_cases,
     )
 
-    if args.head_branch == "main":
+    if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases

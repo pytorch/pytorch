@@ -1968,9 +1968,9 @@ class TestReductions(TestCase):
             a[2, 2] = nan
             actual = f(a.to(device)).cpu()
             expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg='nans for {}'.format(name))
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=f'nans for {name}')
             self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], msg='nans for {}'.format(name))
+                             expected[~torch.isnan(expected)], msg=f'nans for {name}')
 
     # TODO: make this test generic using OpInfos
     @onlyCUDA
@@ -2199,16 +2199,16 @@ class TestReductions(TestCase):
                 fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
                 values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
                 self.assertEqual(values[:, 1], values_expected,
-                                 msg='{} values with out= kwarg'.format(fn_name))
+                                 msg=f'{fn_name} values with out= kwarg')
                 self.assertEqual(indices[:, 1], indices_expected,
-                                 msg='{} indices with out= kwarg'.format(fn_name))
+                                 msg=f'{fn_name} indices with out= kwarg')
                 continue
 
             x = torch.randn(5, 3, device=device)
             y = torch.randn(5, 3, device=device)
             fn(y, 1, keepdim=False, out=x[:, 1])
             expected = fn(y, 1, keepdim=False)
-            self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
+            self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
     @onlyCUDA
     @largeTensorTest('10GB')
@@ -3498,8 +3498,8 @@ as the input tensor excluding its innermost dimension'):
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
 
             msg = ("Failed to produce expected results! Input tensor was"
-                   " {0}, torch result is {1}, and reference result is"
-                   " {2}.").format(t, actual, expected) if t.numel() < 10 else None
+                   " {}, torch result is {}, and reference result is"
+                   " {}.").format(t, actual, expected) if t.numel() < 10 else None
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 

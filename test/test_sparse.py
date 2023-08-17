@@ -285,11 +285,11 @@ class TestSparse(TestSparseBase):
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
             values_shape = torch.Size((nnz,) + shape[sparse_dim:])
-            printed.append("# shape: {}".format(torch.Size(shape)))
-            printed.append("# nnz: {}".format(nnz))
-            printed.append("# sparse_dim: {}".format(sparse_dim))
-            printed.append("# indices shape: {}".format(indices_shape))
-            printed.append("# values shape: {}".format(values_shape))
+            printed.append(f"# shape: {torch.Size(shape)}")
+            printed.append(f"# nnz: {nnz}")
+            printed.append(f"# sparse_dim: {sparse_dim}")
+            printed.append(f"# indices shape: {indices_shape}")
+            printed.append(f"# values shape: {values_shape}")
 
             indices = torch.arange(indices_shape.numel(), dtype=self.index_tensor(0).dtype,
                                    device=device).view(indices_shape)
@@ -308,7 +308,7 @@ class TestSparse(TestSparseBase):
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
-                printed.append("########## {} ##########".format(dtype))
+                printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
                 printed.append("# sparse tensor")
                 printed.append(str(x))
@@ -3382,8 +3382,7 @@ class TestSparse(TestSparseBase):
                                                dtype=dtype, device=device)
             else:
                 raise ValueError(
-                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
-                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+                    f'`dim(={dim})` must be smaller than `sparse_dim(={sparse.sparse_dim()}) + dense_dim(={sparse.dense_dim()})`')
 
         def softmax_jacobian_analytic(x, dim):
             """Return Jacobian of softmax using analytic formula
@@ -3701,6 +3700,17 @@ class TestSparse(TestSparseBase):
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
 
+        def test_backward_noncontiguous():
+            # Sparse.mm backward used to wrong with non-contiguous grads,
+            # see https://github.com/pytorch/pytorch/issues/102493.
+            n_reps = 7
+            for _ in range(n_reps):
+                A = torch.eye(5).to_sparse().requires_grad_(True)
+                B = torch.eye(5).to_sparse()
+                out = torch.sparse.mm(A, B)
+                out.coalesce().values().sum().backward()
+                self.assertEqual(A.grad, A)
+
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):
@@ -3709,6 +3719,7 @@ class TestSparse(TestSparseBase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+        test_backward_noncontiguous()
 
     @coalescedonoff
     @dtypes(torch.double)
