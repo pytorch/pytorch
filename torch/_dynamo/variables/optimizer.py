@@ -1,3 +1,4 @@
+import weakref
 from typing import Dict, List
 
 import torch
@@ -59,6 +60,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
                 tx.store_global_weakref(self.get_global_name(), self.value)
+                self.create_finalizer(tx)
                 # finalize(self.value, )
 
                 return ConstantVariable(None)
@@ -188,6 +190,19 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     recursively_contains={},
                 )
                 tx.replace_all(arg, tensor_vars)
+
+    def create_finalizer(self, tx):
+        names_to_delete = self.static_tensor_names
+        value = self.value
+
+        def init_finalizer(gm):
+            def clear_static_tensor_attrs():
+                for name in names_to_delete:
+                    setattr(gm, name, None)
+
+            weakref.finalize(value, clear_static_tensor_attrs)
+
+        tx.output.add_finalizer_init(init_finalizer)
 
     def get_global_name(self):
         return f"__optimizer_{id(self.value)}"
