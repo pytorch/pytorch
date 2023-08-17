@@ -4,6 +4,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import dynamic_dim, export
+from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -365,6 +366,14 @@ class TestDeserialize(TestCase):
         model = case.model
         inputs = normalize_inputs(case.example_inputs)
         self.check_graph(model, inputs.args)
+
+    def test_constraints(self):
+        def f(x, y):
+            n = x.item()
+            constrain_as_size(n, min=2)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
 
 
 instantiate_parametrized_tests(TestDeserialize)
