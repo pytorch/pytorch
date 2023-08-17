@@ -296,6 +296,7 @@ These two are encapsulated into a ExtraState.
 // Linked list of cache entries, where each cache entry stores
 // the check_fn and the torch.compile optimized python bytecode.
 typedef struct cache_entry {
+  PyObject_HEAD
   // check the guards: lambda: <locals of user function>: bool
   PyObject* check_fn;
   // modified user bytecode (protected by check_fn's guards)
@@ -303,6 +304,19 @@ typedef struct cache_entry {
   // on a cache miss, linked list of next thing to try
   struct cache_entry* next;
 } CacheEntry;
+
+
+static void destroy_cache_entry(CacheEntry* e);
+
+static PyTypeObject CacheEntryType = {
+  PyVarObject_HEAD_INIT(NULL, 0)
+  .tp_name = "torch._C.dynamo.eval_frame.CacheEntryWrapper",
+  .tp_basicsize = sizeof(CacheEntry),
+  .tp_itemsize = 0,
+  .tp_flags = Py_TPFLAGS_DEFAULT,
+  .tp_new = PyType_GenericNew,
+  .tp_dealloc = (destructor)destroy_cache_entry,
+};
 
 // ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
 // level of abstraction of what is stored on the extra code object. Previously,
@@ -327,8 +341,8 @@ static CacheEntry* create_cache_entry(
   //   - guarded_code: Borrowed
   //  return
   //   - CacheEntry*: new reference.
-  CacheEntry* e = (CacheEntry*)malloc(sizeof(CacheEntry));
-  DEBUG_NULL_CHECK(e);
+  CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject *) &CacheEntryType, NULL);
+  NULL_CHECK(e);
   e->check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
   NULL_CHECK(e->check_fn);
   e->code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code");
@@ -343,8 +357,9 @@ static void destroy_cache_entry(CacheEntry* e) {
   }
   Py_XDECREF(e->check_fn);
   Py_XDECREF(e->code);
-  destroy_cache_entry(e->next);
-  free(e);
+  // This will recursively call destroy_cache_entry for the next items in the
+  // linked list.
+  Py_XDECREF(e->next);
 }
 
 /* CacheEntry helper functions ends */
@@ -411,7 +426,9 @@ inline static void destroy_extra_state(void* obj) {
   if (extra != NULL && extra != SKIP_CODE) {
     CacheEntry* cache_entry = extra->cache_entry;
     FrameState* frame_state = extra->frame_state;
-    destroy_cache_entry(cache_entry);
+    // Cpython gc will call destroy_cache_entry on its own when the ref count
+    // goes to 0.
+    Py_XDECREF(cache_entry);
     Py_XDECREF(frame_state);
     free(extra);
   }
@@ -1099,6 +1116,16 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 #endif
+
+
+  if (PyType_Ready(&CacheEntryType) < 0) {
+    return NULL;
+  }
+  Py_INCREF(&CacheEntryType);
+  if (PyModule_AddObject(module, "_CacheEntryPyWrapper", (PyObject *) &CacheEntryType) < 0) {
+      Py_DECREF(&CacheEntryType);
+      return NULL;
+  }
 
   return module;
 }
