@@ -30,9 +30,27 @@ void THCPGraph_init(PyObject* module) {
       // docs aren't clear. But it works.
       .def(
           "capture_begin",
-          torch::wrap_pybind_function_no_gil(
-              &at::cuda::CUDAGraph::capture_begin),
-          py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
+          [](::at::cuda::CUDAGraph& self,
+             c10::cuda::MempoolId_t pool,
+             std::string capture_error_mode) {
+            cudaStreamCaptureMode capture_mode;
+            if (capture_error_mode == "global") {
+              capture_mode = cudaStreamCaptureModeGlobal;
+            } else if (capture_error_mode == "local") {
+              capture_mode = cudaStreamCaptureModeThreadLocal;
+            } else if (capture_error_mode == "relaxed") {
+              capture_mode = cudaStreamCaptureModeRelaxed;
+            } else {
+              TORCH_INTERNAL_ASSERT(
+                  false,
+                  "Unknown capture error mode. Expected `global`, `local`, or `relaxed`, got ",
+                  capture_error_mode);
+            }
+            return self.capture_begin(pool, capture_mode);
+          },
+          py::arg("pool") = c10::cuda::MempoolId_t{0, 0},
+          py::arg("capture_error_mode") = "global",
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))

@@ -833,7 +833,7 @@ class CUDAGraphNode:
         del inputs
 
         # graph used for recording model invocation
-        self.graph = torch.cuda.CUDAGraph()
+        self.graph = torch.cuda.CUDAGraph(capture_error_mode="thread_local")
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -1678,7 +1678,7 @@ class CUDAGraphTreeManager:
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
-            self.graph = torch.cuda.CUDAGraph()
+            self.graph = torch.cuda.CUDAGraph(capture_error_mode="thread_local")
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 

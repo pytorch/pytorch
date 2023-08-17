@@ -1,4 +1,5 @@
 import gc
+from typing import Literal
 
 import torch
 from torch.utils._pytree import (
@@ -56,7 +57,7 @@ class CUDAGraph(torch._C._CUDAGraph):
     def __new__(cls):
         return super().__new__(cls)
 
-    def capture_begin(self, pool=None):
+    def capture_begin(self, pool=None, capture_error_mode="global"):
         r"""
         Begins capturing CUDA work on the current stream.
 
@@ -68,13 +69,18 @@ class CUDAGraph(torch._C._CUDAGraph):
             pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
                 :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
                 with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+            capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
+                Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
+                may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
+                actions in the current thread, and "relaxed" will not error on actions.
+
         """
         # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
         # so I'm not taking any chances.
         if pool is None:
-            super().capture_begin()
+            super().capture_begin(capture_error_mode=capture_error_mode)
         else:
-            super().capture_begin(pool)
+            super().capture_begin(capture_error_mode=capture_error_mode)
 
     def capture_end(self):
         r"""
@@ -139,6 +145,10 @@ class graph:
             may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
+        capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
+            Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
+            may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
+            actions in the current thread, and "relaxed" will not error on actions.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -149,7 +159,13 @@ class graph:
     """
     default_capture_stream = None
 
-    def __init__(self, cuda_graph, pool=None, stream=None):
+    def __init__(
+        self,
+        cuda_graph,
+        pool=None,
+        stream=None,
+        capture_error_mode: Literal["global", "thread_local", "relaxed"] = "global",
+    ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -163,6 +179,7 @@ class graph:
         assert self.capture_stream is not None
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
+        self.capture_error_mode = capture_error_mode
 
     def __enter__(self):
         # Free as much memory as we can for the graph
@@ -174,7 +191,7 @@ class graph:
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
 
-        self.cuda_graph.capture_begin(*self.pool)
+        self.cuda_graph.capture_begin(*self.pool, self.capture_error_mode)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.cuda_graph.capture_end()

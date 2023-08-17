@@ -772,7 +772,7 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
+    graph = torch.cuda.CUDAGraph(capture_error_mode="thread_local")
     with torch.cuda.graph(graph, stream=stream):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
