@@ -4698,7 +4698,7 @@ def meta__scaled_dot_product_flash(
         logsumexp = torch.empty(
             (
                 batch_size,
-                max_seqlen_batch_q if query.requires_grad_() else 0,
+                max_seqlen_batch_q if query.requires_grad else 0,
                 num_heads,
             ),
             dtype=torch.float,
