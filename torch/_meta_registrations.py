@@ -4694,50 +4694,68 @@ def meta__scaled_dot_product_flash(
         batch_size, max_seqlen_batch_q, num_heads, head_dim
     ).transpose(1, 2)
 
-    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_q),
-        dtype=torch.float,
-        device=query.device,
-    )
-    cumulative_sequence_length_q = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
-    )
-    cumulative_sequence_length_k = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
-            dtype=query.dtype,
+    if device_hint(query) == "cpu":
+        logsumexp = torch.empty(
+            (batch_size, max_seqlen_batch_q, num_heads),
+            dtype=torch.float,
             device=query.device,
+        ).transpose(1, 2)
+        return (
+            attention,
+            logsumexp,
+            torch.empty((), dtype=torch.int32, device="meta"),
+            torch.empty((), dtype=torch.int32, device="meta"),
+            0,
+            0,
+            torch.empty((), dtype=torch.long, device="meta"),
+            torch.empty((), dtype=torch.long, device="meta"),
+            torch.empty((), dtype=query.dtype, device=query.device),
         )
     else:
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+        max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_seqlen_q),
+            dtype=torch.float,
+            device=query.device,
+        )
+        cumulative_sequence_length_q = torch.empty(
+            batch_size + 1, dtype=torch.int32, device="meta"
+        )
+        cumulative_sequence_length_k = torch.empty(
+            batch_size + 1, dtype=torch.int32, device="meta"
+        )
 
-    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
-    # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return meta tensors here
-    # it's possible we'll need to have some special handling in inductor for sdpa
+        if return_debug_mask:
+            blocksize_c = 128 if head_dim > 64 else 256
+            max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+            if max_seqlen_batch_k <= 128:
+                max_seqlen_k = 128
+            elif max_seqlen_batch_k <= 256:
+                max_seqlen_k = 256
+            debug_mask = torch.empty(
+                (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+                dtype=query.dtype,
+                device=query.device,
+            )
+        else:
+            debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    return (
-        attention,
-        logsumexp,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_k,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
-        debug_mask,
-    )
+        # Note [Seed and Offset]: device for seed and offset below depends on whether we are
+        # capturing or not, but at the time of tracing we don't know if we
+        # are going to use cudagraphs or not, so we return meta tensors here
+        # it's possible we'll need to have some special handling in inductor for sdpa
+
+        return (
+            attention,
+            logsumexp,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_k,
+            max_seqlen_batch_q,
+            max_seqlen_batch_k,
+            torch.empty((), dtype=torch.long, device="meta"),
+            torch.empty((), dtype=torch.long, device="meta"),
+            debug_mask,
+        )
 
 
 @register_meta(
@@ -4765,21 +4783,23 @@ def meta__scaled_dot_product_flash_backward(
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
+    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
+    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads, len_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, len_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, len_k, head_dim),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
