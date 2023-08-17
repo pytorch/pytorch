@@ -44,7 +44,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 
 ## More About PyTorch
 
-[PyTorch Introduction](https://pytorch.org/tutorials/beginner/basics/intro.html)
+[Learn the basics of PyTorch](https://pytorch.org/tutorials/beginner/basics/intro.html)
 
 At a granular level, PyTorch is a library that consists of the following components:
 
