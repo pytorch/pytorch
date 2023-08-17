@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import unittest
 from io import StringIO
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
@@ -743,6 +744,25 @@ def override_lowering(aten_op, override_fn):
         lowering.lowerings[aten_op] = orig_fn
 
 
+def add_scheduler_init_hook(pre_fn, post_fn=None):
+    """
+    Add hook functions to be called at the beginning and end of Scheduler.__init__.
+    Used for unit tests.
+    """
+    from torch._inductor.scheduler import Scheduler
+
+    orig_fn = Scheduler.__init__
+
+    def wrapper(scheduler, nodes):
+        pre_fn(scheduler, nodes)
+        out = orig_fn(scheduler, nodes)
+        if post_fn:
+            post_fn(scheduler, nodes)
+        return out
+
+    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
+
+
 def developer_warning(msg):
     """
     Warnings that will be actionable for PyTorch developers, but not
@@ -991,3 +1011,22 @@ def try_find_schema(schemas, args, kwargs):
             return schema
 
     return None
+
+
+def get_device_tflops(dtype):
+    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
+    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    if dtype in (torch.float16, torch.bfloat16):
+        return get_max_tensorcore_tflops(dtype)
+
+    if torch.backends.cuda.matmul.allow_tf32:
+        return get_max_tensorcore_tflops(torch.float32)
+    else:
+        return get_max_simd_tflops(torch.float32)
+
+
+def get_gpu_dram_gbps():
+    from triton.testing import get_dram_gbps
+
+    return get_dram_gbps()

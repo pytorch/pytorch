@@ -18,6 +18,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
+from torch._dynamo.exc import UserError
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -2272,7 +2273,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2321,7 +2322,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2343,11 +2344,11 @@ def forward(self, x):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+            RuntimeError, r"Invalid value range for 20 between \[4, 7\]."
         ) as cm:
             torch._export.export(f, (torch.tensor([20]),))
 
@@ -2360,14 +2361,14 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
@@ -3012,47 +3013,136 @@ def forward(self, x):
                     + str(aten_graph),
                 )
 
-    def test_capture_symbolic_tracing(self) -> None:
-        from torch._dynamo.output_graph import config
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    def test_invalid_input_global(self) -> None:
+        global bulbous_bouffant
+        bulbous_bouffant = torch.randn(3)
 
+        def f(y):
+            return bulbous_bouffant + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['bulbous_bouffant'], accessed at:
+  File "test_export.py", line N, in f
+    return bulbous_bouffant + y
+""",
+        )
+
+    def test_invalid_input_global_multiple_access(self) -> None:
+        global macademia
+        macademia = torch.randn(3)
+
+        def g(y):
+            global macademia
+            y = macademia + y
+            return y
+
+        def f(y):
+            global macademia
+            y = g(y)
+            return macademia + y
+
+        # NB: This doesn't actually work (it only reports the first usage),
+        # but I'm leaving the test here in case we fix it later
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['macademia'], accessed at:
+  File "test_export.py", line N, in f
+    y = g(y)
+  File "test_export.py", line N, in g
+    y = macademia + y
+""",
+        )
+
+    def test_invalid_input_nonlocal(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            return arglebargle + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """L['arglebargle'], a closed over free variable""",
+        )
+
+    def test_invalid_input_unused_nonlocal_ok(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            x = arglebargle
+            return y
+
+        torch._dynamo.export(f)(torch.randn(3))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        with fake_mode:
+            model = DynamicShapeSimpleModel()
+            inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+                dynamic_dim(inputs[2], 0),
+                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
+
+        # Since there are no parameters we can do this
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        self.assertEqual(model(*inputs), gm(*inputs))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        # TODO: Seems to choke if you don't make a fresh model and
+        # just try to export Linear directly...
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
-                self.linear2 = torch.nn.Linear(2, 2)
 
             def forward(self, x):
                 out = self.linear(x)
-                out = self.linear2(out)
                 return out
 
-        # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=False,
-            allow_fallback_kernels=True,
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
-            ),
-        )
-        # Fakefy input+model before exporting it
         with fake_mode:
-            x = torch.rand(5, 2, 2)
             model = Model()
-
-        # Export the model with fake inputs and parameters
-        for aten_graph in [True, False]:
-            graph_module, _ = torch._dynamo.export(
-                model, x, aten_graph=aten_graph, fake_mode=fake_mode
-            )
-
-            self.assertTrue(
-                isinstance(graph_module, torch.fx.GraphModule),
-                msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
-            )
+            inputs = (torch.randn(10, 2, 2),)
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
 
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
@@ -3446,6 +3536,25 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
 
         self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
+
+    @config.patch(suppress_errors=True)
+    @config.patch(verbose=True)
+    def test_export_with_map_zero_sized_tensor_suppress_errors(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return map(body, xs)
+
+        mod = Module()
+        xs = torch.randn(0, 2)
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            out_graph, _ = torch._dynamo.export(mod, xs)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
