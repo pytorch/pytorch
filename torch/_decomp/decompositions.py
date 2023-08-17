@@ -2995,6 +2995,11 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+@register_decomposition([aten._unsafe_index])
+def _index(x, indices):
+    return aten.index(x, indices)
+
+
 def _nll_loss_forward(
     self: Tensor,
     target: Tensor,

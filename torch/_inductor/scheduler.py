@@ -19,6 +19,7 @@ from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
+
 log = logging.getLogger(__name__)
 
 
@@ -800,15 +801,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = all(
+        a_first = sum(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = all(
+        b_first = sum(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first and not b_first:
+        if a_first > b_first:
             return -1
-        if b_first and not a_first:
+        if b_first > a_first:
             return 1
 
         # otherwise contiguous
@@ -1434,7 +1435,7 @@ class Scheduler:
         for name in names_to_remove:
             if name in V.kernel.args.inplace_buffers:
                 buf = V.kernel.args.inplace_buffers[name]
-                if buf == "REMOVED":
+                if isinstance(buf, str) and buf.startswith("REMOVED"):
                     continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
@@ -1453,7 +1454,10 @@ class Scheduler:
 
     def remove_inplace_buffer(self, name):
         log.debug("removing_inplace_buffer(%r)", name)
-        V.kernel.args.inplace_buffers[name] = "REMOVED"
+        inner_name = V.kernel.args.inplace_buffers[name].inner_name
+        V.kernel.args.inplace_buffers[name] = inner_name.replace(
+            "in_out_ptr", "REMOVED"
+        )
         V.graph.removed_buffers.add(name)
 
     def flush(self):

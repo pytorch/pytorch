@@ -31,6 +31,7 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
+from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -1769,6 +1770,34 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                ),
+                check_lowp=True,
+            )
+
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm2(self):
+        def fn(a, b, scale, bias):
+            return torch.mm(a, b.to(a.dtype)) * scale + bias
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                    torch.randn(8),
+                    torch.randn(8),
+                ),
+                check_lowp=True,
+            )
 
     def test_scalar_input(self):
         def fn(x, y):
@@ -7039,6 +7068,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_optimize_indexing_dtype_with_constraint(self):
+            def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                x = torch.arange(0, b.shape[0], device="cuda")
+                y = ((x + x) / 3).int()
+                return a[y.to(torch.int64)]
+
+            def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                constrain_as_size(b.shape[0], 2, 100)
+                return fn1(a, b)
+
+            fn1_opt = torch._dynamo.optimize("inductor")(fn1)
+            fn2_opt = torch._dynamo.optimize("inductor")(fn2)
+
+            a = torch.rand([100, 100], device="cuda")
+            b = torch.rand([100], device="cuda")
+            torch._dynamo.mark_dynamic(b, 0)
+            inps = [a, b]
+
+            code1 = run_and_get_triton_code(fn1_opt, *inps)
+            code2 = run_and_get_triton_code(fn2_opt, *inps)
+
+            # The function with the constrained tensor should be optimized, but
+            # the other should not:
+            self.assertTrue("to(tl.int64)" in code1)
+            self.assertTrue("to(tl.int32)" in code2)
+            self.assertFalse("to(tl.int64)" in code2)
+
+            self.assertEqual(fn1_opt(*inps), fn1(*inps))
+            self.assertEqual(fn2_opt(*inps), fn1(*inps))
+
         def test_constant_folding_deallocation(self):
             import torch._inductor
 
@@ -7188,6 +7247,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_numpy_on_cuda(self):
+            x = np.arange(10, dtype=np.float32)
+
+            @torch.compile
+            def fn(x):
+                return np.sin(x)
+
+            def fn_cuda(x):
+                with torch.device("cuda"):
+                    return fn(x)
+
+            r = fn_cuda(x)
+            code = run_and_get_triton_code(fn_cuda, x)
+            self.assertIn("tl.sin", code)
+            self.assertEqual(type(r), np.ndarray)
+            self.assertEqual(r, np.sin(x))
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
