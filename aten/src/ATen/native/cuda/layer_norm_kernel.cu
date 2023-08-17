@@ -228,8 +228,8 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
-    const vec_t * gamma_vec = reinterpret_cast<const vec_t*>(gamma);
-    const vec_t * beta_vec = reinterpret_cast<const vec_t*>(beta);
+    const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+    const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
 
     const int numx = blockDim.x * blockDim.y;
