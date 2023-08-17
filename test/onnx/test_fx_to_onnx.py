@@ -473,8 +473,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_google_flan_t5_small(self):
         model_name = "google/flan-t5-small"
+        device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
             decoder_input_ids = tokenizer(
@@ -498,6 +499,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         from datasets import load_dataset  # type: ignore[import]
 
         model_name = "openai/whisper-tiny"
+        device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
             config = transformers.WhisperConfig.from_pretrained(model_name)
             processor = transformers.WhisperProcessor.from_pretrained(model_name)
@@ -509,7 +511,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             ).input_features
             decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
 
-            model = transformers.AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
                 model,
@@ -527,10 +529,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
         model_name = "databricks/dolly-v2-3b"
+        device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
             inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = transformers.AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
@@ -570,13 +573,18 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
         model_name = "mosaicml/mpt-7b"
+        device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
             tokenizer = transformers.AutoTokenizer.from_pretrained(
                 model_name, trust_remote_code=True
             )
             inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = transformers.AutoModelForCausalLM.from_pretrained(
-                model_name, trust_remote_code=True
+            model = (
+                transformers.AutoModelForCausalLM.from_pretrained(
+                    model_name, trust_remote_code=True
+                )
+                .to(device)
+                .eval()
             )
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
