@@ -120,8 +120,8 @@ def _step_logger():
 
 @dataclasses.dataclass
 class FXNodeMetaContext:
-    meta: List[Any]
-    counter_name: str
+    node_metas: List[Dict[str, Any]]
+    lineno_map: Dict[int, Optional[int]]
 
 
 _fx_node_meta_context = None

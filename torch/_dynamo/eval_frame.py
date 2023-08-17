@@ -128,10 +128,10 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         fx_node_meta_context = None
         if isinstance(self._orig_mod, torch.fx.GraphModule):
-            if self._orig_mod._counter_name is not None:
+            if self._orig_mod._lineno_map is not None:
                 fx_node_meta_context = FXNodeMetaContext(
                     [node.meta for node in self._orig_mod.graph.nodes],
-                    self._orig_mod._counter_name,
+                    self._orig_mod._lineno_map,
                 )
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(

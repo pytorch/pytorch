@@ -1218,19 +1218,20 @@ class SubgraphTracer(fx.Tracer):
                 self.prev_inst = cur_inst
 
         # preserve original meta if it is available
-        if (
-            tx._fx_node_meta_context is not None
-            and tx._fx_node_meta_context.counter_name in tx.symbolic_locals
-        ):
-            meta = tx._fx_node_meta_context.meta[
-                tx.symbolic_locals[
-                    tx._fx_node_meta_context.counter_name
-                ].as_python_constant()
-            ]
-            for key in ("nn_module_stack", "source_fn", "stack_trace"):
-                if key in meta:
-                    rv.node.meta[key] = meta[key]
-            return rv
+        if tx._fx_node_meta_context is not None:
+            breakpoint()
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = tx._fx_node_meta_context.lineno_map[
+                    lineno - tx.f_code.co_firstlineno
+                ]
+            if node_idx is not None:
+                meta = tx._fx_node_meta_context.node_metas[node_idx]
+                for key in ("nn_module_stack", "source_fn", "stack_trace"):
+                    if key in meta:
+                        rv.node.meta[key] = meta[key]
+                return rv
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:

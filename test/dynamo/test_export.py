@@ -2274,7 +2274,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2323,7 +2323,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2345,11 +2345,11 @@ def forward(self, x):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+            RuntimeError, r"Invalid value range for 20 between \[4, 7\]."
         ) as cm:
             torch._export.export(f, (torch.tensor([20]),))
 
@@ -2362,14 +2362,14 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
@@ -3579,7 +3579,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         mod = Module2()
         inp = torch.randn(3, 3)
 
-        gm, _ = torch._dynamo.export(mod, inp)
+        gm, _ = torch._dynamo.export(mod)(inp)
 
         # replace relu with fn
         gm_edit = copy.deepcopy(gm)
@@ -3588,9 +3588,9 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
                 nd.target = fn
                 nd.meta.clear()
                 break
-        gm_edit.recompile(emit_counter=True)
+        gm_edit.recompile()
 
-        gm2, _ = torch._dynamo.export(gm_edit, inp)
+        gm2, _ = torch._dynamo.export(gm_edit)(inp)
 
         # check for source code
         gm_code = gm.print_readable(print_output=False)

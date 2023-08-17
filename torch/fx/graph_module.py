@@ -647,7 +647,7 @@ class {module_name}(torch.nn.Module):
         return self._code
 
     @compatibility(is_backward_compatible=True)
-    def recompile(self, emit_counter: bool = False) -> PythonCode:
+    def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
@@ -656,9 +656,9 @@ class {module_name}(torch.nn.Module):
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
-        python_code = self._graph.python_code(root_module='self', emit_counter=emit_counter)
+        python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
-        self._counter_name = python_code._counter_name
+        self._lineno_map = python_code._lineno_map
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, '_co_fields') else {}

@@ -171,7 +171,7 @@ def capture_pre_autograd_graph(
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
@@ -363,7 +363,7 @@ def export(
             # so we serialize them here instead of inside dynamo
             gm.meta["inline_constraints"] = {
                 k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
 

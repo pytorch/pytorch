@@ -1159,10 +1159,8 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2):
                         possible_fusions.append(key)
-                    elif (
-                        node2.is_template()
-                        or node2.is_foreach()
-                        and self.can_fuse(node2, node1)
+                    elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
+                        node2, node1
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
