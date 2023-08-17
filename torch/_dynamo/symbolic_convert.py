@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_constant
 from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -972,7 +972,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         val = self.f_builtins[inst.argval]
 
         if callable(val):
-            assert is_builtin_callable(val)
             self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
@@ -1441,7 +1440,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, BaseListVariable):
+        if isinstance(seq, (BaseListVariable, SetVariable)):
             self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):

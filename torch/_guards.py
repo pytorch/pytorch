@@ -608,7 +608,7 @@ def tracing(context: TracingContext):
     try:
         yield context
     except Exception as e:
-        if not hasattr(e, "real_stack"):
+        if not hasattr(e, "real_stack") and context is not None:
             e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
@@ -643,6 +643,24 @@ class Source:
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
+
+
+# Represents a source tensor coming from a field on a wrapper tensor subclass.
+# For example, in torch.testing._internal.double_tensor.DoubleTensor,
+# fields DoubleTensor.a and DoubleTensor.b will get a WrapperSubclassFieldSource
+@dataclasses.dataclass(frozen=True)
+class WrapperSubclassFieldSource(Source):
+    inner_source: Source
+    field_name: str
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_global(self.name(), False, add=False)]
+
+    def guard_source(self):
+        return self.inner_source.guard_source()
+
+    def name(self):
+        return f"{self.inner_source.name()}.{self.field_name}"
 
 
 def detect_fake_mode(inputs: Any = None):

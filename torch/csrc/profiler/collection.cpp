@@ -1471,7 +1471,7 @@ void set_fwd_bwd_enabled_val(bool val) {
 
 namespace {
 std::function<bool()>& cuda_sync_enabled_fn() {
-  static std::function<bool()> fn = []() { return true; };
+  static std::function<bool()> fn = []() { return false; };
   return fn;
 }
 } // namespace

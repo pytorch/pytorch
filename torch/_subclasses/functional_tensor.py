@@ -32,6 +32,9 @@ class FunctionalTensor(torch.Tensor):
     """
 
     elem: torch.Tensor
+    # Indicates to our torch_dispatch dispatching infra that
+    # this is an "infra" mode with lower dispatching precedence.
+    _mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
@@ -127,19 +130,27 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
         self.is_active = True
         self.is_on_stack = False
+        self.enter_stack = []
+        # Indicates to our torch_dispatch dispatching infra that
+        # this is an "infra" mode with lower dispatching precedence.
+        self._mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
-        if torch._C._get_functional_tensor_mode() is None:
-            torch._C._set_functional_tensor_mode(self)
-            self.is_on_stack = True
-        return self
+        if (
+            torch._C._get_dispatch_mode(torch._C.TorchDispatchModeKey.FUNCTIONAL)
+            is None
+        ):
+            self.enter_stack.append(True)
+            return super().__enter__()
+        else:
+            self.enter_stack.append(False)
+            return self
 
     def __exit__(self, a, b, c):
-        if self.is_on_stack:
-            out = torch._C._unset_functional_tensor_mode()
-            # Sanity check
-            assert out is self
+        is_on_stack = self.enter_stack.pop()
+        if is_on_stack:
+            super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -207,11 +218,11 @@ class FunctionalTensorMode(TorchDispatchMode):
 
 @contextlib.contextmanager
 def maybe_disable_functional_mode():
-    func_mode = None
-    if torch._C._get_functional_tensor_mode() is not None:
-        func_mode = torch._C._unset_functional_tensor_mode()
+    maybe_func_mode = torch._C._unset_dispatch_mode(
+        torch._C.TorchDispatchModeKey.FUNCTIONAL
+    )
     try:
         yield
     finally:
-        if func_mode is not None:
-            torch._C._set_functional_tensor_mode(func_mode)
+        if maybe_func_mode is not None:
+            torch._C._set_dispatch_mode(maybe_func_mode)
