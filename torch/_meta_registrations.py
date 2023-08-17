@@ -2866,9 +2866,7 @@ def _foreach_binary_op_list_alpha(func, inplace, op, is_kwarg=True):
                 op(tensors1[i], tensors2[i], alpha=alpha) for i in range(len(tensors1))
             ]
         else:
-            return [
-                op(tensors1[i], tensors2[i], alpha) for i in range(len(tensors1))
-            ]  # lerp
+            return [op(tensors1[i], tensors2[i], alpha) for i in range(len(tensors1))]
 
     @register_meta(inplace)
     def _inplace_meta(
@@ -2963,13 +2961,15 @@ def _foreach_pointwise_op_scalarlist(func, inplace, op):
         tensors2: List[Tensor],
         scalars: List[NumberType],
     ):
-        _common(input, tensors1, tensors2)
+        _common(input, tensors1, tensors2, scalars)
         return None
 
     return _func_meta, _inplace_meta
 
 
-def _convert_tensor_to_scalar_list(scalars: Tensor, expect_length: int):
+def _convert_tensor_to_scalar_list(
+    scalars: Tensor, expect_length: int
+) -> List[NumberType]:
     torch._check(scalars.is_contiguous(), lambda: "Expected scalars to be contiguous.")
     torch._check(
         scalars.ndim == 1,
@@ -2992,9 +2992,9 @@ def _foreach_pointwise_op_tensor(func, inplace, op):
         tensors2: List[Tensor],
         scalars: Tensor,
     ):
-        scalars = _convert_tensor_to_scalar_list(scalars, len(input))
+        scalar_list = _convert_tensor_to_scalar_list(scalars, len(input))
         _check_foreach_api_restrictions_pointwise_scalarlist(
-            input, tensors1, tensors2, scalars
+            input, tensors1, tensors2, scalar_list
         )
 
     @register_meta(func)
@@ -3004,7 +3004,7 @@ def _foreach_pointwise_op_tensor(func, inplace, op):
         tensors2: List[Tensor],
         scalars: Tensor,
     ):
-        _common(input, tensors1, tensors2)
+        _common(input, tensors1, tensors2, scalars)
         return [
             op(input[i], tensors1[i], tensors2[i], value=scalars[i])
             for i in range(len(input))
@@ -3017,7 +3017,7 @@ def _foreach_pointwise_op_tensor(func, inplace, op):
         tensors2: List[Tensor],
         scalars: Tensor,
     ):
-        _common(input, tensors1, tensors2)
+        _common(input, tensors1, tensors2, scalars)
         return None
 
     return _func_meta, _inplace_meta
@@ -3048,7 +3048,6 @@ _foreach_binary_op_list_alpha(
 _foreach_binary_op_list_alpha(
     aten._foreach_sub.List, aten._foreach_sub_.List, torch.sub
 )
-# XXX: lerp: weight is not a kwarg
 _foreach_binary_op_list_alpha(
     aten._foreach_lerp.Scalar, aten._foreach_lerp_.Scalar, torch.lerp, is_kwarg=False
 )
@@ -3086,14 +3085,14 @@ _foreach_binary_op_scalar(
 _foreach_binary_op_scalar(
     aten._foreach_pow.Scalar, aten._foreach_pow_.Scalar, torch.pow
 )
-# _foreach_binary_op_scalar(aten._foreach_norm.Scalar, None, torch.linalg.vector_norm, has_inplace=False)
 
 
-# XXX: same as _foreach_binary_op_scalar, but the second argument is named ord and has no inplace overload
-# @register_meta(aten._foreach_norm.Scalar)
-# def _func_meta(tensors: List[Tensor], ord: NumberType = 2):
-#     _check_foreach_api_restrictions_unary(tensors)
-#     return [torch.linalg.vector_norm(tensors[i], ord) for i in range(len(tensors))]
+# Note: could have been defined via _foreach_binary_op_scalar, but the second
+# argument is named ord and the op has no inplace overload.
+@register_meta(aten._foreach_norm.Scalar)
+def foreach_norm_meta(tensors: List[Tensor], ord: NumberType = 2):
+    _check_foreach_api_restrictions_unary(tensors)
+    return [torch.linalg.vector_norm(tensors[i], ord) for i in range(len(tensors))]
 
 
 _foreach_binary_op_scalarlist(
@@ -3201,19 +3200,25 @@ _foreach_unary_op(aten._foreach_zero.default, aten._foreach_zero_.default, torch
 _foreach_pointwise_op_scalar(
     aten._foreach_addcdiv.Scalar, aten._foreach_addcdiv_.Scalar, torch.addcdiv
 )
-# _foreach_pointwise_op_scalar(aten._foreach_addcmul.Scalar, aten._foreach_addcmul_.Scalar, torch.addcmul)
+_foreach_pointwise_op_scalar(
+    aten._foreach_addcmul.Scalar, aten._foreach_addcmul_.Scalar, torch.addcmul
+)
 
 
 _foreach_pointwise_op_scalarlist(
     aten._foreach_addcdiv.ScalarList, aten._foreach_addcdiv_.ScalarList, torch.addcdiv
 )
-# _foreach_pointwise_op_scalarlist(aten._foreach_addcmul.ScalarList, aten._foreach_addcmul_.ScalarList, torch.addcmul)
+_foreach_pointwise_op_scalarlist(
+    aten._foreach_addcmul.ScalarList, aten._foreach_addcmul_.ScalarList, torch.addcmul
+)
 
 
 _foreach_pointwise_op_tensor(
     aten._foreach_addcdiv.Tensor, aten._foreach_addcdiv_.Tensor, torch.addcdiv
 )
-# _foreach_pointwise_op_tensor(aten._foreach_addcmul.Tensor, aten._foreach_addcmul_.Tensor, torch.addcmul)
+_foreach_pointwise_op_tensor(
+    aten._foreach_addcmul.Tensor, aten._foreach_addcmul_.Tensor, torch.addcmul
+)
 
 
 _foreach_ternary_op(aten._foreach_lerp.List, aten._foreach_lerp_.List, torch.lerp)

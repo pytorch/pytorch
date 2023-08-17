@@ -8333,6 +8333,24 @@ class foreach_inputs_sample_func:
                 requires_grad=_foreach_inputs_kwargs.get("requires_grad", False),
             )]
         should_use_simpler_scalars = opinfo.name == "_foreach_pow" and dtype in (torch.float16, torch.bfloat16)
+        # passing float scalar with int tensors leads to unsafe cast
+        should_use_int_scalars = opinfo.name == "_foreach_addcmul" and dtype in integral_types()
+        # same for complex
+        should_use_int_float_scalars = (
+            opinfo.name == "_foreach_addcmul" and dtype in floating_types_and(torch.float16, torch.bfloat16)
+        )
+
+        def to_int(x):
+            if type(x) is complex:
+                return int(x.real)
+            else:
+                return int(x)
+
+        def to_int_float(x):
+            if type(x) is complex:
+                return x.real
+            else:
+                return x
 
         def sample_float():
             s = random.random()
@@ -8343,7 +8361,7 @@ class foreach_inputs_sample_func:
 
         high = 2 if should_use_simpler_scalars else 9
         if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
-            return [
+            res = [
                 [random.randint(0, high) + 1 for _ in range(num_tensors)],
                 [sample_float() for _ in range(num_tensors)],
                 [complex(sample_float(), sample_float()) for _ in range(num_tensors)],
@@ -8351,13 +8369,23 @@ class foreach_inputs_sample_func:
                 [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
                 [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
             ]
+            if should_use_int_scalars:
+                res = [[to_int(x) for x in y] for y in res]
+            elif should_use_int_float_scalars:
+                res = [[to_int_float(x) for x in y] for y in res]
+            return res
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
-            return (
+            res = (
                 random.randint(1, high + 1),
                 sample_float(),
                 True,
                 complex(sample_float(), sample_float()),
             )
+            if should_use_int_scalars:
+                res = tuple(to_int(x) for x in res)
+            elif should_use_int_float_scalars:
+                res = tuple(to_int_float(x) for x in res)
+            return res
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):

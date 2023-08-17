@@ -697,8 +697,6 @@ meta_function_skips = {
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
-    torch._foreach_addcmul: {i8, i16, i32, i64, u8, bf16, f16, f32, f64, c64, c128},
-    torch._foreach_norm: {bf16, f16, f32, f64, c64, c128},
 }
 
 

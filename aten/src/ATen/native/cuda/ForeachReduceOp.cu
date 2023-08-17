@@ -212,7 +212,9 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   std::vector<Tensor> result;
   result.reserve(ntensors);
   for (const auto& i : c10::irange(ntensors)) {
-    result.emplace_back(ret_per_tensor[i]);
+    // Makes a copy so that storage_offset is always 0, like on CPU
+    Tensor tmp = ret_per_tensor[i].clone();
+    result.emplace_back(tmp);
   }
   return result;
 }
