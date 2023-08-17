@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
-    TEST_WITH_ROCM, expectedFailureCUDA
+    TEST_WITH_ROCM, expectedFailureCUDA, onlyCUDAAndPRIVATEUSE1, dtypesIfPRIVATEUSE1
 from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
@@ -397,6 +397,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     # Issue: https://github.com/pytorch/pytorch/issues/78868
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
+    @dtypesIfPRIVATEUSE1(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_adaptive_pooling_empty_output_size(self, dtype, device):
         error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
@@ -768,6 +769,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @gcIfJetson
     @dtypes(torch.float, torch.double)
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None,
@@ -853,7 +855,7 @@ torch.cuda.synchronize()
         check(tensor, 3, 2, 1, 2, ceil_mode=True)
         check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 
-    @onlyCUDA
+    @onlyCUDAAndPRIVATEUSE1
     @gcIfJetson
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):
@@ -877,6 +879,7 @@ torch.cuda.synchronize()
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
@@ -1004,14 +1007,14 @@ torch.cuda.synchronize()
         helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
         helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
-    @onlyCUDA
+    @onlyCUDAAndPRIVATEUSE1
     @gcIfJetson
     def test_max_pool2d_indices(self, device):
         def helper(n, c, h, w, ks):
             if n is None:
-                x = torch.randn(c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+                x = torch.randn(c, h, w, device=device, dtype=torch.float, requires_grad=True)
             else:
-                x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+                x = torch.randn(n, c, h, w, device=device, dtype=torch.float, requires_grad=True)
 
             ref_x = x.detach().clone().cpu().requires_grad_()
 
@@ -1132,7 +1135,7 @@ torch.cuda.synchronize()
             helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
             helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
 
-    @onlyCUDA
+    @onlyCUDAAndPRIVATEUSE1
     def test_pool3d_size_one_feature_dim(self, device):
         # Tests crazy strides for feature dim of size 1
         x = torch.randn(7, 1, 5, 3, 2, device=device)
@@ -1172,7 +1175,7 @@ torch.cuda.synchronize()
         self.assertEqual(y, ref_y, exact_dtype=False)
         self.assertEqual(x.grad, ref_x.grad, exact_dtype=False)
 
-    @onlyCUDA
+    @onlyCUDAAndPRIVATEUSE1
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1259,40 +1262,47 @@ torch.cuda.synchronize()
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
     @skipIfMps
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
     @skipIfMps
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
@@ -1317,6 +1327,7 @@ torch.cuda.synchronize()
             _, indicies_single_batch = module(input.unsqueeze(0))
             self.assertEqual(indices_no_batch, indicies_single_batch.squeeze(0))
 
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
@@ -1419,6 +1430,7 @@ torch.cuda.synchronize()
                     # Incorrect output_size
                     F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
@@ -1451,6 +1463,7 @@ torch.cuda.synchronize()
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
@@ -1481,6 +1494,7 @@ torch.cuda.synchronize()
         helper(nn.AdaptiveMaxPool2d((2**6, 2**6)))
         helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
 
+    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
@@ -1504,7 +1518,7 @@ torch.cuda.synchronize()
                         # some implementations do not support dilation
                         res = fn(x, 6, stride=2, padding=0)
 
-    @onlyCUDA
+    @onlyCUDAAndPRIVATEUSE1
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(self, torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
         _test_bfloat16_ops(self, torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)
