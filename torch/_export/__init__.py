@@ -3,7 +3,9 @@ import inspect
 import re
 import weakref
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -17,11 +19,15 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
+from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import traceback as fx_traceback
+from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -34,14 +40,20 @@ from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
     _process_constraints,
-    combine_args_kwargs,
     CallSpec,
+    combine_args_kwargs,
     ExportBackwardSignature,
     ExportedProgram,
     ExportGraphSignature,
 )
+from .passes.add_runtime_assertions_for_constraints_pass import (
+    _AddRuntimeAssertionsForInlineConstraintsPass,
+)
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
-from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAssertionsForInlineConstraintsPass
+from .passes.replace_view_ops_with_view_copy_ops_pass import (
+    ReplaceViewOpsWithViewCopyOpsPass,
+)
+from .wrappers import _wrap_submodules
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -120,11 +132,50 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 DECOMP_TABLE = core_aten_decompositions()
 
 
-def export(
+# FIXME: actually migrate it to pre_autograd tracing
+@compatibility(is_backward_compatible=False)
+def capture_pre_autograd_graph(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    decomp_table: Dict[OpOverload, Callable] = core_aten_decompositions(),
+) -> torch.nn.Module:
+    """
+    A helper function that is intended to trace a module before any pre-autograd
+    decomposition is run. The produced module will be "non-functional" and
+    composed of aten operators. You can manually specify decomp_table to control
+    decomposition rule. Later this API will be deleted in favor of more general
+    torch.export API.
+
+    Args:
+      f: A callable to be traced
+
+      args: example positional inputs.
+
+      kwargs: optional example keyword inputs.
+
+      constraints: A optional list of constraints on the dynamic arguments specifying
+            their possible range of their shapes
+
+      decomp_table: A optional table of specifying how to decompose certain aten op.
+    Returns:
+        An nn.Module containing the traced method.
+
+    """
+
+    with patch("torch._export.DECOMP_TABLE", decomp_table):
+        ep = export(f, args, kwargs, constraints=constraints)
+    return ep.transform(ReplaceViewOpsWithViewCopyOpsPass()).module()
+
+
+def export(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -140,6 +191,9 @@ def export(
         constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+            calling conventions are preserved as metadata.
+
     Returns:
         An ExportedProgram containing the traced method.
     """
@@ -152,19 +206,28 @@ def export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
-            # TODO hack to skip dynamo
-            if isinstance(f, torch.fx.GraphModule) and "is_torch_exported" in f.meta:
+            module_call_signatures: Dict[str, ModuleCallSignature] = {}
+            # TODO horrible hack to skip dynamo when retracing
+
+            def _safe_to_skip(gm: torch.fx.GraphModule):
+                for node in gm.graph.nodes:
+                    if "is_torch_exported" in node.meta:
+                        return True
+                return False
+
+            if isinstance(f, torch.fx.GraphModule) and _safe_to_skip(f):
                 gm_torch_level = f
             else:
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    constraints=constraints,
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                )(
-                    *args,
-                    **kwargs,
-                )
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        constraints=constraints,
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                    )(
+                        *args,
+                        **kwargs,
+                    )
 
             params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
@@ -173,7 +236,7 @@ def export(
             for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
                 params_buffers[name] = buffer
 
-            fake_inps = []
+            fake_inps: List[torch.Tensor] = []
             fake_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=True,
@@ -181,13 +244,28 @@ def export(
                     assume_static_by_default=True,
                 ),
             )
+
             for node in gm_torch_level.graph.nodes:
                 if node.op == "placeholder" and "val" in node.meta:
                     fake_val = node.meta["val"]
-                    fake_inps.append(fake_val)
+                    if fake_val is not None:
+                        assert isinstance(fake_val, torch.Tensor)
+                        fake_inps.append(fake_val)
 
             if detected_fake_mode := detect_fake_mode(fake_inps):
                 fake_mode = detected_fake_mode
+
+            count = 0
+
+            def convert_to_fake(x):
+                nonlocal count
+                val = fake_inps[count]
+                count += 1
+                return val
+
+            fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
+            # TODO properly use the cached fake tensor
+            fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
 
             # First, we want to pass through the graph to try populating
             # val field for getattr if there is anything missing.
@@ -230,16 +308,11 @@ def export(
                                 if entry in meta:
                                     params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
-            fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
-            fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
-
             # Fix the graph output signature to be tuple if scalar
-            # because aot_export expects a tuple as return type
-            return_val = f(*args, **kwargs)
             out_spec = orig_out_spec = gm_torch_level._out_spec
-            # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple)):
-                out_spec = pytree.tree_flatten((return_val,))[1]
+            # aot_export expect the return type to always be a tuple.
+            if out_spec.type not in (list, tuple):
+                out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
@@ -288,11 +361,9 @@ def export(
             # so we serialize them here instead of inside dynamo
             gm.meta["inline_constraints"] = {
                 k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
-
-            gm.meta["is_torch_exported"] = True
 
             # After aot_export, set the param/buffer metadata back into placeholders
             # Technically, users can still construct this data from param names
@@ -310,6 +381,8 @@ def export(
                             for k, v in params_buffers_to_node_meta[buffer_name].items():
                                 node.meta[k] = v
 
+                node.meta["is_torch_exported"] = True
+
             flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
             range_constraints, equality_constraints = _process_constraints(
                 gm,
@@ -325,11 +398,14 @@ def export(
                 params_buffers,
                 range_constraints,
                 equality_constraints,
+                [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
             )
 
             exported_program = exported_program.transform(
                 _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
             )
+            if len(preserve_module_call_signature) > 0:
+                exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:

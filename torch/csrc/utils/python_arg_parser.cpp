@@ -233,7 +233,7 @@ auto handle_torch_function(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
   return handle_torch_function_no_python_arg_parser(
-      {py::handle(self)},
+      {self},
       args_.ptr(),
       kwargs,
       func_name.c_str(),
@@ -257,9 +257,155 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
   return (PyObject*)Py_TYPE(obj_or_type);
 }
 
+static py::object dispatch_on_subclass(
+    PyObject* args,
+    PyObject* kwargs,
+    at::ArrayRef<PyObject*> overloaded_args,
+    py::tuple py_types,
+    PyObject* torch_api_function,
+    bool is_torch_function,
+    const char* torch_function_name_str,
+    c10::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
+        c10::nullopt) {
+  py::object ret;
+  for (auto& arg : overloaded_args) {
+    py::object torch_function =
+        PyObject_FastGetAttrString(arg, torch_function_name_str);
+    if (!torch_function) {
+      TORCH_INTERNAL_ASSERT(0);
+    }
+    if (torch_function.ptr() == torch::disabled_torch_dispatch_impl()) {
+      // During __torch_dispatch__, don't dispatch on args with a disabled
+      // torch_dispatch. This code runs before infra modes, so we need to make
+      // sure that infra modes can run first. (In theory, maybe we can rearrange
+      // things so that infra modes are *always* attempted first, and just
+      // return NotImplemented when there are any user subclasses. Maybe that
+      // would fix this problem?)
+      continue;
+    }
+
+    // _mode_key logic is only relevant to __torch_dispatch__
+    if (!is_torch_function) {
+      py::object maybe_mode_key_obj =
+          PyObject_FastGetAttrString(arg, "_mode_key");
+      if (maybe_mode_key.has_value()) {
+        if (!maybe_mode_key_obj ||
+            py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj) !=
+                maybe_mode_key.value()) {
+          // When maybe_mode_key is set to TorchDispatchModeKey.FAKE,
+          // we only consider arguments that have a ._mode_key =
+          // TorchDispatchModeKey.FAKE in dispatch.
+          continue;
+        }
+      } else {
+        if (maybe_mode_key_obj) {
+          // When maybe_mode_key is not set,
+          // we only consider arguments that do *not* have a ._mode_key in
+          // dispatch.
+          continue;
+        }
+      }
+    }
+
+    // See https://github.com/pytorch/pytorch/issues/63767
+    if (is_torch_function &&
+        PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
+            .is(py::handle(arg)) &&
+        torch_function.ptr() != torch::disabled_torch_function_impl()) {
+      TORCH_WARN(
+          "Defining your `",
+          torch_function_name_str,
+          "` as a plain method is deprecated ",
+          "and will be an error in future, please define it as a classmethod.");
+    }
+
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+        torch_function.ptr(),
+        torch_api_function,
+        py_types.ptr(),
+        args,
+        kwargs,
+        NULL));
+    if (ret.ptr() == nullptr) {
+      throw python_error();
+    }
+    if (ret.ptr() != Py_NotImplemented) {
+      // Return the reference to the result. This also covers the case where
+      // ret is NULL and __torch_function__/__torch_dispatch raised an
+      // exception, which we throw below
+      break;
+    }
+  }
+  return ret;
+}
+
+static std::tuple<py::object, py::object> dispatch_on_mode(
+    PyObject* args,
+    PyObject* kwargs,
+    py::tuple py_types,
+    PyObject* torch_api_function,
+    bool is_torch_function,
+    const char* torch_function_name_str) {
+  // Disable mode on the inside; this makes for a more user-friendly
+  // experience if you try to, e.g., print your tensors.
+  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+  py::object mode_obj;
+  // NB: We only really need keep the mode_obj live if the function call
+  // fails for error reporting, but whatever, Python refcounts are cheap
+  if (is_torch_function) {
+    tf_g.emplace();
+    mode_obj = py::reinterpret_borrow<py::object>(
+        tf_g->get_cur_mode()->ptr(getPyInterpreter()));
+  } else {
+    td_g.emplace();
+    mode_obj = py::reinterpret_borrow<py::object>(
+        td_g->get_cur_mode()->ptr(getPyInterpreter()));
+  }
+  py::object torch_function =
+      PyObject_FastGetAttrString(mode_obj.ptr(), torch_function_name_str);
+  if (!torch_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+  TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+  TORCH_INTERNAL_ASSERT(args != nullptr);
+
+  TORCH_CHECK(
+      PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(mode_obj),
+      "Defining your mode's `",
+      torch_function_name_str,
+      "` as a classmethod is not supported, please make it a plain method");
+
+  // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
+  // because the nullptr terminates the argument list ick ick ick.
+  py::object ret;
+  if (kwargs == nullptr) {
+    ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+        mode_obj.ptr(),
+        torch_function_name_str,
+        "OOO",
+        torch_api_function,
+        py_types.ptr(),
+        args));
+  } else {
+    ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+        mode_obj.ptr(),
+        torch_function_name_str,
+        "OOOO",
+        torch_api_function,
+        py_types.ptr(),
+        args,
+        kwargs));
+  }
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
+  return std::make_tuple(ret, mode_obj);
+}
+
 // See Note: [Overloaded args] for what they hold
 auto handle_torch_function_no_python_arg_parser(
-    at::ArrayRef<py::handle> overloaded_args,
+    at::ArrayRef<PyObject*> overloaded_args,
     PyObject* args,
     PyObject* kwargs,
     const char* func_name,
@@ -283,215 +429,134 @@ auto handle_torch_function_no_python_arg_parser(
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
   for (auto& arg : overloaded_args) {
-    overloaded_types.push_back(py::reinterpret_borrow<py::object>(
-        get_type_of_overloaded_arg(arg.ptr())));
+    overloaded_types.push_back(
+        py::reinterpret_borrow<py::object>(get_type_of_overloaded_arg(arg)));
   }
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   py::object mode_obj;
 
-  // Of our overloaded types, filter out the FakeTensor arguments.
-  // FakeTensor is special, and gets lower precdence in the dispatcher ordering.
-  std::vector<py::handle> overloaded_non_fake_args;
-  std::vector<py::handle> overloaded_fake_args;
-  for (auto& arg : overloaded_args) {
-    auto curr_type = get_type_of_overloaded_arg(arg.ptr());
-    auto curr_type_name = PyObject_GetAttrString(curr_type, "__name__");
-    auto curr_type_str = std::string(PyUnicode_AsUTF8(curr_type_name));
-    if (curr_type_str != "FakeTensor") {
-      overloaded_non_fake_args.push_back(arg);
-    } else {
-      overloaded_fake_args.push_back(arg);
-    }
-  }
-
+  // Step 1: Try to dispatch based on the mode stack, *ignoring* infra
+  // torch_dispatch modes.
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  const auto is_mode_active = [&]() {
+  const auto is_mode_active = [&](bool skip_infra_modes) {
     return is_torch_function
         ? at::impl::torch_function_mode_enabled()
         // Check if any *user* torch_dispatch modes are active (not including
         // fake and proxy modes, which are special)
-        : c10::impl::dispatch_mode_enabled(/*skip_proxy_and_fake=*/true);
+        : c10::impl::dispatch_mode_enabled(
+              /*skip_infra_modes=*/skip_infra_modes);
   };
+  // Note [__torch_dispatch__ dispatching order]
+  // The high-level idea motivating the dispatching
+  // order below is that: (1) modes get higher dispatch precedence over
+  // subclasses (2) "user" modes/subclasses get higher dispatch precedence over
+  // "infra" modes/subclasses.
+  //
+  // To give a complete example: let's say we are running torch.compile, with
+  // the following "user" modes and subclasses:
+  //   mode_stack: [ModeA]
+  //   user_args: [MyWrapperSubclassB(torchTensor)]
 
-  // Step 1: Try to dispatch based on the mode stack.
-  if (is_mode_active()) {
-    // Disable mode on the inside; this makes for a more user-friendly
-    // experience if you try to, e.g., print your tensors.
-    at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-    at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
-    // NB: We only really need keep the mode_obj live if the function call
-    // fails for error reporting, but whatever, Python refcounts are cheap
-    if (is_torch_function) {
-      tf_g.emplace();
-      mode_obj = py::reinterpret_borrow<py::object>(
-          tf_g->get_cur_mode()->ptr(getPyInterpreter()));
-    } else {
-      td_g.emplace();
-      mode_obj = py::reinterpret_borrow<py::object>(
-          td_g->get_cur_mode()->ptr(getPyInterpreter()));
-    }
-    py::object torch_function =
-        PyObject_FastGetAttrString(mode_obj.ptr(), torch_function_name_str);
-    if (!torch_function) {
-      TORCH_INTERNAL_ASSERT(0);
-    }
-    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-    TORCH_INTERNAL_ASSERT(args != nullptr);
+  // During tracing in AOTAutograd tracing, we use some additional infra modes
+  // and subclasses to perform tracing:
+  //   FunctionalTensorMode, ProxyTorchDispatchMode, FakeTensorMode,
+  //   FunctionalTensor, FakeTensor
+  // The modified mode stack and tracing arguments will look like this:
+  //   mode_stack (user modes): [ModeA]
+  //   mode_stack (infra modes): [
+  //     FunctionalTensorMode, ProxyTorchDispatchMode, FakeTensorMode
+  //   ]
+  //   tracing_args: [
+  //     MyWrapperSubclassB(FunctionalTensor(_to_functional_tensor(FakeTensor)))
+  //   ]
 
-    TORCH_CHECK(
-        PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
-            .is(mode_obj),
-        "Defining your mode's `",
-        torch_function_name_str,
-        "` as a classmethod is not supported, please make it a plain method");
+  // And the dispatching order that we want is as follows:
+  // (1) ModeA.__torch_dispatch__ (user modes highest)
+  // (2) MyWrapperSubclassB.__torch_dispatch__ (user subclasses next highest)
+  // (3) FunctionalTensorMode.__torch_dispatch__ (infra modes next highest)
+  // (4) ProxyTorchDispatchMode.__torch_dispatch__ (infra modes next highest)
+  // (5) FakeTensorMode.__torch_dispatch__ (infra modes next highest)
+  // (6) FakeTensor.__torch_fake_dispatch__ (infra subclasses next highest)
 
-    // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
-    // because the nullptr terminates the argument list ick ick ick.
-    if (kwargs == nullptr) {
-      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj.ptr(),
-          torch_function_name_str,
-          "OOO",
-          torch_api_function,
-          py_types.ptr(),
-          args));
-    } else {
-      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj.ptr(),
-          torch_function_name_str,
-          "OOOO",
-          torch_api_function,
-          py_types.ptr(),
-          args,
-          kwargs));
-    }
-    if (ret.ptr() == nullptr) {
-      throw python_error();
+  // Why does do FunctionalTensor and FakeTensor even need to be special-cased
+  // in the ordering?
+  // In theory we could remove their __torch_dispatch__, but both of these
+  // subclasses override sizes/strides metadata calls with __torch_dispatch__,
+  // which would mean a mode would be **required** to access their metadata.
+
+  if (is_mode_active(/*skip_infra_modes=*/true)) {
+    // Step 1: Try to dispatch on any user TorchDispatchModes
+    auto ret_ = dispatch_on_mode(
+        args,
+        kwargs,
+        py_types,
+        torch_api_function,
+        is_torch_function,
+        torch_function_name_str);
+    ret = std::get<0>(ret_);
+    mode_obj = std::get<1>(ret_);
+  }
+
+  // Step 2: Try to dispatch based on any user subclasses,
+  // ignoring any subclasses that have a _mode_key field
+  // (corresponding to infra subclasses)
+  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
+    auto curr_ret = dispatch_on_subclass(
+        args,
+        kwargs,
+        overloaded_args,
+        py_types,
+        torch_api_function,
+        is_torch_function,
+        torch_function_name_str);
+    if (curr_ret.ptr() != nullptr) {
+      ret = curr_ret;
     }
   }
-  // Step 2: Try to dispatch based on any user subclasses
-  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
-    for (auto& arg : overloaded_non_fake_args) {
-      py::object torch_function =
-          PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
-      if (!torch_function) {
-        TORCH_INTERNAL_ASSERT(0);
-      }
 
-      // See https://github.com/pytorch/pytorch/issues/63767
-      if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
-              .is(arg) &&
-          torch_function.ptr() != torch::disabled_torch_function_impl()) {
-        TORCH_WARN(
-            "Defining your `",
-            torch_function_name_str,
-            "` as a plain method is deprecated ",
-            "and will be an error in future, please define it as a classmethod.");
-      }
+  // Step 3: Try to dispatch on any infra modes
+  // (in practice, this is FunctionalTensorMode, ProxyTorchDispatchMode, and
+  // FakeTensorMode)
+  if ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
+      is_mode_active(/*skip_infra_modes=*/false)) {
+    auto ret_and_mode = dispatch_on_mode(
+        args,
+        kwargs,
+        py_types,
+        torch_api_function,
+        is_torch_function,
+        torch_function_name_str);
+    auto curr_ret = std::get<0>(ret_and_mode);
+    auto curr_mode_obj = std::get<1>(ret_and_mode);
+    if (curr_ret.ptr() != nullptr) {
+      ret = curr_ret;
+      mode_obj = curr_mode_obj;
+    }
+  }
 
-      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-          torch_function.ptr(),
-          torch_api_function,
-          py_types.ptr(),
+  // Step 4: Try to dispatch based on any infra subclasses,
+  // by dispatching on any args that have a _mode_key field
+  // (in practice, this is only FakeTensor)
+  // Also, we only do this for __torch_dispatch__ dispatching
+  if ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
+      !is_torch_function) {
+    for (const auto i : c10::irange(static_cast<size_t>(
+             c10::impl::TorchDispatchModeKey::NUM_MODE_KEYS))) {
+      auto mode_key = static_cast<c10::impl::TorchDispatchModeKey>(i);
+      auto curr_ret = dispatch_on_subclass(
           args,
           kwargs,
-          NULL));
-      if (ret.ptr() != Py_NotImplemented) {
-        // Return the reference to the result. This also covers the case where
-        // ret is NULL and __torch_function__/__torch_dispatch raised an
-        // exception, which we throw below
+          overloaded_args,
+          py_types,
+          torch_api_function,
+          /*is_torch_function=*/false,
+          torch_function_name_str,
+          /*maybe_mode_key=*/mode_key);
+      if (curr_ret.ptr() != nullptr) {
+        ret = curr_ret;
         break;
-      }
-    }
-  }
-  // Step 3: Try to dispatch based ProxyTorchDispatchMode, FakeTensorMode, or
-  // any FakeTensor args (Only do this for __torch_dispatch__)
-  if (!is_torch_function &&
-      (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented)) {
-    auto found_proxy_or_fake = false;
-    auto is_proxy_mode = false;
-    auto is_fake_mode = false;
-    c10::optional<py::object> torch_dispatch;
-
-    // Try proxy mode
-    auto maybe_proxy_mode = c10::impl::TorchDispatchModeTLS::get_proxy_mode();
-    if (maybe_proxy_mode != c10::nullopt) {
-      mode_obj = py::reinterpret_borrow<py::object>(
-          (*maybe_proxy_mode)->ptr(getPyInterpreter()));
-      is_proxy_mode = true;
-      found_proxy_or_fake = true;
-    }
-
-    // Try fake mode
-    if (!found_proxy_or_fake) {
-      auto maybe_fake_mode = c10::impl::TorchDispatchModeTLS::get_fake_mode();
-      if (maybe_fake_mode != c10::nullopt) {
-        mode_obj = py::reinterpret_borrow<py::object>(
-            (*maybe_fake_mode)->ptr(getPyInterpreter()));
-        is_fake_mode = true;
-        found_proxy_or_fake = true;
-      }
-    }
-
-    // Looks for fake tensor args
-    if (!found_proxy_or_fake) {
-      for (auto& arg : overloaded_fake_args) {
-        torch_dispatch =
-            PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
-        found_proxy_or_fake = true;
-      }
-    }
-    if (found_proxy_or_fake) {
-      // We successfully found a proxy / fake mode or argument to dispatch on
-      // Sigh, there are a few differences on how we need do call back into
-      // python depending on whether our object is a mode or a subclass.
-      if (is_proxy_mode || is_fake_mode) {
-        torch_dispatch_mode::ProxyOrFakeModeGuard guard(
-            /*is_proxy=*/is_proxy_mode);
-        auto mode_obj = py::reinterpret_borrow<py::object>(
-            guard.get_cur_mode()->ptr(getPyInterpreter()));
-        if (kwargs == nullptr) {
-          ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-              mode_obj.ptr(),
-              torch_function_name_str,
-              "OOO",
-              torch_api_function,
-              py_types.ptr(),
-              args));
-        } else {
-          ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-              mode_obj.ptr(),
-              torch_function_name_str,
-              "OOOO",
-              torch_api_function,
-              py_types.ptr(),
-              args,
-              kwargs));
-        }
-      } else {
-        // We must have found a FakeTensor subclass (with a __torch_dispatch__
-        // field)
-        if (torch_dispatch == c10::nullopt) {
-          TORCH_INTERNAL_ASSERT(0);
-        }
-        if (!(*torch_dispatch)) {
-          TORCH_INTERNAL_ASSERT(0);
-        }
-        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-            torch_dispatch->ptr(),
-            torch_api_function,
-            py_types.ptr(),
-            args,
-            kwargs,
-            NULL));
-      }
-
-      TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-      TORCH_INTERNAL_ASSERT(args != nullptr);
-      if (ret.ptr() == nullptr) {
-        throw python_error();
       }
     }
   }
@@ -518,8 +583,8 @@ auto handle_torch_function_no_python_arg_parser(
       ss << "  - mode object " << py::repr(mode_obj) << "\n";
     }
     for (auto& arg : overloaded_args) {
-      ss << "  - tensor subclass "
-         << py::repr(get_type_of_overloaded_arg(arg.ptr())) << "\n";
+      ss << "  - tensor subclass " << py::repr(get_type_of_overloaded_arg(arg))
+         << "\n";
     }
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = ss.str();
@@ -542,18 +607,9 @@ auto handle_torch_function(
       (char*)(func_name_override ? func_name_override : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
-  py::object ret;
   py::tuple args_ = combine_self_args(self, args);
-  // overloaded_args already all have unique types
-  std::vector<py::object> overloaded_types;
-  overloaded_types.reserve(r.signature.overloaded_args.size());
-  for (auto& arg : r.signature.overloaded_args) {
-    overloaded_types.push_back(
-        py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(arg.ptr())));
-  }
-  py::tuple py_types = py::cast(overloaded_types);
   return handle_torch_function_no_python_arg_parser(
-      r.signature.overloaded_args,
+      r.overloaded_args,
       args_.ptr(),
       kwargs,
       r.get_func_name().c_str(),
@@ -583,7 +639,7 @@ auto handle_torch_function_indexing(
   } else {
     index_tup = py::make_tuple(py::handle(index));
   }
-  std::vector<py::handle> overridable_args;
+  std::vector<PyObject*> overridable_args;
   is_tensor_and_append_overloaded(self, &overridable_args);
   auto size = PyTuple_GET_SIZE(index_tup.ptr());
   for (auto i : c10::irange(size)) {
@@ -628,7 +684,7 @@ auto handle_torch_function_indexing(
  *  entry in overloaded_args for this type with higher precedence than
  *  the superclass.
  *
- *  See torch._overrides._get_overloaded_types_and_args for the equivalent
+ *  See torch._overrides._get_overloaded_args for the equivalent
  *  function in the Python __torch_function__ implementation.
  *
  *  The precedence-determining algorithm implemented in this function is
@@ -648,13 +704,13 @@ auto handle_torch_function_indexing(
  */
 
 static void append_overloaded_arg(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj,
     bool obj_is_type) {
   bool class_not_seen_yet = true;
   PyObject* obj_type = obj_is_type ? obj : (PyObject*)Py_TYPE(obj);
   for (auto& arg : *overloaded_args) {
-    if (obj_type == get_type_of_overloaded_arg(arg.ptr())) {
+    if (obj_type == get_type_of_overloaded_arg(arg)) {
       // obj is the same type as another parameter we've seen in a prior
       // iteration of the loop over parameters so we already have an entry
       // with the proper __torch_function__ implementation to call, so skip
@@ -667,9 +723,7 @@ static void append_overloaded_arg(
     auto arg_index = overloaded_args->size();
     for (const auto j : c10::irange(arg_index)) {
       if (PyObject_IsSubclass(
-              obj_type,
-              (PyObject*)(get_type_of_overloaded_arg(
-                  (*overloaded_args)[j].ptr())))) {
+              obj_type, get_type_of_overloaded_arg((*overloaded_args)[j]))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
         // insert it into overloaded_args before the superclass
@@ -686,20 +740,20 @@ static void append_overloaded_arg(
 }
 
 void append_overloaded_tensor(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj) {
   append_overloaded_arg(overloaded_args, obj, /*obj_is_type*/ false);
 }
 
 void append_overloaded_type(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj) {
   append_overloaded_arg(overloaded_args, obj, /*obj_is_type*/ true);
 }
 
 bool is_tensor_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args) {
+    std::vector<PyObject*>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
     // torch.Tensor instances (not subclasses, except for Parameter)
     return true;
@@ -736,7 +790,7 @@ static bool is_scalar_list(PyObject* obj) {
 
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     int argnum,
     bool throw_error) {
   auto tuple = six::isTuple(obj);
@@ -900,7 +954,7 @@ static bool is_int_or_symint_list(
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(
     PyObject* obj,
-    std::vector<py::handle>& overloaded_args,
+    std::vector<PyObject*>& overloaded_args,
     int argnum,
     int64_t* failed_idx) -> bool {
   switch (type_) {
@@ -1457,6 +1511,7 @@ bool FunctionSignature::parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* dst[], // NOLINT
+    std::vector<PyObject*>& overloaded_args,
     bool raise_exception) {
   Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
@@ -1484,13 +1539,9 @@ bool FunctionSignature::parse(
     return false;
   }
 
-  if (!overloaded_args.empty()) {
-    overloaded_args.clear();
-  }
-
   int i = 0;
   if (self != nullptr && check_has_torch_function(self, /*ignore_mode*/ true)) {
-    append_overloaded_tensor(&this->overloaded_args, self);
+    append_overloaded_tensor(&overloaded_args, self);
   }
   for (auto& param : params) {
     PyObject* obj = nullptr;
@@ -1525,7 +1576,7 @@ bool FunctionSignature::parse(
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args, i, &failed_idx)) {
+    } else if (param.check(obj, overloaded_args, i, &failed_idx)) {
       dst[i++] = obj;
       // XXX: the Variable check is necessary because sizes become tensors when
       // tracer is enabled. This behavior easily leads to ambiguities, and we
@@ -1651,15 +1702,20 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* parsed_args[]) { // NOLINT
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    signature.parse(self, args, kwargs, parsed_args, true);
+    std::vector<PyObject*> overloaded_args;
+    signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
     check_deprecated(signature);
-    return PythonArgs(traceable, signature, parsed_args);
+    return PythonArgs(
+        traceable, signature, parsed_args, std::move(overloaded_args));
   }
 
   for (auto& signature : signatures_) {
-    if (signature.parse(self, args, kwargs, parsed_args, false)) {
+    std::vector<PyObject*> overloaded_args;
+    if (signature.parse(
+            self, args, kwargs, parsed_args, overloaded_args, false)) {
       check_deprecated(signature);
-      return PythonArgs(traceable, signature, parsed_args);
+      return PythonArgs(
+          traceable, signature, parsed_args, std::move(overloaded_args));
     }
   }
 
@@ -1685,7 +1741,8 @@ void PythonArgParser::print_error(
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    signature.parse(self, args, kwargs, parsed_args, true);
+    std::vector<PyObject*> overloaded_args;
+    signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
   }
 
   auto options = get_signatures();

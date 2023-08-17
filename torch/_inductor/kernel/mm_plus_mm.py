@@ -1,6 +1,7 @@
 import functools
 
 import torch
+
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -26,6 +27,9 @@ mm_plus_mm_template = TritonTemplate(
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K1 = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
     # K2 = {{size("C", 1)}}
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
@@ -141,10 +145,15 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
     # Optimization is optional, because we can always just not do the fusion
-    if not V.graph.sizevars.statically_known_list_equals(
-        mat1.get_size(), mat3.get_size()
-    ) or not V.graph.sizevars.statically_known_list_equals(
-        mat2.get_size(), mat4.get_size()
+    if (
+        m1 * n1 == 0
+        or m2 * n2 == 0
+        or not V.graph.sizevars.statically_known_list_equals(
+            mat1.get_size(), mat3.get_size()
+        )
+        or not V.graph.sizevars.statically_known_list_equals(
+            mat2.get_size(), mat4.get_size()
+        )
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967

@@ -481,7 +481,7 @@ class TestJit(JitTestCase):
         class MyModule(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.b0 = nn.Buffer(torch.randn(1, 3))
+                self.register_buffer('b0', torch.randn(1, 3))
                 self.p0 = nn.Parameter(torch.randn(2, 3))
 
             @torch.jit.script_method
@@ -537,7 +537,7 @@ class TestJit(JitTestCase):
                 super().__init__()
                 whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
                 self.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
-                self.b0 = nn.Buffer(whole_tensor.narrow(0, 3, 1))
+                self.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
 
         m = Foo()
         m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
@@ -3988,7 +3988,7 @@ def foo(x):
         a.p = nn.Parameter(torch.rand(3, 4))
         a.foo = nn.Module()
         a.foo.name = 'foo'
-        a.foo.b = nn.Buffer(torch.rand(1, 1))
+        a.foo.register_buffer('b', torch.rand(1, 1))
         a.foo.bar = nn.Module()
         a.foo.bar.name = 'bar'
         a.foo.bar.an_int = 4
@@ -8953,7 +8953,7 @@ dedent """
         class ModuleBufferMutate(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.running_var = nn.Buffer(torch.tensor(0, dtype=torch.long))
+                self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
 
             @torch.jit.script_method
             def forward(self):
@@ -9080,12 +9080,12 @@ dedent """
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.derived = nn.Buffer(torch.neg(self.param).detach().clone())
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
-            self.pack_called = nn.Buffer(torch.zeros(1, dtype=torch.long))
+            self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
             # This is a flag so we can test that the unpack method was called
-            self.unpack_called = nn.Buffer(torch.zeros(1, dtype=torch.long))
+            self.register_buffer('unpack_called', torch.zeros(1, dtype=torch.long))
 
         @torch.jit.script_method
         def _pack(self):
@@ -9265,7 +9265,7 @@ dedent """
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.buf = nn.Buffer(torch.ones(3, 4) * 3)
+                self.register_buffer('buf', torch.ones(3, 4) * 3)
 
             @torch.jit.script_method
             def _pack(self):
@@ -9282,7 +9282,7 @@ dedent """
         class SubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.buf = nn.Buffer(torch.ones(3, 4) * 2)
+                self.register_buffer('buf', torch.ones(3, 4) * 2)
                 self.ssm = SubSubMod()
 
             @torch.jit.script_method
@@ -9301,7 +9301,7 @@ dedent """
             def __init__(self):
                 super().__init__()
                 self.submod = SubMod()
-                self.buf = nn.Buffer(torch.ones(3, 4) * 1)
+                self.register_buffer('buf', torch.ones(3, 4) * 1)
 
             @torch.jit.script_method
             def _pack(self):
@@ -13107,7 +13107,7 @@ dedent """
                 self.out_features = out_features
                 self.weight = torch.nn.Parameter(torch.empty(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.empty(out_features))
-                self.counter = nn.Buffer(torch.ones(out_features))
+                self.register_buffer('counter', torch.ones(out_features))
                 self.reset_parameters()
 
             def reset_parameters(self):
@@ -13160,7 +13160,7 @@ dedent """
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.ones(out_features))
-                self.buffer = nn.Buffer(torch.ones(out_features))
+                self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
             def forward(self, x):
@@ -13615,8 +13615,8 @@ dedent """
 
             def __init__(self, number):
                 super().__init__()
-                self.buffer1 = nn.Buffer(torch.ones(2, 2))
-                self.buffer2 = nn.Buffer(torch.ones(2, 2))
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
                 self.number = number
 
             @torch.jit.script_method
@@ -13634,8 +13634,8 @@ dedent """
 
             def __init__(self, number, submodule):
                 super().__init__()
-                self.buffer1 = nn.Buffer(torch.ones(2, 2))
-                self.buffer2 = nn.Buffer(torch.ones(2, 2))
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
                 self.number = number
                 self.submodule = submodule
 
@@ -13671,8 +13671,8 @@ dedent """
         class NoArgState(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = nn.Buffer(torch.ones(2, 2))
-                self.buffer2 = nn.Buffer(torch.ones(2, 2))
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
 
             def forward(self):
                 pass
@@ -15088,7 +15088,7 @@ dedent """
                 def __init__(self):
                     super().__init__()
                     tensor = torch.zeros(1, requires_grad=False)
-                    self.some_state = nn.Buffer(torch.nn.Parameter(tensor))
+                    self.register_buffer('some_state', torch.nn.Parameter(tensor))
 
                 @torch.jit.script_method
                 def forward(self, x):
@@ -15481,8 +15481,8 @@ dedent """
                 self.mod = (torch.nn.ReLU())
                 self.mod2 = (torch.nn.ReLU())
                 self.mod3 = torch.nn.Sequential(torch.nn.Sequential(torch.nn.ReLU()))
-                self.x = nn.Buffer(torch.zeros(3))
-                self.y = nn.Buffer(torch.zeros(3))
+                self.register_buffer('x', torch.zeros(3))
+                self.register_buffer('y', torch.zeros(3))
                 self.z = torch.zeros(3)
 
             def bleh(self):
@@ -16106,6 +16106,10 @@ def add_nn_module_test(*args, **kwargs):
         if not kwargs.get('check_jit', True):
             raise unittest.SkipTest('module test skipped on JIT')
 
+        default_dtype = torch.get_default_dtype()
+        if 'default_dtype' in kwargs and kwargs['default_dtype'] is not None:
+            default_dtype = kwargs['default_dtype']
+
         module_name = get_nn_module_name_from_kwargs(**kwargs)
 
         if 'constructor' in kwargs:
@@ -16116,89 +16120,96 @@ def add_nn_module_test(*args, **kwargs):
         if "FunctionalModule" in str(nn_module):
             return
 
-        if 'constructor_args_fn' in kwargs:
-            constructor_args = kwargs['constructor_args_fn']()
-        else:
-            constructor_args = kwargs.get('constructor_args', ())
+        with set_default_dtype(default_dtype):
+            if 'constructor_args_fn' in kwargs:
+                constructor_args = kwargs['constructor_args_fn']()
+            else:
+                constructor_args = kwargs.get('constructor_args', ())
 
-        def create_script_module(*args, **kwargs):
-            """Construct a script module that passes arguments through to self.submodule"""
-            formals, tensors, actuals = get_script_args(args)
+            def create_script_module(*args, **kwargs):
+                """Construct a script module that passes arguments through to self.submodule"""
+                formals, tensors, actuals = get_script_args(args)
 
-            method_args = ', '.join(['self'] + actuals)
-            call_args_str = ', '.join(actuals)
-            call = f"self.submodule({call_args_str})"
-            script = script_method_template.format(method_args, call)
+                method_args = ', '.join(['self'] + actuals)
+                call_args_str = ', '.join(actuals)
+                call = f"self.submodule({call_args_str})"
+                script = script_method_template.format(method_args, call)
 
-            submodule_constants = []
-            if kwargs.get('is_constant'):
-                submodule_constants = ['submodule']
+                submodule_constants = []
+                if kwargs.get('is_constant'):
+                    submodule_constants = ['submodule']
 
-            # Create module to use the script method
-            class TheModule(torch.jit.ScriptModule):
-                __constants__ = submodule_constants
+                # Create module to use the script method
+                class TheModule(torch.jit.ScriptModule):
+                    __constants__ = submodule_constants
 
-                def __init__(self):
-                    super().__init__()
-                    self.submodule = nn_module(*constructor_args)
+                    def __init__(self):
+                        super().__init__()
+                        self.submodule = nn_module(*constructor_args)
 
-            def make_module(script):
-                module = TheModule()
-                # check __repr__
-                str(module)
-                module.define(script)
-                return module
+                def make_module(script):
+                    module = TheModule()
+                    # check __repr__
+                    str(module)
+                    module.define(script)
+                    return module
 
-            module = make_module(script)
-            self.assertExportImportModule(module, tensors)
-            create_script_module.last_graph = module.graph
-            mod = module(*args)
-            return mod
+                module = make_module(script)
+                self.assertExportImportModule(module, tensors)
+                create_script_module.last_graph = module.graph
+                mod = module(*args)
+                return mod
 
-        # Construct a normal nn module to stay consistent with create_script_module
-        # and make use of a single global rng_state in module initialization
-        def create_nn_module(*args, **kwargs):
-            module = nn_module(*constructor_args)
-            return module(*args)
+            # Construct a normal nn module to stay consistent with create_script_module
+            # and make use of a single global rng_state in module initialization
+            def create_nn_module(*args, **kwargs):
+                module = nn_module(*constructor_args)
+                return module(*args)
 
-        # Set up inputs from tuple of sizes or constructor fn
-        dtype = torch.float
-        if 'input_fn' in kwargs:
-            input = kwargs['input_fn']()
-            if isinstance(input, Tensor):
-                input = (input,)
+            # Set up inputs from tuple of sizes or constructor fn
+            dtype = torch.get_default_dtype()
+            if 'input_fn' in kwargs:
+                input = kwargs['input_fn']()
+                if isinstance(input, Tensor):
+                    input = (input,)
 
-            if all(tensor.is_complex() for tensor in input):
-                dtype = torch.cfloat
-        else:
-            input = (kwargs['input_size'],)
+                if all(tensor.is_complex() for tensor in input):
+                    if dtype == torch.float:
+                        dtype = torch.cfloat
+                    elif dtype == torch.double:
+                        dtype = torch.cdouble
+                    else:
+                        raise AssertionError(f"default_dtype {default_dtype} is not supported")
 
-        if 'target_size' in kwargs:
-            input = input + (kwargs['target_size'],)
-        elif 'target_fn' in kwargs:
-            if torch.is_tensor(input):
-                input = (input,)
-            input = input + (kwargs['target_fn'](),)
-        elif 'target' in kwargs:
-            input = input + (kwargs['target'],)
+            else:
+                input = (kwargs['input_size'],)
 
-        # Extra parameters to forward()
-        if 'extra_args' in kwargs:
-            input = input + kwargs['extra_args']
+            if 'target_size' in kwargs:
+                input = input + (kwargs['target_size'],)
+            elif 'target_fn' in kwargs:
+                if torch.is_tensor(input):
+                    input = (input,)
+                input = input + (kwargs['target_fn'](),)
+            elif 'target' in kwargs:
+                input = input + (kwargs['target'],)
 
-        args_variable, kwargs_variable = create_input(input, dtype=dtype)
-        f_args_variable = deepcopy(unpack_variables(args_variable))
+            # Extra parameters to forward()
+            if 'extra_args' in kwargs:
+                input = input + kwargs['extra_args']
 
-        # TODO(issue#52052) Neither this nor no_grad should be required
-        # if check_against_reference() is updated to check gradients
-        # w.r.t. weights and then only check w.r.t. inputs if any
-        # inputs require it.
-        any_requires_grad = any(input.requires_grad for input in f_args_variable)
+            args_variable, kwargs_variable = create_input(input, dtype=dtype)
+            f_args_variable = deepcopy(unpack_variables(args_variable))
 
-        # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module,
-                                lambda x: x, f_args_variable,
-                                no_grad=no_grad or not any_requires_grad)
+            # TODO(issue#52052) Neither this nor no_grad should be required
+            # if check_against_reference() is updated to check gradients
+            # w.r.t. weights and then only check w.r.t. inputs if any
+            # inputs require it.
+            any_requires_grad = any(input.requires_grad for input in f_args_variable)
+
+            # Check against Python module as reference
+            check_against_reference(self, create_script_module, create_nn_module,
+                                    lambda x: x, f_args_variable,
+                                    no_grad=no_grad or not any_requires_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)

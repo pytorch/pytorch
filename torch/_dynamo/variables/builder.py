@@ -11,6 +11,8 @@ import re
 import types
 from typing import List, NamedTuple, Optional, Union
 
+import numpy as np
+
 import torch
 
 from torch import SymInt
@@ -27,7 +29,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
-from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
+from ..allowed_functions import (
+    is_allowed,
+    is_builtin_callable,
+    is_numpy,
+    is_user_defined_allowed,
+)
 from ..exc import unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -38,6 +45,7 @@ from ..source import (
     GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
+    NumpyTensorSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -46,14 +54,13 @@ from ..utils import (
     build_checkpoint_variable,
     clone_input,
     get_fake_value,
+    get_static_address_type,
     getfile,
     global_key_name,
-    HAS_NUMPY,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
     istype,
-    np,
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
@@ -86,6 +93,7 @@ from .functions import (
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -247,6 +255,7 @@ class VariableBuilder:
             odict_values: ListVariable,
             torch.nn.ParameterList: ListVariable,
             torch.nn.ModuleList: ListVariable,
+            collections.deque: DequeVariable,
         }[type(value)]
 
     def get_source(self):
@@ -270,15 +279,10 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (
-                    torch.Tensor,
-                    torch.nn.Buffer,
-                    torch.nn.Parameter,
-                    torch._subclasses.FakeTensor,
-                ),
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
-            ((tuple, list, odict_values), cls.wrap_listlike),
+            ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
             (
@@ -295,8 +299,7 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
-        if config.numpy_ndarray_as_tensor:
-            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
+        entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -450,6 +453,8 @@ class VariableBuilder:
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(
                 value,
                 source=self.source,
@@ -540,7 +545,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif HAS_NUMPY and isinstance(value, np.number):
+        elif isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -848,6 +853,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
+            or get_static_address_type(value) is not None
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(
@@ -888,7 +894,6 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
-                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
@@ -902,12 +907,6 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
-
-        if not self.tx.output.export:
-            # Export has (supposedly) valid cases for fake tensors as inputs here.
-            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
-            # in real_value_tensor_positive_aliases in the common case)
-            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
 
         # We have accessed the SAME tensor from a different source.  In some
         # situations, it doesn't matter if you have the same tensor identity
@@ -942,7 +941,14 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+            guards=self.make_guards(
+                functools.partial(
+                    GuardBuilder.TENSOR_MATCH,
+                    value=value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value),
+                )
+            ),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=source,
@@ -979,13 +985,17 @@ class VariableBuilder:
     def wrap_numpy_ndarray(self, value):
         assert isinstance(value, np.ndarray)
 
-        source = self.get_source()
+        source = NumpyTensorSource(self.get_source())
         tensor_value = torch.as_tensor(value)
-
+        # We do this because we want the full behavior of guarding the numpy ndarray as if it were
+        # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
+        # that there's not another great way to do this atm.
+        # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
+        tensor_vt = VariableBuilder(self.tx, source)(tensor_value)
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
-        options = {"source": source}
+        options = {"source": source, "guards": tensor_vt.guards}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
@@ -1219,7 +1229,7 @@ def wrap_fx_proxy_cls(
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not is_fake(value):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -1516,7 +1526,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
     ):
@@ -1581,6 +1591,8 @@ class SourcelessBuilder:
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
