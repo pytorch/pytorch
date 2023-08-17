@@ -322,6 +322,13 @@ static PyTypeObject CacheEntryType = {
 // level of abstraction of what is stored on the extra code object. Previously,
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.
+
+// TODO - Consider making this a PyObject. Benefits are
+//   1) Modular dealloc - destroy_extra_state just becomes Py_DECREF(extra)
+//   2) We can directly send the extra object to convert_frame callback. One
+//   data structure - easier to understand code.
+// There might be some perf impact of going through a PyObject on the critical
+// path, but it should not be too bad.
 typedef struct {
   // Cache entry for the code object
   CacheEntry* cache_entry;
@@ -424,12 +431,10 @@ inline static void destroy_extra_state(void* obj) {
 
   ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
-    CacheEntry* cache_entry = extra->cache_entry;
-    FrameState* frame_state = extra->frame_state;
     // Cpython gc will call destroy_cache_entry on its own when the ref count
     // goes to 0.
-    Py_XDECREF(cache_entry);
-    Py_XDECREF(frame_state);
+    Py_XDECREF(extra->cache_entry);
+    Py_XDECREF(extra->frame_state);
     free(extra);
   }
 }
