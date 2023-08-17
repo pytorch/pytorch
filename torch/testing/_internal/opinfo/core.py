@@ -2679,6 +2679,7 @@ class ForeachFuncInfo(OpInfo):
         supports_scalar_self_arg=False,
         supports_forward_ad=False,
         backward_requires_result=False,
+        has_no_out_of_place=False,
         **kwargs,
     ):
         (
@@ -2687,13 +2688,13 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
-        if name == "zero":
+        if has_no_out_of_place:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
             assert foreach_method is None
-            foreach_method = torch.zero_
+            foreach_method = getattr(torch.Tensor, f"{name}_")
         super().__init__(
             name="_foreach_" + name,
             op=foreach_method,
@@ -2713,6 +2714,7 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
         self.backward_requires_result = backward_requires_result
+        self.has_no_out_of_place = has_no_out_of_place
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm

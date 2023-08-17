@@ -68,7 +68,7 @@ Features described in this documentation are classified by release status:
    cuda
    mps
    torch.backends <backends>
-   export
+   torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>

@@ -10,8 +10,6 @@ import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
-    ArgsType,
-    KwargsType,
     OpInfo,
     OpSchema,
     OutputSharding,
@@ -84,7 +82,7 @@ def redistribute_local_args(
     # Need to fix all the ops before doing this.
     flatten_args_schema_to_reshard = tree_flatten(suggested_input_schema.args_schema)[0]
 
-    new_flat_local_args: ArgsType = []
+    new_flat_local_args: List[object] = []
     for i, arg_spec in enumerate(op_info.flat_args_schema):
         reshard_arg_spec = flatten_args_schema_to_reshard[i]
         if isinstance(arg_spec, DTensorSpec):
@@ -121,10 +119,10 @@ def _operator_dispatch(
     # unwrap the op info from args/kwargs
     flat_args_list, args_spec = tree_flatten(args)
     flat_kwargs_list, kwargs_spec = tree_flatten(kwargs)
-    flat_args_schema: ArgsType = []
-    flat_local_args: ArgsType = []
-    flat_kwargs_schema: KwargsType = []
-    flat_local_kwargs: KwargsType = []
+    flat_args_schema: List[object] = []
+    flat_local_args: List[object] = []
+    flat_kwargs_schema: List[object] = []
+    flat_local_kwargs: List[object] = []
     mesh = None
 
     for arg in flat_args_list:
@@ -230,6 +228,7 @@ def _operator_dispatch(
     else:
         if output_sharding.needs_redistribute:
             # compute locally with redistribute first if needed
+            assert output_sharding.schema_suggestions is not None
             suggested_input_schema = output_sharding.schema_suggestions[0]
             redistribute_local_args(op_info, suggested_input_schema)
 
@@ -253,7 +252,7 @@ def _operator_dispatch(
                     "before executing a DTensor random op."
                 )
             # For DTensor random operator, run it within a distribute region
-            with random._rng_tracker._distribute_region(arg_list[0]._spec):
+            with random._rng_tracker._distribute_region(flat_args_schema[0]):
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         else:
             local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
