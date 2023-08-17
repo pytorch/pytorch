@@ -12,7 +12,6 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
-from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Union, Optional
 from torch.testing._internal.common_nn import NNTestCase
