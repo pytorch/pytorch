@@ -254,6 +254,27 @@ class TestSubclass(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
             param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
 
+    def test_tensor_subclass_storage_data_accesses_throw(self):
+        from torch.testing._internal.logging_tensor import LoggingTensor
+        x = torch.ones(2)
+        x_log = LoggingTensor(x)
+        # Accessing storage on a tensor subclass is valid
+        storage = x_log.untyped_storage()
+        # This includes accessing metadata on the storage
+        sz = storage.size()
+        # But storage methods that access data will throw
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.resize_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.copy_(storage)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.fill_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage._write_file("file")
+
+
 instantiate_parametrized_tests(TestSubclass)
 
 if __name__ == '__main__':

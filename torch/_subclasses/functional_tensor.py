@@ -30,6 +30,9 @@ class FunctionalTensor(torch.Tensor):
     """
 
     elem: torch.Tensor
+    # Indicates to our torch_dispatch dispatching infra that
+    # this is an "infra" mode with lower dispatching precedence.
+    _mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
@@ -78,6 +81,11 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
+    def __init__(self):
+        # Indicates to our torch_dispatch dispatching infra that
+        # this is an "infra" mode with lower dispatching precedence.
+        _mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
