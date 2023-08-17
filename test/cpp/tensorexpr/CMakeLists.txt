@@ -26,7 +26,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_type_specializations.cpp
 )
 
-if(USE_CUDA || USE_ROCM)
+if(USE_CUDA OR USE_ROCM)
   list(APPEND TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_cuda.cpp)
 endif()
 
