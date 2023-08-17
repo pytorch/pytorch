@@ -13473,6 +13473,9 @@ op_db: List[OpInfo] = [
                          device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cpu'),
+            # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
+                         device_type='cpu'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture

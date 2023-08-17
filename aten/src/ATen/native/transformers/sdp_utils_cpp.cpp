@@ -6,7 +6,6 @@ namespace {
 std::array<SDPBackend, num_backends> priority_order_cpp(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
-      // SDPBackend::efficient_attention,
       SDPBackend::math};
 
   return default_order;
@@ -22,31 +21,6 @@ bool check_head_dim_size_cpp(sdp_params params, bool debug) {
       TORCH_WARN(
           "Flash attention requires q,k,v to have the same last dimension.",
           " Got Query.size(-1): ",
-          query_size_last,
-          ", Key.size(-1): ",
-          params.key.sym_size(-1),
-          ", Value.size(-1): ",
-          params.value.sym_size(-1),
-          " instead.");
-    }
-    return false;
-  }
-  return true;
-}
-
-bool check_head_dim_size_mem_efficient_cpp(sdp_params params, bool debug) {
-  const auto query_size_last = params.query.sym_size(-1);
-  const auto value_size_last = params.value.sym_size(-1);
-  const int64_t alignment = 1;
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
-        value_size_last % alignment == 0 && value_size_last > 0)) {
-    if (debug) {
-      TORCH_WARN(
-          "Mem efficient attention requires last dimension of inputs to be divisible by ",
-          alignment,
-          ". ",
-          "Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
           params.key.sym_size(-1),
@@ -82,30 +56,6 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
 
   return check_tensor_dtype(params, cpp_supported_flash_dtypes, debug);
 }
-
-bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
-  constexpr auto cpp_supported_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16);
-
-  //  Define gate functions that determine if a mem efficient kernel can be run
-  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_runtime_disabled_mem_efficient,
-      check_nested_tensor,
-      check_for_dropout,
-      check_tensor_shapes,
-      check_batch_size_and_num_heads,
-      check_for_attn_mask,
-      check_head_dim_size_mem_efficient_cpp,
-      check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1);
-  for (auto& constraint : constraints) {
-    if (!constraint(params, debug)) {
-      return false;
-    }
-  }
-
-  return check_tensor_dtype(params, cpp_supported_mem_efficient_dtypes, debug);
-}
 } // namespace
 
 SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
@@ -131,11 +81,6 @@ SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
           return SDPBackend::flash_attention;
         }
         break;
-      // case SDPBackend::efficient_attention:
-      //   if (use_mem_efficient_attention_cpp(kernel_params, print_debug)) {
-      //     return SDPBackend::efficient_attention;
-      //   }
-      //   break;
       case SDPBackend::math:
         if (ctx.userEnabledMathSDP()) {
           return SDPBackend::math;
@@ -153,8 +98,6 @@ SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
   // reason why the kernel was not selected
 
   print_debug = true;
-  TORCH_WARN("Memory efficient kernel not used because:");
-  use_mem_efficient_attention_cpp(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
   use_flash_attention_cpp(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")

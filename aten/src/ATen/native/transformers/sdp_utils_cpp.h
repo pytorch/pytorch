@@ -234,7 +234,7 @@ inline bool check_nested_tensor(sdp_params params, bool debug) {
 }
 
 inline bool check_for_dropout(sdp_params params, bool debug) {
-  if (params.dropout > 0.00001) {
+  if (params.dropout > 0.0) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-zero dropout.");
     }

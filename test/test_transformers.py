@@ -1506,18 +1506,18 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
-    def test_fused_sdp_choice_cpu(self, device, type: str, dropout: float):
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
+    def test_fused_sdp_choice_cpu(self, device, type: str, dropout: float, dtype: torch.dtype):
         # Test that cpu and nestedtensor cpu return MATH backend
-        for dtype in floating_types_and_half() + (torch.bfloat16,):
-            make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
-            size = (2, 128, 8, 64)
-            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            if type == "nested" \
-                    or dropout > 0.0 \
-                    or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
-                assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
-            else:
-                assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
+        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
+        size = (2, 128, 8, 64)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        if type == "nested" \
+                or dropout > 0.0 \
+                or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+        else:
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
@@ -1550,7 +1550,9 @@ class TestSDPA(NNTestCase):
             rtol = 2e-2
 
         n_embd = n_head * head_dim
-        x = torch.randn(batch_size, seq_len, 3 * n_embd, device=device, dtype=dtype)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
+        shape = (batch_size, seq_len, n_head, head_dim)
+        x = make_tensor(shape)
         x2 = x.clone()
 
         if train:
@@ -1566,12 +1568,12 @@ class TestSDPA(NNTestCase):
             v2 = v2.float()
 
         # (B, nh, T, hs)
-        k = k.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
-        q = q.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
-        v = v.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
-        k2 = k2.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
-        q2 = q2.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
-        v2 = v2.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        k2 = k2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q2 = q2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
 
         with sdp_kernel(**backend_map[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
@@ -1594,7 +1596,6 @@ class TestSDPA(NNTestCase):
             grad_q_ref, grad_k_ref, grad_v_ref = grad_x2.split(n_embd, dim=2)
 
             self.assertEqual(grad_q_actual, grad_q_ref, atol=atol, rtol=rtol)
-            # the error is bigger for grad_k, it need accumulation on N
             self.assertEqual(grad_k_actual, grad_k_ref, atol=atol, rtol=rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=atol, rtol=rtol)
 
