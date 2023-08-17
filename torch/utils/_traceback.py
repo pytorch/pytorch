@@ -157,7 +157,7 @@ class CapturedTraceback:
 
     def __init__(self, tb, skip=0):
         self.tb = tb
-        self.skip = 0
+        self.skip = skip
         # Cached StackSummary; this mostly exists so CapturedTraceback
         # can be reliably pickled and then printed later
         self._summary = None
