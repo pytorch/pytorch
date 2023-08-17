@@ -39,6 +39,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if "capturable" in group:
                 group["capturable"] = True
 
+            for p in group["params"]:
+                mark_static_address(p, guard=False)
+
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -61,7 +64,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # if the optimizer object dies
                 tx.store_global_weakref(self.get_global_name(), self.value)
                 self.create_finalizer(tx)
-                # finalize(self.value, )
 
                 return ConstantVariable(None)
             except (ArgMappingException, GuardInstallException) as _:
@@ -154,28 +156,29 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Wrap state tensor in a TensorVariable"""
         from .builder import VariableBuilder
 
-        # mark these tensors as static for cudagraphs
-        mark_static_address(tensor_value)
-
         # If we have a source for a tensor already use it,
         # if we have not seen a tensor before, stash and use a
         # global weak ref source, since it must be an optimizer tensor
         # that we have missed
 
         if tensor_value in self.tensor_to_source:
+            # mark these tensors as static for cudagraphs
+            mark_static_address(tensor_value, guard=False)
             builder = VariableBuilder(tx, self.tensor_to_source[tensor_value])
-            result = builder(tensor_value)
+            self.static_tensor_names.add(tx.output.module_key_name(builder.name))
         elif tensor_value in self.grad_to_source:
             builder = VariableBuilder(tx, self.grad_to_source[tensor_value])
-            result = builder(tensor_value)
         else:
+            # mark these tensors as static for cudagraphs
+            mark_static_address(tensor_value, guard=False)
+
             tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
             builder = VariableBuilder(
                 tx, GlobalWeakRefSource(global_key_name(tensor_value))
             )
+            self.static_tensor_names.add(tx.output.module_key_name(builder.name))
 
         result = builder(tensor_value)
-        self.static_tensor_names.add(tx.output.module_key_name(builder.name))
         return result
 
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
@@ -194,15 +197,18 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names
         value = self.value
+        tc = tx.output.tracing_context
 
         def init_finalizer(gm):
-            def clear_static_tensor_attrs():
+            def clear_static_tensor_refs():
                 for name in names_to_delete:
-                    setattr(gm, name, None)
+                    gm._buffers.pop(name, None)
+                    gm._parameters.pop(name, None)
+                    tc.params_flat.clear()
 
-            weakref.finalize(value, clear_static_tensor_attrs)
+            weakref.finalize(value, clear_static_tensor_refs)
 
-        tx.output.add_finalizer_init(init_finalizer)
+        tx.output.add_graph_finalizer(init_finalizer)
 
     def get_global_name(self):
         return f"__optimizer_{id(self.value)}"

@@ -7,6 +7,7 @@ import functools
 # Owner(s): ["module: dynamo"]
 
 import inspect
+import weakref
 
 import torch
 
@@ -20,30 +21,36 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
+def get_optimizer_step(opt, closure=None):
+    # run the patcher so that step has the expected structure
+    torch._dynamo.eval_frame.TorchPatcher.patch()
+
+    # unwrap step to avoid a deliberate graph break due to
+    # a limitation of functionalization/no_grad detection
+    # see the [Note on graph break] in optimizer.py
+    # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
+    # as dynamo does not support differentiable optimizers anyway
+    step_fn = opt.step.__wrapped__
+    if closure is not None:
+
+        def fn():
+            step_fn(opt, closure)
+
+    else:
+
+        def fn():
+            step_fn(opt)
+
+    return fn
+
+
 def make_test(optim_cls, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
         nonlocal opt
 
-        # run the patcher so that step has the expected structure
-        torch._dynamo.eval_frame.TorchPatcher.patch()
-
-        # unwrap step to avoid a deliberate graph break due to
-        # a limitation of functionalization/no_grad detection
-        # see the [Note on graph break] in optimizer.py
-        # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
-        # as dynamo does not support differentiable optimizers anyway
-        step_fn = opt.step.__wrapped__
-        if closure is not None:
-
-            def fn():
-                step_fn(opt, closure)
-
-        else:
-
-            def fn():
-                step_fn(opt)
+        fn = get_optimizer_step(opt, closure=closure)
 
         with torch.set_grad_enabled(False):
             torch.compile(fn, backend="eager", fullgraph=True)()
@@ -68,6 +75,37 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # test_radam = unittest.skipIf(IS_FBCODE, "TypeError: _use_grad() missing")(
     #    make_test(torch.optim.RAdam, exp_graph_count=0)
     # )
+
+    def test_optimizer_weakref_recompile(self):
+        pass
+
+    def test_static_address_finalizer(self):
+        torch._logging.set_logs(graph=True)
+        p_ref = None
+
+        def fn():
+            nonlocal p_ref
+            mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
+            for p in mod.parameters():
+                p.grad = torch.rand_like(p)
+
+            opt = torch.optim.Adam(mod.parameters(), lr=0.1)
+
+            def fn():
+                opt.step()
+
+            with torch.set_grad_enabled(False):
+                step_fn_compiled = torch.compile(fn)
+                step_fn_compiled()
+            p_ref = weakref.ref(p)
+            self.assertTrue(p_ref() is not None)
+
+        fn()
+        # import refcycle
+        # X = refcycle.snapshot()
+        # X.ancestors(p_ref(), generations=12).export_image("y.svg")
+
+        self.assertTrue(p_ref() is None)
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
