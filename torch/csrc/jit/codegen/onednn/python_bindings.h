@@ -11,4 +11,4 @@ void bind_partition(pybind11::module& m);
 void bind_stream(pybind11::module& m);
 void bind_tensor(pybind11::module& m);
 
-void initOnednnPythonBindings(PyObject* module);
+void TORCH_API initOnednnPythonBindings(PyObject* module);

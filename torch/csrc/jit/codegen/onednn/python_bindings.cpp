@@ -1,3 +1,6 @@
+#include <ATen/Config.h>
+
+#if AT_MKLDNN_ENABLED()
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/codegen/onednn/python_bindings.h>
@@ -540,3 +543,5 @@ void initOnednnPythonBindings(PyObject* module) {
   bind_cpartition(llga);
   bind_stream(llga);
 }
+
+#endif // AT_MKLDNN_ENABLED()

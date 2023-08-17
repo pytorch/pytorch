@@ -2114,7 +2114,9 @@ void initJITBindings(PyObject* module) {
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
   // initNvFuserPythonBindings(module);
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
   initOnednnPythonBindings(module);
+#endif
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
