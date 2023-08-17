@@ -390,7 +390,7 @@ inline static ExtraState* get_extra_state(PyCodeObject* code) {
   // args
   //  - code: Borrowed
   // return
-  //  - extra_state: Borrowed. set_extra_state is the owner.
+  //  - extra_state: Borrowed.
   ExtraState* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, extra_index, (void*)&extra);
   return extra;
