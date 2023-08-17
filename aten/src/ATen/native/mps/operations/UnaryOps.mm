@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
 #include <ATen/ops/asin_native.h>
@@ -30,7 +31,9 @@
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/log2_native.h>
 #include <ATen/ops/log_native.h>
+#include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
+#include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/round_native.h>
@@ -58,15 +61,15 @@ namespace mps {
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 using is_noop_p = std::function<bool(const Tensor&)>;
 
-bool is_empty_tensor(const Tensor& self) {
+static bool is_empty_tensor(const Tensor& self) {
   return self.numel() == 0;
 }
 
-void unary_op(const Tensor& self,
-              const Tensor& output,
-              std::string op_name,
-              UnaryOpBlock unaryBlock,
-              is_noop_p is_noop = is_empty_tensor) {
+static void unary_op(const Tensor& self,
+                     const Tensor& output,
+                     std::string op_name,
+                     UnaryOpBlock unaryBlock,
+                     is_noop_p is_noop = is_empty_tensor) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
   if (!output.is_same_size(self)) {
@@ -278,7 +281,7 @@ TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor& output, const std::string op_name) {
+static void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor& output, const std::string op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
 
   mps::unary_op(self, output, key, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -382,12 +385,12 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
   }
 }
 
-void cumulative_op_impl(const Tensor& self,
-                        int64_t dim,
-                        c10::optional<ScalarType> dtype,
-                        const Tensor& result,
-                        MPSCumulativeOpType cumulativeOpType,
-                        const std::string& op_name) {
+static void cumulative_op_impl(const Tensor& self,
+                               int64_t dim,
+                               c10::optional<ScalarType> dtype,
+                               const Tensor& result,
+                               MPSCumulativeOpType cumulativeOpType,
+                               const std::string& op_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   auto nDims = self.dim();
   auto wrapped_dim = maybe_wrap_dim(dim, nDims);

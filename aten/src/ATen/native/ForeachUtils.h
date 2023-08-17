@@ -272,8 +272,9 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(
               }
               const auto& tensor = tensorlist[tensor_index];
               // note(crcrpar): Currently the scope of this function is
-              // optimizers so there could be `state_steps` whose elements are a
-              // float tensor no matter what the parameter's dtype is.
+              // optimizers so there could be `state_steps` and other scalars
+              // whose elements are float tensors no matter what the parameter's
+              // dtype is.
               if (!tensor.has_value()) {
                 return true;
               } else {
@@ -293,7 +294,7 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 }
               }
             }),
-        "Tensors of the same index must be on the same device the same dtype except `step` tensors that can be CPU and float32 notwithstanding");
+        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32 notwithstanding");
     if (!grouped_tensors_with_indices.count(key)) {
       grouped_tensors_with_indices.insert(
           {key,

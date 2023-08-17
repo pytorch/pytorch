@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from torch.onnx._internal import _beartype
@@ -17,6 +18,35 @@ _SarifClass = Union[
     sarif.ReportingDescriptor,
     sarif.Result,
 ]
+
+
+class LazyString:
+    """A class to lazily evaluate a string.
+
+    Adopted from `torch._dynamo.utils.LazyString`.
+    """
+
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.func(*self.args, **self.kwargs)
+
+
+def lazy_format_exception(exception: Exception) -> LazyString:
+    return LazyString(
+        lambda: "\n".join(
+            (
+                "```",
+                *traceback.format_exception(
+                    type(exception), exception, exception.__traceback__
+                ),
+                "```",
+            )
+        ),
+    )
 
 
 @_beartype.beartype
@@ -81,39 +111,6 @@ def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))
-
-
-@_beartype.beartype
-def pretty_print_title(
-    title: str, width: int = 80, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    ==================== title ====================
-    """
-    msg = f" {title} ".center(width, fill_char)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
-def pretty_print_item_title(
-    title: str, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    title
-    =====
-    """
-    msg_list = []
-    msg_list.append(title)
-    msg_list.append(fill_char * len(title))
-
-    msg = "\n".join(msg_list)
-    if print_output:
-        print(msg)
-    return msg
 
 
 @_beartype.beartype
