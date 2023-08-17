@@ -136,7 +136,7 @@ def shorten_filename(fn):
     """
     # Truncate torch/foo.py to foo.py
     prefix = os.path.commonpath([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
-    return fn[len(prefix)+1:]
+    return fn[len(prefix) + 1:]
 
 def format_frame(frame):
     """
