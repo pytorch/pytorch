@@ -158,6 +158,11 @@ def _operator_dispatch(
                     )
             else:
                 mesh = kwarg.device_mesh
+        elif isinstance(kwarg, torch.Tensor):
+            raise RuntimeError(
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
         else:
             flat_kwargs_schema.append(kwarg)
             flat_local_kwargs.append(kwarg)
@@ -178,7 +183,7 @@ def _operator_dispatch(
 
     sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    assert output_sharding is not None
+    assert output_sharding is not None, "output sharding should not be None"
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
@@ -253,7 +258,9 @@ def _operator_dispatch(
                     "before executing a DTensor random op."
                 )
             # For DTensor random operator, run it within a distribute region
-            with random._rng_tracker._distribute_region(flat_args_schema[0]):
+            with random._rng_tracker._distribute_region(
+                cast(DTensorSpec, flat_args_schema[0])
+            ):
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         else:
             local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
