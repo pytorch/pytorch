@@ -5604,21 +5604,6 @@ def activate_meta():
                     "meta kernels for the base operators."
                 )
             pass
-        elif op_overload.is_view:
-            # Attempting to register a python meta kernel for a view operator.
-            # We shouldn't do this, because the output will report as not having aliased storages.
-            # All view ops have meta kernels in C++ today, so we should use those instead.
-            pass
-        elif op_overload.name() in {
-            "aten::empty_strided",  # causing infinite recursion, test_meta.py
-            "aten::clone",  # causing infinite recursion
-            "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-            "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
-            "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
-            "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
-            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
-        }:
-            pass
         else:
             if "mkldnn::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
