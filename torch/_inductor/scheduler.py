@@ -24,6 +24,7 @@ from .utils import (
     free_symbol_has,
     get_device_tflops,
     get_dtype_size,
+    get_gpu_dram_gbps,
     has_triton,
     sympy_product,
 )
@@ -423,11 +424,8 @@ class BaseSchedulerNode:
             # default to no reordering based on runtime
             return 0
 
-        # TODO(xmfan): figure out how to get hardware specs
         try:
-            from triton.testing import get_dram_gbps
-
-            gpu_memory_bandwidth = get_dram_gbps()
+            gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
         except Exception:
             return 0
@@ -450,7 +448,12 @@ class BaseSchedulerNode:
                     ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
-                    return flop_counter_mode.get_total_flops() / gpu_flops
+
+                    # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
+                    factor = 0.5
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    return factor * counted_flops / gpu_flops
+
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):

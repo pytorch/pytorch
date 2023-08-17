@@ -1024,3 +1024,9 @@ def get_device_tflops(dtype):
         return get_max_tensorcore_tflops(torch.float32)
     else:
         return get_max_simd_tflops(torch.float32)
+
+
+def get_gpu_dram_gbps():
+    from triton.testing import get_dram_gbps
+
+    return get_dram_gbps()

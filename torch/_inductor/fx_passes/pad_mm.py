@@ -149,8 +149,6 @@ def pad_addmm(
 
 
 def is_mm_compute_bound(M, K, N, dtype):
-    from triton.testing import get_dram_gbps
-
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -158,7 +156,9 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     # Fails with AMD
     try:
-        machine_balance = (1000 * utils.get_device_tflops(dtype)) / get_dram_gbps()
+        machine_balance = (
+            1000 * utils.get_device_tflops(dtype)
+        ) / utils.get_gpu_dram_gbps()
     except Exception:
         return True
 
