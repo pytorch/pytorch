@@ -705,45 +705,6 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
-// TODO: Remove this before committing; this is for debug use only
-Tensor nested_tensor_size_batching_rule(const Tensor& self) {
-  auto* maybe_batched_impl = maybeGetBatchedImpl(self);
-  if (!maybe_batched_impl) {
-    TORCH_INTERNAL_ASSERT(false,
-        "Tried to run batching rule for _nested_tensor_size() on a non-batched tensor")
-  }
-  auto* nt_impl = at::native::get_nested_tensor_impl(maybe_batched_impl->value());
-  if (!nt_impl) {
-    TORCH_INTERNAL_ASSERT(false,
-        "Tried to run batching rule for _nested_tensor_size() on a non-nested tensor")
-  }
-  return nt_impl->get_nested_sizes();
-}
-
-// TODO: Remove this before committing; this is for debug use only
-Tensor nested_to_padded_tensor_batching_rule(
-    const Tensor& self,
-    double padding,
-    OptionalIntArrayRef output_size) {
-  auto* maybe_batched_impl = maybeGetBatchedImpl(self);
-  if (!maybe_batched_impl) {
-    TORCH_INTERNAL_ASSERT(false,
-        "Tried to run batching rule for nested_to_padded_tensor() on a non-batched tensor")
-  }
-  // TODO: do this better; why does output->vec() return garbage?
-  auto nt = maybe_batched_impl->value();
-  std::vector<int64_t> new_output_size;
-  if (output_size.has_value()) {
-    new_output_size.push_back(static_cast<int64_t>(nt.size(0)));
-    for (auto iter = output_size->begin(); iter != output_size->end(); ++iter) {
-      new_output_size.push_back(*iter);
-    }
-    output_size = new_output_size;
-  }
-  // TODO: Fix args
-  return makeBatched(at::nested_to_padded_tensor(nt, padding, output_size), 0, 1);
-}
-
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
 
@@ -812,11 +773,8 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedNestedTensorForLoopFallback>());
 }
 
-// TODO: Move this somewhere better
+// TODO: Move this somewhere better?
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
-  // TODO: Remove these two
-  m.impl("_nested_tensor_size", nested_tensor_size_batching_rule);
-  m.impl("nested_to_padded_tensor", nested_to_padded_tensor_batching_rule);
   m.impl("cat", nested_cat_batching_rule);
 }
 } // namespace functorch
