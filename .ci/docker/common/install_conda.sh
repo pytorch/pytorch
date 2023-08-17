@@ -111,7 +111,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # So remove libstdc++6.so.3.29 installed by https://anaconda.org/anaconda/libstdcxx-ng/files?version=11.2.0
   # Same is true for gcc-12 from Ubuntu-22.04
   cat /etc/issue
-  if grep -e [12][82].04.[62] /etc/issue >/dev/null; then
+  if grep -e [12][82].04.[623] /etc/issue >/dev/null; then
   rm /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/libstdc++.so.6
   fi
 
