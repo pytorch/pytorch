@@ -32,7 +32,7 @@ from .quantizer import (
     QuantizationSpec,
     Quantizer,
 )
-from .xnnpack_quantizer import _is_annotated
+from .xnnpack_quantizer_utils import _is_annotated
 
 __all__ = [
     "X86InductorQuantizer",

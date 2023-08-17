@@ -385,6 +385,7 @@ class CPUReproTests(TestCase):
                         inps_var = [v_var]
                         self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    @slowTest
     def test_lstm_packed(self):
         params_dict = {
             "unbatched": [True, False],
