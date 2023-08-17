@@ -11,6 +11,7 @@ from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     deserialize,
     serialize,
+    SerializeError,
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -368,6 +369,18 @@ class TestDeserialize(TestCase):
 
 
 instantiate_parametrized_tests(TestDeserialize)
+
+class TestSchemaVersioning(TestCase):
+    def test_error(self):
+        def f(x):
+            return x + x
+
+        ep = export(f, (torch.randn(1, 3),))
+
+        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
+        serialized_ep.schema_version = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
 
 
 class TestOpVersioning(TestCase):
