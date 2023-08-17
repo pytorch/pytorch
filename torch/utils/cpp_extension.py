@@ -1343,9 +1343,10 @@ def _get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
-def _check_and_build_extension_h_precompiler_headers(extra_cflags,
-                            extra_include_paths,
-                            is_standalone=False):
+def _check_and_build_extension_h_precompiler_headers(
+    extra_cflags,
+    extra_include_paths,
+    is_standalone=False):
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
     GCC offical manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html

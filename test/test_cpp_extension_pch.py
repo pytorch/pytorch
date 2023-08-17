@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import time
 
 import torch.testing._internal.common_utils as common
