@@ -16,9 +16,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/OpMathType.h>
 
-namespace at {
-namespace cuda {
-namespace blas {
+namespace at::cuda::blas {
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
 // its previous value when the guard is destroyed
@@ -310,6 +308,4 @@ TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_A
 template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
-} // namespace blas
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::blas

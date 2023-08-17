@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import *  # noqa: F403
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.testing._internal.double_tensor import DoubleTensor
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
@@ -895,7 +895,7 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):
-            # Returns (DoubleTensor, Tensor)
+            # Returns (TwoTensor, Tensor)
             return x * y, y + y
         x_a = torch.zeros(4)
         x_b = torch.zeros(4)
@@ -907,10 +907,10 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
         # convention as f(*args). Unwrapping tensor subclass inputs can potentially change
         # the number of input args to the graph, breaking that assumption
         def f_to_trace(x_a, x_b, y):
-            x = DoubleTensor(x_a, x_b)
+            x = TwoTensor(x_a, x_b)
             out1, out2 = f(x, y)
             out1_unwrapped, _ = out1.__tensor_flatten__()
-            return (*out1_unwrapped, out2)
+            return (*out1_unwrapped.values(), out2)
         fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
         self.assertExpectedInline(fx_g.code, """\
 
