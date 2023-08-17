@@ -229,6 +229,36 @@ git submodule update --init --recursive
 ```
 
 #### Install PyTorch
+
+QUICK INSTALLATION GUIDE
+
+1.	Choose your preference and run the install command based on your system and needs:
+•	Stable (2.0.1) or Preview (Nightly)
+•	Linux, Mac, or Windows
+•	Conda or Pip
+
+2.	Install with Conda (Recommended):
+•	With CUDA: conda install python && conda install pytorch torchvision torchaudio cudatoolkit=[your CUDA version] -c pytorch
+•	No CUDA: conda install python && conda install pytorch torchvision torchaudio cpuonly -c pytorch
+
+3.	Install with Pip:
+•	With CUDA: pip install torch torchvision torchaudio -f https://download.pytorch.org/whl/cu117/stable.html (replace cu117 with your CUDA version)
+•	No CUDA: pip install torch torchvision torchaudio -f https://download.pytorch.org/whl/cpu/stable.html
+
+4.	Verify the installation by running sample PyTorch code in the command line:
+
+```python
+import torch
+x = torch.rand(5, 3)
+print(x)
+```
+
+Remember to check the prerequisites and select the right CUDA version if applicable! Find more details at https://pytorch.org/get-started/locally/ for a more expanded installation guide.
+
+END QUICK INSTALLATION GUIDE
+
+
+
 **On Linux**
 
 If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
