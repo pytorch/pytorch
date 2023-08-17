@@ -28,6 +28,18 @@ Tensor& linspace_out(const Tensor& start, const Tensor& end, int64_t steps, Tens
   return at::linspace_out(result, start.item(), end.item(), steps);
 }
 
+Tensor& linspace_out(const Tensor& start, const Scalar& end, int64_t steps, Tensor& result) {
+  TORCH_CHECK(start.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::linspace_out(result, start.item(), end, steps);
+}
+
+Tensor& linspace_out(const Scalar& start, const Tensor& end, int64_t steps, Tensor& result) {
+  TORCH_CHECK(end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::linspace_out(result, start, end.item(), steps);
+}
+
 Tensor& linspace_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   if (result.numel() != steps) {
@@ -58,6 +70,18 @@ Tensor& logspace_out(const Tensor& start, const Tensor& end, int64_t steps, doub
   TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
     "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
   return at::logspace_out(result, start.item(), end.item(), steps, base);
+}
+
+Tensor& logspace_out(const Tensor& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
+  TORCH_CHECK(start.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::logspace_out(result, start.item(), end, steps, base);
+}
+
+Tensor& logspace_out(const Scalar& start, const Tensor& end, int64_t steps, double base, Tensor& result) {
+  TORCH_CHECK(end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::logspace_out(result, start, end.item(), steps, base);
 }
 
 Tensor& logspace_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {

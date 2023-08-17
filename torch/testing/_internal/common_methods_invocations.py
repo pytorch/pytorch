@@ -1003,31 +1003,22 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1, 4, 50)
     starts = (-2., 0, 4.3, 50)
     nsteps = (0, 1, 50)
+    is_start_end_tensors = ((True, True), (True, False), (False, True), (False, False))
+    make_arg = partial(torch.tensor, device=device, requires_grad=False)
+
     # Extra case to replicate off-by-one issue on CUDA
-    cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
-    for start, end, nstep in cases:
+    cases = list(product(starts, ends, nsteps, is_start_end_tensors)) + [(0, 7, 50, (False, False))]
+    for start, end, nstep, (is_start_tensor, is_end_tensor) in cases:
         if dtype == torch.uint8 and end < 0 or start < 0:
             continue
 
         tensor_options = {"dtype": dtype, "device": device}
+        if (is_start_tensor):
+            start = make_arg(start, dtype=torch.float32 if isinstance(start, float) else torch.int64)
+        if (is_end_tensor):
+            end = make_arg(end, dtype=torch.float32 if isinstance(end, float) else torch.int64)
 
         yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
-        yield SampleInput(
-            torch.tensor(
-                start,
-                dtype=torch.float32 if isinstance(start, float) else torch.int64,
-                device=device
-            ),
-            args=(
-                torch.tensor(
-                    end,
-                    dtype=torch.float32 if isinstance(end, float) else torch.int64,
-                    device=device
-                ),
-                nstep
-            ),
-            kwargs=tensor_options
-        )
 
     yield SampleInput(1, args=(3, 1))
 
@@ -1037,7 +1028,9 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
     starts = (-2., 0, 1, 2, 4.3)
     nsteps = (0, 1, 2, 4)
     bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
-    for start, end, nstep, base in product(starts, ends, nsteps, bases):
+    is_start_end_tensors = ((True, True), (True, False), (False, True), (False, False))
+    make_arg = partial(torch.tensor, device=device)
+    for start, end, nstep, base, (is_start_tensor, is_end_tensor) in product(starts, ends, nsteps, bases, is_start_end_tensors):
         if dtype == torch.uint8 and end < 0 or start < 0:
             continue
         if nstep == 1 and isinstance(start, float) and not (dtype.is_complex or dtype.is_floating_point):
@@ -1046,42 +1039,15 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
 
         tensor_options = {"dtype": dtype, "device": device}
 
+        if (is_start_tensor):
+            start = make_arg(start, dtype=torch.float32 if isinstance(start, float) else torch.int64)
+        if (is_end_tensor):
+            end = make_arg(end, dtype=torch.float32 if isinstance(end, float) else torch.int64)
+
         if base is None:
             yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
-            yield SampleInput(
-                torch.tensor(
-                    start,
-                    dtype=torch.float32 if isinstance(start, float) else torch.int64,
-                    device=device
-                ),
-                args=(
-                    torch.tensor(
-                        end,
-                        dtype=torch.float32 if isinstance(end, float) else torch.int64,
-                        device=device
-                    ),
-                    nstep),
-                kwargs=tensor_options
-            )
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs=tensor_options)
-            yield SampleInput(
-                torch.tensor(
-                    start,
-                    dtype=torch.float32 if isinstance(start, float) else torch.int64,
-                    device=device
-                ),
-                args=(
-                    torch.tensor(
-                        end,
-                        dtype=torch.float32 if isinstance(end, float) else torch.int64,
-                        device=device
-                    ),
-                    nstep,
-                    base,
-                ),
-                kwargs=tensor_options
-            )
 
     yield SampleInput(1, args=(3, 1, 2.))
 
@@ -11189,11 +11155,10 @@ op_db: List[OpInfo] = [
            skips=(
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # Tests that assume input is a tensor or sequence of tensors
+               # TypeError: 'int' object is not subscriptable
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
@@ -11218,11 +11183,10 @@ op_db: List[OpInfo] = [
            skips=(
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # Tests that assume input is a tensor or sequence of tensors
+               # TypeError: 'int' object is not subscriptable
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
@@ -18700,10 +18664,9 @@ python_ref_db = [
         "_refs.linspace",
         torch_opinfo_name="linspace",
         skips=(
-            # Tests that assume input is a tensor or sequence of tensors
+            # TypeError: 'int' object is not subscriptable
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
             # cpu implementation is wrong on some integral types
             # https://github.com/pytorch/pytorch/issues/81996
@@ -18730,10 +18693,9 @@ python_ref_db = [
         "_refs.logspace",
         torch_opinfo_name="logspace",
         skips=(
-            # Tests that assume input is a tensor or sequence of tensors
+            # TypeError: 'int' object is not subscriptable
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
             # Off-by-one issue when casting floats to ints
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',

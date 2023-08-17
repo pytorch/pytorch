@@ -72,13 +72,21 @@ def check_inplace_broadcast(self_shape, *args_shape):
 @register_meta(
     [
         aten.linspace.default,
+        aten.linspace.Tensor_Tensor,
+        aten.linspace.Tensor_Scalar,
+        aten.linspace.Scalar_Tensor,
         aten.linspace.out,
-        aten.linspace.Tensor,
-        aten.linspace.Tensor_out,
+        aten.linspace.Tensor_Tensor_out,
+        aten.linspace.Tensor_Scalar_out,
+        aten.linspace.Scalar_Tensor_out,
         aten.logspace.default,
+        aten.logspace.Tensor_Tensor,
+        aten.logspace.Tensor_Scalar,
+        aten.logspace.Scalar_Tensor,
+        aten.logspace.Tensor_Tensor_out,
+        aten.logspace.Tensor_Scalar_out,
+        aten.logspace.Scalar_Tensor_out,
         aten.logspace.out,
-        aten.logspace.Tensor,
-        aten.logspace.Tensor_out,
     ]
 )
 @out_wrapper()
@@ -136,11 +144,6 @@ def meta_linspace_logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-
-
-@register_meta([aten.allclose.default])
-def allclose(a, b, rtol: float = 1e-05, atol: float = 1e-08, equal_nan: bool = False):
-    a.new_empty((), dtype=torch.bool)
 
 
 @register_meta([aten.take.default, aten.take.out])
@@ -5268,7 +5271,7 @@ def activate_meta():
             # only for the base operators.
             if op_overload in global_decomposition_table["meta"]:
                 raise RuntimeError(
-                   f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
                     "register meta function for it. Instead, we should let the decomposition run and write "
                     "meta kernels for the base operators."
                 )
