@@ -704,7 +704,7 @@ def create_add_loggers_graph(
     from torch.ao.ns._numeric_suite_fx import OutputLogger, OutputComparisonLogger
 
     def _get_subgraph_containing_node(node, subgraphs_dedup):
-        for name, subgraph in subgraphs_dedup.items():
+        for subgraph in subgraphs_dedup.values():
             if node in subgraph:
                 return subgraph
         return None
@@ -1289,7 +1289,7 @@ def print_n_shadows_summary(
         return
 
     results = []
-    for subgraph_name, subgraph_data in results_comparison.items():
+    for subgraph_data in results_comparison.values():
         mean_all_candidates = [
             candidate['cmp_mean']
             for candidate_name, candidate in subgraph_data['candidates'].items()

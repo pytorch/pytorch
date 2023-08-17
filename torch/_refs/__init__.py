@@ -1,6 +1,7 @@
 import builtins
 import collections
 import inspect
+import itertools
 import math
 import operator
 import warnings
@@ -330,6 +331,8 @@ __all__ = [
     # Misc
     #
     "renorm",
+    "stft",
+    "istft",
 ]
 
 Tensor = torch.Tensor
@@ -597,9 +600,7 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
 
     python_type = utils.dtype_to_type(a.dtype)
     if not utils.is_weakly_lesser_type(type(value), python_type):
-        msg = "value argument of type {0} cannot be safely cast to type {1}!".format(
-            type(value), python_type
-        )
+        msg = f"value argument of type {type(value)} cannot be safely cast to type {python_type}!"
         raise ValueError(msg)
 
     return prims.fill(a, value)
@@ -997,11 +998,7 @@ def add(
         if python_type != bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
@@ -1069,7 +1066,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
             a.device, b.device
         )
         raise RuntimeError(msg)
@@ -1098,10 +1095,7 @@ def div(
     elif rounding_mode == "floor":
         return floor_divide(a, b)
     else:
-        msg = (
-            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
-            "but found {0}.".format(rounding_mode)
-        )
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
         raise ValueError(msg)
 
 
@@ -1218,7 +1212,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
                 a.device, b.device
             )
             raise RuntimeError(msg)
@@ -1378,21 +1372,15 @@ def _check_close_args(
 ) -> None:
     torch._check_value(
         a.dtype == b.dtype,
-        lambda: "{0}: Attempting to compare tensors of different dtypes {1} and {2}!".format(
-            name, a.dtype, b.dtype
-        ),
+        lambda: f"{name}: Attempting to compare tensors of different dtypes {a.dtype} and {b.dtype}!",
     )
     torch._check(
         rtol >= 0,
-        lambda: "{0}: rtol must be greater than or equal to zero, but got {1}!".format(
-            name, rtol
-        ),
+        lambda: f"{name}: rtol must be greater than or equal to zero, but got {rtol}!",
     )
     torch._check(
         atol >= 0,
-        lambda: "{0}: atol must be greater than or equal to zero, but got {1}!".format(
-            name, atol
-        ),
+        lambda: f"{name}: atol must be greater than or equal to zero, but got {atol}!",
     )
 
 
@@ -1664,11 +1652,7 @@ def sub(
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         if isinstance(b, torch.Tensor):
             b = prims.mul(b, alpha)
@@ -1759,9 +1743,7 @@ def addcdiv(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 / tensor2
@@ -1788,9 +1770,7 @@ def addcmul(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 * tensor2
@@ -1892,7 +1872,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
             b.device, a.device
         )
         raise RuntimeError(msg)
@@ -2098,9 +2078,7 @@ def _reduction(
     assert isinstance(a, TensorLike)
     if a.ndim > 64:
         raise RuntimeError(
-            "Received a tensor with {0} dimensions, but only tensors with up to 64 dims are supported!".format(
-                a.ndim
-            )
+            f"Received a tensor with {a.ndim} dimensions, but only tensors with up to 64 dims are supported!"
         )
 
     if out is not None:
@@ -2864,7 +2842,7 @@ def expand_as(a: Tensor, b: Tensor) -> Tensor:
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
-        msg = "Expected at least one chunk, but got {0}!".format(chunks)
+        msg = f"Expected at least one chunk, but got {chunks}!"
         raise ValueError(msg)
 
     dim = utils.canonicalize_dim(a.ndim, dim)
@@ -2945,14 +2923,13 @@ def narrow(
     torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
     dim_length = a.size(dim)
-    # Start being the end is usually invalid since it's out of bounds. So it's
-    # not allowed by canonicalize_dim. But for narrow it's valid as long as
-    # the length is 0, which is handled by the check below.
-    if start != dim_length:
-        # Negative start means indexing from the end of dim.
-        # Note: a dimension isn't being canonicalized here, this reuses
-        # canonicalize_dim because the semantics are similar.
-        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    torch._check_with(
+        IndexError,
+        -dim_length <= start and start <= dim_length,  # type: ignore[arg-type]
+        lambda: f"start out of range (expected to be in range of [{-dim_length}, {dim_length}], but got {start})",
+    )
+    if start < 0:
+        start = start + dim_length
     torch._check(
         start <= dim_length - length,  # type: ignore[arg-type]
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
@@ -3173,6 +3150,269 @@ def renorm(
     return (input * norm_factor).contiguous()
 
 
+# CompositeImplicitAutograd - don't register decomp
+@aten.stft.center.py_impl(DispatchKey.CompositeImplicitAutograd)
+def stft(
+    input: Tensor,
+    n_fft: int,
+    hop_length: Optional[int] = None,
+    win_length: Optional[int] = None,
+    window: Optional[Tensor] = None,
+    center: bool = True,
+    pad_mode: str = "reflect",
+    normalized: bool = False,
+    onesided: Optional[bool] = None,
+    return_complex: Optional[bool] = None,
+) -> Tensor:
+    torch._check(
+        window is None or window.device == input.device,
+        lambda: (
+            f"stft input and window must be on the same device but got self on {input.device}"
+            + f" and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+
+    hop_length_ = hop_length if hop_length is not None else n_fft // 4
+    win_length_ = win_length if win_length is not None else n_fft
+
+    if return_complex is None:
+        return_complex_ = input.is_complex() or (
+            window is not None and utils.is_complex_dtype(window.dtype)
+        )
+        torch._check(
+            return_complex_,
+            (
+                "stft requires the return_complex parameter be given for real inputs, "
+                + "and will further require that return_complex=True in a future PyTorch release."
+            ),
+        )
+    else:
+        return_complex_ = return_complex
+
+    torch._check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: "stft expected a tensor of floating point or complex values",
+    )
+    torch._check(1 <= input.ndim <= 2, lambda: "stft expected a 1D or 2D tensor")
+
+    original_ndim = input.ndim
+    if original_ndim == 1:
+        input = input.unsqueeze(0)
+
+    if center:
+        extra_dims = 3 - input.ndim
+        pad_amount = n_fft // 2
+        extended_shape = [*itertools.repeat(1, extra_dims), *input.shape]
+        input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
+        input = input.view(input.size()[extra_dims:])
+
+    batch = input.size(0)
+    length = input.size(1)
+    torch._check(
+        0 < n_fft <= length,
+        lambda: f"stft expected 0 < n_fft <= {length}, but got n_fft={n_fft}",
+    )
+    torch._check(
+        hop_length_ > 0,
+        lambda: f"stft expected hop_length > 0 but got hop_length={hop_length_}",
+    )
+    torch._check(
+        0 < win_length_ <= n_fft,
+        lambda: f"stft expected 0 < win_length <= n_fft but got win_length={win_length_}",
+    )
+    torch._check(
+        window is None or window.shape == (win_length_,),
+        lambda: (
+            f"expected a 1D window tensor of size equal to win_length={win_length_}, "
+            + f"but got window with size {window.shape}"  # type: ignore[union-attr]
+        ),
+    )
+
+    if win_length_ < n_fft:
+        if window is None:
+            window = torch.ones(win_length_, dtype=input.dtype, device=input.device)
+        left = (n_fft - win_length_) // 2
+        window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
+
+    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+    if window is not None:
+        input = input * window
+
+    complex_fft = utils.is_complex_dtype(input.dtype)
+    onesided = onesided if onesided is not None else not complex_fft
+    norm = "ortho" if normalized else None
+    if onesided:
+        torch._check(
+            not complex_fft,
+            lambda: "Cannot have onesided output if window or input is complex",
+        )
+        out = torch.fft.rfft(input, dim=-1, norm=norm)
+    else:
+        out = torch.fft.fft(input, dim=-1, norm=norm)
+
+    out.transpose_(1, 2)
+
+    if original_ndim == 1:
+        out = out.squeeze_(0)
+
+    return out if return_complex_ else torch.view_as_real(out)
+
+
+# CompositeImplicitAutograd - don't register decomp
+@aten.istft.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def istft(
+    input: Tensor,
+    n_fft: int,
+    hop_length: Optional[int] = None,
+    win_length: Optional[int] = None,
+    window: Optional[Tensor] = None,
+    center: bool = True,
+    normalized: bool = False,
+    onesided: Optional[bool] = None,
+    length: Optional[int] = None,
+    return_complex=False,
+) -> Tensor:
+    torch._check(
+        window is None or window.device == input.device,
+        lambda: (
+            f"istft input and window must be on the same device but got self on {input.device}"
+            + f" and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+
+    hop_length_ = hop_length if hop_length is not None else n_fft // 4
+    win_length_ = win_length if win_length is not None else n_fft
+
+    torch._check(
+        utils.is_complex_dtype(input.dtype),
+        lambda: (
+            "istft input and window must be on the same device but got self on "
+            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+    n_frames = input.size(-1)
+    fft_size = input.size(-2)
+
+    expected_output_signal_len = n_fft + hop_length_ * (n_frames - 1)
+    torch._check(input.numel() > 0, lambda: "istft input tensor cannot be empty")
+    torch._check(
+        2 <= input.ndim <= 3,
+        lambda: f"istft expected a tensor with 2 or 3 dimensions, but got {input.ndim}",
+    )
+    onesided_ = onesided if onesided is not None else fft_size != n_fft
+
+    if onesided_:
+        torch._check(
+            n_fft // 2 + 1 == fft_size,
+            lambda: (
+                "istft expected the frequency dimension (3rd to the last) of the input tensor "
+                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+            ),
+        )
+    else:
+        torch._check(
+            n_fft == fft_size,
+            lambda: (
+                "istft expected the frequency dimension (3rd to the last) of the input tensor "
+                + "to match n_fft when onesided=False, but got {fft_size}",
+            ),
+        )
+
+    torch._check(
+        0 < hop_length_ <= win_length_,
+        lambda: "istft expected 0 < hop_length <= win_length",
+    )
+    torch._check(
+        0 < win_length_ <= n_fft, lambda: "istft expected 0 < win_length <= n_fft"
+    )
+    torch._check(
+        window is None or window.shape == (win_length_,),
+        lambda: "Invalid window shape. window has to be 1D and length of `win_length`",
+    )
+
+    if window is None:
+        real_dtype = utils.corresponding_real_dtype(input.dtype)
+        window_ = torch.ones(win_length_, dtype=real_dtype, device=input.device)
+    else:
+        window_ = window
+
+    if win_length_ != n_fft:
+        left = (n_fft - win_length_) // 2
+        window_ = aten.constant_pad_nd(window_, (left, n_fft - win_length_ - left), 0)
+
+    original_ndim = input.ndim
+    if input.ndim == 2:
+        input = input.unsqueeze(0)
+
+    input = input.transpose(1, 2)
+    norm = "ortho" if normalized else None
+    if return_complex:
+        torch._check(
+            not onesided_,
+            lambda: "cannot have onesided output if window or input is complex",
+        )
+        input = torch.fft.ifft(input, dim=-1, norm=norm)
+    else:
+        torch._check(
+            window is None or not utils.is_complex_dtype(window.dtype),
+            lambda: "Complex windows are incompatible with return_complex=False",
+        )
+        if not onesided_:
+            input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
+        input = torch.fft.irfft(input, dim=-1, norm=norm)
+
+    assert input.size(2) == n_fft
+
+    y_tmp = input * window_.view([1, 1, n_fft])
+    y = aten.unfold_backward(
+        y_tmp,
+        input_sizes=(y_tmp.size(0), expected_output_signal_len),
+        dim=1,
+        size=n_fft,
+        step=hop_length_,
+    )
+    window_envelop = aten.unfold_backward(
+        window_.pow(2).expand((1, n_frames, n_fft)),
+        input_sizes=(y_tmp.size(0), expected_output_signal_len),
+        dim=1,
+        size=n_fft,
+        step=hop_length_,
+    )
+
+    assert expected_output_signal_len == y.size(1)
+    assert expected_output_signal_len == window_envelop.size(1)
+
+    start = n_fft // 2 if center else 0
+    if length is not None:
+        end = start + length
+    elif center:
+        end = expected_output_signal_len - n_fft // 2
+    else:
+        end = expected_output_signal_len
+
+    length = max(0, end - start)
+    y = y.narrow(dim=1, start=start, length=length)
+    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+
+    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
+    torch._check(
+        not window_envelop_lowest.item(),
+        lambda: "window overlap add min less than 1e-11",
+    )
+
+    y = y / window_envelop
+    if original_ndim == 2:
+        y = y.squeeze(0)
+
+    if end > expected_output_signal_len:
+        warnings.warn(
+            "The length of signal is shorter than the length parameter. Result is being "
+            + "padded with zeros in the tail. Please check your center and hop_length settings"
+        )
+        y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
+    return y
+
+
 # Get the new shape and stride after applying unfold to an input tensor
 def _get_unfold_shape_stride(
     a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
@@ -3346,7 +3586,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {0} and strides {1} as a tensor with shape {2}!".format(
+                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
                     a.shape, a.stride(), shape
                 )
                 raise ValueError(msg)
@@ -3704,13 +3944,13 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
+            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
                 indices_or_sections.device
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
             msg = "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
-            " but received one with dtype {0}".format(indices_or_sections.dtype)
+            f" but received one with dtype {indices_or_sections.dtype}"
             raise ValueError(msg)
 
     # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
@@ -3724,9 +3964,7 @@ def tensor_split(
         )
 
         if sections <= 0:
-            msg = "tensor_split: number of sections must be greater than 0, but was {0}".format(
-                sections
-            )
+            msg = f"tensor_split: number of sections must be greater than 0, but was {sections}"
             raise ValueError(msg)
 
         splits = []
@@ -3751,9 +3989,7 @@ def tensor_split(
         if isinstance(indices_or_sections, TensorLike):
             if indices_or_sections.ndim != 1:
                 msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
-                "but received a tensor with {0} dimensions".format(
-                    indices_or_sections.ndim
-                )
+                f"but received a tensor with {indices_or_sections.ndim} dimensions"
                 raise ValueError(msg)
 
             indices = indices_or_sections.tolist()
@@ -4648,20 +4884,29 @@ def logspace(
         if isinstance(end, FloatLike):
             end = sym_int(end)
 
+    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        dtype = default_complex_dtype
+        _dtype = None  # torch.linspace will update the correct dtype
+    else:
+        _dtype = torch.float64
+
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
         raise NotImplementedError
-    ret = torch.linspace(
+    ret = torch.linspace(  # type: ignore[misc]
         start,
         end,
         steps,  # type: ignore[arg-type]
-        dtype=torch.float64,
+        dtype=_dtype,
         layout=layout,
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)  # type: ignore[arg-type,return-value]
 
 
 @overload

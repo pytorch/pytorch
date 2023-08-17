@@ -56,7 +56,7 @@ def _dtensor_init_helper(
     return DTensor(
         local_tensor=local_tensor,
         device_mesh=device_mesh,
-        placements=placements,
+        placements=tuple(placements),
         shape=size,
         dtype=local_tensor.dtype,
         stride=torch_stride,
@@ -246,3 +246,7 @@ def zeros(
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+if not torch._running_with_deploy():
+    import torch.distributed._tensor._dynamo_utils

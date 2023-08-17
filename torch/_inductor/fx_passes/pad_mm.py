@@ -164,7 +164,10 @@ def get_flops(dtype):
 def is_mm_compute_bound(M, K, N, dtype):
     from triton.testing import get_dram_gbps
 
-    arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
+    denominator = M * K + N * K + M * N
+    if denominator == 0:
+        return False
+    arithmetic_intensity = (M * N * K) / denominator
 
     # Fails with AMD
     try:
