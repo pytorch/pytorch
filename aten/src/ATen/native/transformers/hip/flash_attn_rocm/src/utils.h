@@ -27,6 +27,8 @@
 #include <ck/library/reference_tensor_operation/cpu/reference_softmax.hpp>
 #include <ck/library/reference_tensor_operation/cpu/reference_dropout.hpp>
 
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define NEW_UNPACK (TORCH_VERSION_MAJOR * 10000 + TORCH_VERSION_MINOR * 100 + TORCH_VERSION_PATCH) > 11300
@@ -74,20 +76,31 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static inline size_t get_size_in_bytes( size_t n, auto dtype ) {
-  if(dtype == torch::kFloat32){
-    return n * 4;
-  }else if(dtype == torch::kBFloat16){
-    return n * 2;
-  }else if(dtype == torch::kFloat16){
-    return n * 2;
-  }else if(dtype == torch::kInt32){
-    return n * 4;
-  }else if(dtype == torch::kInt8){
-    return n; 
-  }
+template <typename dtype_t>
+static inline size_t get_size_in_bytes( size_t n, dtype_t dtype ){
   return 0;
-}
+};
+
+template <>
+static inline size_t get_size_in_bytes( size_t n, at::kFloat dtype ){
+  return n * 4;
+};
+template <>
+static inline size_t get_size_in_bytes( size_t n, at::kBFloat16 dtype ){
+  return n * 2;
+};
+template <>
+static inline size_t get_size_in_bytes( size_t n, at::kHalf dtype ){
+  return n * 2;
+};
+// template <>
+// static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt32 dtype ){
+//   return n * 4;
+// };
+// template <>
+// static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt8 dtype ){
+//   return n;
+// };
 
 
 static std::tuple<uint64_t, uint64_t> unpack(at::PhiloxCudaState arg) {
