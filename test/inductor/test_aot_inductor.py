@@ -152,7 +152,6 @@ class AotInductorTests(TestCase):
                 )
                 self.bn1 = torch.nn.BatchNorm2d(num_features=16)
                 self.relu1 = torch.nn.ReLU()
-                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
                 self.loss_fn = torch.nn.L1Loss()
 
             def forward(self, x, target):
@@ -162,9 +161,7 @@ class AotInductorTests(TestCase):
                 x = self.relu1(x)
                 x = x + y
                 x = torch.flatten(x)
-                x = self.fc1(x)
                 output = self.loss_fn(x, target)
-
                 return (output,)
 
         def get_triton_codegen(optimized_module, args):
@@ -193,8 +190,8 @@ class AotInductorTests(TestCase):
                     res = re.search(r"seq_nr:(\d+)", line)
                     if res:
                         seq_nr_set.add(int(res.group(1)))
+
         self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
-        return
 
 
 if __name__ == "__main__":

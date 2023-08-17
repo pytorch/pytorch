@@ -242,8 +242,11 @@ class BatchNorm1d(_BatchNorm):
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input). By default, the
-    elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0. The
-    standard-deviation is calculated via the biased estimator, equivalent to `torch.var(input, unbiased=False)`.
+    elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0.
+    At train time in the forward pass, the standard-deviation is calculated via the biased estimator,
+    equivalent to ``torch.var(input, unbiased=False)``. However, the value stored in the
+    moving average of the standard-deviation is calculated via the unbiased  estimator, equivalent to
+    ``torch.var(input, unbiased=True)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -353,9 +356,9 @@ class BatchNorm2d(_BatchNorm):
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`. However, the value stored in the moving average of the
+    ``torch.var(input, unbiased=False)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased  estimator, equivalent to
-    `torch.var(input, unbiased=True)`.
+    ``torch.var(input, unbiased=True)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -459,8 +462,11 @@ class BatchNorm3d(_BatchNorm):
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. The standard-deviation is calculated
-    via the biased estimator, equivalent to `torch.var(input, unbiased=False)`.
+    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    standard-deviation is calculated via the biased estimator, equivalent to
+    ``torch.var(input, unbiased=False)``. However, the value stored in the moving average of the
+    standard-deviation is calculated via the unbiased  estimator, equivalent to
+    ``torch.var(input, unbiased=True)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
