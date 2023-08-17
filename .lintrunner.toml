@@ -63,6 +63,7 @@ include_patterns = [
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
+    'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',

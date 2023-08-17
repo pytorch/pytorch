@@ -5013,19 +5013,13 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
                      error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got -4\)")
 
     # out of bounds start
-    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
-        # narrow_copy_dense_cpu_out
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=RuntimeError,
-                         error_regex=r"start \(11\) \+ length \(0\) exceeds dimension size \(10\)\.")
-    else:
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=IndexError,
-                         error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got 11\)")
     # out of bounds start (negative)
     yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
                      error_type=IndexError,
-                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got -11\)")
 
     # out of bounds length
     yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),

@@ -82,6 +82,7 @@ def define_targets(rules):
         deps = [
             ":ScalarType",
             ":impl_cow_context",
+            "//third_party/cpuinfo",
             "//c10/macros",
             "//c10/util:TypeCast",
             "//c10/util:base",
