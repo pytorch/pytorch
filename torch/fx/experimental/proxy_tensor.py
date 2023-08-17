@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
-from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily, is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -25,12 +25,8 @@ from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
-)
-
-from torch._C import (
-    _set_proxy_tensor_mode,
-    _unset_proxy_tensor_mode,
-    _get_proxy_tensor_mode,
+    _pop_mode,
+    _push_mode,
 )
 
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
@@ -118,7 +114,7 @@ def snapshot_fake(val):
     return val.detach()
 
 def extract_val(val):
-    if is_fake_tensor(val):
+    if is_fake(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
@@ -147,7 +143,7 @@ def extract_val(val):
 def set_meta(proxy, val):
     proxy.node.meta['val'] = extract_val(val)
     # Best effort tensor_meta setting; prefer using val!
-    if is_fake_tensor(val):
+    if is_fake(val):
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, torch.Tensor) and not val.is_sparse:
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -214,11 +210,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mb_fake_mode = torch._C._get_fake_tensor_mode()
-    if isinstance(mb_fake_mode, FakeTensorMode):
-        return unset_fake_temporarily()
-    else:
-        return nullcontext()
+    return unset_fake_temporarily()
 
 
 @dataclass
@@ -241,7 +233,7 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, torch._subclasses.FakeTensor)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
@@ -286,7 +278,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
     )
 
-    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
+    if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
         if all_constant:
             const_args, const_kwargs = pytree.tree_map_only(
@@ -297,7 +289,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
         # incorrectly burn in constants by allowing this access.  Raise
         # an error in this case
-        if pytree.tree_all_only(torch.Tensor, lambda t: not is_fake_tensor(t), (args, kwargs)):
+        if pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
             raise RuntimeError(
                 f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
                 "It's likely that this is caused by data-dependent control flow or similar.  "
@@ -395,7 +387,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         with maybe_disable_fake_tensor_mode():
             constant = args[0].clone()
     elif (
-        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+        torch.Tag.nondeterministic_seeded not in func.tags
         and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
@@ -486,11 +478,11 @@ def _pop_proxy_mode_temporarily(dk):
             _push_mode(old, dk)
     else:
         # During normal tracing, pop off of the dedicated proxy mode stack
-        old = _unset_proxy_tensor_mode()
+        old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
         try:
             yield old
         finally:
-            _set_proxy_tensor_mode(old)
+            torch._C._set_dispatch_mode(old)
 
 def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
@@ -570,6 +562,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
+        # Indicates to our torch_dispatch dispatching infra that
+        # this is an "infra" mode with lower dispatching precedence.
+        self._mode_key = torch._C.TorchDispatchModeKey.PROXY
+        # Every time we enter a mode, we maintain a stack telling us what the previous
+        # ProxyTorchDispatchMode state was (if there was any).
+        # This lets us properly reset the state on exit.
+        self.enter_stack: List[Optional[FakeTensorMode]] = []
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -581,13 +580,21 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         m = self.sym_mode.enable(True)
         self._managers.append(m)
         m.__enter__()
-        _set_proxy_tensor_mode(self)
-        return self
+        # Stash and store the previous proxy mode (there may or may not be one)
+        maybe_prev_proxy_mode = torch._C._unset_dispatch_mode(self._mode_key)
+        self.enter_stack.append(maybe_prev_proxy_mode)
+        return super().__enter__()
 
     def __exit__(self, exc_type, exc_value, traceback):
         m = self._managers.pop()
         # ...exit us first, then sym mode
-        b = _unset_proxy_tensor_mode()
+        b = super().__exit__(exc_type, exc_value, traceback)
+
+        # Re-enable the previous proxy mode, if there was one.
+        mb_previous_proxy_mode = self.enter_stack.pop()
+        if mb_previous_proxy_mode is not None:
+            torch._C._set_dispatch_mode(mb_previous_proxy_mode)
+
         if not b:
             return m.__exit__(exc_type, exc_value, traceback)
         else:
@@ -859,19 +866,19 @@ def get_torch_dispatch_modes():
 
 
 def get_innermost_proxy_mode():
-    return _get_proxy_tensor_mode()
+    return torch._C._get_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
 
 
 @contextlib.contextmanager
 def disable_proxy_modes_tracing():
     # Only one proxy_mode can be "active" at a time.
     # So we simply remove our active mode.
-    maybe_old = None if torch._C._get_proxy_tensor_mode() is None else torch._C._unset_proxy_tensor_mode()
+    maybe_old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
     try:
         yield
     finally:
         if maybe_old is not None:
-            _set_proxy_tensor_mode(maybe_old)
+            torch._C._set_dispatch_mode(maybe_old)
 
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):

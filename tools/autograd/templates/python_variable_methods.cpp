@@ -969,30 +969,8 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
   if (check_has_torch_function(self)) {
     return handle_torch_function(self, "untyped_storage");
   }
-
-  // Note [Python Storages for Tensor Subclasses]
-  // For tensor subclasses that are traceable,
-  // we need to be able to track aliasing of subclasses in AOTAutograd.
-  // __tensor_flatten__/__tensor_unflatten__ are part of the contract
-  // for "declaring your subclass to be traceable",
-  // So we detect this situation and allow python storage objects to be returned.
-  // In the future we could think about making subclass storages always visible in python,
-  // although it has some footguns (you can use them to loosely track aliasing,
-  // but they don't have a valid data pointer).
-  py::object maybe_tensor_flatten = PyObject_FastGetAttrString(self, "__tensor_flatten__");
-  py::object maybe_tensor_unflatten = PyObject_FastGetAttrString(self, "__tensor_unflatten__");
-  auto is_traceable_subclass = maybe_tensor_flatten && maybe_tensor_unflatten;
-
-  // FunctionalTensor is a python subclass that we use during compilation.
-  // It explicitly is **not** traceable (doesn't implement __tensor_flatten__),
-  // but we need to use its storage to determine aliasing reliationships in the graph.
-  auto curr_type = (PyObject*)Py_TYPE(self);
-  auto curr_type_name = PyObject_GetAttrString(curr_type, "__name__");
-  auto curr_type_str = std::string(PyUnicode_AsUTF8(curr_type_name));
-  auto is_python_functional_tensor = curr_type_str == "FunctionalTensor";
-
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage(), /*always_create_python_storage=*/is_traceable_subclass || is_python_functional_tensor);
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
