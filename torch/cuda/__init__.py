@@ -312,7 +312,7 @@ def _lazy_init():
                 except Exception as e:
                     msg = (
                         f"CUDA call failed lazily at initialization with error: {str(e)}\n\n"
-                        f"CUDA call was originally invoked at:\n\n{orig_traceback}"
+                        f"CUDA call was originally invoked at:\n\n{''.join(orig_traceback)}"
                     )
                     raise DeferredCudaCallError(msg) from e
         finally:

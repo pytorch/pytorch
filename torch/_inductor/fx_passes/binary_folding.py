@@ -34,7 +34,7 @@ def mark_mixed_dtype_conv(conv):
 
     if not (
         conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] == conv_dtype
+        and conv_user.args[1] in (torch.float16, torch.bfloat16, torch.float32)
     ):
         return
 
