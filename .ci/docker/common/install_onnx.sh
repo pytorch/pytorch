@@ -36,14 +36,13 @@ pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
 # Transformers requires packages
 pip_install datasets==2.14.4
 
-# Cache after installing PyTorch saves manually install some packages
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2").to("cpu"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
-as_jenkins echo 'transformers.AutoModel.from_pretrained("bigscience/bloom-560m").to("cpu"); transformers.AutoTokenizer.from_pretrained("bigscience/bloom-560m");' >> "${IMPORT_SCRIPT_FILENAME}"
-as_jenkins echo 'transformers.AutoModel.from_pretrained("openai/whisper-tiny").to("cpu"); transformers.WhisperConfig.from_pretrained("openai/whisper-tiny");transformers.WhisperProcessor.from_pretrained("openai/whisper-tiny");' >> "${IMPORT_SCRIPT_FILENAME}"
-as_jenkins echo 'transformers.AutoModel.from_pretrained("google/flan-t5-small").to("cpu"); transformers.AutoTokenizer.from_pretrained("google/flan-t5-small");' >> "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2").to("cpu"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2"); \
+                transformers.AutoModel.from_pretrained("bigscience/bloom-560m").to("cpu"); transformers.AutoTokenizer.from_pretrained("bigscience/bloom-560m"); \
+                transformers.AutoModel.from_pretrained("openai/whisper-tiny").to("cpu"); transformers.WhisperConfig.from_pretrained("openai/whisper-tiny");transformers.WhisperProcessor.from_pretrained("openai/whisper-tiny"); \
+                transformers.AutoModel.from_pretrained("google/flan-t5-small").to("cpu"); transformers.AutoTokenizer.from_pretrained("google/flan-t5-small");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
