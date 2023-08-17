@@ -56,12 +56,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda12_1-py3_10-gcc9-inductor-build:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -81,31 +81,31 @@ jobs:
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-inductor-test-nightly:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc9-inductor-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm80
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-inductor-test:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc9-inductor-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm80
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
