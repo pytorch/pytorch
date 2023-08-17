@@ -1228,8 +1228,8 @@ def wrap_fx_proxy_cls(
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            # tensor subclasses that are not fakified need to be cloned
+            if not is_fake(value):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
