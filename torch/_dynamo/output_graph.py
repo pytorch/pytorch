@@ -965,8 +965,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
-        for finalizer in self.create_finalizer_fns:
-            weakref.finalize(gm, finalizer)
+        for create_finalizer in self.create_finalizer_fns:
+            create_finalizer(gm)
+
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
