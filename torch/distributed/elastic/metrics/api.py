@@ -149,7 +149,7 @@ def profile(group=None):
      @metrics.profile("my_metric_group")
      def some_function(<arguments>):
     """
-    warnings.warn("Deprecated, use @prof instead", DeprecationWarning, stacklevel=1)
+    warnings.warn("Deprecated, use @prof instead", DeprecationWarning, stacklevel=2)
 
     def wrap(func):
         @wraps(func)
@@ -191,7 +191,7 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
 
 def publish_metric(metric_group: str, metric_name: str, metric_value: int):
     warnings.warn(
-        "Deprecated, use put_metric(metric_group)(metric_name, metric_value) instead", stacklevel=1
+        "Deprecated, use put_metric(metric_group)(metric_name, metric_value) instead", stacklevel=2
     )
     metric_stream = getStream(metric_group)
     metric_stream.add_value(metric_name, metric_value)

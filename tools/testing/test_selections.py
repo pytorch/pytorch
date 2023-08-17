@@ -160,7 +160,7 @@ def _get_previously_failing_tests() -> Set[str]:
     if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
         warn(
             f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}",
-            stacklevel=1,
+            stacklevel=2,
         )
         return set()
 
@@ -189,7 +189,7 @@ def _get_modified_tests() -> Set[str]:
     try:
         changed_files = _query_changed_test_files()
     except Exception as e:
-        warn(f"Can't query changed test files due to {e}", stacklevel=1)
+        warn(f"Can't query changed test files due to {e}", stacklevel=2)
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 

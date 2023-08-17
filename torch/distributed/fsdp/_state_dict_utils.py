@@ -335,7 +335,7 @@ def _full_post_state_dict_hook(
                     "memory regions after returning from state_dict() call if this "
                     "parameter is managed by FSDP. Please check clone "
                     f"implementation of {fqn}. Error: {str(e)}",
-                    stacklevel=1,
+                    stacklevel=2,
                 )
 
     return _common_unshard_post_state_dict_hook(
@@ -692,7 +692,7 @@ def _post_state_dict_hook(
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned.",
-            stacklevel=1,
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()
@@ -750,7 +750,7 @@ def _pre_state_dict_hook(
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned.",
-            stacklevel=1,
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()
@@ -788,7 +788,7 @@ def _pre_load_state_dict_hook(
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned.",
-            stacklevel=1,
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()
@@ -820,7 +820,7 @@ def _post_load_state_dict_hook(
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned.",
-            stacklevel=1,
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()

@@ -137,7 +137,7 @@ def make_tensor(
                 "is deprecated since 2.1 and will be removed in 2.3. "
                 "Use torch.full(...) instead.",
                 FutureWarning,
-                stacklevel=1,
+                stacklevel=2,
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")

@@ -25,7 +25,7 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
-    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead", stacklevel=1)
+    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead", stacklevel=2)
     return _apply_permutation(tensor, permutation, dim)
 
 
@@ -71,7 +71,7 @@ class RNNBase(Module):
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
-                          "num_layers={}".format(dropout, num_layers), stacklevel=1)
+                          "num_layers={}".format(dropout, num_layers), stacklevel=2)
 
         if not isinstance(hidden_size, int):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")

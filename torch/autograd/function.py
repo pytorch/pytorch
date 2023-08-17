@@ -178,7 +178,7 @@ class FunctionCtx:
             "mark_shared_storage is deprecated. "
             "Tensors with shared storages are automatically tracked. Note "
             "that calls to `set_()` are not tracked",
-            stacklevel=1,
+            stacklevel=2,
         )
 
     def mark_non_differentiable(self, *args: torch.Tensor):
@@ -477,7 +477,7 @@ class Function(_SingleLevelFunction):
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
             DeprecationWarning,
-            stacklevel=1,
+            stacklevel=2,
         )
 
     def __call__(self, *args, **kwargs):

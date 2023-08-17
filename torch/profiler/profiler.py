@@ -339,7 +339,7 @@ def schedule(
     if warmup == 0:
         warn(
             "Profiler won't be using warmup, this can skew profiler results",
-            stacklevel=1,
+            stacklevel=2,
         )
     return schedule_fn
 
@@ -512,7 +512,7 @@ class profile(_KinetoProfile):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
             warn(
-                "use_cuda is deprecated, use activities argument instead", stacklevel=1
+                "use_cuda is deprecated, use activities argument instead", stacklevel=2
             )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)

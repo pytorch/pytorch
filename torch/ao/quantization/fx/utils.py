@@ -811,25 +811,25 @@ def _qconfig_satisfies_dtype_config_constraints(
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
-                warnings.warn(f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}", stacklevel=1)
+                warnings.warn(f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}", stacklevel=2)
                 return False
             elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
                 warnings.warn(
                     f"QConfig {debug_string} quantization range must fall within the backend's:\n"
                     f"QConfig range = ({app_quant_min}, {app_quant_max}), "
                     f"BackendConfig range = ({backend_quant_min}, {backend_quant_max}), "
-                    f"ignoring {qconfig}", stacklevel=1
+                    f"ignoring {qconfig}", stacklevel=2
                 )
                 return False
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
-                warnings.warn(f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}", stacklevel=1)
+                warnings.warn(f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}", stacklevel=2)
                 return False
             if app_scale_min < backend_scale_min:
                 warnings.warn(
                     f"QConfig {debug_string} eps ({app_scale_min}) must be greater than or equal to "
-                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}", stacklevel=1
+                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}", stacklevel=2
                 )
                 return False
         # check fixed scale and zero point
@@ -849,14 +849,14 @@ def _qconfig_satisfies_dtype_config_constraints(
                     not isinstance(activation_post_process, FixedQParamsFakeQuantize):
                 warnings.warn(
                     f"QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
-                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}", stacklevel=1
+                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}", stacklevel=2
                 )
                 return False
             if observer.scale != backend_scale_exact_match or observer.zero_point != backend_zero_point_exact_match:
                 warnings.warn(
                     f"QConfig fixed scale ({observer.scale}) and zero point ({observer.zero_point}) "
                     f"do not match the backend's ({backend_scale_exact_match} and {backend_zero_point_exact_match}), "
-                    f"ignoring {qconfig}.\n{suggestion_str}", stacklevel=1
+                    f"ignoring {qconfig}.\n{suggestion_str}", stacklevel=2
                 )
                 return False
         return True

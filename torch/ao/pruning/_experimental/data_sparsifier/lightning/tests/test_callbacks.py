@@ -58,7 +58,7 @@ class StepSLScheduler(BaseDataScheduler):
     def get_schedule_param(self):
         if not self._get_sp_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=1)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
         data_groups = self.data_sparsifier.data_groups
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
             return {name: config[self.schedule_param] for name, config in data_groups.items()}

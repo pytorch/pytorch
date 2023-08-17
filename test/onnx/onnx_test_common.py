@@ -361,7 +361,7 @@ def run_ort(
     try:
         import onnx.inliner
     except ImportError:
-        warnings.warn("Cannot import onnx.inliner. Skip inlining model.", stacklevel=1)
+        warnings.warn("Cannot import onnx.inliner. Skip inlining model.", stacklevel=2)
     else:
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)
@@ -398,7 +398,7 @@ def _try_clone_model(model: _ModelType) -> _ModelType:
     except Exception:
         warnings.warn(
             "Failed to clone model. Model state might be mutated during verification.",
-            stacklevel=1,
+            stacklevel=2,
         )
         return model
 

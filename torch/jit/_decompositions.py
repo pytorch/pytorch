@@ -41,7 +41,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         for field in ["name", "annotation"]:
             if field == "name" and decomp_param.name == "self":
                 warnings.warn(
-                    "PyTorch uses 'input' instead of 'self' on public api", stacklevel=1
+                    "PyTorch uses 'input' instead of 'self' on public api", stacklevel=2
                 )
 
             if getattr(decomp_param, field) != getattr(op_param, field):

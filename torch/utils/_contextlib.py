@@ -125,7 +125,7 @@ class _DecoratorContextManager:
             warnings.warn("Decorating classes is deprecated and will be disabled in "
                           "future versions. You should only decorate functions or methods. "
                           "To preserve the current behavior of class decoration, you can "
-                          "directly decorate the `__init__` method and nothing else.", stacklevel=1)
+                          "directly decorate the `__init__` method and nothing else.", stacklevel=2)
             func = cast(F, lambda *args, **kwargs: orig_func(*args, **kwargs))
         else:
             func = orig_func

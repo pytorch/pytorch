@@ -399,7 +399,7 @@ def _init_core_state(
                 "FSDP is switching to use `NO_SHARD` instead of "
                 f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
                 "the world size is 1.",
-                stacklevel=1,
+                stacklevel=2,
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
@@ -597,7 +597,7 @@ def _get_ignored_modules(
             "Trying to ignore the top-level module passed into the FSDP "
             "constructor itself will result in all parameters being "
             f"ignored and is not well-supported: {module}",
-            stacklevel=1,
+            stacklevel=2,
         )
     # Include nested FSDP modules' ignored modules
     for submodule in root_module.modules():
@@ -732,7 +732,7 @@ def _get_device_from_device_id(
             "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument.",
-            stacklevel=1,
+            stacklevel=2,
         )
         device = torch.device("cuda", torch.cuda.current_device())
     return device
@@ -808,7 +808,7 @@ def _materialize_meta_module(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
             f"type {type(module)} implements a `reset_parameters()` method.",
-            stacklevel=1,
+            stacklevel=2,
         )
         raise e
 
@@ -923,7 +923,7 @@ def _warn_cpu_init():
         "`module` to GPU for the sharding initialization. `module` must also "
         "be on GPU device to work with the `sync_module_states=True` flag "
         "since that requires GPU communication.",
-        stacklevel=1,
+        stacklevel=2,
     )
 
 

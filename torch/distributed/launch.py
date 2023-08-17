@@ -186,7 +186,7 @@ def main(args=None):
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
         "further instructions\n",
-        FutureWarning, stacklevel=1
+        FutureWarning, stacklevel=2
     )
     args = parse_args(args)
     launch(args)

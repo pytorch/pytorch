@@ -213,7 +213,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         if reduce_range:
             warnings.warn(
                 "Please use quant_min and quant_max to specify the range for observers. \
-                    reduce_range will be deprecated in a future release of PyTorch.", stacklevel=1
+                    reduce_range will be deprecated in a future release of PyTorch.", stacklevel=2
             )
         self.reduce_range = reduce_range
         self.register_buffer(
@@ -746,7 +746,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 elif name == expected_max_name:
                     self.max_val.resize_(val.shape)
                 else:
-                    warnings.warn(f"Observer load_from_state_dict got unexpected name {name}", stacklevel=1)
+                    warnings.warn(f"Observer load_from_state_dict got unexpected name {name}", stacklevel=2)
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
@@ -755,7 +755,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                     elif name == expected_max_name:
                         self.max_val.copy_(val)
                     else:
-                        warnings.warn(f"Observer load_from_state_dict got unexpected name {name}", stacklevel=1)
+                        warnings.warn(f"Observer load_from_state_dict got unexpected name {name}", stacklevel=2)
             elif strict:
                 missing_keys.append(key)
 
@@ -1206,7 +1206,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         if is_uninitialized:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ", stacklevel=1
+                                    Returning default scale and zero point ", stacklevel=2
             )
             return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor([0], device=self.min_val.device.type)
         assert self.bins == len(self.histogram), (
@@ -1354,7 +1354,7 @@ class PlaceholderObserver(ObserverBase):
             warnings.warn(
                 "Please use `is_dynamic` instead of `compute_dtype`. \
                     `compute_dtype` will be deprecated in a future release \
-                    of PyTorch.", stacklevel=1
+                    of PyTorch.", stacklevel=2
             )
         self.is_dynamic = is_dynamic
 

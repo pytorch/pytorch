@@ -154,7 +154,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
             "be resized unless they have zero elements. "
             "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
         )
-        warnings.warn(msg, stacklevel=1)
+        warnings.warn(msg, stacklevel=2)
     return True
 
 

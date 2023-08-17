@@ -252,7 +252,7 @@ class Backend:
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
                 "`cuda`. Please specify it via the `devices` argument of "
-                "`register_backend`.", stacklevel=1
+                "`register_backend`.", stacklevel=2
             )
             Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
         elif isinstance(devices, str):
@@ -309,7 +309,7 @@ class BackendConfig:
             warnings.warn(
                 f"Device capability of {backend} unknown, assuming `cpu` and "
                 "`cuda`. You can specify it in `device:backend` format in "
-                "`init_process_group` call.", stacklevel=1
+                "`init_process_group` call.", stacklevel=2
             )
             backend_val = Backend(backend)
             self.device_backend_map = {
@@ -346,7 +346,7 @@ class _reduce_op:
     def __getattribute__(self, key):
         warnings.warn(
             "torch.distributed.reduce_op is deprecated, please use "
-            "torch.distributed.ReduceOp instead", stacklevel=1
+            "torch.distributed.ReduceOp instead", stacklevel=2
         )
         return object.__getattribute__(self, key)
 
@@ -602,7 +602,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None):
         warnings.warn(
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
-            "of PyTorch Distributed instead.", stacklevel=1
+            "of PyTorch Distributed instead.", stacklevel=2
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
@@ -700,7 +700,7 @@ def _warn_not_in_group(op_name):
     global_rank = -1 if GroupMember.WORLD is None else GroupMember.WORLD.rank()
     warnings.warn(
         f"Running {op_name} on global rank {global_rank} which does not "
-        "belong to the given group.", stacklevel=1
+        "belong to the given group.", stacklevel=2
     )
 
 
@@ -760,7 +760,7 @@ def _get_global_rank(group, rank):
     """
     warnings.warn(
         "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead", stacklevel=1
+        "please use torch.distributed.distributed_c10d.get_global_rank instead", stacklevel=2
     )
     return get_global_rank(group, rank)
 
@@ -1125,7 +1125,7 @@ def init_process_group(
             warnings.warn(
                 "For MPI backend, world_size ({}) and rank ({}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank), stacklevel=1
+                "MPI runtime.".format(world_size, rank), stacklevel=2
             )
 
         default_pg, _ = _new_process_group_helper(
@@ -1430,7 +1430,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
-                "ProcessGroup is destroyed. They will be cleaned.", stacklevel=1
+                "ProcessGroup is destroyed. They will be cleaned.", stacklevel=2
             )
             del _world.pg_coalesce_state[pg]
 
@@ -1847,7 +1847,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
     warnings.warn(
         "torch.distributed.broadcast_multigpu will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=2
     )
 
     if _rank_not_in_group(group):
@@ -1951,7 +1951,7 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     warnings.warn(
         "torch.distributed.all_reduce_multigpu will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=2
     )
 
     if _rank_not_in_group(group):
@@ -2091,7 +2091,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#collective-functions", stacklevel=2
     )
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
@@ -2154,7 +2154,7 @@ def reduce_multigpu(
     warnings.warn(
         "torch.distributed.reduce_multigpu will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=2
     )
 
     if _rank_not_in_group(group):
@@ -2273,7 +2273,7 @@ def all_gather_multigpu(
     warnings.warn(
         "torch.distributed.all_gather_multigpu will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=2
     )
 
     if _rank_not_in_group(group):
@@ -2922,7 +2922,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     warnings.warn(
         "torch.distributed._all_gather_base is a private function and will be "
         "deprecated. Please use torch.distributed.all_gather_into_tensor "
-        "instead.", stacklevel=1
+        "instead.", stacklevel=2
     )
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
@@ -2977,7 +2977,7 @@ def all_gather_coalesced(
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#collective-functions", stacklevel=2
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
@@ -3226,7 +3226,7 @@ def reduce_scatter_multigpu(
     warnings.warn(
         "torch.distributed.reduce_scatter_multigpu will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=1
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions", stacklevel=2
     )
 
     if _rank_not_in_group(group):
@@ -3398,7 +3398,7 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
     warnings.warn(
         "torch.distributed._reduce_scatter_base is a private function and will "
         "be deprecated. Please use torch.distributed.reduce_scatter_tensor "
-        "instead.", stacklevel=1
+        "instead.", stacklevel=2
     )
     return reduce_scatter_tensor(output, input, op, group, async_op)
 

@@ -185,7 +185,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
             "Only floating datatype is supported for these operators: "
             "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
             "the onnx model to be incorrect, if inputs have integer datatypes.",
-            stacklevel=1,
+            stacklevel=2,
         )
     return (old_type,) + args
 

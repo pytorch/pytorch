@@ -550,14 +550,14 @@ class DataLoader(Generic[T_co]):
             warnings.warn(_create_warning_msg(
                 max_num_worker_suggest,
                 self.num_workers,
-                cpuset_checked), stacklevel=1)
+                cpuset_checked), stacklevel=2)
             return
 
         if self.num_workers > max_num_worker_suggest:
             warnings.warn(_create_warning_msg(
                 max_num_worker_suggest,
                 self.num_workers,
-                cpuset_checked), stacklevel=1)
+                cpuset_checked), stacklevel=2)
 
 
 class _BaseDataLoaderIter:
@@ -591,7 +591,7 @@ class _BaseDataLoaderIter:
             if not loader.pin_memory:
                 warn_msg = ("pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
                             "please set pin_memory to true, if you need to use the device pin memory")
-                warnings.warn(warn_msg, stacklevel=1)
+                warnings.warn(warn_msg, stacklevel=2)
 
             self._pin_memory = loader.pin_memory
             self._pin_memory_device = loader.pin_memory_device
@@ -639,7 +639,7 @@ class _BaseDataLoaderIter:
                     warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
                                  "IterableDataset replica at each worker. Please see "
                                  "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
-                warnings.warn(warn_msg, stacklevel=1)
+                warnings.warn(warn_msg, stacklevel=2)
             return data
 
     def __len__(self) -> int:

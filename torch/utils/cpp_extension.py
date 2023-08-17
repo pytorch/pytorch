@@ -354,7 +354,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
         warnings.warn(WRONG_COMPILER_WARNING.format(
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
-            platform=sys.platform), stacklevel=1)
+            platform=sys.platform), stacklevel=2)
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
@@ -372,14 +372,14 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
             version = ['0', '0', '0'] if match is None else list(match.groups())
     except Exception:
         _, error, _ = sys.exc_info()
-        warnings.warn(f'Error checking compiler version for {compiler}: {error}', stacklevel=1)
+        warnings.warn(f'Error checking compiler version for {compiler}: {error}', stacklevel=2)
         return (False, TorchVersion('0.0.0'))
 
     if tuple(map(int, version)) >= minimum_required_version:
         return (True, TorchVersion('.'.join(version)))
 
     compiler = f'{compiler} {".".join(version)}'
-    warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler), stacklevel=1)
+    warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler), stacklevel=2)
 
     return (False, TorchVersion('.'.join(version)))
 
@@ -403,7 +403,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             raise ValueError("setuptools>=49.4.0 is required")
         if cuda_ver.major != torch_cuda_version.major:
             raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
-        warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda), stacklevel=1)
+        warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda), stacklevel=2)
 
     if not (sys.platform.startswith('linux') and
             os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
@@ -413,7 +413,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
-        warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}', stacklevel=1)
+        warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}', stacklevel=2)
     else:
         min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
         # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
@@ -491,7 +491,7 @@ class BuildExtension(build_ext):
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
             if not is_ninja_available():
-                warnings.warn(msg.format('we could not find ninja.'), stacklevel=1)
+                warnings.warn(msg.format('we could not find ninja.'), stacklevel=2)
                 self.use_ninja = False
 
     def finalize_options(self) -> None:

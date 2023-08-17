@@ -364,6 +364,6 @@ def assert_deadline_disabled():
             "To avoid `DeadlineExceeded` errors, please update. "
             "Current hypothesis version: {}".format(hypothesis.__version__)
         )
-        warnings.warn(warning_message, stacklevel=1)
+        warnings.warn(warning_message, stacklevel=2)
     else:
         assert settings().deadline is None

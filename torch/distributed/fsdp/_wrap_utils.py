@@ -118,9 +118,9 @@ def _warn_on_overridden_mixed_precision(
     warnings.warn(
         "Both mixed precision and an auto_wrap_policy were specified to FSDP, "
         f"where the wrapped module has submodules of type:\n{overridden_module_classes}\n"
-        "These modules will be wrapped as separate FSDP instacnes with mixed "
+        "These modules will be wrapped as separate FSDP instances with mixed "
         "precision disabled.",
-        stacklevel=1,
+        stacklevel=2,
     )
 
 
@@ -172,7 +172,7 @@ def _validate_frozen_params(
                     f"The following parameters have requires_grad=False:\n{frozen_param_fqns}"
                 )
                 if use_orig_params:
-                    warnings.warn(msg, stacklevel=1)
+                    warnings.warn(msg, stacklevel=2)
                 else:
                     raise ValueError(msg)
 

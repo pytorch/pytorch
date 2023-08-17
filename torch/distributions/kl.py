@@ -132,7 +132,7 @@ def _dispatch_kl(type_p, type_q):
                 type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__
             ),
             RuntimeWarning,
-            stacklevel=1,
+            stacklevel=2,
         )
     return left_fun
 

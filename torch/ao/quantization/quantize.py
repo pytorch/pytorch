@@ -308,7 +308,7 @@ def prepare(model, inplace=False, allow_list=None,
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
                       "passed correct configuration through `qconfig_dict` or "
-                      "by assigning the `.qconfig` attribute directly on submodules", stacklevel=1)
+                      "by assigning the `.qconfig` attribute directly on submodules", stacklevel=2)
 
     _add_observer_(
         model, qconfig_propagation_list, observer_non_leaf_module_list,

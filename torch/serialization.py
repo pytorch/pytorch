@@ -210,7 +210,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
         if error_if_malformed:
             raise RuntimeError(message) from e
         else:
-            warnings.warn(message + ', but continuing assuming that requirement is met', stacklevel=1)
+            warnings.warn(message + ', but continuing assuming that requirement is met', stacklevel=2)
             requirement_is_met = True
 
     return requirement_is_met
@@ -653,7 +653,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
-                              "for correctness upon loading.", stacklevel=1)
+                              "for correctness upon loading.", stacklevel=2)
             return ('module', obj, source_file, source)
 
         if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
@@ -996,7 +996,7 @@ def load(
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
-                                  " silence this warning)", UserWarning, stacklevel=1)
+                                  " silence this warning)", UserWarning, stacklevel=2)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
@@ -1068,7 +1068,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
                           "type " + container_type.__name__ + ". It won't be checked "
-                          "for correctness upon loading.", stacklevel=1)
+                          "for correctness upon loading.", stacklevel=2)
             return
         if original_source != current_source:
             if container_type.dump_patches:
@@ -1100,7 +1100,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                        "`torch.nn.Module.dump_patches = True` and use the "
                        "patch tool to revert the changes.")
             msg = f"source code of class '{torch.typename(container_type)}' has changed. {msg}"
-            warnings.warn(msg, SourceChangeWarning, stacklevel=1)
+            warnings.warn(msg, SourceChangeWarning, stacklevel=2)
 
     def legacy_load(f):
         deserialized_objects: Dict[int, Any] = {}
@@ -1348,7 +1348,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
                       "in a future release, to avoid this behavior please use "
                       "torch.serialization.set_default_load_endianness to set "
                       "the desired default load endianness",
-                      DeprecationWarning, stacklevel=1)
+                      DeprecationWarning, stacklevel=2)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

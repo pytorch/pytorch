@@ -48,7 +48,7 @@ class ErrorHandler:
         try:
             faulthandler.enable(all_threads=True)
         except Exception as e:
-            warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}", stacklevel=1)
+            warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}", stacklevel=2)
 
     def _write_error_file(self, file_path: str, error_msg: str) -> None:
         """
@@ -58,7 +58,7 @@ class ErrorHandler:
             with open(file_path, "w") as fp:
                 fp.write(error_msg)
         except Exception as e:
-            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=1)
+            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=2)
 
     def record_exception(self, e: BaseException) -> None:
         """

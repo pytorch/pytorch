@@ -30,7 +30,7 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
         if min_val / max_val < 0.75:
-            warnings.warn(imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]), stacklevel=1)
+            warnings.warn(imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]), stacklevel=2)
             return True
         return False
 

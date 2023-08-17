@@ -150,7 +150,7 @@ def _validate_unshard_params_args(
             "unsharded parameters being redundantly copied to CPU memory for "
             "GPUs sharing the same CPU memory, which risks CPU OOM. We "
             "recommend using offload_to_cpu=True with rank0_only=True.",
-            stacklevel=1,
+            stacklevel=2,
         )
 
 

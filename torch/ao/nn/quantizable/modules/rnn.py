@@ -314,12 +314,12 @@ class LSTM(torch.nn.Module):
         if dropout > 0:
             warnings.warn("dropout option for quantizable LSTM is ignored. "
                           "If you are training, please, use nn.LSTM version "
-                          "followed by `prepare` step.", stacklevel=1)
+                          "followed by `prepare` step.", stacklevel=2)
             if num_layers == 1:
                 warnings.warn("dropout option adds dropout after all but last "
                               "recurrent layer, so non-zero dropout expects "
                               "num_layers greater than 1, but got dropout={} "
-                              "and num_layers={}".format(dropout, num_layers), stacklevel=1)
+                              "and num_layers={}".format(dropout, num_layers), stacklevel=2)
 
         layers = [_LSTMLayer(self.input_size, self.hidden_size,
                              self.bias, batch_first=False,

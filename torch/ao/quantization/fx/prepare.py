@@ -919,7 +919,7 @@ def _maybe_insert_input_equalization_observers_for_node(
 
     if is_branch:
         warnings.warn(
-            f"Cannot equalize {node} because it is part of a branch.", stacklevel=1
+            f"Cannot equalize {node} because it is part of a branch.", stacklevel=2
         )
         return
 
@@ -1742,25 +1742,25 @@ def prepare(
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.", stacklevel=1)
+            "in a future version. Please pass in a QConfigMapping instead.", stacklevel=2)
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
 
     if isinstance(_equalization_config, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
-            "be supported in a future version. Please pass in a QConfigMapping instead.", stacklevel=1)
+            "be supported in a future version. Please pass in a QConfigMapping instead.", stacklevel=2)
         _equalization_config = QConfigMapping.from_dict(_equalization_config)
 
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.", stacklevel=1)
+            "in a future version. Please pass in a PrepareCustomConfig instead.", stacklevel=2)
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     if isinstance(backend_config, Dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.", stacklevel=1)
+            "in a future version. Please pass in a BackendConfig instead.", stacklevel=2)
         backend_config = BackendConfig.from_dict(backend_config)
 
     assert(isinstance(qconfig_mapping, QConfigMapping))

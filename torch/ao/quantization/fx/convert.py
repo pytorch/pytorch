@@ -504,7 +504,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
         for arg_element in arg.values():
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     else:
-        warnings.warn(f"Unsupported node type in recursive remove dequantize: {type(arg)}", stacklevel=1)
+        warnings.warn(f"Unsupported node type in recursive remove dequantize: {type(arg)}", stacklevel=2)
 
 def _get_module_path_and_prefix(
         obs_node: Node,
@@ -918,13 +918,13 @@ def convert(
     if isinstance(convert_custom_config, Dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.", stacklevel=1)
+            "in a future version. Please pass in a ConvertCustomConfig instead.", stacklevel=2)
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.", stacklevel=1)
+            "in a future version. Please pass in a QConfigMapping instead.", stacklevel=2)
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
@@ -932,7 +932,7 @@ def convert(
     if isinstance(backend_config, Dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.", stacklevel=1)
+            "in a future version. Please pass in a BackendConfig instead.", stacklevel=2)
         backend_config = BackendConfig.from_dict(backend_config)
 
     if backend_config is None:
@@ -1043,7 +1043,7 @@ def convert(
                 if 0 in output_quantized_idxs:
                     _maybe_recursive_remove_dequantize(output, return_node, model.graph)
             else:
-                warnings.warn(f"Unsupported node type for output_quantized_idxs: {type(output)}", stacklevel=1)
+                warnings.warn(f"Unsupported node type for output_quantized_idxs: {type(output)}", stacklevel=2)
         elif node.op == "call_module":
             mod = _get_module(node, modules)
             assert mod is not None

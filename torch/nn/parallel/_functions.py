@@ -67,7 +67,7 @@ class Gather(Function):
             inputs = tuple(t.view(1) for t in inputs)
             warnings.warn('Was asked to gather along dimension 0, but all '
                           'input tensors were scalars; will instead unsqueeze '
-                          'and return a vector.', stacklevel=1)
+                          'and return a vector.', stacklevel=2)
             ctx.unsqueezed_scalar = True
         else:
             ctx.unsqueezed_scalar = False

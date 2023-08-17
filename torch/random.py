@@ -148,7 +148,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
                        f"set {device_type.upper()}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
                        f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                        f"`range(torch.{device_type}.device_count())`.")
-            warnings.warn(message, stacklevel=1)
+            warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:
