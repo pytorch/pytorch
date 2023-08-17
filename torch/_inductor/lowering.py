@@ -1711,7 +1711,6 @@ FALLBACK_ALLOW_LIST = {
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)

@@ -185,12 +185,15 @@ def get_decompositions(
                 # Prefer python dispatcher registration to C++ registrations.
                 # This mimicks the behavior of the Python Dispatcher, which is alway running
                 # during torch.compile
-                if torch._C.DispatchKey.CompositeImplicitAutograd in overload.py_kernels:
-                    python_kernel = overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
-                    decompositions[overload] = python_kernel
-                elif (
-                    has_composite_implicit_kernel(overload)
+                if (
+                    torch._C.DispatchKey.CompositeImplicitAutograd
+                    in overload.py_kernels
                 ):
+                    python_kernel = overload.py_kernels[
+                        torch._C.DispatchKey.CompositeImplicitAutograd
+                    ]
+                    decompositions[overload] = python_kernel
+                elif has_composite_implicit_kernel(overload):
                     # Our synthetic cpp decomp: uses OpOverload.decompose to call
                     # a CompositeImplicitAutograd kernel, if it exists.
                     def cpp_decomp(*args, curr_overload=overload, **kwargs):
