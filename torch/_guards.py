@@ -24,6 +24,7 @@ from typing import (
 )
 
 import torch
+from torch._C._profiler import gather_traceback
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +144,11 @@ class Guard:
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
+
+    fast_tb = None
+
+    def __post_init__(self):
+        self.fast_tb = gather_traceback(python=True, script=False, cpp=False)
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))

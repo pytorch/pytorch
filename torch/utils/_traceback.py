@@ -150,3 +150,48 @@ def format_traceback_short(tb):
     Format a TracebackType in a short way, printing only the inner-most frame.
     """
     return format_frame(traceback.extract_tb(tb)[-1])
+
+def extract_captured_stack(*, script=False, cpp=False):
+    """
+    Like traceback.extract_stack(), but faster (approximately 20x faster); it
+    is fast enough that you can unconditionally log stacks this way as part of
+    normal execution.  It returns a torch._C._profiler.CapturedTraceback
+    object that must be formatted specially with format_captured_tb.
+
+    By default, this only reports Python backtraces (like extract_stack).  You
+    can set the script/cpp kwargs to also turn on TorchScript/C++ trace
+    reporting.
+    """
+    from torch._C._profiler import gather_traceback
+
+    return gather_traceback(python=True, script=script, cpp=cpp)
+
+def _extract_symbolized_tb(tb):
+    """
+    Given a symbolized traceback from symbolize_tracebacks, return a StackSummary object of
+    pre-processed stack trace entries.
+    """
+    stack = traceback.StackSummary()
+    for f in reversed(tb):
+        stack.append(traceback.FrameSummary(f['filename'], f['line'], f['name']))
+    return stack
+
+def format_captured_tb(tb):
+    """
+    Formats a single torch._C._profiler.CapturedTraceback into a list of
+    strings equivalent to the output of traceback.format_list.  Note that if
+    pass it CapturedTraceback with C++ traces,  it is better not to use this
+    function and use the batch formatting API format_captured_tbs to amortize
+    the cost of symbolization
+    """
+    from torch._C._profiler import symbolize_tracebacks
+
+    return format_list(_extract_symbolized_tb(symbolize_tracebacks([tb])[0]))
+
+def format_captured_tbs(tbs):
+    """
+    Bulk version of format_captured_tb.  Returns a list of list of strings.
+    """
+    from torch._C._profiler import symbolize_tracebacks
+
+    return [format_list(_extract_symbolized_tb(stb)) for stb in symbolize_tracebacks(tbs)]
