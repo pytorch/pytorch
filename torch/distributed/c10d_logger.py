@@ -41,7 +41,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
+def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     if dist.is_initialized():
         msg_dict = {
             "func_name": f"{func_name}",
@@ -67,7 +67,7 @@ def _exception_logger(func):
         try:
             return func(*args, **kwargs)
         except Exception as error:
-            msg_dict = get_msg_dict(func.__name__, *args, **kwargs)
+            msg_dict = _get_msg_dict(func.__name__, *args, **kwargs)
             msg_dict["error"] = f"{error}"
             _c10d_logger.debug(msg_dict)
             raise
@@ -82,7 +82,7 @@ def _time_logger(func):
         func_return = func(*args, **kwargs)
         time_spent = time.time_ns() - t1
 
-        msg_dict = get_msg_dict(func.__name__, *args, **kwargs)
+        msg_dict = _get_msg_dict(func.__name__, *args, **kwargs)
         msg_dict["time_spent"] = f"{time_spent}ns"
         _c10d_logger.debug(msg_dict)
 
