@@ -1390,7 +1390,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseBinaryOpIntersectionKernel.cpp",
     "aten/src/ATen/native/sparse/FlattenIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
-    "aten/src/ATen/native/transformers/sdp_utils_cpp.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
