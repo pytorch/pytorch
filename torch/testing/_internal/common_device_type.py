@@ -1238,10 +1238,9 @@ class dtypesIfPRIVATEUSE1(dtypes):
 class dtypesIfCUDAAndPRIVATEUSE1(dtypes):
 
     def __init__(self, *args):
-        if TEST_CUDA:
-            super().__init__(*args, device_type='cuda')
-        elif TEST_PRIVATEUSE1:
-            super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
+        super().__init__(*args, device_type='cuda')
+        if TEST_PRIVATEUSE1:
+            self.device_type=torch._C._get_privateuse1_backend_name()
 
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)
