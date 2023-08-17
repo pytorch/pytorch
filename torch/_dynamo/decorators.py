@@ -93,6 +93,7 @@ def allow_in_graph(fn):
     assert callable(fn), "allow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.add(id(fn))
     allowed_functions._disallowed_function_ids.remove(id(fn))
+    allowed_functions._allowed_user_defined_function_ids.add(id(fn))
     return fn
 
 
@@ -108,6 +109,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
             )
         allowed_functions._allowed_function_ids.remove(id(fn))
         allowed_functions._disallowed_function_ids.add(id(fn))
+        allowed_functions._allowed_user_defined_function_ids.remove(id(fn))
         return fn
 
     return inner
