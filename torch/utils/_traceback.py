@@ -135,8 +135,8 @@ def shorten_filename(fn):
     directory is "obvious" and doesn't need to be shown to user.
     """
     # Truncate torch/foo.py to foo.py
-    prefix = os.path.commonprefix([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
-    return fn[len(prefix):]
+    prefix = os.path.commonpath([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
+    return fn[len(prefix)+1:]
 
 def format_frame(frame):
     """
@@ -151,47 +151,102 @@ def format_traceback_short(tb):
     """
     return format_frame(traceback.extract_tb(tb)[-1])
 
-def extract_captured_stack(*, script=False, cpp=False):
-    """
-    Like traceback.extract_stack(), but faster (approximately 20x faster); it
-    is fast enough that you can unconditionally log stacks this way as part of
-    normal execution.  It returns a torch._C._profiler.CapturedTraceback
-    object that must be formatted specially with format_captured_tb.
+class CapturedTraceback:
+    __slots__ = ['tb', 'skip', '_summary']
 
-    By default, this only reports Python backtraces (like extract_stack).  You
-    can set the script/cpp kwargs to also turn on TorchScript/C++ trace
-    reporting.
-    """
-    from torch._C._profiler import gather_traceback
+    def __init__(self, tb, skip=0):
+        self.tb = tb
+        self.skip = 0
+        # Cached StackSummary; this mostly exists so CapturedTraceback
+        # can be reliably pickled and then printed later
+        self._summary = None
 
-    return gather_traceback(python=True, script=script, cpp=cpp)
+    def summary(self):
+        import torch._C._profiler
 
-def _extract_symbolized_tb(tb):
+        if self._summary is None:
+            assert self.tb is not None
+            self._summary = _extract_symbolized_tb(
+                torch._C._profiler.symbolize_tracebacks([self.tb])[0],
+                self.skip
+            )
+        return self._summary
+
+    def __getstate__(self):
+        # Force populate summary
+        self.summary()
+        return (None, {
+            'tb': None,  # TB is not pickleable
+            'skip': self.skip,
+            '_summary': self._summary
+        })
+
+    @staticmethod
+    def extract(*, script=False, cpp=False, skip=0):
+        """
+        Like traceback.extract_stack(), but faster (approximately 20x faster); it
+        is fast enough that you can unconditionally log stacks this way as part of
+        normal execution.  It returns a torch._C._profiler.CapturedTraceback
+        object that must be formatted specially with format_captured_tb.
+
+        By default, this only reports Python backtraces (like extract_stack).  You
+        can set the script/cpp kwargs to also turn on TorchScript/C++ trace
+        reporting.
+        """
+        import torch._C._profiler
+
+        if script or cpp:
+            assert skip == 0, "skip with script/cpp NYI"
+
+        return CapturedTraceback(
+            torch._C._profiler.gather_traceback(python=True, script=script, cpp=cpp),
+            # Elide extract() frame if we don't have script/cpp frames.  If
+            # we do have those frames, it doesn't work so force zero.
+            0 if script or cpp else skip + 1
+        )
+
+    def format(self):
+        """
+        Formats a single torch._C._profiler.CapturedTraceback into a list of
+        strings equivalent to the output of traceback.format_list.  Note that if
+        pass it CapturedTraceback with C++ traces,  it is better not to use this
+        function and use the batch formatting API format_captured_tbs to amortize
+        the cost of symbolization
+        """
+        return traceback.format_list(self.summary())
+
+    @staticmethod
+    def format_all(tbs):
+        """
+        Bulk version of CapturedTraceback.format.  Returns a list of list of strings.
+        """
+        import torch._C._profiler
+
+        # Directly populate tracebacks that already have cached summaries
+        rs = []
+        delayed_idxs = []
+        for i, tb in enumerate(tbs):
+            if tb._summary is not None:
+                rs.append(traceback.format_list(tb._summary))
+            else:
+                rs.append(None)
+                delayed_idxs.append(i)
+
+        stbs = torch._C._profiler.symbolize_tracebacks([tbs[i].tb for i in delayed_idxs])
+        for i, stb in zip(delayed_idxs, stbs):
+            tb = tbs[i]
+            tb._summary = _extract_symbolized_tb(stb, tb.skip)
+            rs[i] = traceback.format_list(tb._summary)
+
+        return rs
+
+
+def _extract_symbolized_tb(tb, skip):
     """
     Given a symbolized traceback from symbolize_tracebacks, return a StackSummary object of
     pre-processed stack trace entries.
     """
     stack = traceback.StackSummary()
-    for f in reversed(tb):
+    for f in reversed(tb[skip:]):
         stack.append(traceback.FrameSummary(f['filename'], f['line'], f['name']))
     return stack
-
-def format_captured_tb(tb):
-    """
-    Formats a single torch._C._profiler.CapturedTraceback into a list of
-    strings equivalent to the output of traceback.format_list.  Note that if
-    pass it CapturedTraceback with C++ traces,  it is better not to use this
-    function and use the batch formatting API format_captured_tbs to amortize
-    the cost of symbolization
-    """
-    from torch._C._profiler import symbolize_tracebacks
-
-    return format_list(_extract_symbolized_tb(symbolize_tracebacks([tb])[0]))
-
-def format_captured_tbs(tbs):
-    """
-    Bulk version of format_captured_tb.  Returns a list of list of strings.
-    """
-    from torch._C._profiler import symbolize_tracebacks
-
-    return [format_list(_extract_symbolized_tb(stb)) for stb in symbolize_tracebacks(tbs)]
