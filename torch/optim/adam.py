@@ -27,6 +27,8 @@ class Adam(Optimizer):
                  fused: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
+        if isinstance(lr, Tensor) and foreach and not capturable:
+            raise ValueError("A tensor lr with capturable=False is unsupported with foreach")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
@@ -282,7 +284,7 @@ def adam(params: List[Tensor],
     if fused is None and foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
         # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and torch.is_tensor(lr) and not capturable:
+        if foreach and isinstance(lr, Tensor) and not capturable:
             foreach = False
     if fused is None:
         fused = False

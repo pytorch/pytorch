@@ -1113,8 +1113,7 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=torch.tensor(1e-3),
                 maximize=maximize,
-                foreach=foreach,
-                capturable=foreach,
+                foreach=False,  # foreach for lr tensors tested in multi configs
             ),
             [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
             constructor_accepts_maximize=True,
@@ -1126,7 +1125,7 @@ class TestOptim(TestCase):
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
         self._test_complex_2d(functools.partial(
-            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
         ))
 
         with self.assertRaisesRegex(
@@ -1136,6 +1135,11 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "A tensor lr with capturable=False is unsupported"
+        ):
+            optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -1185,8 +1189,7 @@ class TestOptim(TestCase):
                 weight_decay=1,
                 amsgrad=True,
                 maximize=maximize,
-                foreach=foreach,
-                capturable=True,
+                foreach=False,  # foreach for lr tensors tested in multi configs
             ),
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -1197,10 +1200,15 @@ class TestOptim(TestCase):
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
         self._test_complex_2d(functools.partial(
-            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True
+            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
         ))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "A tensor lr with capturable=False is unsupported"
+        ):
+            optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(

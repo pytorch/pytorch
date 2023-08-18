@@ -27,6 +27,8 @@ class AdamW(Optimizer):
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
+        if isinstance(lr, Tensor) and foreach and not capturable:
+            raise ValueError("A tensor lr with capturable=False is unsupported with foreach")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
@@ -138,7 +140,7 @@ class AdamW(Optimizer):
                 raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
 
             # Foreach without capturable does not support a tensor lr
-            if group['foreach'] and torch.is_tensor(group['lr']) and not group['capturable']:
+            if group['foreach'] and isinstance(group['lr'], Tensor) and not group['capturable']:
                 raise RuntimeError('`foreach` with a Tensor lr requires `capturable` to be `True`')
 
             state_steps.append(state["step"])
