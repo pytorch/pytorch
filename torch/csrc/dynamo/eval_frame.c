@@ -308,6 +308,24 @@ typedef struct cache_entry {
 
 static void destroy_cache_entry(CacheEntry* e);
 
+
+#define DECLARE_CACHE_ENTRY_ATTR(name) \
+static PyObject* CacheEntry_##name(CacheEntry* self, PyObject* _noargs) { \
+  PyObject* res = (PyObject*)self->name; \
+  Py_XINCREF(res); \
+  return res; \
+}
+
+DECLARE_CACHE_ENTRY_ATTR(check_fn)
+DECLARE_CACHE_ENTRY_ATTR(code)
+DECLARE_CACHE_ENTRY_ATTR(next)
+
+static struct PyGetSetDef CacheEntry_properties[] = {
+    {"check_fn", (getter)CacheEntry_check_fn, NULL, NULL, NULL},
+    {"code", (getter)CacheEntry_code, NULL, NULL, NULL},
+    {"next", (getter)CacheEntry_next, NULL, NULL, NULL},
+    {NULL}};
+
 static PyTypeObject CacheEntryType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   .tp_name = "torch._C.dynamo.eval_frame.CacheEntryWrapper",
@@ -316,6 +334,7 @@ static PyTypeObject CacheEntryType = {
   .tp_flags = Py_TPFLAGS_DEFAULT,
   .tp_new = PyType_GenericNew,
   .tp_dealloc = (destructor)destroy_cache_entry,
+  .tp_getset = CacheEntry_properties,
 };
 
 // ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
@@ -323,7 +342,7 @@ static PyTypeObject CacheEntryType = {
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.
 
-// TODO - Consider making this a PyObject. Benefits are
+// TODO(anijain2305) - Consider making this a PyObject. Benefits are
 //   1) Modular dealloc - destroy_extra_state just becomes Py_DECREF(extra)
 //   2) We can directly send the extra object to convert_frame callback. One
 //   data structure - easier to understand code.
@@ -359,7 +378,8 @@ static CacheEntry* create_cache_entry(
 }
 
 static void destroy_cache_entry(CacheEntry* e) {
-  if (e == NULL || e == SKIP_CODE) {
+  if (e == (CacheEntry*)Py_None) {
+    Py_XDECREF(e);
     return;
   }
   Py_XDECREF(e->check_fn);
@@ -479,7 +499,10 @@ inline static ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   CHECK(get_extra_state(code) == NULL);
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(extra_state);
-  extra_state->cache_entry = NULL;
+  // Last node in the linked list is Py_None. We incref the Py_None here, the
+  // corresponding decref is in destroy_cache_entry.
+  Py_INCREF(Py_None);
+  extra_state->cache_entry = (CacheEntry*)Py_None;
   extra_state->frame_state = PyDict_New();
   set_extra_state(code, extra_state);
   return extra_state;
@@ -509,7 +532,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   if (!outer_list) {
     return NULL;  // Return NULL if failed to create list
   }
-  while (current_node != NULL && current_node != SKIP_CODE) {
+  while (current_node != NULL && current_node != (CacheEntry*)Py_None) {
     // Creating a new Python tuple for the check_fn and code of current CacheEntry
     PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
     int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
@@ -529,7 +552,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
-    long cache_len,
+    CacheEntry* cache_entry,
     FrameState* frame_state) {
 
 #if IS_PYTHON_3_11_PLUS
@@ -540,7 +563,19 @@ static inline PyObject* call_callback(
 #else
   PyObject* frame = Py_NewRef(_frame);
 #endif
-  PyObject* res = PyObject_CallFunction(callable, "OlO", frame, cache_len, frame_state);
+
+  // PyObject* prepared_cache_entry = (PyObject*)cache_entry;
+  // if (prepared_cache_entry == Py_None) {
+  //   Py_INCREF(Py_None);
+  //   prepared_cache_entry = Py_None;
+  // }
+
+  PyObject* res = PyObject_CallFunction(
+    callable,
+    "OOO",
+    frame,
+    cache_entry,
+    frame_state);
   Py_DECREF(frame);
   return res;
 }
@@ -558,7 +593,7 @@ static PyObject* call_guard_fail_hook(
       e->code,
       f_locals,
       (Py_ssize_t)index,
-      (e->next == NULL ? Py_True : Py_False));
+      (e->next == (CacheEntry*)Py_None ? Py_True : Py_False));
 }
 
 static PyObject* call_profiler_start_hook(PyObject* name_str) {
@@ -580,7 +615,7 @@ static void call_profiler_end_hook(PyObject* record) {
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
-  if (e == NULL) {
+  if (e == (CacheEntry*)Py_None) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
   }
@@ -622,13 +657,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     Py_DECREF(r);
   }
   return lookup(e->next, frame, e, index + 1);
-}
-
-static long cache_size(CacheEntry* e) {
-  if (e == NULL) {
-    return 0;
-  }
-  return 1 + cache_size(e->next);
 }
 
 inline static PyObject* eval_custom_code(
@@ -902,7 +930,7 @@ static PyObject* _custom_eval_frame(
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
-      call_callback(callback, frame, cache_size(cache_entry), frame_state);
+      call_callback(callback, frame, cache_entry, frame_state);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
