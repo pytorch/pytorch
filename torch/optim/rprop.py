@@ -300,14 +300,12 @@ def _multi_tensor_rprop(
         # At the end of the step, grouped_prevs will contain the current grads, so we reuse
         # grouped_prevs memory instead of creating a new buffer, but, for clarity, we reassign
         # to keep referring to the buffer as grouped_grads.
-        for i in range(len(grouped_prevs)):
-            if maximize:
-                grouped_prevs[i].copy_(grouped_grads[i] * -1)
-            else:
-                grouped_prevs[i].copy_(grouped_grads[i])
+        torch._foreach_copy_(grouped_prevs, grouped_grads)
+        if maximize:
+            torch._foreach_neg_(grouped_prevs)
         grouped_grads = grouped_prevs
 
-        signs = [s.sign() for s in signs]
+        torch._foreach_sign_(signs)
         for sign in signs:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus

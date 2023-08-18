@@ -6,6 +6,7 @@ from typing import Iterator
 import torch
 import torch._C
 import torch._ops
+import torch.utils._python_dispatch
 import torch.utils._pytree as pytree
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]
@@ -132,7 +133,9 @@ def make_crossref_functionalize(op, final_key):
             else:
                 return t
 
-        with suspend_functionalization():
+        # TODO: This probably does the wrong thing if you're running other
+        # substantive modes with the normal op outside here
+        with torch.utils._python_dispatch._disable_current_modes(), suspend_functionalization():
             f_args, f_kwargs = pytree.tree_map(fakeify_defun, (args, kwargs))
             orig_f_args, orig_f_kwargs = pytree.tree_map(
                 maybe_detach, (f_args, f_kwargs)

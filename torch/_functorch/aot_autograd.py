@@ -148,7 +148,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         return callback
 
-    def get_prehook(stack_):
+    def get_prehook(stack_, seq_nr):
         def prehook(grad_output):
             global callback_set
 
@@ -159,24 +159,27 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
+            fx_traceback.set_seq_nr(seq_nr, bwd=True)
 
         return prehook
 
-    def get_posthook(special_stack_):
+    def get_posthook(special_stack_, seq_nr):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
+            fx_traceback.set_seq_nr(-1, bwd=True)
 
         return posthook
 
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
-        node.register_prehook(get_prehook(forward_node_stack))
+        node.register_prehook(get_prehook(forward_node_stack,
+                              node._sequence_nr()))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
             "Gradient addition node due to multiple use of tensor around:"
         )
-        node.register_hook(get_posthook(special_stack))
+        node.register_hook(get_posthook(special_stack, node._sequence_nr()))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1396,7 +1399,6 @@ def create_functionalized_graph(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
-                    assert has_same_metadata(inpt_new, inpt_old)
                     inpt_old.copy_(inpt_new)
 
         return pytree.tree_map(from_fun, f_outs)
@@ -1646,6 +1648,86 @@ def same_dtype_views(view1, view2):
     return True
 
 
+
+# Assumption: x and y are known to share a storage, and we are trying to determine
+# if their memory is actually completely disjoint, based on sizes/strides/storage_offset
+def tensors_definitely_do_not_overlap(x, y):
+    if x is y:
+        return False
+    if x.numel() == 0 or y.numel() == 0:
+        return True
+
+    # Make x always on the left
+    if x.storage_offset() > y.storage_offset():
+        x, y = y, x
+    # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
+    if x.is_contiguous() and y.is_contiguous():
+        if x.storage_offset() + x.numel() > y.storage_offset():
+            # definitely overlap
+            return False
+        else:
+            # definitely no overlap
+            return True
+
+    if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
+        # This cases is needed for the shampoo optimizer.
+        # All tensors are 2d (non-contiguous), have the same outer stride, and have an inner stride of 1
+        # (so rows are contiguous)
+        if x.stride(0) == y.stride(0):
+            offset_delta = y.storage_offset() - x.storage_offset()
+            if offset_delta < x.size(1):
+                # definitely overlaps (row 0 of y overlaps with row 0 of x)
+                # Example:
+                #   base = torch.arange(32).reshape(4, 8)
+                #   x = base.narrow(1, 0, 4)
+                #     x: size=(4, 4), stride=(8, 1), offset=0
+                #   y = base.narrow(1, 3, 4)
+                #     y: size=(4, 4), stride=(8, 1), offset=3
+                return False
+            x_total_elems_covered = x.stride(0) * (x.size(0) - 1) + x.size(1)
+            if x_total_elems_covered <= offset_delta:
+                # definitely does not overlap (last byte of x is before start of y)
+                # Example:
+                #   x: size=(4, 4), stride=(8, 1), offset=0 (last byte is 27)
+                #   y: size=(4, 4), stride=(8, 1), offset=28 (start byte is 28)
+                return True
+            # At this point, we want to check if the 0th row of y
+            # overlaps with **some** row of x.
+            # We can check this by shifting y backward by the shared stride, repeatedly,
+            # until the first row of y is before the first row of x.
+            # Then we can check if these rows overlap.
+            # We can accomplish this by modding our offset by the stride.
+            offset_delta_mod = offset_delta % x.stride(0)
+            # Example:
+            # 0 1 2 3
+            # 9 10 11 12
+            # 18 19 20 21
+            # 27 28 29 30
+            #   x: size=(4, 4), stride=(9, 1), offset=0
+            #   y: size=(4, 4), stride=(9, 1), offset=22 (this would not overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=23 (this would not overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=24 (this would overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
+            # If the interval [modded_offset, modded_offset + x_size] falls entirely
+            # without
+            if offset_delta_mod + y.size(1) <= x.stride(0):
+                return True
+            else:
+                return False
+    return False
+
+
+def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
+    actual_aliased_indices = set()
+    for j in range(len(aliased_input_indices)):
+        for i in range(j):
+            i_ = aliased_input_indices[i]
+            j_ = aliased_input_indices[j]
+            if not tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
+                actual_aliased_indices.add(i_)
+                actual_aliased_indices.add(j_)
+    return actual_aliased_indices
+
 # Note [Handling mutations on an input that aliases other inputs]
 # The easiest example to show-case this edge case is here:
 #
@@ -1746,6 +1828,19 @@ def merge_view_inputs(
             for curr_idx in aliased_input_indices:
                 other_args.append(fwd_inputs[curr_idx])
             continue
+
+        # Here, we attempt to do a more complicated check to detect false aliasing
+        # (e.g. if all the tensors have the same storage, but don't actually overlap)
+        # In theory, we could have a large group of tensors that all share storages, where only *some* of them
+        # have overlapping memory.
+        # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
+        # of tensors in the current group that shares a storage is non-overlapping.
+        aliased_input_indices_no_false_sharing = compute_overlapping_inputs(fwd_inputs, aliased_input_indices)
+        if len(aliased_input_indices_no_false_sharing) <= 1:
+            for curr_idx in aliased_input_indices:
+                other_args.append(fwd_inputs[curr_idx])
+            continue
+
         # We detected an input that was mutated, AND aliases with another input.
         # we need to replace this set of aliased inputs with a single synthetic base.
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
@@ -2485,8 +2580,12 @@ def create_runtime_wrapper(
                 # We can't just check of original_inpt.storage_size != updated_inpt.storage_size,
                 # Because the original_inpt might be a view of some larger tensor,
                 # and updated_inpt is always densely packed.
-                if not trace_joint and original_inpt.storage().size() != updated_inpt.storage().size():
-                    original_inpt.resize_(updated_inpt.size())
+                if not trace_joint and original_inpt.untyped_storage().size() != updated_inpt.untyped_storage().size():
+                    # It actually isn't enough just to see if the storage sizes are different between old and new inputs.
+                    # If the original input was a slice into some larger storage, the same will not be true for the updated input.
+                    # So before doing the resize_(), we **also** check that functionalization detected a metadata mutation.
+                    if meta.mutates_metadata:
+                        original_inpt.resize_(updated_inpt.size())
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)

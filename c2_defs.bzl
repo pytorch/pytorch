@@ -370,10 +370,13 @@ def using_protobuf_v3():
 def get_c2_protobuf_dep():
     return "fbsource//third-party/protobuf:libprotobuf" if using_protobuf_v3() else "fbsource//xplat/third-party/protobuf:fb-protobuf-lite"
 
-def c2_cxx_library(**kwargs):
+def c2_cxx_library(fbobjc_compiler_flags = [], **kwargs):
     args = get_c2_default_cxx_args()
     args.update(kwargs)
     args.setdefault("platforms", (ANDROID, APPLE, CXX, WINDOWS))
+
+    # Make sure we don't overwrite custom `fbobjc_compiler_flags`
+    args["fbobjc_compiler_flags"] = args.pop("fbobjc_compiler_flags", []) + fbobjc_compiler_flags
 
     fb_xplat_cxx_library(
         labels = [

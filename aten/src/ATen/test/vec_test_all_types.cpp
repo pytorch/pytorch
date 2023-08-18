@@ -1568,7 +1568,8 @@ namespace {
       uint16_t u16;
       float x;
       for (const auto i : c10::irange(100)) {
-      #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+      #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+          !defined(__APPLE__)
         u16 = at::vec::float2half_scalar(f32s[i]);
         x = at::vec::half2float_scalar(u16);
       #else

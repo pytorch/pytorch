@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS)
+                                                  IS_MACOS, TEST_CUDA)
 
 
 try:
@@ -74,11 +74,6 @@ skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
-# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
-# as well during the execution of this test suite, and it will cause
-# CUDA OOM error on Windows.
-TEST_CUDA = torch.cuda.is_available()
 if TEST_CUDA:
     torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
