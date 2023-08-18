@@ -63,6 +63,10 @@ inline void _call_caffe2_op_from_c10(
           *OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
+#if USE_ROCM
+  caffe2::SetHipMasqueradingAsCuda(true);
+#endif
+
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
@@ -110,6 +114,10 @@ inline void _call_caffe2_op_from_c10(
       torch::jit::push(*stack, at::Tensor(std::move(outputs_c2[i])));
     }
   }
+
+#if USE_ROCM
+  caffe2::SetHipMasqueradingAsCuda(false);
+#endif
 
   // postcondition: All inputs are cleared from the stack, there's now one
   //                IValue for each output which holds the result. This
@@ -259,6 +267,8 @@ inline FunctionSchema make_function_schema_for_c10(
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
 // rewritten to C10_EXPORT_CAFFE2_OP_TO_C10_HIP by hipify .
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)         \
+  /* Register HIP as CUDA, as well */                                        \
+  C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass);             \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
   TORCH_LIBRARY_IMPL(_caffe2, HIP, m) {                                      \
     m.impl(                                                                  \

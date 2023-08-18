@@ -515,6 +515,11 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     // A one-time caffe2 cuda initializer.
     static Caffe2CudaInitializerHelper g_cuda_initializer_;
     void* ptr = nullptr;
+#ifdef USE_ROCM
+    auto CUDA_OR_HIP = caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP;
+#else
+    auto CUDA_OR_HIP = CUDA;
+#endif
 
     if (FLAGS_caffe2_gpu_memory_tracking) {
       TrackMemoryAlloc(nbytes);
@@ -528,7 +533,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(CUDA_OR_HIP, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
         if (nbytes != 0) {
           CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
@@ -539,7 +544,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(CUDA_OR_HIP, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
         {
           // The reason we have this stream guard here is to preserve
@@ -572,9 +577,9 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(CUDA_OR_HIP, CaffeCudaGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+    return {nullptr, nullptr, &Delete, at::Device(CUDA_OR_HIP, CaffeCudaGetDevice())};
   }
 
   at::DeleterFnPtr raw_deleter() const override {
@@ -636,7 +641,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
 };
 
 static DefaultCUDAAllocator g_cuda_alloc;
-REGISTER_ALLOCATOR(CUDA, &g_cuda_alloc);
+REGISTER_CUDA_ALLOCATOR(&g_cuda_alloc);
 
 } // namespace caffe2
 

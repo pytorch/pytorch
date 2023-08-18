@@ -7739,6 +7739,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         a = torch.ones(2, 3)
         # Metadata changes are allowed on view tensors that are created from detach().
 
+    def _test_c10_layer_norm(self, X, weight, bias, epsilon):
+        expected_norm = torch.nn.functional.layer_norm(
+            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
+        actual_norm, actual_mean, actual_stdev = \
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
+                weight), torch.tensor(bias), 1, epsilon, True)
+        torch.testing.assert_close(expected_norm, actual_norm)
+
     @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
@@ -7746,13 +7754,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         weight = torch.rand(*X.size()[1:], dtype=torch.float)
         bias = torch.rand(*X.size()[1:], dtype=torch.float)
         epsilon = 1e-4
-
-        expected_norm = torch.nn.functional.layer_norm(
-            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
-        actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
-                weight), torch.tensor(bias), 1, epsilon, True)
-        torch.testing.assert_close(expected_norm, actual_norm)
+        self._test_c10_layer_norm(X, weight, bias, epsilon)
+        if torch.cuda.is_available():
+            X_cuda = X.cuda()
+            weight_cuda = weight.cuda()
+            bias_cuda = bias.cuda()
+            self._test_c10_layer_norm(X_cuda, weight_cuda, bias_cuda, epsilon)
 
     def test_memory_format(self):
         def test_helper(x, memory_format):

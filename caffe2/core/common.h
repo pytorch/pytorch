@@ -146,6 +146,9 @@ TORCH_API void SetHipRuntimeFlag();
 // CMake)
 TORCH_API const std::map<string, string>& GetBuildOptions();
 
+TORCH_API bool IsHipMasqueradingAsCuda();
+TORCH_API void SetHipMasqueradingAsCuda(bool value);
+
 } // namespace caffe2
 
 #endif // CAFFE2_CORE_COMMON_H_

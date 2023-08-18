@@ -8480,6 +8480,13 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
+        (
+            "caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP",
+            ("caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP", API_CAFFE2),
+        ),
+        ("masquerade_as_cuda_", ("masquerade_as_cuda_", API_CAFFE2)),
+        ("IsHipMasqueradingAsCuda", ("IsHipMasqueradingAsCuda", API_CAFFE2)),
+        ("SetHipMasqueradingAsCuda", ("SetHipMasqueradingAsCuda", API_CAFFE2)),
         ("cuda_stream", ("hip_stream", API_CAFFE2)),
         # if the header is a native hip folder (under hip directory),
         # there is no need to add a hip path to it; the trie in hipify script

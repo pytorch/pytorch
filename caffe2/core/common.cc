@@ -28,6 +28,14 @@ void SetHipRuntimeFlag() {
 }
 } // namespace internal
 
+thread_local bool masquerade_as_cuda_{false};
+bool IsHipMasqueradingAsCuda() {
+  return masquerade_as_cuda_;
+}
+void SetHipMasqueradingAsCuda(bool value) {
+  masquerade_as_cuda_ = value;
+}
+
 const std::map<string, string>& GetBuildOptions() {
 #ifndef CAFFE2_BUILD_STRINGS
 #define CAFFE2_BUILD_STRINGS {}

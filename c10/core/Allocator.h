@@ -225,6 +225,17 @@ struct AllocatorRegisterer {
   static c10::AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
+// This hack is needed for CUDA/HIP interop for caffe2 op export to
+// pytorch.  REGISTER_CUDA_ALLOCATOR is hipified to
+// REGISTER_HIP_ALLOCATOR.  REGISTER_HIP_ALLOCATOR will use the same
+// allocator and register as both CUDA and HIP.
+#define REGISTER_CUDA_ALLOCATOR(f) REGISTER_ALLOCATOR(CUDA, f)
+#define REGISTER_HIP_ALLOCATOR(f)                         \
+  REGISTER_ALLOCATOR(CUDA, f)                             \
+  namespace {                                             \
+  static c10::AllocatorRegisterer<HIP> g_allocator_d2(f); \
+  }
+
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {

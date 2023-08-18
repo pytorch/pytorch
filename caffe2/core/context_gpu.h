@@ -328,6 +328,21 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return status == cudaSuccess;
   }
 
+  // we use the ifdef here to preserve the original CUDA code and avoid thread_local access
+#ifdef USE_ROCM
+  at::Device device() const override {
+    return at::Device(caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP, gpu_id_);
+  }
+
+  DeviceType device_type() const override {
+    return caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP;
+  }
+
+  // no longer constexpr since this becomes dynamic
+  static DeviceType GetDeviceType() {
+    return caffe2::IsHipMasqueradingAsCuda() ? CUDA : HIP;
+  }
+#else
   at::Device device() const override {
     return at::Device(CUDA, gpu_id_);
   }
@@ -339,6 +354,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   static constexpr DeviceType GetDeviceType() {
     return CUDA;
   }
+#endif
 
  protected:
   int gpu_id_;
