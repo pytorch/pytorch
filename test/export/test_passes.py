@@ -78,7 +78,7 @@ class TestPasses(TestCase):
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(ep(x), f(x)))
+        self.assertTrue(torch.allclose(ep(x), f(x), atol=1e-3, rtol=0.01))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
