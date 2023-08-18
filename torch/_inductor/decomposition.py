@@ -83,6 +83,11 @@ def functional_assert_async_msg_decomp(tensor, msg):
     return
 
 
+@register_decomposition([aten.sym_constrain_range_for_size.default])
+def sym_constrain_range_for_size(symbol, *, min=None, max=None):
+    return
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):
@@ -207,8 +212,19 @@ def mm(self, input2):
 
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
-    if len(tensors) == 1:
+    def non_empty_tensor(x):
+        # special case for cat'ing with an empty tensor -
+        # just drop the 'empty' inputs so they don't confuse the logic below.
+        return len(x.shape) > 1 or x.shape[0] > 0
+
+    filtered_tensors = list(filter(non_empty_tensor, tensors))
+
+    if len(filtered_tensors) == 1:
         return tensors[0].clone()
+    elif 1 < len(filtered_tensors) < len(tensors):
+        # on the first call, when we remove empty tensors, we redispatch recursively
+        return aten.cat.default(filtered_tensors, dim)
+    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
