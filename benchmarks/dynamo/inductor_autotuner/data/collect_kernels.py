@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 import os
 from os import listdir
 from os.path import join, isdir
@@ -68,10 +69,19 @@ def main(args):
                                 os.system(cmd)
 
                 # run benchmark
-                cmd = f"""TORCHINDUCTOR_CACHE_DIR={cache_dir} TORCH_LOGS="+inductor" TORCHINDUCTOR_BENCHMARK_KERNEL=1 python3 {BENCHMARK_PY} --{DTYPE} --performance --{MODE} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
+                my_env = os.environ.copy()
+                my_env["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
+                my_env["TORCH_LOGS"] = "+inductor"
+                my_env["TORCHINDUCTOR_BENCHMARK_KERNEL"] = "1"
+                cmd = f"""python3 {BENCHMARK_PY} --{DTYPE} --performance --{MODE} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
                 print(cmd)
-
-                os.system(cmd)
+                try:
+                    pro = subprocess.Popen(
+                        cmd, env=my_env, shell=True, preexec_fn=os.setsid
+                    )
+                    pro.wait(timeout=None)
+                except subprocess.TimeoutExpired as exc:
+                    print(exc)
 
 
 if __name__ == "__main__":
