@@ -1104,7 +1104,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
         m = prepare_pt2e(m, BackendAQuantizer())
         # make sure the two observers for input are shared
+        conv_output_obs = []
         for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == torch.ops.aten.convolution.default:
+                conv_output_obs.append(getattr(m, list(n.users)[0].target))
             if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
                 inputs = n.args[0]
                 input0 = inputs[0]
@@ -1114,6 +1117,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 obs_ins0 = getattr(m, input0.target)
                 obs_ins1 = getattr(m, input1.target)
                 assert obs_ins0 == obs_ins1
+        assert len(conv_output_obs) == 2, "expecting two observer that follows convolution ops"
+        # checking that the output observers for the two convs are shared as well
+        assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
         m = convert_pt2e(m)
