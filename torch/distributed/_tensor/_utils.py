@@ -42,6 +42,12 @@ def compute_local_shape(
         return tuple(local_shape)
 
 
+import torch.distributed as dist
+
+def p0(line):
+    if dist.get_rank() == 3:
+        print(line)
+
 def compute_local_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
@@ -74,6 +80,7 @@ def compute_local_offset(
                 )
                 local_shape[shard_dim] = shard_size
                 local_offsets[shard_dim] = shard_offset
+                p0(f"idx:{idx}, placement:{placement}, mesh_dim_size:{mesh_dim_size}, shard_dim:{shard_dim}, local_shape[shard_dim]:{local_shape[shard_dim]}, my_coordinate[idx]:{my_coordinate[idx]}, shard_offset:{shard_offset}, local_offsets:{local_offsets}, local_shape:{local_shape}")
         return tuple(local_offsets)
 
 
