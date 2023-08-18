@@ -16,8 +16,18 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
+from .ir import ComputedBuffer
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton
+from .utils import (
+    cache_on_self,
+    cmp,
+    free_symbol_has,
+    get_device_tflops,
+    get_dtype_size,
+    get_gpu_dram_gbps,
+    has_triton,
+    sympy_product,
+)
 from .virtualized import V
 
 
@@ -56,6 +66,15 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
         return ForeachKernelSchedulerNode.fuse(node1, node2)
     else:
         return FusedSchedulerNode.fuse(node1, node2)
+
+
+# TODO(xmfan): reuse an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
+kernel_name_to_op = {
+    "extern_kernels.convolution": torch.ops.aten.convolution,
+    "extern_kernels.mm": torch.ops.aten.mm,
+    "extern_kernels.bmm": torch.ops.aten.bmm,
+    "extern_kernels.addmm": torch.ops.aten.addmm,
+}
 
 
 class BaseSchedulerNode:
@@ -362,6 +381,88 @@ class BaseSchedulerNode:
         buffer.writelines(out_lines)
         self.written = True
 
+    def get_read_write_buffers_sizes(self) -> int:
+        if isinstance(self, NopKernelSchedulerNode):
+            return 0
+        reads = {dep.name for dep in self.read_writes.reads}
+        writes = {dep.name for dep in self.read_writes.writes}
+
+        def is_materialized(buf):
+            buf_uses = {user.node for user in self.scheduler.name_to_node[buf].users}
+            return len(buf_uses - set(self.snodes)) > 0
+
+        if isinstance(self, FusedSchedulerNode):
+            removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+            writes = writes - removed_buffers
+            reads = reads - removed_buffers
+        node_bytes = 0
+        for buf in reads | writes:
+            if buf in V.graph.name_to_buffer:
+                buf = V.graph.name_to_buffer[buf]
+            elif buf in V.graph.graph_inputs:
+                buf = V.graph.graph_inputs[buf]
+            else:
+                continue
+
+            node_bytes += V.graph.sizevars.size_hint(
+                sympy_product(buf.get_size())
+            ) * get_dtype_size(buf.get_dtype())
+        return node_bytes
+
+    def get_estimated_runtime(self) -> float:
+        layout = None
+        dtype = None
+        if not self.node:
+            assert self.snodes
+            layout = self.snodes[0].node.get_layout()
+            dtype = self.snodes[0].node.get_dtype()
+        else:
+            layout = self.node.get_layout()
+            dtype = self.node.get_dtype()
+
+        if "cuda" != layout.device.type:
+            # default to no reordering based on runtime
+            return 0
+
+        try:
+            gpu_memory_bandwidth = get_gpu_dram_gbps()
+            gpu_flops = get_device_tflops(dtype) * 10**12
+        except Exception:
+            return 0
+
+        if isinstance(self, ExternKernelSchedulerNode):
+            op = kernel_name_to_op.get(getattr(self.node, "kernel", ""), None)
+
+            # if there is a resolved op, dry-run using fake mode and record flop count
+            if op is not None:
+                from torch._subclasses.fake_tensor import FakeTensorMode
+                from torch.utils.flop_counter import FlopCounterMode
+
+                with FakeTensorMode(), FlopCounterMode(
+                    display=False
+                ) as flop_counter_mode:
+                    from .ir import ir_node_to_tensor
+
+                    fake_inputs = [
+                        ir_node_to_tensor(input) for input in self.node.inputs
+                    ]
+                    cls = self.node.__class__
+                    cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
+
+                    # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
+                    factor = 0.5
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    return factor * counted_flops / gpu_flops
+
+        elif isinstance(self, FusedSchedulerNode) or isinstance(
+            self.node, ComputedBuffer
+        ):
+            return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
+
+        # TODO(xmfan): add support for CollectiveKernel
+
+        return 0
+
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self) -> str:
@@ -486,7 +587,9 @@ class SchedulerNode(BaseSchedulerNode):
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.get_aliases() or self.is_template():
             return False
-        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+        if len(self.read_writes.writes) == 1 and isinstance(
+            read_dep, dependencies.MemoryDep
+        ):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -976,6 +1079,8 @@ class Scheduler:
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
+                    and isinstance(read_dep, dependencies.MemoryDep)
+                    and isinstance(write_dep, dependencies.MemoryDep)
                     and read_dep.index == write_dep.index
                     and read_dep.size == write_dep.size
                 ):
