@@ -17,10 +17,10 @@ class RAdam(Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
+        decoupled_weight_decay: bool=False,
         *,
         foreach: Optional[bool] = None,
         differentiable: bool = False,
-        decoupled_weight_decay: bool=False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -173,6 +173,8 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        decoupled_weight_decay (bool, optional): whether to use decoupled weight
+            decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
 
@@ -180,6 +182,8 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         https://arxiv.org/abs/1908.03265
     .. _author's implementation:
         https://github.com/LiyuanLucasLiu/RAdam
+    .. _Decoupled Weight Decay Regularization:
+        https://arxiv.org/abs/1711.05101
 
     """
 
@@ -192,6 +196,7 @@ def radam(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool=False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     *,
@@ -200,7 +205,6 @@ def radam(
     lr: float,
     weight_decay: float,
     eps: float,
-    decoupled_weight_decay: bool=False,
 ):
     r"""Functional API that performs RAdam algorithm computation.
 
@@ -234,8 +238,8 @@ def radam(
         lr=lr,
         weight_decay=weight_decay,
         eps=eps,
-        differentiable=differentiable,
         decoupled_weight_decay=decoupled_weight_decay,
+        differentiable=differentiable,
     )
 
 
@@ -316,8 +320,8 @@ def _multi_tensor_radam(
     lr: float,
     weight_decay: float,
     eps: float,
-    differentiable: bool,
     decoupled_weight_decay: bool,
+    differentiable: bool,
 ):
 
     if len(params) == 0:
