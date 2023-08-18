@@ -14,6 +14,6 @@ from .fully_sharded_data_parallel import (
     ShardedStateDictConfig,
     ShardingStrategy,
     StateDictConfig,
-    StateDictType,
     StateDictSettings,
+    StateDictType,
 )
