@@ -279,12 +279,6 @@ def setup_compile_debug():
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
-        # torch._logging.set_logs(
-        #     dynamo=logging.DEBUG,
-        #     aot=logging.DEBUG,
-        #     inductor=logging.DEBUG,
-        #     output_code=True,  # this is off by default
-        # )
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -2039,3 +2033,10 @@ def is_guard_failure_reporting_enabled():
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
+
+
+def get_static_address_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None

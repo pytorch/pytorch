@@ -20,7 +20,6 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
-    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -28,7 +27,6 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    register_replacement,
     remove_extra_clones,
     stable_topological_sort,
 )
@@ -75,9 +73,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)
 
-    reinplace_scatters(gm.graph)
-
     stable_topological_sort(gm.graph)
+
+    # It's probably a good idea to keep this last, since it introduces
+    # mutation.
+    # print(gm.graph)
+    reinplace_scatters(gm.graph)
+    # print(gm.graph)
     gm.recompile()
     gm.graph.lint()
 
@@ -92,7 +94,6 @@ def lazy_init():
     from .quantization import register_quantization_lowerings
 
     register_quantization_lowerings()
-    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -460,70 +461,6 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
-def addmm_relu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.relu(output)
-
-
-def addmm_relu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
-
-
-def addmm_gelu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.gelu(output)
-
-
-def addmm_gelu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
-
-
-def should_replace_addmm_activation(match):
-    if config.max_autotune_gemm:
-        # keep addmm for tuning
-        return False
-
-    input = match.kwargs["input"].meta["val"]
-    # conditions of epilogue fusion in _addmm_activation
-    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
-
-
-def register_addmm_activation_replacement():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    else:
-        device = "cpu"
-
-    # sizes/values dont actually matter for initial trace
-    # once we get a possible match we re-trace with the actual values and verify the match still holds
-
-    inp = functools.partial(torch.empty, (5,), device=device)
-    mat1 = functools.partial(torch.empty, (3, 4), device=device)
-    mat2 = functools.partial(torch.empty, (4, 5), device=device)
-
-    for pattern, replacement, args in [
-        (
-            addmm_relu_pattern,
-            addmm_relu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-        (
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-    ]:
-        register_replacement(
-            pattern,
-            replacement,
-            args,
-            inference_graph,
-            inference_patterns,
-            extra_check=should_replace_addmm_activation,
-        )
-
-
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -555,7 +492,7 @@ def is_valid_splitwithsizes_cat(match):
 
 
 def _get_node_storage(node):
-    return node.meta["val"].storage()._cdata
+    return node.meta["val"].untyped_storage()._cdata
 
 
 def reinplace_scatters(graph):
@@ -644,3 +581,37 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or use.target.is_view:
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
+
+
+@register_graph_pattern(
+    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    pass_dict=pass_patterns[2],
+)
+def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
+    if not inp.meta["val"].is_cuda:
+        return
+
+    output = match.output_node()
+    if not all(is_pointwise_use(use) for use in output.users):
+        return
+
+    def repl(inp, x1, x2):
+        return x1 @ x2 + inp
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])
