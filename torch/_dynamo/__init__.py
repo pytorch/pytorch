@@ -64,7 +64,7 @@ def reset() -> None:
     resume_execution.ContinueExecutionCache.cache.clear()
     cached_backends = getattr(eval_frame.guarded_backend_cache, "cached_backends", None)
     if cached_backends is not None:
-        for backend in cached_backends.items():
+        for backend in cached_backends.values():
             if hasattr(backend, "reset"):
                 backend.reset()
         cached_backends.clear()
