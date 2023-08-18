@@ -1323,43 +1323,43 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-#ifdef __aarch64__
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
+#ifdef __aarch64__
     // Minimum dimension requirement for MKLDNN; derived based on experiments.
     constexpr int64_t default_min_dim = 8;
+#else
+    // Always dispatch MatMul to MKLDNN by default for archs other than aarch64.
+    constexpr int64_t default_min_dim = 0;
+#endif
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
   return value;
 }
 
+
 static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
+#ifdef __aarch64__
     // Minimum size requirement for MKLDNN; derived based on experiments.
     constexpr int64_t default_min_size = 8 * 1024;
+#else
+    // Always dispatch MatMul to MKLDNN by default for archs other than aarch64.
+    constexpr int64_t default_min_size = 0;
+#endif
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
   return value;
 }
 
-static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n, int64_t min_dim, int64_t min_size) {
+
+static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
+  const int64_t min_dim = get_mkldnn_matmul_min_dim();
+  const int64_t min_size = get_mkldnn_matmul_min_size();
   return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
-#else // __aarch64__
-static constexpr int64_t get_mkldnn_matmul_min_dim() {
-  return 0;
-}
-
-static constexpr int64_t get_mkldnn_matmul_min_size() {
-  return 0;
-}
-
-static constexpr bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n, int64_t min_dim, int64_t min_size) {
-  return true;
-}
-#endif // __aarch64__
 
 
 static void addmm_impl_cpu_(
@@ -1480,7 +1480,7 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1], get_mkldnn_matmul_min_dim(), get_mkldnn_matmul_min_size());
+  bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
   if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
       // We have dispatched to ACL GEMM for single precision float
@@ -1730,7 +1730,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2], get_mkldnn_matmul_min_dim(), get_mkldnn_matmul_min_size());
+  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)) {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
