@@ -163,20 +163,19 @@ class InitDeviceMeshTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_default_init_device_mesh(self):
-        default_mesh = init_device_mesh(self.device_type)
-        ref_mesh = DeviceMesh(self.device_type, torch.arange(8))
-        self.assertEqual(default_mesh, ref_mesh)
+    def test_init_device_mesh_with_mesh_dim_names(self):
+        mesh_shape = [2, 4]
+        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
 
-    @with_comms
-    def test_init_device_mesh(self):
-        mesh_dims = [2, 4]
+        # test init_device_mesh with mesh_dim_names
         mesh_dim_names = ["DP", "TP"]
-        two_d_mesh = init_device_mesh(self.device_type, mesh_dims, mesh_dim_names)
-
-        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_dims))
+        two_d_mesh = init_device_mesh(self.device_type, mesh_shape, mesh_dim_names)
         self.assertEqual(two_d_mesh, ref_mesh)
-        self.assertEqual(two_d_mesh._mesh_dim_names, mesh_dim_names)
+        self.assertEqual(two_d_mesh.mesh_dim_names, mesh_dim_names)
+
+        # test init_device_mesh without mesh_dim_names
+        two_d_mesh = init_device_mesh(self.device_type, mesh_shape)
+        self.assertEqual(two_d_mesh, ref_mesh)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
