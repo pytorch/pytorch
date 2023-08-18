@@ -695,6 +695,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
+  // Mutex to Guard all_nccl_process_groups
+  static std::mutex allProcessGroupsMutex_;
+
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 

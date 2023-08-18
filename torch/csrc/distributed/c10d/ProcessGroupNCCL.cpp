@@ -286,6 +286,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
+std::mutex ProcessGroupNCCL::allProcessGroupsMutex_;
 std::unordered_set<c10d::ProcessGroupNCCL*>
     ProcessGroupNCCL::all_nccl_process_groups;
 
@@ -730,7 +731,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 #endif
-  all_nccl_process_groups.insert(this);
+  {
+    std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
+    all_nccl_process_groups.insert(this);
+  }
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -901,7 +905,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
 
-  all_nccl_process_groups.erase(this);
+  {
+    std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
+    all_nccl_process_groups.erase(this);
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -1095,6 +1102,7 @@ void ProcessGroupNCCL::runHookLoop() {
 }
 
 bool ProcessGroupNCCL::watchDogsDone() {
+  std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
   for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin();
        it != ProcessGroupNCCL::all_nccl_process_groups.end();
        it++) {

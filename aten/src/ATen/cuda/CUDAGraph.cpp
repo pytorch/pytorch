@@ -9,6 +9,7 @@
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
+constexpr int64_t _busy_wait_millis = 10;
 
 MempoolId_t graph_pool_handle() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
@@ -71,6 +72,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // the graph capture.
   while (!c10d::ProcessGroupNCCL::watchDogsDone()) {
     TORCH_WARN("Attempting to start graph capture but NCCL ProcessGroup(s) have remaining enqueued work. Waiting for enqueued work to finish...");
+    // Yield
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(_busy_wait_millis));
   }
 #endif
   TORCH_CHECK(!has_graph_exec_,
