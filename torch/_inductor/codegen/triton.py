@@ -65,9 +65,9 @@ class TritonPrinter(PythonPrinter):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
     def _print_Where(self, expr):
-        c = self._print(expr.args[0])
-        p = self._print(expr.args[1])
-        q = self._print(expr.args[2])
+        c = self.doprint(expr.args[0])
+        p = self.doprint(expr.args[1])
+        q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
     def _print_Min(self, expr):

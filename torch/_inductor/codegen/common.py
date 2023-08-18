@@ -310,6 +310,9 @@ class ExprPrinter(Printer):
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
 
+    def _print_GreaterThan(self, expr):
+        return " >= ".join(map(self.paren, map(self._print, expr.args)))
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):

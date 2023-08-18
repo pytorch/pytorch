@@ -41,7 +41,7 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.operator_schemas import get_signature_for_torch_op
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -1849,7 +1849,6 @@ class FixedLayout(Layout):
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
-                    idx = idx + Where(idx >= 0, 0, sz)
                     result = result + idx * stride
             return result
 
