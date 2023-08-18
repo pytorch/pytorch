@@ -1143,24 +1143,23 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_load_checkpoint_after_model_creation(
         "HF Bloom model does not need `model.load_state_dict` to work."
     )
-    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
-
-        model_name = "bigscience/bloom-560m"
-        device = "cpu"
+    def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
+        config = transformers.BloomConfig()
+        batch, seq = 4, 256
 
         def create_args():
             return tuple()
 
-        def create_kwargs(model_name=model_name):
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            return tokenizer("Hello world!", return_tensors="pt")
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            return {"input_ids": input_ids, "attention_mask": attention_mask}
 
         def create_model():
-            return AutoModel.from_pretrained(model_name).to(device).eval()
+            return transformers.BloomModel(config).eval()
 
         self._test_fake_tensor_mode_exporter(
-            model_name.replace("/", "_"),
+            "huggingface_bigscience_bloom_560m",
             create_model,
             create_args,
             create_kwargs,
