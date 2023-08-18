@@ -24,7 +24,6 @@ from typing import (
 )
 
 import torch
-from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
@@ -113,7 +112,8 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
-    stack: CapturedTraceback
+    # TODO: store this in slightly less formatted form
+    stack: str
 
 
 @dataclasses.dataclass
@@ -143,11 +143,6 @@ class Guard:
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
-
-    stack = None
-
-    def __post_init__(self):
-        self.stack = CapturedTraceback.extract(skip=2)
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
