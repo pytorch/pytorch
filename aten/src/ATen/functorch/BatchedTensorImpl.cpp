@@ -13,9 +13,22 @@
 namespace at {
 namespace functorch {
 
+// Returns the base unbatched value of a tensor, unwrapping as many
+// levels of BatchedTensor as needed.
+Tensor get_base_unbatched_value(const Tensor& maybe_batched_tensor) {
+  auto ret = maybe_batched_tensor;
+  auto* batched = maybeGetBatchedImpl(maybe_batched_tensor);
+  while(batched) {
+    ret = batched->value();
+    batched = maybeGetBatchedImpl(ret);
+  }
+  return ret;
+}
+
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      key_set.add(DispatchKey::FuncTorchBatched),
+      key_set.add(
+          value.is_nested() ? DispatchKey::BatchedNestedTensor : DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )
@@ -24,21 +37,31 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
   , bdim_(bdim)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  if (get_base_unbatched_value(value_).is_nested()) {
+    TORCH_CHECK(bdim_ == 0,
+        "Nested tensors can only be vmapped over dim=0");
+    TORCH_CHECK(level_ == 1,
+        "Only one level of vmap is supported when vmapping over nested tensors");
+  }
   set_storage_access_should_throw();
-  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(
+      value_.is_nested() ? SizesStridesPolicy::CustomSizes : SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }
 
 void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
-  const auto value_sizes = value_.sizes();
-  const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
-  for (const auto dim : c10::irange(0, public_dims)) {
-    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+
+  if (!value_.is_nested()) {
+    const auto value_sizes = value_.sizes();
+    const auto value_strides = value_.strides();
+    for (const auto dim : c10::irange(0, public_dims)) {
+      auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+      sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
+      sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+    }
   }
   storage_offset_= value_.storage_offset();
   refresh_numel();
@@ -59,6 +82,34 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
 
 void BatchedTensorImpl::checkInvariants() const {
   TORCH_INTERNAL_ASSERT(level_ > -1);
+}
+
+int64_t BatchedTensorImpl::size_custom(int64_t d) const {
+  if (!value_.is_nested()) {
+    return size(d);
+  }
+  // TODO: Error messages will mention the actualDim, which could be confusing; fix this
+  auto actual_dim = actualDim(d, /*wrap_dim=*/ true);
+  return value_.size(actual_dim);
+}
+
+c10::SymInt BatchedTensorImpl::sym_size_custom(int64_t d) const {
+  if (!value_.is_nested()) {
+    return sym_size(d);
+  }
+  // TODO: Error messages will mention the actualDim, which could be confusing; fix this
+  auto actual_dim = actualDim(d, /*wrap_dim=*/ true);
+  return value_.sym_size(actual_dim);
+}
+
+IntArrayRef BatchedTensorImpl::sizes_custom() const {
+  TORCH_CHECK(!value_.is_nested(), "sizes() is not supported for batched nested tensors");
+  return sizes_default();
+}
+
+SymIntArrayRef BatchedTensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(!value_.is_nested(), "sizes() is not supported for batched nested tensors");
+  return sym_sizes_default();
 }
 
 // The following are publically exposed as methods of Tensor

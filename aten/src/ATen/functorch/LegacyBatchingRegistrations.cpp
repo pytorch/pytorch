@@ -9,6 +9,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/TensorShape.h>
 
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchingMetaprogramming.h>
@@ -704,6 +705,39 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+
+  std::vector<std::vector<Tensor>> unbound;
+  for (auto tensor_iter = tensors.begin(); tensor_iter != tensors.end(); ++tensor_iter) {
+    auto* maybe_batched_impl = maybeGetBatchedImpl(*tensor_iter);
+    TORCH_CHECK(maybe_batched_impl, "Tried to run batching rule for cat() on a non-batched tensor");
+    auto nt = maybe_batched_impl->value();
+    TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
+    auto this_unbound = nt.unbind();
+    if (unbound.size() > 0) {
+      TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
+          "cat() not supported for differently-sized nested arguments");
+    }
+    unbound.push_back(this_unbound);
+  }
+
+  // Do a cat for each set of zipped unbound components
+  const auto num_components = unbound.front().size();
+  std::vector<Tensor> outputs;
+  for (auto i : c10::irange(num_components)) {
+    std::vector<Tensor> arg_list;
+    for (auto j : c10::irange(unbound.size())) {
+      arg_list.push_back(unbound[j][i]);
+    }
+    outputs.push_back(at::cat(arg_list, dim));
+  }
+
+  // NB: NTs only support batching over dim 0
+  auto out_nt = at::_nested_tensor_from_tensor_list(outputs);
+  return makeBatched(out_nt, 0, get_current_level());
+}
 
 }
 
@@ -733,6 +767,15 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("as_strided", as_strided_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 
+}
+
+TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedNestedTensorForLoopFallback>());
+}
+
+// TODO: Move this somewhere better?
+TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
+  m.impl("cat", nested_cat_batching_rule);
 }
 } // namespace functorch
 } // namespace at
