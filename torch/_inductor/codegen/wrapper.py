@@ -410,13 +410,13 @@ class WrapperCodeGen(CodeGen):
     def next_kernel_suffix(self):
         return f"{next(self._names_iter)}"
 
-    def codegen_cuda_device_guard_enter(self, device_idx):
+    def codegen_device_guard_enter(self, device_idx):
         self.writeline(
             EnterCudaDeviceContextManagerLine(device_idx, self.first_device_guard)
         )
         self.first_device_guard = False
 
-    def codegen_cuda_device_guard_exit(self):
+    def codegen_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
@@ -1089,7 +1089,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if isinstance(output, ir.ReinterpretView) or (
+                if (
                     hasattr(output, "get_name")
                     and output.get_name() in self.outputs_need_copy
                 ):
@@ -1215,7 +1215,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
-            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
     def codegen_device(self, device):

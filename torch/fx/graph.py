@@ -614,7 +614,7 @@ class _PyTreeCodeGen(CodeGen):
     def process_outputs(self, out: Any) -> Any:
         if self.pytree_info is None or self.pytree_info.out_spec is None:
             return out
-        if not isinstance(out, list):
+        if not isinstance(out, (list, tuple)):
             out = [out]
         assert(self.pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)

@@ -643,7 +643,12 @@ def is_cusparse_file(rel_filepath):
 
 def is_special_file(rel_filepath):
     if is_pytorch_file(rel_filepath):
-        return ("sparse" in rel_filepath.lower()) or ("linalg" in rel_filepath.lower())
+        if "sparse" in rel_filepath.lower():
+            return True
+        elif "linalg" in rel_filepath.lower():
+            if "batchlinearalgebralibblas" in rel_filepath.lower():
+                return False  # don't use "special" mappings for this specific linalg cublas file
+            return True
     return False
 
 def is_caffe2_gpu_file(rel_filepath):
@@ -745,7 +750,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
                 PYTORCH_SPECIAL_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
-        if constants.API_PYTORCH not in meta_data:
+        if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
