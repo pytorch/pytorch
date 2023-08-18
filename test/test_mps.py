@@ -511,7 +511,6 @@ def mps_ops_modifier(ops):
         'polygammapolygamma_n_4': None,
         'qr': None,
         'quantile': None,
-        'renorm': None,
         'rsub': None,
         'scatter_reduceamax': None,
         'scatter_reduceamin': None,
@@ -10724,7 +10723,7 @@ class TestConsistency(TestCaseMPS):
             elif (op.name == "native_layer_norm"):
                 atol = 1e-4
                 rtol = 1.3e-5
-            elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
+            elif op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
                 atol = 7e-4
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:

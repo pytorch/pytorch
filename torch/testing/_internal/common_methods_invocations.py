@@ -44,7 +44,7 @@ import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
 
-from distutils.version import LooseVersion
+from packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -5013,19 +5013,13 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
                      error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got -4\)")
 
     # out of bounds start
-    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
-        # narrow_copy_dense_cpu_out
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=RuntimeError,
-                         error_regex=r"start \(11\) \+ length \(0\) exceeds dimension size \(10\)\.")
-    else:
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=IndexError,
-                         error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got 11\)")
     # out of bounds start (negative)
     yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
                      error_type=IndexError,
-                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got -11\)")
 
     # out of bounds length
     yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),
@@ -8552,46 +8546,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
 
-class foreach_clamp_sample_func(foreach_inputs_sample_func):
-
-    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors_specified = "num_input_tensors" in kwargs
-        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
-        assert isinstance(num_input_tensors, list)
-        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
-        _foreach_inputs_kwargs["requires_grad"] = requires_grad
-
-        # zero_size tensor
-        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
-            zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
-            zero_size_foreach_inputs_kwargs["zero_size"] = True
-            input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
-            args = np.random.uniform(size=(2,)).tolist()
-            kwargs = {
-                "zero_size": True,
-                "disable_fastpath": dtype in integral_types_and(torch.bool),
-            }
-            yield SampleInput(input, *args, **kwargs)
-
-        for num_tensors, args in product(
-            num_input_tensors,
-            (
-                (-1, 1),
-                (-1, None),
-                (None, 1),
-                (3, 1),
-            ),
-        ):
-            _foreach_inputs_kwargs["zero_size"] = False
-            input = sample_inputs_foreach(
-                None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-            kwargs = {
-                "zero_size": False,
-                "disable_fastpath": dtype in integral_types_and(torch.bool),
-            }
-            yield SampleInput(input, *args, **kwargs)
-
-
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
     def __init__(
@@ -8878,6 +8832,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        has_no_out_of_place=True,
     ),
 
     ForeachFuncInfo(
@@ -8922,15 +8877,6 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
-        supports_autograd=True,
-        supports_forward_ad=True,
-    ),
-    ForeachFuncInfo(
-        "clamp",
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        supports_alpha_param=False,
-        sample_inputs_func=foreach_clamp_sample_func(2, True, True),
         supports_autograd=True,
         supports_forward_ad=True,
     ),
@@ -8986,6 +8932,12 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
+    ForeachFuncInfo(
+        "copy",
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
+        has_no_out_of_place=True,
+    )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -17177,11 +17129,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
