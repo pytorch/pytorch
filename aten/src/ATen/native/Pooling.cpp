@@ -55,6 +55,19 @@ std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef o
   checkDimRange("adaptive_max_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
   check1d("adaptive_max_pool1d", "output_size", output_size);
 
+  int ndim = self.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(
+        self.size(i) > 0,
+        "adaptive_max_pool1d(): ",
+        "Expected input to have non-zero size for non-batch dimensions, "
+        "but input has sizes ",
+        self.sizes(),
+        " with dimension ",
+        i,
+        " being empty");
+  }
+
   Tensor output, indices;
   std::tie(output, indices) = at::adaptive_max_pool2d(
       self.unsqueeze(-2),
