@@ -6,6 +6,9 @@ from unittest import mock
 
 from tools.stats.upload_metrics import emit_metric
 
+from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
+
+
 # default values
 REPO = "some/repo"
 BUILD_ENV = "cuda-10.2"
@@ -108,6 +111,38 @@ class TestUploadStats(unittest.TestCase):
         emit_metric("metric_name", metric)
 
         self.assertFalse(put_item_invoked)
+
+    def test_upload_to_rockset_batch_size(self) -> None:
+        cases = [
+            {
+                "batch_size": BATCH_SIZE - 1,
+                "expected_number_of_requests": 1,
+            },
+            {
+                "batch_size": BATCH_SIZE,
+                "expected_number_of_requests": 1,
+            },
+            {
+                "batch_size": BATCH_SIZE + 1,
+                "expected_number_of_requests": 2,
+            },
+        ]
+
+        for case in cases:
+            mock_client = mock.Mock()
+            mock_client.Documents.add_documents.return_value = "OK"
+
+            batch_size = case["batch_size"]
+            expected_number_of_requests = case["expected_number_of_requests"]
+
+            docs = list(range(batch_size))
+            upload_to_rockset(
+                collection="test", docs=docs, workspace="commons", client=mock_client
+            )
+            self.assertEqual(
+                mock_client.Documents.add_documents.call_count,
+                expected_number_of_requests,
+            )
 
 
 if __name__ == "__main__":

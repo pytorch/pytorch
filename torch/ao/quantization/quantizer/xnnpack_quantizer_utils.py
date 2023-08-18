@@ -3,6 +3,7 @@ import operator
 from typing import Callable, Dict, List, Optional
 
 import torch
+import torch.nn.functional as F
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.quantizer import QuantizationSpecBase, SharedQuantizationSpec
 
@@ -378,7 +379,7 @@ def _annotate_gru_io_only(
         _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
 
-def _annotate_maxpool2d(
+def _annotate_max_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
@@ -419,6 +420,54 @@ def _annotate_maxpool2d(
             output_qspec=act_qspec,
             _annotated=True,
         )
+
+
+def _annotate_input_out_obs_sharing_op(
+    op: Callable,
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
+    partitions = list(itertools.chain(*module_partitions.values()))
+    for partition in partitions:
+        io_obs_sharing_node = partition.output_nodes[0]
+        if _is_annotated([io_obs_sharing_node]):
+            continue
+
+        input_act = io_obs_sharing_node.args[0]
+        assert isinstance(input_act, Node)
+
+        # only annotate input output sharing operator
+        # when the output of the input node is annotated
+        if (
+            "quantization_annotation" not in input_act.meta
+            or not input_act.meta["quantization_annotation"]._annotated
+            or input_act.meta["quantization_annotation"].output_qspec is None
+        ):
+            continue
+
+        act_qspec = SharedQuantizationSpec(input_act)
+        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                input_act: act_qspec,
+            },
+            output_qspec=act_qspec,
+            _annotated=True,
+        )
+
+
+def _annotate_adaptive_avg_pool2d(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    _annotate_input_out_obs_sharing_op(
+        torch.nn.AdaptiveAvgPool2d, gm, quantization_config, filter_fn
+    )
+    _annotate_input_out_obs_sharing_op(
+        F.adaptive_avg_pool2d, gm, quantization_config, filter_fn
+    )
 
 
 def _annotate_add_relu(
@@ -502,9 +551,10 @@ OP_TO_ANNOTATOR = {
     "conv2d_relu": _annotate_conv2d_relu,
     "conv2d_bn": _annotate_conv2d_bn,
     "conv2d_bn_relu": _annotate_conv2d_bn_relu,
-    "maxpool2d": _annotate_maxpool2d,
+    "max_pool2d": _annotate_max_pool2d,
     "add": _annotate_add,
     "add_relu": _annotate_add_relu,
+    "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,
 }

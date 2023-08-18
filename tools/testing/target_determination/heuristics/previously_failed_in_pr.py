@@ -17,9 +17,11 @@ class PreviouslyFailedInPR(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        critical_tests = _get_previously_failing_tests()
+        # Tests must always be returned in a deterministic order.
+        # Otherwise it breaks our test sharding logic
+        critical_tests = sorted(_get_previously_failing_tests())
         test_rankings = TestPrioritizations()
-        test_rankings.highly_relevant = list(critical_tests)
+        test_rankings.highly_relevant = critical_tests
 
         return test_rankings
 
@@ -37,6 +39,7 @@ def _get_previously_failing_tests() -> Set[str]:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
+
     return python_test_file_to_test_name(prioritized_tests)
 
 

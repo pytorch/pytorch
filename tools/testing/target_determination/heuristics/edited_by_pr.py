@@ -16,7 +16,7 @@ class EditedByPR(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        critical_tests = _get_modified_tests()
+        critical_tests = sorted(_get_modified_tests())
         test_rankings = TestPrioritizations()
         test_rankings.highly_relevant = list(critical_tests)
 
@@ -31,4 +31,6 @@ def _get_modified_tests() -> Set[str]:
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 
+    # Tests must always be returned in a deterministic order.
+    # Otherwise it breaks our test sharding logic
     return python_test_file_to_test_name(set(changed_files))

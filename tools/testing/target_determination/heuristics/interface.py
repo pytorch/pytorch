@@ -8,6 +8,9 @@ class TestPrioritizations:
     Heuristics can leave a list empty if they don't consider any tests relevant.
 
     Heuristics can leave the unranked_relevance list empty to imply all unmentioned tests are irrelevant
+
+    Important: Lists of tests must always be returned in a deterministic order,
+               otherwise it breaks the test sharding logic
     """
 
     highly_relevant: List[str]
