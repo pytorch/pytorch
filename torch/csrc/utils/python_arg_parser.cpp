@@ -486,8 +486,8 @@ auto handle_torch_function_no_python_arg_parser(
   // which would mean a mode would be **required** to access their metadata.
 
   if (is_mode_active()) {
-    // Step 1: Try to dispatch on any user TorchDispatchModes (including infra modes,
-    // which will always be at the bottom of the mode stack).
+    // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
+    // modes, which will always be at the bottom of the mode stack).
     auto ret_ = dispatch_on_mode(
         args,
         kwargs,
@@ -502,9 +502,9 @@ auto handle_torch_function_no_python_arg_parser(
   // Step 2: Try to dispatch based on any user subclasses,
   // ignoring any subclasses that have a _mode_key field
   // (corresponding to infra subclasses)
-  // Note: user subclasses should always run *before* infra modes like proxy/fake.
-  // This is handles by having proxy/fake modes return NotImplemented when they
-  // see a user subclass that they don't understand.
+  // Note: user subclasses should always run *before* infra modes like
+  // proxy/fake. This is handles by having proxy/fake modes return
+  // NotImplemented when they see a user subclass that they don't understand.
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     auto curr_ret = dispatch_on_subclass(
         args,
