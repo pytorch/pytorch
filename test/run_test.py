@@ -13,13 +13,13 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
 
 import pkg_resources
 
 import torch
 import torch.distributed as dist
+from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -1366,7 +1366,9 @@ def get_selected_tests(options) -> List[ShardedTest]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":
+    if torch.version.cuda is not None and version.parse(
+        torch.version.cuda
+    ) >= version.parse("11.6"):
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
