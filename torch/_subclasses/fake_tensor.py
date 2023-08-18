@@ -173,14 +173,30 @@ def _is_tensor_constructor(func: OpOverload):
 def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
-    if is_traceable_wrapper_subclass(x):
-        flattened_tensors, _ = type(x).__tensor_flatten__(x)
+    elif is_traceable_wrapper_subclass(x):
+        attrs, _ = type(x).__tensor_flatten__(x)
+        flattened_tensors = [getattr(x, attr) for attr in attrs]
         # need to recurse because we could have nested subclasses
-        all_fake = all(is_fake(x) for x in flattened_tensors.values())
-        any_fake = any(is_fake(x) for x in flattened_tensors.values())
+        all_fake = all(is_fake(x) for x in flattened_tensors)
+        any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        return is_fake(torch._C._functorch._unwrap_functional_tensor(x, reapply_views))
     return False
+
+
+def maybe_get_fake_mode(t):
+    if isinstance(t, FakeTensor):
+        return t.fake_mode
+    if is_traceable_wrapper_subclass(t):
+        inner_tensors, _ = t.__tensor_flatten__()
+        modes = [maybe_get_fake_mode(x) for x in inner_tensors]
+        m = modes[0]
+        assert all(m is x for x in modes)
+        return m
+    return None
 
 
 @functools.lru_cache(None)

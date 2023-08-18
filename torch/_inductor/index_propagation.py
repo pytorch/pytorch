@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import sympy
 
@@ -162,6 +162,9 @@ class IndexPropagation:
         return self._inner.index_expr(expr, dtype)
 
     def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
+        if isinstance(a, (list, tuple)):
+            return tuple(self.unwrap(v) for v in a)
+
         if not isinstance(a, IndexPropVar):
             return a
 
@@ -171,15 +174,22 @@ class IndexPropagation:
 
         return a.value
 
-    def fallback(self, name: str, args: Tuple, kwargs: Dict[str, Any]) -> IndexPropVar:
+    def wrap(self, a: Any) -> Union[IndexPropVar, Sequence[IndexPropVar]]:
+        if isinstance(a, (list, tuple)):
+            return tuple(self.wrap(v) for v in a)
+        return IndexPropVar(a)
+
+    def fallback(
+        self, name: str, args: Tuple, kwargs: Dict[str, Any]
+    ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
-        return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
+        return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
         self, name: str, args: Tuple, kwargs: Dict[str, Any]
-    ) -> Union[TypedExpr, IndexPropVar]:
+    ) -> IndexPropVar:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
             if not isinstance(a, IndexPropVar):
