@@ -87,6 +87,7 @@ jobs:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
     continue-on-error: true
+    environment: pytorchbot-env
     steps:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
