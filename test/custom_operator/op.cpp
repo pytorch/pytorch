@@ -77,5 +77,5 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
 }
 
 TORCH_LIBRARY_IMPL(custom, CPU, m) {
-  m.impl("sin", &custom_sin)
+  m.impl("sin", &custom_sin);
 }
