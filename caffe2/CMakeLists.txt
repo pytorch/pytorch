@@ -747,6 +747,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/options/transformer.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adadelta.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
