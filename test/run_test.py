@@ -1638,22 +1638,23 @@ def main():
             "cpp": options.cpp,
         }
 
-    test_times_dict = download_test_times(TEST_TIMES_FILE)
-    test_batches: List[TestBatch] = []
-
     class TestBatch:
+        """Defines a set of tests with similar priority that should be run together on the current shard"""
         name: str
-        sharded_test: List[ShardedTest]
+        sharded_tests: List[ShardedTest]
         failures: List[TestFailure]
 
         def __init__(self, name: str, raw_tests: List[str], should_sort_shard: bool):
             self.name = name
             self.failures = []
-            self.sharded_test = do_sharding(
+            self.sharded_tests = do_sharding(
                 options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
             )
 
-    # Each batch of tests will be run sequentially
+    test_times_dict = download_test_times(TEST_TIMES_FILE)
+    test_batches: List[TestBatch] = []
+
+    # Each batch will be run sequentially
     test_batches = [
         TestBatch("highly_relevant", test_prioritization.highly_relevant, False),
         TestBatch("probably_relevant", test_prioritization.probably_relevant, False),
@@ -1673,13 +1674,14 @@ def main():
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    # Actually run the tests
     try:
+        # Actually run the tests
         start_time = time.time()
         for test_batch in test_batches:
+            print(f"Starting test batch '{test_batch.name}'")
             metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
             run_tests(
-                test_batch.sharded_test, test_directory, options, test_batch.failures
+                test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
             metrics_dict[f"{test_batch.name}_failures"] = [
                 x.test for x in test_batch.failures
