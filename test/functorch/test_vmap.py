@@ -5174,6 +5174,27 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             torch.randn(*size) for size in sizes
         ], device=device)
 
+    # Creates an NT matching another NT's number of components and
+    # shape / ragged structure for all dims specified to be -1.
+    def _nt_from_similar(self, other, dims):
+        assert len(dims) == other.dim()
+        assert dims[0] == -1 or dims[0] == other.size(0)
+
+        ret_sizes = []
+        for t in other.unbind():
+            other_size = t.shape
+            ret_size = []
+            for i, d in enumerate(dims[1:]):
+                if d == -1:
+                    ret_size.append(other_size[i])
+                else:
+                    ret_size.append(d)
+            ret_sizes.append(ret_size)
+
+        return torch.nested.nested_tensor([
+            torch.randn(*size) for size in ret_sizes
+        ], device=other.device)
+
     @allowVmapFallbackUsage
     def test_fallback_unary(self, device):
         def f(x):
@@ -5208,6 +5229,28 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         x = self._create_nt([5, None, 3], device=device)
         y = torch.randn(5, 3, 4, device=device)
         self._vmap_test(f, (x, y))
+
+    def test_cat_batching_rule(self, device):
+        def f(x, y, dim):
+            return torch.cat([x, y], dim=dim)
+
+        # Different nested structure, same other dims
+        x = self._create_nt([3, None, 2], device=device)
+        y = self._create_nt([3, None, 2], device=device)
+        self._vmap_test(functools.partial(f, dim=0), (x, y))
+
+        x = self._create_nt([3, 2, None], device=device)
+        y = self._create_nt([3, 2, None], device=device)
+        self._vmap_test(functools.partial(f, dim=1), (x, y))
+
+        # Same nested structure, different other dims
+        x = self._create_nt([3, 2, None], device=device)
+        y = self._nt_from_similar(x, [-1, 4, -1])
+        self._vmap_test(functools.partial(f, dim=0), (x, y))
+
+        x = self._create_nt([3, None, 2], device=device)
+        y = self._nt_from_similar(x, [-1, -1, 4])
+        self._vmap_test(functools.partial(f, dim=1), (x, y))
 
     # .shape calls don't work on NTs
     # TODO: Fix this somehow?
