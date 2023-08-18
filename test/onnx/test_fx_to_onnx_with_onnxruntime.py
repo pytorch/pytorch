@@ -985,7 +985,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
-    def test_large_scale_exporter_with_tiny_gpt2(self):
+    def test_large_scale_exporter_with_gpt2(self):
         config = transformers.GPT2Config()
         device = "cpu"
         batch, seq = 4, 256
@@ -1004,7 +1004,93 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return {"return_dict": False}
 
         self._test_fake_tensor_mode_exporter(
-            "tiny_gpt2",
+            "huggingface_gpt2",
+            create_model,
+            create_args,
+            create_kwargs,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    def test_large_scale_exporter_with_t5(self):
+        config = transformers.T5Config(
+            vocab_size=8096,
+            d_model=64,
+            d_kv=8,
+            d_ff=128,
+            num_layers=4,
+            num_decoder_layers=None,
+            num_heads=4,
+            relative_attention_num_buckets=8,
+            relative_attention_max_distance=64,
+        )
+        device = "cpu"
+        batch, seq = 4, 256
+
+        def create_model() -> nn.Module:
+            return transformers.T5Model(config).to(device).eval()
+
+        def create_args():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            return input_ids, attention_mask, decoder_input_ids
+
+        def create_kwargs():
+            return {"return_dict": False}
+
+        self._test_fake_tensor_mode_exporter(
+            "huggiinface_google_t5",
+            create_model,
+            create_args,
+            create_kwargs,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    def test_large_scale_exporter_with_whisper(self):
+        config = transformers.WhisperConfig(
+            vocab_size=8096,
+            num_mel_bins=40,
+            encoder_layers=2,
+            encoder_attention_heads=2,
+            decoder_layers=2,
+            decoder_attention_heads=2,
+            decoder_ffn_dim=384,
+            encoder_ffn_dim=384,
+            d_model=64,
+            decoder_start_token_id=8001,
+            pad_token_id=8000,
+            bos_token_id=8000,
+            eos_token_id=8000,
+            begin_suppress_tokens=[220, 8000],
+        )
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=40)
+        device = "cpu"
+        batch = 4
+
+        def create_model() -> nn.Module:
+            return transformers.AutoModel.from_config(config).to(device).eval()
+
+        def create_args():
+            return ()
+
+        def create_kwargs():
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
+            )
+            decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
+            return {
+                "input_features": input_features,
+                "decoder_input_ids": decoder_input_ids,
+                "return_dict": False,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "huggiinface_google_t5",
             create_model,
             create_args,
             create_kwargs,
