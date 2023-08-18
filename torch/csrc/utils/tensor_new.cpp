@@ -89,7 +89,9 @@ Tensor new_with_storage(
   return tensor;
 }
 
-std::vector<int64_t> compute_sizes(PyObject* seq_or_set, ScalarType scalar_type) {
+std::vector<int64_t> compute_sizes(
+    PyObject* seq_or_set,
+    ScalarType scalar_type) {
   bool is_storage = isStorage(seq_or_set);
   std::vector<int64_t> sizes;
   while (PySequence_Check(seq_or_set) || PyAnySet_Check(seq_or_set)) {
@@ -102,7 +104,8 @@ std::vector<int64_t> compute_sizes(PyObject* seq_or_set, ScalarType scalar_type)
     }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
-      throw ValueError("too many dimensions '%s'", Py_TYPE(seq_or_set)->tp_name);
+      throw ValueError(
+          "too many dimensions '%s'", Py_TYPE(seq_or_set)->tp_name);
     }
     if (length == 0)
       break;
@@ -161,7 +164,8 @@ ScalarType infer_scalar_type(PyObject* obj) {
   }
   if (PySequence_Check(obj) || PyAnySet_Check(obj)) {
     c10::optional<ScalarType> scalarType;
-    auto wrapped_obj = THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
+    auto wrapped_obj =
+        THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
     if (!wrapped_obj)
       throw python_error();
     auto length = PySequence_Fast_GET_SIZE(wrapped_obj.get());
@@ -170,10 +174,10 @@ ScalarType infer_scalar_type(PyObject* obj) {
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
-    PyObject **items = PySequence_Fast_ITEMS(wrapped_obj.get());
+    PyObject** items = PySequence_Fast_ITEMS(wrapped_obj.get());
     for (const auto i : c10::irange(length)) {
       if (items[i] == obj)
-        throw TypeError("new(): self-referential containers are incompatible");
+        throw TypeError("new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(items[i]);
       scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
                                 : item_scalarType;
@@ -248,13 +252,13 @@ void recursive_store(
         (long long)size);
   }
 
-  PyObject **items = PySequence_Fast_ITEMS(wrapped.get());
+  PyObject** items = PySequence_Fast_ITEMS(wrapped.get());
   for (const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
     if (is_numpy_available() && PyArray_Check(items[i])) {
       TORCH_WARN_ONCE(
-          "Creating a tensor from a container of numpy.ndarrays is extremely slow. "
-          "Please consider converting the container to a single numpy.ndarray with "
+          "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
+          "Please consider converting the list to a single numpy.ndarray with "
           "numpy.array() before converting to a tensor.");
     }
 #endif
@@ -468,7 +472,8 @@ Tensor legacy_new_from_sequence(
     PyObject* data) {
   if (!PySequence_Check(data) && !PyAnySet_Check(data)) {
     throw TypeError(
-        "new(): data must be a sequence or set (got %s)", Py_TYPE(data)->tp_name);
+        "new(): data must be a sequence or set (got %s)",
+        Py_TYPE(data)->tp_name);
   }
   return internal_new_from_data(
       options,
