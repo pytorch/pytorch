@@ -1286,7 +1286,7 @@ class LSTMCell(RNNCellBase):
         if hx is not None:
             for idx, value in enumerate(hx):
                 if value.dim() not in (1, 2):
-                    raise ValueError(f"LSTMCell: Expected hidden{idx} to be 1D or 2D, got {value.dim()}D instead")
+                    raise ValueError(f"LSTMCell: Expected hx[{idx}] to be 1D or 2D, got {value.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)

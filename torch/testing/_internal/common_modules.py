@@ -2513,7 +2513,7 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
             ),
             error_on=ModuleErrorEnum.FORWARD_ERROR,
             error_type=ValueError,
-            error_regex="Expected hidden0 to be 1D or 2D, got 4D instead"
+            error_regex="Expected hx\\[0\\] to be 1D or 2D, got 4D instead"
         ),
     ]
     return samples
