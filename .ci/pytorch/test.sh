@@ -567,10 +567,11 @@ test_libtorch() {
 
   # The slow test config corresponds to a default test config that should run
   # the libtorch tests instead.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
+  if [[ "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libcaffe2_nvrtc.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -583,7 +584,8 @@ test_libtorch() {
       test_libtorch_api
     fi
 
-    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
+    # still disable rocm
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* && (-z "${SHARD}" || "${SHARD}" == "2") ]]; then
       test_libtorch_jit
     fi
 
