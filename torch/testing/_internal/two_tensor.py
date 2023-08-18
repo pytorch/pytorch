@@ -30,7 +30,7 @@ class TwoTensor(torch.Tensor):
         return f"TwoTensor({a_repr}, {b_repr})"
 
     def __tensor_flatten__(self):
-        return {"a": self.a, "b": self.b}, None
+        return ["a", "b"], None
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta):
