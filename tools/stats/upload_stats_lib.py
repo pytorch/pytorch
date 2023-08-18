@@ -23,6 +23,8 @@ S3_RESOURCE = boto3.resource("s3")
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
+# NB: Rockset has an upper limit of 5000 documents in one request
+BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -116,17 +118,29 @@ def download_gha_artifacts(
 
 
 def upload_to_rockset(
-    collection: str, docs: List[Any], workspace: str = "commons"
+    collection: str,
+    docs: List[Any],
+    workspace: str = "commons",
+    client: Any = None,
 ) -> None:
-    print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    client.Documents.add_documents(
-        collection=collection,
-        data=docs,
-        workspace=workspace,
-    )
+    if not client:
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+
+    index = 0
+    while index < len(docs):
+        from_index = index
+        to_index = min(from_index + BATCH_SIZE, len(docs))
+        print(f"Writing {to_index - from_index} documents to Rockset")
+
+        client.Documents.add_documents(
+            collection=collection,
+            data=docs[from_index:to_index],
+            workspace=workspace,
+        )
+        index += BATCH_SIZE
+
     print("Done!")
 
 
@@ -249,7 +263,7 @@ class EnvVarMetric:
         value = os.environ.get(self.env_var)
         if value is None and self.required:
             raise ValueError(
-                f"Missing {self.name}. Please set the {self.env_var}"
+                f"Missing {self.name}. Please set the {self.env_var} "
                 "environment variable to pass in this value."
             )
         if self.type_conversion_fn:
