@@ -599,7 +599,7 @@ def as_sparse_gradcheck(gradcheck):
             if d['layout'] is torch.sparse_coo:
                 # TODO: After fixing gh-107097, replace `.coalesce()`
                 # method call with `._coalesced_(True)`.
-                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).coalesce()
+                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape'])
             elif d['layout'] in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
                 dense_dim = d['original'].dense_dim()
                 batch_dim = d['compressed_indices'].ndim - 1
