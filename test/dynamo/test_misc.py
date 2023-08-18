@@ -11,6 +11,7 @@ import operator
 import os
 import random
 import sys
+import threading
 import traceback
 import typing
 import unittest
@@ -3296,6 +3297,17 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def _optimize_then_check_exp(
+        self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
+    ):
+        opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+        self.assertEqual(exp_out, opt_out)
+        self.assertEqual(cnt.frame_count, exp_frame_count)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            exp_n_cached_backend,
+        )
+
     def test_backend_match_guard(self):
         x = torch.randn([3, 4])
 
@@ -3312,24 +3324,70 @@ def fn():
         backends = [eager_record_backend, "eager"]
 
         # We intentionally don't reset dynamo for each backend so that we can test
-        # 1. dynamo doesn't recompile when backend stays the same
-        # 2. dynamo recompiles when backend changes
+        # 1. dynamo doesn't recompile when backend stays the same, i.e. frame_count doesn't increase
+        # 2. dynamo recompiles when backend changes, i.e. frame_count is non-zero for next backend
         def test_recompile(foo, *, exp_frame_count):
-            for backend in backends:
+            eager_result = foo(x)
+            for i, backend in enumerate(backends):
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
-                eager_result = foo(x)
-                opt_result = torch._dynamo.optimize(backend=cnt)(foo)(x)
-                opt_result2 = torch._dynamo.optimize(backend=cnt)(foo)(x)
-                opt_result3 = torch._dynamo.optimize(backend=cnt)(foo)(x)
-                self.assertEqual(eager_result, opt_result)
-                self.assertEqual(cnt.frame_count, exp_frame_count)
-                self.assertEqual(eager_result, opt_result2)
-                self.assertEqual(cnt.frame_count, exp_frame_count)
-                self.assertEqual(eager_result, opt_result3)
-                self.assertEqual(cnt.frame_count, exp_frame_count)
+                # Run opt_f multiple times to make sure dynamo doesn't recompile.
+                # Specifically, frame_count doesn't increase
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                )
 
         test_recompile(foo, exp_frame_count=1)
+        torch._dynamo.reset()
         test_recompile(foo_graph_break, exp_frame_count=2)
+
+    def test_backend_match_guard_multi_threads(self):
+        x = torch.randn([3, 4])
+
+        def foo(x):
+            return x.sin() + x.cos()
+
+        def compile_then_check_exp(*args):
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            thread_success[threading.current_thread()] = True
+
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
+
+        # Test dynamo recompiles but only caches a single backend for each thread
+        eager_result = foo(x)
+        exp_n_cached_backend = 1
+        exp_frame_count = 1
+        threads = []
+        thread_success = {}
+        for i, backend in enumerate(backends):
+            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            thread = threading.Thread(
+                target=compile_then_check_exp,
+                args=(
+                    foo,
+                    (x,),
+                    cnt,
+                    eager_result,
+                    exp_frame_count,
+                    exp_n_cached_backend,
+                ),
+            )
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(thread_success), len(threads))
 
     def test_dynamo_min_operator_with_shape(self):
         @torch._dynamo.optimize("eager", nopython=True)

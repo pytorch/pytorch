@@ -22,7 +22,6 @@ from torch._export.verifier import (
 @torch.no_grad()
 def capture(f, args):
     torchdynamo.config.allow_rnn = True
-    torchdynamo.reset()
     graphmodule, _ = torchdynamo.export(
         f,
         *copy.deepcopy(args),

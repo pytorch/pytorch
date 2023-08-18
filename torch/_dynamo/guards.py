@@ -75,10 +75,13 @@ CLOSURE_VARS = collections.OrderedDict(
             torch.are_deterministic_algorithms_enabled,
         ),
         ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
-        ("___current_backend", lambda: torch._dynamo.eval_frame.most_recent_backend),
+        (
+            "___current_backend",
+            lambda: torch._dynamo.eval_frame.guarded_backend_cache.most_recent_backend,
+        ),
         (
             "___lookup_backend",
-            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache[
+            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
                 backend_obj_id
             ],
         ),
@@ -525,7 +528,7 @@ class GuardBuilder(GuardBuilderBase):
         """Guard on backend matching based on id of most_recent_backend"""
         assert guard.source is GuardSource.GLOBAL
         code = [
-            f"___current_backend() == ___lookup_backend({id(torch._dynamo.eval_frame.most_recent_backend)})"
+            f"___current_backend() == ___lookup_backend({id(torch._dynamo.eval_frame.guarded_backend_cache.most_recent_backend)})"
         ]
         self._produce_guard_code(guard, code)
 

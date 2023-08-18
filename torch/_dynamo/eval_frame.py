@@ -92,9 +92,20 @@ class Unset(Enum):
 unset = Unset.token
 
 compile_lock = threading.RLock()
-most_recent_backend: Optional[CompilerFn] = None
-# Mapping id of a CompilerFn to itself
-guarded_backend_cache: Dict[int, CompilerFn] = {}
+guarded_backend_cache = threading.local()
+
+
+def _set_current_backend(backend: CompilerFn):
+    guarded_backend_cache.most_recent_backend = backend
+    # Mapping id of a CompilerFn to itself
+    cached_backends: Optional[Dict[int, CompilerFn]] = getattr(
+        guarded_backend_cache, "cached_backends", None
+    )
+    if cached_backends is None:
+        guarded_backend_cache.cached_backends = {}
+    guarded_backend_cache.cached_backends[id(backend)] = backend
+
+
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -407,9 +418,7 @@ class OptimizeContext(_TorchDynamoContext):
         compiler_config=None,
     ):
         def on_enter():
-            global most_recent_backend
-            most_recent_backend = compiler_fn
-            guarded_backend_cache[id(most_recent_backend)] = most_recent_backend
+            _set_current_backend(compiler_fn)
             install_generation_tagging_init()
 
         compiler_fn = innermost_fn(callback)
@@ -642,14 +651,13 @@ def explain(f, *extra_args, **extra_kwargs):
             nonlocal out_guards
             out_guards.extend(guards)
 
-        with patch(f"{__name__}.most_recent_backend", None):
-            opt_f = optimize(
-                dynamo_graph_accumulating_compiler,
-                nopython=False,
-                guard_export_fn=guard_export_print,
-            )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-            opt_f(*args, **kwargs)
+        opt_f = optimize(
+            dynamo_graph_accumulating_compiler,
+            nopython=False,
+            guard_export_fn=guard_export_print,
+        )(f)
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
 
@@ -1167,7 +1175,7 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        with config.patch(
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
