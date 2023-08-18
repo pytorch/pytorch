@@ -827,6 +827,10 @@ class _Ops(types.ModuleType):
         ``torch.ops.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
+        It is possible for the custom operator library to specify Python
+        modules that they are associated with. If we are loading such a library,
+        then we will also import all of the associated Python modules.
+
         Args:
             path (str): A path to a shared library to load.
         """
