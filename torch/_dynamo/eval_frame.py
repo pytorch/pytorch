@@ -14,6 +14,7 @@ import traceback
 import types
 import warnings
 import weakref
+from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -36,7 +37,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -97,6 +98,17 @@ DONT_WRAP_FILES = {
     inspect.getsourcefile(GraphModule),
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
+
+
+CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+
+
+def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+    """
+    Given a code object, retrieve the cache entries stored in this code.
+    """
+    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    return list(map(CacheEntry._make, cache_list))
 
 
 class OptimizedModule(torch.nn.Module):
@@ -239,7 +251,7 @@ class _TorchDynamoContext:
         if config.raise_on_ctx_manager_usage:
             raise RuntimeError(
                 "torch._dynamo.optimize(...) is used with a context manager. "
-                "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
+                "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
@@ -849,6 +861,205 @@ class ExportResult(NamedTuple):
     # destructuring so it is BC-breaking
 
 
+def check_signature_rewritable(graph):
+    input_errors = []
+    for node in graph.graph.nodes:
+        if node.op == "placeholder":
+            assert hasattr(node, "_dynamo_source")
+            source = node._dynamo_source
+            user_stacks = graph._source_to_user_stacks.get(source)
+            if user_stacks is None:
+                continue
+            assert len(user_stacks) > 0
+            # In some cases we may not have a useful stack.  Look for a
+            # useful stack
+            stack = None
+            for s in user_stacks:
+                if len(s) == 0:
+                    continue
+                stack = s
+                break
+            if stack is None:
+                msg = f"{source.name()}, a closed over free variable"
+            else:
+                tb = "".join(traceback.format_list(stack))
+                extra = ""
+                if len(user_stacks) > 1:
+                    extra = f"(elided {len(user_stacks)-1} more accesses)"
+                msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            # TODO: option to print ALL of the stack traces at once
+            input_errors.append(msg)
+
+    if input_errors:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Cannot export model which references tensors that are neither "
+            "buffers/parameters/constants nor are direct inputs.  For each tensor, if you'd "
+            "like this tensor to be an explicit input, add it as a dummy argument "
+            "to the top-level model definition you are exporting; if you would "
+            "like its value to be embedded as an exported constant, wrap its access "
+            "in a function marked with @assume_constant_result.\n\n"
+            + "\n\n".join(input_errors),
+        )
+
+
+def rewrite_signature(
+    f_sig,
+    graph,
+    fake_mode,
+    flat_args,
+    in_spec,
+    example_fake_inputs,
+    graph_captured_input,
+    graph_captured_output,
+    dynamo_traced_result,
+):
+    orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
+
+    def produce_matching(source_args, candidate_args, loc):
+        matched_elements_positions = []
+        dict_of_source_args = dict()
+        for i in range(0, len(source_args)):
+            element_id = id(source_args[i])
+            dict_of_source_args[element_id] = i
+
+        for i in range(0, len(candidate_args)):
+            arg = candidate_args[i]
+            # 1-element tensor arg can be unspec int/float
+            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                if id(arg) in dict_of_source_args:
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                elif id(arg.item()) in dict_of_source_args:
+                    matched_elements_positions.append(
+                        dict_of_source_args[id(arg.item())]
+                    )
+                else:
+                    raise AssertionError(
+                        f"Dynamo {loc} is not consistent with traced {loc}"
+                    )
+            else:
+                assert (
+                    id(arg) in dict_of_source_args
+                ), f"Dynamo {loc} is a strict subset of traced {loc}"
+                matched_elements_positions.append(dict_of_source_args[id(arg)])
+
+        return matched_elements_positions
+
+    matched_input_elements_positions = produce_matching(
+        flat_args, graph_captured_input, "input"
+    )
+
+    flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
+
+    assert graph_captured_output is not None
+    flat_both = list(graph_captured_output) + flat_args
+    matched_output_elements_positions = produce_matching(
+        flat_both, flat_results_traced, "output"
+    )
+
+    new_graph = FlattenInputOutputSignature(
+        graph,
+        flat_args,
+        matched_input_elements_positions,
+        matched_output_elements_positions,
+        example_fake_inputs,
+        fake_mode,
+    ).transform()
+
+    # Make dynamo graph to have same input/output spec as user code
+    def argument_names(f_sig, args, kwargs) -> List[str]:
+        def signature_to_fullargspec(sig: inspect.Signature):
+            # Get a list of Parameter objects from the Signature object
+            params = list(sig.parameters.values())
+            # Separate positional arguments, keyword-only arguments and varargs/varkw
+            args = [
+                p.name
+                for p in params
+                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            ]
+            kwonlyargs = [
+                p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+            ]
+            varargs = next(
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
+                None,
+            )
+            varkw = next(
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
+                None,
+            )
+            # Get default values for positional arguments and keyword-only arguments
+            defaults = tuple(
+                p.default
+                for p in params
+                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                and p.default is not inspect.Parameter.empty
+            )
+            kwonlydefaults = {
+                p.name: p.default
+                for p in params
+                if p.kind == inspect.Parameter.KEYWORD_ONLY
+                and p.default is not inspect.Parameter.empty
+            }
+            # Get annotations for parameters and return value
+            annotations = {}
+            if sig.return_annotation:
+                annotations = {"return": sig.return_annotation}
+            for parameter in params:
+                annotations[parameter.name] = parameter.annotation
+            # Return a FullArgSpec object with the extracted attributes
+            return inspect.FullArgSpec(
+                args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+            )
+
+        fullargspec = signature_to_fullargspec(f_sig)
+
+        # 1. Map `args` 1-to-1 to positional arguments in original signature.
+        input_strs = fullargspec.args[: len(args)]
+
+        if len(args) > len(fullargspec.args):
+            # 2. If there are more arguments left in `args`, they map to varargs in original
+            # signature. Assign names as {varargs}_0, {varargs}_1, ...
+            assert fullargspec.varargs is not None, "More arguments than expected"
+            input_strs += [
+                f"{fullargspec.varargs}_{i}"
+                for i in range(0, len(args) - len(input_strs))
+            ]
+        elif len(args) < len(fullargspec.args):
+            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+            # it implies these are arguments either with default values, or provided in
+            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+            # export them as part of the function signature. The latter will be handled
+            # in the next step.
+            for unprovided_arg in fullargspec.args[
+                len(args) : -len(fullargspec.defaults or [])
+            ]:
+                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+        # 4. Keyword arguments provided in `kwargs`.
+        input_strs += list(kwargs.keys())
+
+        # 5. Keyword-only arguments with default values if not provided are not exported
+        # as part of the function signature.
+        for kwonly_arg in fullargspec.kwonlyargs:
+            kwonlydefaults = fullargspec.kwonlydefaults or {}
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
+
+        return input_strs
+
+    new_graph.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            argument_names(f_sig, orig_args, orig_kwargs),
+            in_spec,
+            out_spec_traced,
+        )
+    )
+    new_graph.recompile()
+    return new_graph
+
+
 def export(
     f: Callable[..., Any],
     *extra_args,
@@ -860,7 +1071,7 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    fake_mode: fake_tensor.FakeTensorMode = None,
+    same_signature: bool = True,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -884,9 +1095,7 @@ def export(
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
-        fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
-        Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
+        same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
@@ -902,12 +1111,10 @@ def export(
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     # Deal with "local variable referenced before assignment"
-    _fake_mode = fake_mode
     _f = f
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        fake_mode = _fake_mode
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -921,46 +1128,11 @@ def export(
         f = innermost_fn(f)
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
         original_signature = inspect.signature(call_to_inspect)
-        assert (
-            not fake_mode or fake_mode.shape_env is not None
-        ), "The specified fake_mode must contain a valid shape_env"
         graph = None
         out_guards = None
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
-        fake_mode = fake_mode or _guards.detect_fake_mode(args)
-        _allow_fake_constant: bool = (
-            fake_mode is not None
-        )  # Allow fake constants during symbolic tracing
-
-        def produce_matching(source_args, candidate_args):
-            matched_elements_positions = []
-            dict_of_source_args = dict()
-            for i in range(0, len(source_args)):
-                element_id = id(source_args[i])
-                dict_of_source_args[element_id] = i
-
-            for i in range(0, len(candidate_args)):
-                arg = candidate_args[i]
-                # 1-element tensor arg can be unspec int/float
-                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                    if id(arg) in dict_of_source_args:
-                        matched_elements_positions.append(dict_of_source_args[id(arg)])
-                    elif id(arg.item()) in dict_of_source_args:
-                        matched_elements_positions.append(
-                            dict_of_source_args[id(arg.item())]
-                        )
-                    else:
-                        raise AssertionError(
-                            "Dynamo input/output is not consistent with traced input/output"
-                        )
-                else:
-                    assert (
-                        id(arg) in dict_of_source_args
-                    ), "Dynamo input and output is a strict subset of traced input/output"
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
-
-            return matched_elements_positions
+        fake_mode = None
 
         def guard_export_print(guards: Set[_guards.Guard]):
             nonlocal out_guards
@@ -981,7 +1153,12 @@ def export(
             graph = gm
 
             nonlocal fake_mode, example_inputs
-            fake_mode = fake_mode or _guards.detect_fake_mode(inner_example_inputs)
+            # NB: do NOT pass inner_example_inputs here, we are detecting the
+            # Dynamo allocated fake mode, which should be DISTINCT from a
+            # potential outer ambient fake mode which the user provided.
+            # example_inputs is always the user specified inputs, so they
+            # would have the wrong fake mode attached to them
+            fake_mode = _guards.detect_fake_mode()
             example_inputs = inner_example_inputs
 
             def result_capturing_wrapper(*graph_inputs):
@@ -995,6 +1172,8 @@ def export(
 
             return result_capturing_wrapper
 
+        # Note: This is needed by rewrite_signature. We need to put it before
+        # optimize_assert since user program may mutate the inputs.
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
         remove_from_cache(f)
@@ -1007,7 +1186,7 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-        ), torch._guards.export_fake_mode(fake_mode):
+        ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -1066,22 +1245,17 @@ def export(
         assert (
             graph is not None
         ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
+        assert hasattr(graph, "_source_to_user_stacks")
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        matched_input_elements_positions = produce_matching(
-            flat_args, graph_captured_input
-        )
+        # This check need to happend before aten_graph
+        # because placeholder's _source_node attribute is not preserved by make_fx
+        if same_signature:
+            check_signature_rewritable(graph)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
         example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
-        flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
-
-        assert graph_captured_result is not None
-        flat_both = list(graph_captured_result) + flat_args
-        matched_output_elements_positions = produce_matching(
-            flat_both, flat_results_traced
-        )
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace
@@ -1089,7 +1263,9 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with enable_python_dispatcher(), fake_mode:
+            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
+                fake_mode
+            ):
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
@@ -1097,123 +1273,32 @@ def export(
                         tracing_mode="real",
                         _allow_non_fake_inputs=True,
                         pre_dispatch=pre_dispatch,
-                        _allow_fake_constant=_allow_fake_constant,
+                        _allow_fake_constant=False,
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
                     raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
-        new_graph = FlattenInputOutputSignature(
-            graph,
-            flat_args,
-            matched_input_elements_positions,
-            matched_output_elements_positions,
-            example_fake_inputs,
-            fake_mode,
-        ).transform()
-
+        if same_signature:
+            graph = rewrite_signature(
+                original_signature,
+                graph,
+                fake_mode,
+                flat_args,
+                in_spec,
+                example_fake_inputs,
+                graph_captured_input,
+                graph_captured_result,
+                result_traced,
+            )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
-        new_graph.meta["input_shape_constraints"] = (
+        graph.meta["input_shape_constraints"] = (
             [constraint.serializable_spec for constraint in constraints]
             if constraints
             else []
         )
 
-        def signature_to_fullargspec(sig: inspect.Signature):
-            # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
-            # Separate positional arguments, keyword-only arguments and varargs/varkw
-            args = [
-                p.name
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            ]
-            kwonlyargs = [
-                p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
-            ]
-            varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
-                None,
-            )
-            varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
-                None,
-            )
-            # Get default values for positional arguments and keyword-only arguments
-            defaults = tuple(
-                p.default
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-                and p.default is not inspect.Parameter.empty
-            )
-            kwonlydefaults = {
-                p.name: p.default
-                for p in params
-                if p.kind == inspect.Parameter.KEYWORD_ONLY
-                and p.default is not inspect.Parameter.empty
-            }
-            # Get annotations for parameters and return value
-            annotations = {}
-            if sig.return_annotation:
-                annotations = {"return": sig.return_annotation}
-            for parameter in params:
-                annotations[parameter.name] = parameter.annotation
-            # Return a FullArgSpec object with the extracted attributes
-            return inspect.FullArgSpec(
-                args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
-            )
-
-        # Make dynamo graph to have same input/output spec as user code
-        def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
-            fullargspec = signature_to_fullargspec(original_signature)
-
-            # 1. Map `args` 1-to-1 to positional arguments in original signature.
-            input_strs = fullargspec.args[: len(args)]
-
-            if len(args) > len(fullargspec.args):
-                # 2. If there are more arguments left in `args`, they map to varargs in original
-                # signature. Assign names as {varargs}_0, {varargs}_1, ...
-                assert fullargspec.varargs is not None, "More arguments than expected"
-                input_strs += [
-                    f"{fullargspec.varargs}_{i}"
-                    for i in range(0, len(args) - len(input_strs))
-                ]
-            elif len(args) < len(fullargspec.args):
-                # 3. If there are fewer arguments in `args` than `fullargspec.args`,
-                # it implies these are arguments either with default values, or provided in
-                # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
-                # export them as part of the function signature. The latter will be handled
-                # in the next step.
-                for unprovided_arg in fullargspec.args[
-                    len(args) : -len(fullargspec.defaults or [])
-                ]:
-                    assert (
-                        unprovided_arg in kwargs
-                    ), f"Missing argument {unprovided_arg}"
-
-            # 4. Keyword arguments provided in `kwargs`.
-            input_strs += list(kwargs.keys())
-
-            # 5. Keyword-only arguments with default values if not provided are not exported
-            # as part of the function signature.
-            for kwonly_arg in fullargspec.kwonlyargs:
-                kwonlydefaults = fullargspec.kwonlydefaults or {}
-                assert (
-                    kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
-                ), f"Missing keyword only argument {kwonly_arg}"
-
-            return input_strs
-
-        new_graph.graph._codegen = _PyTreeCodeGen(
-            _PyTreeInfo(
-                argument_names(f, *args, **kwargs),
-                in_spec,
-                out_spec_traced,
-            )
-        )
-
-        new_graph.recompile()
-        return ExportResult(new_graph, out_guards)
+        return ExportResult(graph, out_guards)
 
     if extra_args or extra_kwargs:
         warnings.warn(

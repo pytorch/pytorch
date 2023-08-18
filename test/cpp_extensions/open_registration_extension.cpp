@@ -14,10 +14,12 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/CPUFallback.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/ops/view.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -231,6 +233,10 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   return dst;
 }
 
+at::Tensor custom__copy_from_and_resize(const at::Tensor& self, const at::Tensor& dst) {
+  return custom__copy_from(self, dst, false);
+}
+
 at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 c10::IntArrayRef stride,
                                 c10::optional<at::ScalarType> dtype_opt,
@@ -329,12 +335,22 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
+  m.impl("_copy_from_and_resize", &custom__copy_from_and_resize);
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("set_.source_Storage_storage_offset",&custom_set_source_Storage_storage_offset);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
+}
+
+void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  at::native::cpu_fallback(op, stack);
+}
+
+TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -379,14 +395,17 @@ at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
   return at::make_generator<PrivateGeneratorImpl>(device_index);
 }
 
-void register_generator() {
+void register_generator_first() {
+  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
+}
+
+void register_generator_second() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
 void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
-
 
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     ~FooHooksInterface() override = default;
@@ -423,6 +442,37 @@ void register_hook() {
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
 }
+
+struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
+
+  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
+    return self;
+  }
+
+  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+struct CustomAutogradFnAliasing : public torch::autograd::Function<CustomAutogradFnAliasing> {
+
+  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
+    return self.view_symint(self.sym_sizes());
+  }
+
+  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+at::Tensor custom_autograd_fn_returns_self(at::Tensor x) {
+  return CustomAutogradFnReturnsSelf::apply(x);
+}
+
+at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
+  return CustomAutogradFnAliasing::apply(x);
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -431,7 +481,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
-    m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
+    m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
@@ -440,4 +491,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
     m.def("register_hook", &register_hook, "register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
+
+    // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
+    m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);
+}
+
+TORCH_LIBRARY(_test_funcs, m) {
+  m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
+}
+TORCH_LIBRARY_IMPL(_test_funcs, AutogradCPU, m) {
+  m.impl("custom_autograd_fn_aliasing", &custom_autograd_fn_aliasing);
 }

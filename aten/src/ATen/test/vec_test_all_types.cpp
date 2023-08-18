@@ -1560,28 +1560,6 @@ namespace {
          }
       }
     }
-    TEST(HalfConversionTest, HalfFloat) {
-      float f32s[100];
-      for (const auto i : c10::irange(100)) {
-        f32s[i] = i + 0.3;
-      }
-      uint16_t u16;
-      float x;
-      for (const auto i : c10::irange(100)) {
-      #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-        u16 = at::vec::float2half_scalar(f32s[i]);
-        x = at::vec::half2float_scalar(u16);
-      #else
-        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
-        x = c10::detail::fp16_ieee_to_fp32_value(u16);
-      #endif
-
-        EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
-            << "Test failed for float to uint16 " << f32s[i] << "\n";
-        EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
-            << "Test failed for uint16 to float " << u16 << "\n";
-      }
-    }
 
 #else
 #error GTEST does not have TYPED_TEST

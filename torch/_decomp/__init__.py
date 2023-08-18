@@ -185,12 +185,15 @@ def get_decompositions(
                 # Prefer python dispatcher registration to C++ registrations.
                 # This mimicks the behavior of the Python Dispatcher, which is alway running
                 # during torch.compile
-                if torch._C.DispatchKey.CompositeImplicitAutograd in overload.py_kernels:
-                    python_kernel = overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
-                    decompositions[overload] = python_kernel
-                elif (
-                    has_composite_implicit_kernel(overload)
+                if (
+                    torch._C.DispatchKey.CompositeImplicitAutograd
+                    in overload.py_kernels
                 ):
+                    python_kernel = overload.py_kernels[
+                        torch._C.DispatchKey.CompositeImplicitAutograd
+                    ]
+                    decompositions[overload] = python_kernel
+                elif has_composite_implicit_kernel(overload):
                     # Our synthetic cpp decomp: uses OpOverload.decompose to call
                     # a CompositeImplicitAutograd kernel, if it exists.
                     def cpp_decomp(*args, curr_overload=overload, **kwargs):
@@ -220,6 +223,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.addcmul,
             aten.addcmul_,
             aten.addr,
+            aten.affine_grid_generator,
             aten.aminmax,
             aten.arange.default,
             aten.arange.start,
@@ -258,7 +262,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.glu_backward,
             aten.grid_sampler_2d,
             aten.hardshrink,
-            aten.hardshrink_backward,
             aten.hardsigmoid,
             aten.hardsigmoid_,
             aten.hardsigmoid_backward,
@@ -332,6 +335,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.renorm,
             aten.renorm_,
             aten.rot90,
+            aten.rrelu_with_noise,
+            aten.rrelu_with_noise_,
             aten.rsub.Scalar,
             aten.rsub.Tensor,
             aten.select_backward,
@@ -353,7 +358,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.softplus,
             aten.softplus_backward,
             aten.softshrink,
-            aten.softshrink_backward,
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
@@ -371,6 +375,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.triu_,
             aten.unfold_backward,
             aten.unfold_copy,
+            aten._unsafe_index,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
             aten.xlogy,
