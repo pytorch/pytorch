@@ -161,9 +161,6 @@ aten::_foreach_atan_
 aten::_foreach_ceil
 aten::_foreach_ceil.out
 aten::_foreach_ceil_
-aten::_foreach_clamp
-aten::_foreach_clamp.out
-aten::_foreach_clamp_
 aten::_foreach_clamp_max.List
 aten::_foreach_clamp_max.List_out
 aten::_foreach_clamp_max.Scalar
@@ -325,6 +322,7 @@ aten::_foreach_zero.out
 aten::_foreach_zero_
 aten::_functional_assert_async.msg
 aten::_functional_sym_constrain_range
+aten::_functional_sym_constrain_range_for_size
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam_
@@ -783,6 +781,8 @@ aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
 aten::hann_window.periodic_out
+aten::hardshrink_backward
+aten::hardshrink_backward.grad_input
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -1112,9 +1112,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rrelu_with_noise
-aten::rrelu_with_noise.out
-aten::rrelu_with_noise_
 aten::rsub.Scalar_out
 aten::rsub.Tensor_out
 aten::scalar_tensor
@@ -1169,6 +1166,8 @@ aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::softmax.int_out
+aten::softshrink_backward
+aten::softshrink_backward.grad_input
 aten::sort
 aten::sort.stable
 aten::sort.values

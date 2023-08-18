@@ -302,6 +302,9 @@ class IRNode:
     def get_numel(self):
         return sympy_product(self.get_size())
 
+    def is_zero_elements(self):
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+
     def realize(self):
         """
         If the IRNode refers to data which has not been materialized (e.g.,
@@ -389,9 +392,6 @@ class Loops(IRNode):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
-    def is_zero_elements(self):
-        return any(r == 0 for r in self.ranges)
-
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -407,8 +407,19 @@ class Loops(IRNode):
                 ).reads
 
 
+def nop_loader_fn(idx, *, dtype):
+    if dtype.is_floating_point:
+        return ops.constant(float("nan"), dtype)
+    else:
+        return ops.constant(0, dtype)
+
+
 class Pointwise(Loops):
     def make_loader(self):
+        # Make zero-element loops into a no-op
+        if self.is_zero_elements():
+            return partial(nop_loader_fn, dtype=self.dtype)
+
         return self.inner_fn
 
     def get_reduction_size(self):
@@ -418,7 +429,8 @@ class Pointwise(Loops):
         return None
 
     def store_output(self, output_name, indexer, vars):
-        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
+        loader = self.make_loader()
+        return ops.store(output_name, indexer(vars), loader(vars))
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -446,10 +458,11 @@ class Scatter(Pointwise):
         )
 
     def store_output(self, output_name, indexer, vars):
+        loader = self.make_loader()
         return ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
-            self.inner_fn(vars),
+            loader(vars),
             mode=self.scatter_mode,
         )
 
@@ -1254,7 +1267,7 @@ class Scan(Loops):
 
         def wrapper_fn(index, reduction_index):
             *pw_index, block_idx = index
-            elem_idx, = reduction_index
+            (elem_idx,) = reduction_index
             scan_index = block_size * block_idx + elem_idx
             original_idx = [*pw_index[:axis], scan_index, *pw_index[axis:]]
 
@@ -1338,6 +1351,7 @@ class Scan(Loops):
             return [*pointwise_idx, block_idx, elem_idx]
 
         return TensorBox.create(GenericView.create(final_result, size, final_reindex))
+
 
 # This is a hack to manually fuse tha last two steps of a multilayer scan.
 # Currently the scheduler can't fuse loops with different dimensionality, and
@@ -2374,7 +2388,14 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
+    def is_zero_elements(self):
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+
     def make_loader(self):
+        # Loading from a zero-element buffer is a no-op
+        if self.is_zero_elements():
+            return partial(nop_loader_fn, dtype=self.get_dtype())
+
         def loader(index):
             indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
@@ -3256,7 +3277,11 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
+        kernel_name = getattr(self, "kernel", None)
         lines = [
+            f"kernel={kernel_name!r}",
+        ]
+        lines += [
             f"{field.name}={getattr(self, field.name)}"
             for field in dataclasses.fields(self)
         ]
