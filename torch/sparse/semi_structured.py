@@ -193,7 +193,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.original_shape = original_shape
 
     def __tensor_flatten__(self):
-        return {'compressed_tensor': self.compressed_tensor}, (self.original_shape, self.transposed)
+        return ['compressed_tensor'], (self.original_shape, self.transposed)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta):

@@ -217,14 +217,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return {'_local_tensor': self._local_tensor}, self._spec
+        return ["_local_tensor"], self._spec
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, spec):
         assert (
             spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        assert isinstance(inner_tensors, (list, tuple)) and len(inner_tensors) == 1
+        assert isinstance(inner_tensors, dict) and len(inner_tensors) == 1
         local_tensor = inner_tensors['_local_tensor']
         return DTensor(
             local_tensor,

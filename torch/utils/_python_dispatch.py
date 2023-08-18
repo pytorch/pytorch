@@ -130,20 +130,35 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 def is_traceable_wrapper_subclass(t):
-    # In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
-    # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
-
+    """
+    Returns whether or not a tensor subclass that implements __torch_dispatch__
+    is 'traceable' with torch.compile.
+    In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
+    It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
+    It is also expected to obey some restrictions around traceability and aliasing
+    (TODO: add clear documentation around this.)
+    """
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
 def transform_subclass(t, callback):
-    assert is_traceable_wrapper_subclass(t), f"Expects traceable wrapper subclass but got {type(t)}"
-    # convert the tensor subclass into its constituent dense tensors,
-    # and apply a transformation to each dense tensor.
-    flattened_tensors_dict, ctx = type(t).__tensor_flatten__(t)
+    """
+    Given a traceable, wrapper tensor subclass `t` that implements __torch_dispatch__
+    and holds some inner tensors,
+    and a callback of type Callable[[str, torch.Tensor], torch.Tensor],
+    `transform_subclass` will construct a fresh instance of the wrapper tensor subclass.
+    It will do so by grabbing each inner tensor attribute from the wrapper,
+    passing them into `callback` to get a transformed tensor,
+    and putting each transformed tensor into the fresh tensor subclass instance.
+
+    Note: this function will **not** handle ensuring that the fresh subclass
+    gets the same (autograd, and aliasing) metadata as the original tensor.
+    This is generally handled in other subsystems like AOTAutograd.
+    """
+    attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
-    for k, v in flattened_tensors_dict.items():
-        transformed_tensors_dict[k] = callback(k, v)
+    for attr in attrs:
+        transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
     return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
 def _correct_storage_aliasing(func, args, outs):
