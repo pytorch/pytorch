@@ -37,7 +37,7 @@ bin_ops_under_test = [
     torch._foreach_div,
     torch._foreach_maximum,
 ]
-un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg]
+un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
@@ -223,7 +223,7 @@ class ForeachTests(TestCase):
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops

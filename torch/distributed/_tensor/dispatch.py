@@ -85,9 +85,10 @@ def pack_args_kwargs_with_local_tensor(
         if isinstance(arg, dtensor.DTensor):
             if redistribute_with_schema:
                 target_spec = flatten_args_schema[i]
-                arg = redistribute_dtensor(
-                    arg, target_spec.mesh, target_spec.placements
-                )
+                if arg._spec != target_spec:
+                    arg = redistribute_dtensor(
+                        arg, target_spec.mesh, target_spec.placements
+                    )
 
             # reuse the schema list and update it with local tensor
             flatten_args_schema[i] = arg._local_tensor
@@ -143,6 +144,7 @@ def _operator_dispatch(
 
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
+    op_schema_hash = hash(op_schema)
 
     output_sharding = sharding_propagator.propagate(op_call, op_schema)
 
@@ -159,7 +161,7 @@ def _operator_dispatch(
     # tensors before calling the local op
     assert output_sharding.schema_suggestions is not None
     suggested_input_schema = output_sharding.schema_suggestions[0]
-    needs_redistribute = suggested_input_schema is not op_schema
+    needs_redistribute = hash(suggested_input_schema) != op_schema_hash
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
