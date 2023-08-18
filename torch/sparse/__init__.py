@@ -28,7 +28,6 @@ __all__ = [
     'log_softmax',
     'SparseSemiStructuredTensor',
     'to_sparse_semi_structured',
-    'enable_sparse_outputs',
 ]
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
@@ -496,32 +495,3 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
                 return mth(*args, **kwargs)
 
         return test_mth
-
-
-def enable_sparse_outputs(gradcheck):
-    """Decorator for torch.autograd.gradcheck or its functools.partial
-    variants that extends the specified gradcheck function with a
-    support to input functions that may return sparse tensors.
-    """
-    # TODO: move this functionality to torch.autograd.gradcheck?
-
-    def gradcheck_with_sparse_outputs(*args, **kwargs):
-        func = args[0]
-        masked_grad = kwargs.get('masked', False)
-        sparse_layouts = {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-
-        def func_wrapper(*args, **kwargs):
-            # convert differentiable sparse output tensors to strided
-            # tensors:
-            orig_outputs = func(*args, **kwargs)
-            outputs = tuple(orig_outputs) if isinstance(orig_outputs, (list, tuple)) else (orig_outputs,)
-            outputs = tuple((torch.Tensor.to_dense(o, masked_grad=masked_grad)
-                             if o.requires_grad and o.layout in sparse_layouts else o)
-                            for o in outputs)
-            return outputs if isinstance(orig_outputs, (list, tuple)) else outputs[0]
-
-        args = (func_wrapper, *args[1:])
-
-        return gradcheck(*args, **kwargs)
-
-    return gradcheck_with_sparse_outputs

@@ -32,6 +32,7 @@ import numpy as np
 import torch._logging
 import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
+from torch._logging import LazyString
 from . import config
 
 
@@ -1527,16 +1528,6 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
-
-
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
 
 
 def lazy_format_graph_code(name, gm, maybe_id=None):
