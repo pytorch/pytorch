@@ -2143,6 +2143,7 @@ def merge_view_inputs(
     if len(base_args) == 0:
         assert len(other_args) == len(fwd_inputs)
         # If no synthetic bases are necessary, just return the original inputs.
+        import pdb; pdb.set_trace()
         return fwd_inputs, None
     else:
         # Otherwise, return:
@@ -2164,6 +2165,7 @@ def merge_view_inputs(
         # Quick assert: every argument in the inner calling convention should be accounted for.
         for x in post_processed_calling_convention_meta:
             assert x != -1
+        import pdb; pdb.set_trace()
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
@@ -2697,6 +2699,8 @@ fw_metadata={str(fw_metadata)}
         args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             args, fw_metadata.input_info, is_inference=is_inference
         )
+        if synthetic_base_info is None:
+            import pdb; pdb.set_trace()
         assert synthetic_base_info is not None
         aliased_args_w_metadata_mutations = [args[i] for i in aliased_arg_idx_with_metadata_mutations]
         args.clear()
