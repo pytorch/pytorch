@@ -1,8 +1,7 @@
 import shutil
 
 import torch
-import torch._dynamo
-import torch._inductor
+import torch._export
 
 
 class Net(torch.nn.Module):
@@ -23,7 +22,6 @@ with torch._dynamo.config.patch(dynamic_shapes=False):
     torch._dynamo.reset()
 
     with torch.no_grad():
-        module, _ = torch._dynamo.export(Net().cuda(), x, y)
-        lib_path = torch._inductor.aot_compile(module, [x, y])
+        lib_path, module = torch._export.aot_compile(Net().cuda(), (x, y))
 
 shutil.copy(lib_path, "libaot_inductor_output.so")

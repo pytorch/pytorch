@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -647,6 +646,13 @@ The eigenvalues are returned in ascending order.
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
+
+.. warning:: User may see pytorch crashes if running `eigh` on CUDA devices with CUDA versions before 12.1 update 1
+             with large ill-conditioned matrices as inputs.
+             Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
+             If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
+             or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
+             try other supported backends.
 
 .. seealso::
 
@@ -2590,7 +2596,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inverse(A)
+    >>> Ainv = torch.linalg.inv(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

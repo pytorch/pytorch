@@ -228,7 +228,7 @@ class TestSubclass(TestCase):
             def __new__(
                 cls, t: torch.Tensor
             ):
-                r = super(NonRewrappingTensor, cls)._make_wrapper_subclass(
+                r = super()._make_wrapper_subclass(
                     cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
                 return r
 

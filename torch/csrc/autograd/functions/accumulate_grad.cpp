@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -56,6 +57,37 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
 
+  return variable_list();
+}
+
+void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
+  if (args.cond(variable.defined() && variable.requires_grad())) {
+    args.collect(variable);
+    args.collect(variable.grad());
+  }
+}
+variable_list AccumulateGrad::apply_with_saved(
+    const variable_list& grads,
+    SwapSavedVariables& saved) {
+  if (!(variable.defined() && variable.requires_grad()) ||
+      !grads[0].defined()) {
+    return variable_list();
+  }
+  TORCH_INTERNAL_ASSERT(!variable.grad_fn() && grads.size() == 1);
+  at::Tensor variable_copy = variable;
+  at::Tensor grad_copy = variable.grad();
+  saved.before(variable_copy);
+  saved.before(grad_copy);
+  accumulateGrad(
+      variable_copy,
+      grad_copy,
+      grads[0],
+      0 /* num_expected_refs, 0 disables aliased reuse */,
+      [&saved, this](const at::Tensor& grad_update) {
+        saved.assign_mutable_grad(variable, grad_update);
+      });
+  saved.after(variable_copy);
+  saved.after(grad_copy);
   return variable_list();
 }
 
