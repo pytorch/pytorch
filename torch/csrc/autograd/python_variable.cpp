@@ -683,6 +683,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
                      options.device()) // TODO: this shouldn't be necessary if
                                        // it came from options
                  .options(options)
+                 .allocator(c10::GetAllocator(c10::kMeta))
+                 .resizeable_storage()
                  .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
