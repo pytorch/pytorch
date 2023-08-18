@@ -6226,7 +6226,6 @@ class CommonTemplate:
         )
 
     def test_index_dynamic_shapes(self):
-
         # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = arg0_1.unsqueeze(0)
@@ -6656,7 +6655,9 @@ class CommonTemplate:
             batch_size, seq_length = input_shape
             past_key_values_length = 0
             mask_seq_length = past_key_values_length + seq_length
-            attention_mask = torch.ones(batch_size, mask_seq_length, device=input_ids.device)
+            attention_mask = torch.ones(
+                batch_size, mask_seq_length, device=input_ids.device
+            )
             attention_mask = attention_mask.long()
             return torch.cumsum(attention_mask, dim=1)
 
