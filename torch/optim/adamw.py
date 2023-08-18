@@ -313,7 +313,7 @@ def adamw(
     if fused is None and foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
         # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and torch.is_tensor(lr) and not capturable:
+        if foreach and isinstance(lr, Tensor) and not capturable:
             foreach = False
     if fused is None:
         fused = False
@@ -375,6 +375,12 @@ def _single_tensor_adamw(
 ):
 
     assert grad_scale is None and found_inf is None
+
+    if torch.jit.is_scripting():
+        # this assert is due to JIT being dumb and not realizing that the ops below
+        # have overloads to handle both float and Tensor lrs, so we just assert it's
+        # a float since most people using JIT are using floats
+        assert isinstance(lr, float)
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]

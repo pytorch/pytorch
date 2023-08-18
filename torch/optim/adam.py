@@ -348,6 +348,12 @@ def _single_tensor_adam(params: List[Tensor],
 
     assert grad_scale is None and found_inf is None
 
+    if torch.jit.is_scripting():
+        # this assert is due to JIT being dumb and not realizing that the ops below
+        # have overloads to handle both float and Tensor lrs, so we just assert it's
+        # a float since most people using JIT are using floats
+        assert isinstance(lr, float)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]

@@ -325,10 +325,16 @@ aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
 aten::_fused_adam
 aten::_fused_adam.out
+aten::_fused_adam.tensor_lr
+aten::_fused_adam.tensor_lr_out
 aten::_fused_adam_
+aten::_fused_adam_.tensor_lr
 aten::_fused_adamw
 aten::_fused_adamw.out
+aten::_fused_adamw.tensor_lr
+aten::_fused_adamw.tensor_lr_out
 aten::_fused_adamw_
+aten::_fused_adamw_.tensor_lr
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
