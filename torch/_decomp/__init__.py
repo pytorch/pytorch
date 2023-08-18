@@ -223,7 +223,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.gelu_,
             aten.gelu_backward,
             aten.glu_backward,
-            # aten.grid_sampler_2d,
             aten.hardshrink,
             aten.hardshrink_backward,
             aten.hardsigmoid,
