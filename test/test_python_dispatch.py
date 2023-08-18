@@ -744,7 +744,8 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
         x = LoggingTensor(torch.ones(1))
-        self.assertRaises(RuntimeError, lambda: x.storage())
+        storage = x.untyped_storage()
+        self.assertRaises(RuntimeError, lambda: storage.data_ptr())
 
     def test_make_wrapper_subclass_noalloc(self) -> None:
         # This is ludicrously big (8TB) and this should pass because wrapper
@@ -909,8 +910,8 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
         def f_to_trace(x_a, x_b, y):
             x = TwoTensor(x_a, x_b)
             out1, out2 = f(x, y)
-            out1_unwrapped, _ = out1.__tensor_flatten__()
-            return (*out1_unwrapped.values(), out2)
+            out1_unwrapped_attrs, _ = out1.__tensor_flatten__()
+            return (*[getattr(out1, attr) for attr in out1_unwrapped_attrs], out2)
         fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
         self.assertExpectedInline(fx_g.code, """\
 
