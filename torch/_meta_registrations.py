@@ -2974,6 +2974,11 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
+@register_meta([aten._foreach_copy_])
+def meta__foreach_copy_inplace(self, src, non_blocking=False):
+    _check_foreach_binop_tensor_lists(self, src)
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
