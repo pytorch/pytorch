@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import functools
 
 import torch
 
@@ -8,6 +9,8 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
+from torch._dynamo.testing import normalize_gm
+from torch._functorch.aot_autograd import to_fun
 
 
 class MockSubclass(torch.Tensor):
@@ -16,6 +19,17 @@ class MockSubclass(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+class EagerRecordGraphAndInputs:
+    def __init__(self):
+        self.graphs = []
+        self.example_inputs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        self.example_inputs.append(example_inputs)
+        return gm
 
 
 @contextlib.contextmanager
@@ -129,6 +143,83 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 3)
 
+    def test_compile_with_functionalization(self):
+        x = torch.randn([3, 4])
+        x_clone = x.clone()
+        x_clone2 = x.clone()
+        backend = EagerRecordGraphAndInputs()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return x.add_(1.0) + torch.nn.functional.relu_(x)
+
+        f_out = f(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.example_inputs), 1)
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        add_ = l_x_.add_(1.0)
+        relu_ = torch.relu_(l_x_);  l_x_ = None
+        add = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+"""
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertEqual(actual, expected)
+
+        ff = torch.func.functionalize(f)
+        ff_out = ff(x_clone)
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.example_inputs), 2)
+        actual = normalize_gm(backend.graphs[1].print_readable(print_output=False))
+        self.assertEqual(actual, expected)
+        self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
+
+        def aot_f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    return func(*func_args, **func_kwargs)
+                finally:
+                    torch._disable_functionalization()
+
+            return wrapper
+
+        aot_ff = aot_f_wrapper(f)
+        aot_ff_out = aot_ff(x_clone2)
+
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 9)
+        self.assertEqual(len(backend.graphs), 3)
+        self.assertEqual(len(backend.example_inputs), 3)
+        actual = normalize_gm(backend.graphs[2].print_readable(print_output=False))
+        self.assertEqual(actual, expected)
+        self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
+
+        self.assertEqual(f_out, ff_out)
+        self.assertEqual(f_out, aot_ff_out)
+
+        try:
+            torch._enable_functionalization(reapply_views=False)
+            xf = pytree.tree_map(to_fun, x)
+            x_view = xf.t()
+            with self.assertRaisesRegex(RuntimeError, "Cannot safely fakify a view"):
+                f(x_view)
+        finally:
+            torch._disable_functionalization()
+
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
         # Also adds additional guards on the inner tensor's sizes.
@@ -159,7 +250,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 self.inner_elem = inner
 
             def __tensor_flatten__(self):
-                return {"inner_elem": self.inner_elem}, None
+                return ["inner_elem"], None
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, _):
@@ -174,7 +265,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
 
                 args_inner = pytree.tree_map_only(
-                    torch.Tensor, lambda x: x.inner_elem, args
+                    DoubleSizeMaybeAddGeThreeTensor, lambda x: x.inner_elem, args
                 )
                 out_inner = func(*args_inner, **kwargs)
 
@@ -226,17 +317,15 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
         expected_var_to_val = {
-            "s0": 8,
-            "s1": 4,
+            "s0": 4,
         }
         expected_var_to_sources = {
-            "s0": "L['x'].size()[0]",
-            "s1": "L['x'].inner_elem.size()[0]",
+            "s0": "L['x'].inner_elem.size()[0]",
         }
         # lower bound comes from code underneath torch_dispatch  (operating on the inner tensor size)
-        expected_lower_bound = "s1 > 3"
+        expected_lower_bound = "s0 > 3"
         # upper bound comes from user code (operating on the wrapper size)
-        expected_upper_bound = "2*s1 < 10"
+        expected_upper_bound = "2*s0 < 10"
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
         self.assertEqual(lower_bound_str, expected_lower_bound)

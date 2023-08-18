@@ -538,7 +538,7 @@ def clone_tensor(x):
 def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
-    if isinstance(x, torch._subclasses.FakeTensor):
+    if is_fake(x):
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
