@@ -29,6 +29,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 
@@ -481,6 +482,22 @@ static int THPVariable_clear(THPVariable* self) {
         grad_acc->pre_hooks().clear();
         grad_acc->tensor_pre_hooks().clear();
         grad_acc->retains_grad_hooks().clear();
+      }
+
+      if (auto* extra_meta =
+              tensor.unsafeGetTensorImpl()->maybe_get_extra_meta()) {
+        if (auto* sym_meta = extra_meta->symbolic_shape_meta_.get()) {
+          sym_meta->sizes_.clear();
+          sym_meta->strides_.clear();
+          sym_meta->numel_ = 0;
+          sym_meta->storage_offset_ = 0;
+          sym_meta->is_contiguous_ = false;
+          sym_meta->is_channels_last_contiguous_ = false;
+          sym_meta->is_channels_last_3d_contiguous_ = false;
+          sym_meta->is_channels_last_ = false;
+          sym_meta->is_channels_last_3d_ = false;
+          sym_meta->is_non_overlapping_and_dense_ = false;
+        }
       }
     }
   }
@@ -2067,6 +2084,72 @@ static int THPVariable_subclass_traverse(
           if (auto pyhook =
                   dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
             Py_VISIT(pyhook->dict);
+          }
+        }
+      }
+      // Symbolic sizes can contain Python objects, make sure to traverse them
+      // NB: we don't use the public APIs since those can trigger arbitrary
+      // Python code
+      if (auto* extra_meta =
+              tensor.unsafeGetTensorImpl()->maybe_get_extra_meta()) {
+        if (auto* sym_meta = extra_meta->symbolic_shape_meta_.get()) {
+          auto extract_symint =
+              [](const SymInt& s) -> PyObject* {
+                if (s.is_heap_allocated()) {
+                  if (auto py_node =
+                          dynamic_cast<torch::impl::PythonSymNodeImpl*>(
+                              s.toSymNodeImplUnowned())) {
+                    return py_node->getPyObj().ptr();
+                  }
+                }
+                return nullptr;
+              };
+          auto extract_symbool =
+              [&](const SymBool& s) -> PyObject* {
+                if (auto py_node =
+                        dynamic_cast<torch::impl::PythonSymNodeImpl*>(
+                            s.toSymNodeImplUnowned())) {
+                  return py_node->getPyObj().ptr();
+                }
+                return nullptr;
+              };
+
+          for (const auto& s : sym_meta->sizes_) {
+            if (auto* p = extract_symint(s)) {
+              Py_VISIT(p);
+            }
+          }
+          for (const auto& s : sym_meta->strides_) {
+            if (auto* p = extract_symint(s)) {
+              Py_VISIT(p);
+            }
+          }
+          if (auto* p = extract_symint(sym_meta->numel_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symint(sym_meta->storage_offset_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_contiguous_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_channels_last_contiguous_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_channels_last_contiguous_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_channels_last_3d_contiguous_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_channels_last_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_channels_last_3d_)) {
+            Py_VISIT(p);
+          }
+          if (auto* p = extract_symbool(sym_meta->is_non_overlapping_and_dense_)) {
+            Py_VISIT(p);
           }
         }
       }
