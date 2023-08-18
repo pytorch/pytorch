@@ -2074,6 +2074,15 @@ class TestTensorCreation(TestCase):
         res1 = torch.tensor([1, 1])
         self.assertEqual(res1, expected, exact_dtype=False)
 
+        # test from set
+        lst = [1, 2, 3]
+        from_lst = torch.tensor(lst)
+        from_st = torch.tensor(set(lst))
+        from_frozen_st = torch.tensor(frozenset(lst))
+        self.assertEqual(from_st, from_lst)
+        self.assertEqual(from_frozen_st, from_lst)
+
+
         res1 = torch.tensor([1, 1], dtype=torch.int)
         self.assertEqual(res1, expected, exact_dtype=False)
         self.assertIs(torch.int, res1.dtype)
