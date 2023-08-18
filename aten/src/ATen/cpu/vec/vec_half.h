@@ -1,10 +1,14 @@
+#pragma once
+
 #include <ATen/cpu/vec/intrinsics.h>
+
 namespace at {
 namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+    !defined(__APPLE__)
 inline uint16_t float2half_scalar(float val) {
 #if defined(CPU_CAPABILITY_AVX2)
   __m256 v = _mm256_set1_ps(val);

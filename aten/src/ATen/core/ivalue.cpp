@@ -872,26 +872,29 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
 
-
-IValue IValue::deepcopy() const {
+IValue IValue::deepcopy(c10::optional<at::Device> device) const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo);
+  return deepcopy(memo, device);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo) const {
+    IValue::HashAliasedIValueMap& memo,
+    c10::optional<at::Device> device) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
   IValue copy;
   switch(tag) {
-    case IValue::Tag::Tensor:
-      copy = IValue(toTensor().clone());
-      break;
+    case IValue::Tag::Tensor: {
+      const at::Tensor& src_tensor = toTensor();
+      copy = device.has_value() && !src_tensor.device().is_meta()
+          ? IValue(src_tensor.to(*device))
+          : IValue(src_tensor.clone());
+    } break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.emplace_back(e.deepcopy(memo));
+        copied_tuple.emplace_back(e.deepcopy(memo, device));
       }
       copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
@@ -900,7 +903,7 @@ IValue IValue::deepcopy(
       auto list = toList();
       auto copied_list = c10::impl::GenericList(list.elementType());
       for (IValue v : list) {
-        copied_list.push_back(v.deepcopy(memo));
+        copied_list.push_back(v.deepcopy(memo, device));
       }
       copy = IValue(copied_list);
     }
@@ -909,7 +912,9 @@ IValue IValue::deepcopy(
       auto dict = toGenericDict();
       auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
       for (const auto& entry : dict) {
-        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
+        copied_dict.insert(
+            entry.key().deepcopy(memo, device),
+            entry.value().deepcopy(memo, device));
       }
       copy = IValue(copied_dict);
     }
@@ -924,7 +929,7 @@ IValue IValue::deepcopy(
         auto state = class_type->getMethod("__getstate__")({*this});
         class_type->getMethod("__setstate__")({copy, std::move(state)});
       } else {
-        copy = IValue(toObject()->deepcopy(memo));
+        copy = IValue(toObject()->deepcopy(memo, device));
       }
     } break;
     case IValue::Tag::Enum: {
@@ -932,7 +937,7 @@ IValue IValue::deepcopy(
       copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
           enum_holder->type(),
           enum_holder->name(),
-          enum_holder->value().deepcopy(memo)));
+          enum_holder->value().deepcopy(memo, device)));
     } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
@@ -1005,12 +1010,15 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
   return object;
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
+    c10::optional<at::Device> device) const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo);
+  return deepcopy(memo, device);
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
+    IValue::HashAliasedIValueMap& memo,
+    c10::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -1028,7 +1036,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
             "this class.";
       AT_ERROR(err.str());
     }
-    object->setSlot(i, slots_[i].deepcopy(memo));
+    object->setSlot(i, slots_[i].deepcopy(memo, device));
   }
   return object;
 }

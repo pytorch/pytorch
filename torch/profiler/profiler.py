@@ -9,6 +9,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -96,6 +97,10 @@ class _KinetoProfile:
         self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
+        self.use_device = None
+        privateuse1_backend = _get_privateuse1_backend_name()
+        if privateuse1_backend != "privateuseone":
+            self.use_device = privateuse1_backend
 
     def start(self):
         self.prepare_trace()
@@ -109,6 +114,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
+            use_device=None,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -256,6 +262,9 @@ class _KinetoProfile:
         Output: File written as JSON or gzipped JSON
         """
         # Default to device 0, if unset. Fallback on cpu.
+        if device is None and self.use_device and self.use_device != "cuda":
+            device = self.use_device + ":0"
+
         if device is None:
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
