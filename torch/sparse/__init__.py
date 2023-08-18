@@ -28,8 +28,11 @@ __all__ = [
     'log_softmax',
     'SparseSemiStructuredTensor',
     'to_sparse_semi_structured',
+<<<<<<< HEAD
+=======
     'enable_sparse_outputs',
-    'enable_sparse_support',
+    'as_sparse_gradcheck',
+>>>>>>> 7f918758817... Add torch.sparse.enable_sparse_support decorator of gradcheck that allows gradcheck input function to recieve and return sparse tensors
 ]
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
@@ -499,35 +502,7 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
         return test_mth
 
 
-def enable_sparse_outputs(gradcheck):
-    """Decorator for torch.autograd.gradcheck or its functools.partial
-    variants that extends the specified gradcheck function with a
-    support to input functions that may return sparse tensors.
-    """
-
-    def gradcheck_with_sparse_outputs(*args, **kwargs):
-        func = args[0]
-        masked_grad = kwargs.get('masked', False)
-        sparse_layouts = {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-
-        def func_wrapper(*args, **kwargs):
-            # convert differentiable sparse output tensors to strided
-            # tensors:
-            orig_outputs = func(*args, **kwargs)
-            outputs = tuple(orig_outputs) if isinstance(orig_outputs, (list, tuple)) else (orig_outputs,)
-            outputs = tuple((torch.Tensor.to_dense(o, masked_grad=masked_grad)
-                             if o.requires_grad and o.layout in sparse_layouts else o)
-                            for o in outputs)
-            return outputs if isinstance(orig_outputs, (list, tuple)) else outputs[0]
-
-        args = (func_wrapper, *args[1:])
-
-        return gradcheck(*args, **kwargs)
-
-    return gradcheck_with_sparse_outputs
-
-
-def enable_sparse_support(gradcheck):
+def as_sparse_gradcheck(gradcheck):
     """Decorator for torch.autograd.gradcheck or its functools.partial
     variants that extends the gradcheck function with support to input
     functions that operate on or/and return sparse tensors. The specified
@@ -537,15 +512,6 @@ def enable_sparse_support(gradcheck):
     def gradcheck_with_sparse_support(func, inputs, **kwargs):
         """Same as :func:`torch.autograd.gradcheck` but with sparse tensors
         inputs and outputs support.
-
-        .. note::
-
-            When ``masked == False``, the gradients of unspecified
-            elements of sparse tensors are not ignored. This means
-            that the input sparse tensors will be "densified" before
-            computing numerical jacobians. The densified sparse tensor
-            is a copy of a sparse tensor with all unspecified elements
-            being materialized with zero value.
         """
         masked = masked_grad = kwargs.pop('masked', False)
         sparse_layouts = {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
@@ -566,17 +532,12 @@ def enable_sparse_support(gradcheck):
                         return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
                     else:
                         # Materialize unspecified elements with zero values
-                        full_nnz = obj.shape[:obj.sparse_dim()].numel()
-                        full_values = torch.zeros((full_nnz, *values.shape[1:]), dtype=values.dtype, device=values.device)
-                        if values.numel() > 0:
-                            strides = torch.empty(obj.shape[:obj.sparse_dim()]).stride()
-                            flatten_indices = (torch.tensor([strides], device=indices.device, dtype=indices.dtype).T
-                                               * indices).sum(0)
-                            full_values[flatten_indices] = values
-                        full_indices = torch.ones(obj.shape[:obj.sparse_dim()],
-                                                  device=indices.device, dtype=torch.int8).nonzero().to(dtype=indices.dtype).T
-                        d.update(indices=full_indices)
-                        return (STRIDED_REPRESENTATION, d, full_values.requires_grad_(True))
+                        full_obj = torch.ones(obj.shape, dtype=obj.dtype, device=obj.device).to_sparse(
+                            layout=torch.sparse_coo, dense_dim=obj.dense_dim())
+                        full_obj.values().sub_(1)
+                        full_obj += obj
+                        d.update(indices=full_obj.indices())
+                        return (STRIDED_REPRESENTATION, d, full_obj.values().requires_grad_(True))
                 elif obj.layout is torch.sparse_csr:
                     compressed_indices = obj.crow_indices()
                     plain_indices = obj.col_indices()
@@ -591,7 +552,6 @@ def enable_sparse_support(gradcheck):
                             plain_indices=plain_indices)
                         return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
                     else:
-
                         batch_shape = obj.shape[:batch_dim]
                         dense_shape = values.shape[batch_dim + 1:]
                         full_nnz = obj.shape[batch_dim:batch_dim + 2].numel()
@@ -649,9 +609,11 @@ def enable_sparse_support(gradcheck):
                 batch_dim = d['compressed_indices'].ndim - 1
                 if batch_dim == 0 and dense_dim > 0:
                     # TODO: remove this if-block after gh-107373 is fixed
-                    # TODO: use to_sparse(..., dense_dim=dense_dim) after gh-107451 is fixed.
                     r = torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).to_sparse(layout=d['layout'])
-                    assert r.dense_dim() == dense_dim, (r.dense_dim(), dense_dim)  # TODO: remove after gh-107451 is fixed
+                    # TODO: use to_sparse(..., dense_dim=dense_dim)
+                    # and remove the assert below after gh-107451 is
+                    # fixed.
+                    assert r.dense_dim() == dense_dim, (r.dense_dim(), dense_dim)
                     return r
                 return torch.sparse_compressed_tensor(d['compressed_indices'], d['plain_indices'], values,
                                                       size=d['shape'], layout=d['layout'])
@@ -693,8 +655,8 @@ def enable_sparse_support(gradcheck):
             outputs = func(*restored_args, **kwargs)
 
             strided_outputs = tuple(outputs) if isinstance(outputs, (list, tuple)) else (outputs,)
-            strided_outputs = tuple((torch.Tensor.to_dense(o, masked_grad=masked_grad)
-                                     if o.requires_grad and o.layout in sparse_layouts else o)
+            strided_outputs = tuple((o.to_dense(masked_grad=masked_grad)
+                                     if isinstance(o, torch.Tensor) and o.requires_grad and o.layout in sparse_layouts else o)
                                     for o in strided_outputs)
 
             return strided_outputs if isinstance(outputs, (list, tuple)) else strided_outputs[0]

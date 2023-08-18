@@ -1339,8 +1339,7 @@ function, decorate the function with
     :toctree: generated
     :nosignatures:
 
-    sparse.enable_sparse_outputs
-    sparse.enable_sparse_support
+    sparse.as_sparse_gradcheck
 
 Unary functions
 ---------------
