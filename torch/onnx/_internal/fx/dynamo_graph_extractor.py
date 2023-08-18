@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 from typing import (
@@ -63,10 +64,11 @@ class _PyTreeExtensionContext:
         Raises:
             AssertionError: If the custom python type is already registered.
         """
-        assert (
-            class_type not in pytree.SUPPORTED_NODES
-            and class_type not in self._extensions
-        ), "PyTree node already registered"
+        if class_type in pytree.SUPPORTED_NODES or class_type in self._extensions:
+            # PyTree node already registered.
+            # E.g., `huggingface/transformer` registers `ModelOutput` as PyTree node after
+            # https://github.com/huggingface/transformers/pull/25358.
+            return
         self._extensions[class_type] = (flatten_func, unflatten_func)
 
     def _register_huggingface_model_output_extension(self):
@@ -187,15 +189,20 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Translate callable to FX graph.
         #
-        fake_mode = options.fake_context.fake_mode if options.fake_context else None
-        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
-        graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model,
-            *model_args,
-            tracing_mode=fx_mode,
-            fake_mode=fake_mode,
-            **model_kwargs,
+        fake_mode = (
+            options.fake_context.fake_mode
+            if options.fake_context
+            else contextlib.nullcontext()
         )
+        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
+        with fake_mode:  # type: ignore[attr-defined]
+            graph_module, graph_guard = torch._dynamo.export(
+                wrapped_model,
+                tracing_mode=fx_mode,
+            )(
+                *model_args,
+                **model_kwargs,
+            )
         del graph_guard  # Unused
         torch._dynamo.reset()
 

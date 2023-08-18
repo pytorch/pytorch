@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import abc
+
 import dataclasses
 import inspect
 import logging
@@ -28,7 +30,7 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.node import Node  # noqa: F401
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
 
 logger = logging.getLogger(__name__)
@@ -78,51 +80,27 @@ def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
     return val
 
 
-class TypePromotionRule:
-    """Defines how to perform type promotion for 'torch.ops.{namespace}.{op_name}'."""
+class TypePromotionRule(abc.ABC):
+    """Base class for type promotion rule per 'torch.ops.{namespace}.{op_name}'."""
 
-    def __init__(
-        self,
-        namespace: str,
-        op_name: str,
-        promote_args_positions: Sequence[int],
-        promote_kwargs_names: Sequence[str],
-        promotion_kind: _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND,
-    ):
-        """Constructs a TypePromotionRule.
-
-        Args:
-            namespace: Namespace of the op. E.g. 'aten' in 'torch.ops.aten.add'.
-            op_name: Name of the op. E.g. 'add' in 'torch.ops.aten.add'.
-            promote_args_positions: Positions of args to promote.
-            promote_kwargs_names: Names of kwargs to promote.
-            promotion_kind: Type promotion kind. Refer to [_prims_common.elementwise_dtypes](https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py) for detail.  # noqa: B950
-        """
+    def __init__(self, namespace: str, op_name: str):
         self.namespace = namespace
         self.op_name = op_name
-        self.promote_args_positions = promote_args_positions
-        self.promote_kwargs_names = promote_kwargs_names
-        self.promotion_kind = promotion_kind
 
+    # Make this abstract as well because subclass needs to override __eq__().
+    # A class that overrides __eq__() and does not define __hash__() will have its __hash__() implicitly set to None.
+    # Ref: https://docs.python.org/3/reference/datamodel.html#object.__hash__
+    @abc.abstractmethod
     def __hash__(self) -> int:
-        return f"{self.namespace}.{self.op_name}".__hash__()
+        ...
 
+    @abc.abstractmethod
     def __repr__(self):
-        return (
-            f"TypePromotionRule('{self.namespace}', '{self.op_name}', {self.promote_args_positions}, "
-            f"{self.promote_kwargs_names}, {self.promotion_kind})"
-        )
+        ...
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, TypePromotionRule):
-            return False
-        return (
-            self.namespace == __value.namespace
-            and self.op_name == __value.op_name
-            and self.promote_args_positions == __value.promote_args_positions
-            and self.promote_kwargs_names == __value.promote_kwargs_names
-            and self.promotion_kind == __value.promotion_kind
-        )
+    @abc.abstractmethod
+    def __eq__(self, other: Any) -> bool:
+        ...
 
     def is_valid(self) -> bool:
         """Check if the rule is valid."""
@@ -145,6 +123,7 @@ class TypePromotionRule:
 
         return True
 
+    @abc.abstractmethod
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
@@ -153,7 +132,57 @@ class TypePromotionRule:
         Returns a TypePromotionSnapshot object that contains the promoted dtypes for
         the arguments and the expected output dtype.
         """
+        ...
 
+
+class ElementwiseTypePromotionRule(TypePromotionRule):
+    """Defines how to perform elementwise type promotion for 'torch.ops.{namespace}.{op_name}'."""
+
+    def __init__(
+        self,
+        namespace: str,
+        op_name: str,
+        promote_args_positions: Sequence[int],
+        promote_kwargs_names: Sequence[str],
+        promotion_kind: _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND,
+    ):
+        """Constructs a TypePromotionRule for elementwise operators.
+
+        Args:
+            namespace: Namespace of the op. E.g. 'aten' in 'torch.ops.aten.add'.
+            op_name: Name of the op. E.g. 'add' in 'torch.ops.aten.add'.
+            promote_args_positions: Positions of args to promote.
+            promote_kwargs_names: Names of kwargs to promote.
+            promotion_kind: Type promotion kind. Refer to [_prims_common.elementwise_dtypes](https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py) for detail.  # noqa: B950
+        """
+        super().__init__(namespace, op_name)
+        self.promote_args_positions = promote_args_positions
+        self.promote_kwargs_names = promote_kwargs_names
+        self.promotion_kind = promotion_kind
+
+    def __repr__(self):
+        return (
+            f"ElementwiseTypePromotionRule('{self.namespace}', '{self.op_name}', "
+            f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
+        )
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, ElementwiseTypePromotionRule):
+            return False
+        return (
+            self.namespace == __value.namespace
+            and self.op_name == __value.op_name
+            and self.promote_args_positions == __value.promote_args_positions
+            and self.promote_kwargs_names == __value.promote_kwargs_names
+            and self.promotion_kind == __value.promotion_kind
+        )
+
+    def __hash__(self) -> int:
+        return f"{type(self)}:{self.namespace}.{self.op_name}".__hash__()
+
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
         candidate_args = {
             i: args[i]
             for i in self.promote_args_positions
@@ -178,7 +207,7 @@ class TypePromotionRule:
         )
 
 
-class DivTypePromotionRule(TypePromotionRule):
+class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     """Reference type promotion rule from torch._refs.div.
 
     Rule depends on the value of the `rounding_mode` argument.
@@ -214,6 +243,116 @@ class DivTypePromotionRule(TypePromotionRule):
         raise ValueError(f"Unknown rounding_mode: {rounding_mode}")
 
 
+class ReductionTypePromotionRule(TypePromotionRule):
+    def __init__(
+        self,
+        namespace: str,
+        op_name: str,
+        promotion_kind: _prims_common.REDUCTION_OUTPUT_TYPE_KIND,
+    ):
+        """Constructs a TypePromotionRule for reduction operators.
+
+        Args:
+            namespace: Namespace of the op. E.g. 'aten' in 'torch.ops.aten.sum'.
+            op_name: Name of the op. E.g. 'sum' in 'torch.ops.aten.sum'.
+            promotion_kind: Type promotion kind. Refer to [_prims_common.reduction_dtypes]((https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py)) for detail.  # noqa: B950
+        """
+        super().__init__(namespace, op_name)
+        self.promotion_kind = promotion_kind
+
+    def __repr__(self):
+        return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, ElementwiseTypePromotionRule):
+            return False
+        return (
+            self.namespace == __value.namespace
+            and self.op_name == __value.op_name
+            and self.promotion_kind == __value.promotion_kind
+        )
+
+    def __hash__(self) -> int:
+        return f"{type(self)}:{self.namespace}.{self.op_name}".__hash__()
+
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
+        assert len(args) >= 1 and isinstance(
+            arg := args[0], torch.Tensor
+        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+
+        computation_dtype, result_dtype = _prims_common.reduction_dtypes(
+            arg, self.promotion_kind, dtype
+        )
+        if result_dtype is None:
+            # Inspecting code, this can only happen when `promotion_kind` is `KEEP_PROMOTED_TYPE`.
+            # Hence set same as computation_dtype.
+            result_dtype = computation_dtype
+
+        return TypePromotionSnapshot(
+            {0: computation_dtype},
+            {},
+            result_dtype,
+        )
+
+
+class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
+    """Reference type promotion rule from torch.ops.aten.all or torch.ops.aten.any.
+
+    This is a special case where computation dtype is always torch.bool.
+    The result dtype is always uint8 if `dtype` kwarg is uint8, otherwise torch.bool.
+    """
+
+    def __init__(self, op_name: str):
+        super().__init__(
+            "aten",
+            op_name,
+            _prims_common.REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL,
+        )
+
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
+        assert len(args) >= 1 and isinstance(
+            arg := args[0], torch.Tensor
+        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        computation_dtype = torch.bool
+        # Preserves uint8 -- probably a legacy mask thing
+        result_dtype = torch.uint8 if arg.dtype == torch.uint8 else torch.bool
+        return TypePromotionSnapshot(
+            {0: computation_dtype},
+            {},
+            result_dtype,
+        )
+
+
+class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
+    """Reference type promotion rule from torch.ops.aten.sum.
+
+    This is a special case where computation dtype is always torch.int64 for integral arg,
+    unless overridden by `dtype` kwarg.
+    """
+
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
+        assert len(args) >= 1 and isinstance(
+            arg := args[0], torch.Tensor
+        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+        # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
+        if dtype is None:
+            if _prims_common.is_boolean_dtype(
+                arg.dtype
+            ) or _prims_common.is_integer_dtype(arg.dtype):
+                dtype = torch.int64
+            else:
+                dtype = arg.dtype
+        return super().preview_type_promotion(args, {"dtype": dtype})
+
+
 # NOTE: [Update type promotion rule]
 # BELOW TABLE IS GENERATED FROM `TypePromotionRuleSetGenerator.generate_from_torch_refs`.
 # DO NOT EDIT MANUALLY !!!
@@ -224,634 +363,664 @@ class DivTypePromotionRule(TypePromotionRule):
 # 3. If rules are still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
 # Check `TypePromotionRule` class for how each rule is defined and used.
 _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "abs", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "abs_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "acos", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "acos_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "acosh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "acosh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "add", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "add_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "addcdiv", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "addcdiv_", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "addcmul", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "addcmul_", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "addr", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "asin", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "asin_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "asinh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "asinh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atan", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atan2", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atan2_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atan_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atanh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "atanh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_and", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_and_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "bitwise_left_shift",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "bitwise_left_shift_",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_not", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_not_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_or", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_or_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "bitwise_right_shift",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "bitwise_right_shift_",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_xor", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "bitwise_xor_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cat", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cauchy", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cauchy_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "ceil", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "ceil", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "ceil_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "celu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "celu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "celu_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "clamp", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "clamp_", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "copysign", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "copysign_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cos", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cos_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cosh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "cosh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "deg2rad", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "deg2rad_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "digamma", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "digamma_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule("aten", "elu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule("aten", "elu_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "elu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "elu_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "eq", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "eq_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erf", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erf_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erfc", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erfc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erfinv", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "erfinv_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exp", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exp2", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exp2_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exp_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "expm1", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "expm1_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exponential", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "exponential_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "fill", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "floor", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "floor_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "floor_divide", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "floor_divide_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "fmax", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "fmin", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "fmod", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "fmod_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "frac", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "frac", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "frac_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "gcd", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "gcd_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "ge", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "ge_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule("aten", "gelu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "gelu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "geometric", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "geometric_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "glu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "glu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "gt", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "gt_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "hardtanh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "heaviside", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "heaviside_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "huber_loss", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "hypot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "hypot_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "i0", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "i0_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "igamma", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "igamma_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "igammac", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "igammac_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isfinite", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isinf", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isnan", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isneginf", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isposinf", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "isreal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "l1_loss", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lcm", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lcm_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "le", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "le_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "leaky_relu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lerp", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lerp_", [0, 1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lgamma", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lgamma_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log10", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log10_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log1p", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log1p_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log2", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log2_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log_normal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "log_normal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logaddexp", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logaddexp2", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_and", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_and_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_not", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_not_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_or", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_or_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_xor", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logical_xor_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logit", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "logsumexp", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lt", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "lt_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "maximum", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "minimum", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "mish", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "mish", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "mish_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "mse_loss", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "mul", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "mul_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "ne", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "ne_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule("aten", "neg", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule("aten", "neg_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "neg", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "neg_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "nextafter", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "nextafter_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "nll_loss", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "normal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "normal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "pdist", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "poisson_nll_loss",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "pow", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "pow_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "prelu", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "rad2deg", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "rad2deg_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "reciprocal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "reciprocal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule("aten", "relu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "relu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "remainder", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "remainder_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "round", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "rsqrt", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule("aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "selu_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule("aten", "sgn", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule("aten", "sgn_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "sgn", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "sgn_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "sigmoid", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sigmoid_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule("aten", "sign", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
+        "aten", "sign", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "sign_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "signbit", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sin", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sin_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sinc", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sinc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sinh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sinh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "smooth_l1_loss",
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "softplus", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sqrt", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "square", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "square_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "sub_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "tan", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "tan_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "tanh", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "tanh_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "threshold", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "threshold_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "true_divide", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "true_divide_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "trunc", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "trunc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "where", [1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "xlogy", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten", "xlogy_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
 }
@@ -861,14 +1030,14 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
 _EXTRA_TYPE_PROMOTION_RULE_SET = {
     # torch._refs skips type promotion decoration for `clamp_min` and `clamp_max` since
     # the call is routed to the decorated `aten.clamp` op.
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "clamp_max",
         promote_args_positions=(0, 1),
         promote_kwargs_names=(),
         promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    TypePromotionRule(
+    ElementwiseTypePromotionRule(
         "aten",
         "clamp_min",
         promote_args_positions=(0, 1),
@@ -877,12 +1046,62 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
     ),
     # torch.ops.aten.div.Tensor_mode applies different type promotion rules
     # depending on the value of the `mode` argument.
-    DivTypePromotionRule(),
+    DivElementwiseTypePromotionRule(),
+    # Manually curating reduction ops since the logic is written inside the op reference
+    # implementation.
+    AllOrAnyReductionTypePromotionRule("all"),
+    AllOrAnyReductionTypePromotionRule("any"),
+    ReductionTypePromotionRule(
+        "aten",
+        "amax",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
+    ReductionTypePromotionRule(
+        "aten",
+        "amin",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
+    # torch.ops.aten.mean is a special case that does not need type promotion.
+    ReductionTypePromotionRule(
+        "aten",
+        "std",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+    ),
+    ReductionTypePromotionRule(
+        "aten",
+        "std_mean",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+    ),
+    ReductionTypePromotionRule(
+        "aten",
+        "var",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+    ),
+    SumLikeReductionTypePromotionRule(
+        "aten",
+        "cumprod",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
+    SumLikeReductionTypePromotionRule(
+        "aten",
+        "cumsum",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
+    SumLikeReductionTypePromotionRule(
+        "aten",
+        "prod",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
+    SumLikeReductionTypePromotionRule(
+        "aten",
+        "sum",
+        promotion_kind=_prims_common.REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    ),
 }
 
 
-class TypePromotionRuleSetGenerator:
-    """Hackly distilling info from reference ops decorated with type promotion rule.
+class ElementwiseTypePromotionRuleSetGenerator:
+    """Hackly distilling info from reference ops decorated with elementwise type promotion rule.
 
     The goal is to retrieve the decorator
 
@@ -898,7 +1117,7 @@ class TypePromotionRuleSetGenerator:
     """
 
     @classmethod
-    def generate_from_torch_refs(cls) -> Set[TypePromotionRule]:
+    def generate_from_torch_refs(cls) -> Set[ElementwiseTypePromotionRule]:
         """Parse type promotion rules from reference ops under torch._C._refs."""
         rule_set = set()
         rule_set.update(cls._parse_torch_refs(_refs))
@@ -909,7 +1128,9 @@ class TypePromotionRuleSetGenerator:
         return rule_set
 
     @classmethod
-    def _parse_torch_refs(cls, ref_module: ModuleType) -> Set[TypePromotionRule]:
+    def _parse_torch_refs(
+        cls, ref_module: ModuleType
+    ) -> Set[ElementwiseTypePromotionRule]:
         logger.info("Processing module: %s", ref_module.__name__)
         rule_set = set()
         for name in ref_module.__all__:
@@ -924,7 +1145,7 @@ class TypePromotionRuleSetGenerator:
     def _parse_type_promotion_rule_from_refs_op(
         cls,
         decorated_op: Callable,
-    ) -> Optional[TypePromotionRule]:
+    ) -> Optional[ElementwiseTypePromotionRule]:
         """Retrieve and parse type promotion decorator from op under torch._refs."""
         fn = decorated_op
         type_promo_wrapper = None
@@ -958,7 +1179,7 @@ class TypePromotionRuleSetGenerator:
                             promote_kwargs_names.append(name)
                     pos += 1
 
-            return TypePromotionRule(
+            return ElementwiseTypePromotionRule(
                 "aten",
                 decorated_op.__name__,
                 promote_args_positions=promote_args_positions,
@@ -996,7 +1217,7 @@ class TypePromotionTable:
             ValueError: If the rule is invalid.
         """
         if not rule.is_valid():
-            raise ValueError("Invalid type promotion rule: {}".format(rule))
+            raise ValueError(f"Invalid type promotion rule: {rule}")
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
     @_beartype.beartype
@@ -1039,7 +1260,7 @@ def get_type_promotion_rule(
         )
         return None
 
-    diagnostic.with_additional_message(f"Found type promotion rule: {rule}")
+    diagnostic.info("Found type promotion rule: %s", rule)
     return rule
 
 
@@ -1215,12 +1436,15 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                     )
                     node.replace_all_uses_with(output_cast_node)
                     output_cast_node.args = (node,)
-                    diagnostic.with_additional_message(
-                        f"Node '{node}' output dtype becomes {new_node_val.dtype} due to op math. "
-                        f"Cast back to {expected_out_dtype}."
+                    diagnostic.info(
+                        "Node '%s' output dtype becomes %s due to op math. "
+                        "Cast back to %s.",
+                        node,
+                        new_node_val.dtype,
+                        expected_out_dtype,
                     )
 
-        elif isinstance(node_val, proxy_tensor.py_sym_types):
+        elif fx_type_utils.is_torch_symbolic_type(node_val):
             raise NotImplementedError(
                 "Type promotion does not support node output of sym types."
             )
@@ -1241,33 +1465,68 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
     ) -> torch.fx.node.Argument:
         """Promote fx_arg to dtype if necessary."""
         if dtype is None:
-            diagnostic.with_additional_message(
-                f"Argument {fx_arg} is not promoted. Not mentioned by type promotion rule."
+            diagnostic.info(
+                "Argument %s is not promoted. Not mentioned by type promotion rule.",
+                fx_arg,
             )
             return fx_arg
 
         if isinstance(fx_arg, torch.fx.Node):
             arg_val = self.env[fx_arg]
-            if (old_dtype := arg_val.dtype) != dtype:
-                # Promote tensor to dtype.
-                graph = node.graph
-                with graph.inserting_before(node):
-                    diagnostic.with_additional_message(
-                        f"Argument {fx_arg}({old_dtype}) is promoted to {dtype}."
-                    )
-                    return self._create_node(
-                        graph,
-                        "call_function",
-                        torch.ops.prims.convert_element_type.default,
-                        (fx_arg,),
-                        {"dtype": dtype},
-                    )
-            diagnostic.with_additional_message(
-                f"Argument {fx_arg} is not promoted. Already {dtype}."
-            )
-            return fx_arg
+            if isinstance(arg_val, torch.Tensor):
+                if (old_dtype := arg_val.dtype) != dtype:
+                    # Promote tensor to dtype.
+                    graph = node.graph
+                    with graph.inserting_before(node):
+                        diagnostic.info(
+                            "Argument %s(%s) is promoted to %s.",
+                            fx_arg,
+                            old_dtype,
+                            dtype,
+                        )
+                        return self._create_node(
+                            graph,
+                            "call_function",
+                            torch.ops.prims.convert_element_type.default,
+                            (fx_arg,),
+                            {"dtype": dtype},
+                        )
+                diagnostic.info(
+                    "Argument %s is not promoted. Already %s.", fx_arg, dtype
+                )
+                return fx_arg
+            elif fx_type_utils.is_torch_symbolic_type(arg_val):
+                arg_type = type(arg_val)
+                equivalent_dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                    arg_type
+                )
+                assert equivalent_dtype is not None, f"Unexpected arg_type: {arg_type}"
+                if equivalent_dtype != dtype:
+                    # Promote Sym number to tensor of dtype.
+                    graph = node.graph
+                    with graph.inserting_before(node):
+                        diagnostic.info(
+                            "Argument %s(Scalar of equivalent dtype: %s) "
+                            "is promoted to %s.",
+                            fx_arg,
+                            equivalent_dtype,
+                            dtype,
+                        )
+                        return self._create_node(
+                            graph,
+                            "call_function",
+                            torch.ops.aten.scalar_tensor.default,
+                            (fx_arg,),
+                            {"dtype": dtype},
+                        )
+                diagnostic.info(
+                    "Argument %s is not promoted. Already %s.", fx_arg, dtype
+                )
+                return fx_arg
         elif (
-            equivalent_dtype := _SCALAR_TYPE_TENSOR_DTYPE_MAP.get(type(fx_arg), None)
+            equivalent_dtype := fx_type_utils.from_scalar_type_to_torch_dtype(
+                type(fx_arg)
+            )
         ) is not None:
             if equivalent_dtype != dtype:
                 # Promote number to tensor of dtype.
@@ -1275,28 +1534,32 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 # the type promotion rule should not suggest promoting this arg.
                 graph = node.graph
                 with graph.inserting_before(node):
-                    target = getattr(torch.ops.aten.tensor, type(fx_arg).__name__)
-                    diagnostic.with_additional_message(
-                        f"Argument {fx_arg}(Scalar of equivalent dtype: {equivalent_dtype}) "
-                        f"is promoted to {dtype}."
+                    diagnostic.info(
+                        "Argument %s(Scalar of equivalent dtype: %s) "
+                        "is promoted to %s.",
+                        fx_arg,
+                        equivalent_dtype,
+                        dtype,
                     )
                     return self._create_node(
-                        graph, "call_function", target, (fx_arg,), {"dtype": dtype}
+                        graph,
+                        "call_function",
+                        torch.ops.aten.scalar_tensor.default,
+                        (fx_arg,),
+                        {"dtype": dtype},
                     )
-            diagnostic.with_additional_message(
-                f"Argument {fx_arg} is not promoted. Already {dtype}."
-            )
+            diagnostic.info("Argument %s is not promoted. Already %s.", fx_arg, dtype)
             return fx_arg
         elif isinstance(fx_arg, (tuple, list)):
-            diagnostic.with_additional_message(
-                f"Argument {fx_arg} is a tuple/list. Promoting each element."
+            diagnostic.info(
+                "Argument %s is a tuple/list. Promoting each element.", fx_arg
             )
             return type(fx_arg)(
                 self._maybe_promote_arg(diagnostic, node, fx_arg_elem, dtype)
                 for fx_arg_elem in fx_arg
             )
-        else:
-            raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
+
+        raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
 
     @_beartype.beartype
     def _maybe_promote_node(
@@ -1392,19 +1655,6 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
-        """Detect fake mode from the graph.
-
-        Scan through all nodes in graph and their meta['val'] to detect fake mode.
-        """
-        fake_tensors = []
-        for node in self.module.graph.nodes:
-            try:
-                fake_tensors.append(_fake_tensor_from_node_val(node))
-            except RuntimeError:
-                continue
-        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
-
     def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
         """Fetch fake args from fx graph.
 
@@ -1440,12 +1690,13 @@ class InsertTypePromotion(_pass.Transform):
         )
         assert not kwargs, "`kwargs` is not supported"
 
-        fake_tensor_mode = self._detect_fake_mode() or fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=True
-        )
         fake_args = self._fetch_fake_args()
+        fake_mode = self.fake_mode
+        assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with fake_tensor_mode, fx_traceback.preserve_node_meta():
+        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
+            fake_mode
+        ), fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module

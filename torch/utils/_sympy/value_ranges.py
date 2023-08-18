@@ -1,5 +1,4 @@
 import dataclasses
-from copy import deepcopy
 import itertools
 import sympy
 from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
@@ -7,7 +6,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -82,6 +81,20 @@ class ValueRanges:
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+
+    def tighten(self, other: "ValueRanges"):
+        """Given two ValueRanges, returns their intersection"""
+        # Some invariants
+        if other == ValueRanges.unknown():
+            return self
+        if self == ValueRanges.unknown():
+            return other
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+        return range
 
     # Intersection
     def __and__(self, other):
@@ -162,15 +175,27 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def constant(value, dtype):
         # NB: value is NOT a sympy expression, it's a constant!
-        assert isinstance(value, (int, float, bool))
+        is_python = isinstance(value, (int, float, bool))
+        assert is_python or isinstance(value, (BooleanAtom, sympy.Integer, sympy.Number))
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if math.isnan(value):
             return ValueRanges.unknown()
 
-        type_ = dtype_to_type(dtype)
-        value = type_(value)
+        if is_python:
+            type_ = dtype_to_type(dtype)
+            value = type_(value)
+        else:
+            # We do a type check on a best-effort basis
+            # We don't want to force a cast to sympy.Float if the value is Rational to avoid losing precision
+            if dtype == torch.bool:
+                assert isinstance(value, BooleanAtom)
+            elif dtype.is_floating_point:
+                assert not value.is_finite or value.is_real
+            else:
+                # dtype is intXX
+                assert value.is_integer
 
         return ValueRanges.wrap(value)
 
@@ -314,7 +339,9 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.wrap(r)
 
         if b == 0:
-            type_ = sympy.Float if a.lower.is_Float else sympy.Integer
+            if not a.lower.is_finite:
+                return ValueRanges.unknown()
+            type_ = sympy.Float if a.lower.is_real else sympy.Integer
             return ValueRanges.wrap(type_(1))
 
         if b < 0:
@@ -381,15 +408,32 @@ class SymPyValueRangeAnalysis:
         def fn_(x, y):
             # Poorman's version of upcasting in Sympy
             # Inf is not a float...
-            if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
-                result_type = sympy.Float
-            else:
-                assert x.is_Integer
-                assert y.is_Integer
+            if x.is_Integer and y.is_Integer:
                 result_type = sympy.Integer
+            elif x.is_rational and y.is_rational:
+                result_type = sympy.Rational
+            else:
+                assert x.is_real or not x.is_finite or y.is_real or not y.is_finite
+                result_type = sympy.Float
             return fn(result_type(x), result_type(y))
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
+
+    @classmethod
+    def floor(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
+
+    @classmethod
+    def ceil(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
+
+    # It's used in some models on symints
+    @staticmethod
+    def sqrt(x):
+        x = ValueRanges.wrap(x)
+        if x.lower < 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, sympy.sqrt)
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
@@ -485,13 +529,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return cls.add(a, cls.neg(b))
 
     @staticmethod
-    def sqrt(x):
-        x = ValueRanges.wrap(x)
-        if x.lower < 0:
-            return ValueRanges.unknown()
-        return ValueRanges.increasing_map(x, sympy.sqrt)
-
-    @staticmethod
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
@@ -502,25 +539,34 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         else:
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
-    @classmethod
-    def floor(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
-
-    @classmethod
-    def ceil(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
-
     def __getattr__(self, name):
-        log.warning("unhandled ValueRange op %s", name)
+        log.debug("unhandled ValueRange op %s", name)
         return self.default_handler
 
 
-def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
-    # Add dynamic shapes within the expression as potentially unbounded
-    dynamic_shapes = expr.free_symbols - ranges.keys()
-    if dynamic_shapes:
-        ranges = deepcopy(ranges)
-        for s in dynamic_shapes:
-            ranges[s] = ValueRanges(0, math.inf)  # type: ignore[index]
+def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None) -> ValueRanges:
+    ranges = ranges or {}
 
-    return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
+    # If there's a tracing context, augment available constrained ranges.
+    context = torch._guards.TracingContext.get()
+    if context and context.fake_mode.shape_env:
+        ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
+
+    unbounded_vars = expr.free_symbols - ranges.keys()
+    if unbounded_vars:
+        # Give some bounds to the free variables via their SymPy assumptions
+        # TODO A better way of doing this would be to assign them a range upon creation, as
+        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
+        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
+        for s in unbounded_vars:
+            assert s.is_integer  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                lower = 1
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                lower = 0
+            else:
+                lower = -math.inf  # type: ignore[assignment]
+            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+        ranges = {**ranges, **unbounded_ranges}
+
+    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
