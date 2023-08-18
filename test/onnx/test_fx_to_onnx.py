@@ -470,7 +470,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    # TODO: From Config/Model
     def test_fake_tensor_mode_huggingface_google_t5(self):
         config = transformers.T5Config()
         device = "cpu"
