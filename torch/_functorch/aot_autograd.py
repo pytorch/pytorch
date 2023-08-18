@@ -451,10 +451,13 @@ class SubclassCreationMeta:
     #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: torch.Tensor
     meta: Any
+    # metadata we need to pass to __tensor_unflatten__
+    inner_keys: List[any]
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[self.flat_tensor_start_idx:self.flat_tensor_start_idx + self.arg_count]
-        out = type(self.original_subclass).__tensor_unflatten__(curr_args, self.meta)
+        assert len(curr_args) == len(self.inner_keys), f'inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}'
+        out = type(self.original_subclass).__tensor_unflatten__({k: v for (k, v) in zip(self.inner_keys, curr_args)}, self.meta)
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
@@ -762,9 +765,11 @@ def to_fun(t):
             # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
             # goes at the bottom.
             t_inner, ctx = t.__tensor_flatten__()
-            # recurse here, so we can support nested wrapper subclasses
-            t_inner_transformed = pytree.tree_map_only(torch.Tensor, to_fun, t_inner)
-            out = type(t).__tensor_unflatten__(t_inner_transformed, ctx)
+            transformed_tensors_dict = {}
+            for k, v in t_inner.items():
+                # recurse here, so we can support nested wrapper subclasses
+                transformed_tensors_dict[k] = to_fun(v)
+            out = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
             torch._mirror_autograd_meta(t, out)
             return out
         else:
@@ -775,7 +780,7 @@ def to_fun(t):
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
         t_inners, ctx = t.__tensor_flatten__()
-        for t_inner in t_inners:
+        for t_inner in t_inners.values():
             sync_functional_tensor(t_inner)
     else:
         torch._sync(t)
@@ -789,8 +794,11 @@ def from_fun(t):
         # goes at the bottom.
         t_inner, ctx = t.__tensor_flatten__()
         # recurse here, so we can support nested wrapper subclasses
-        t_inner_transformed = pytree.tree_map_only(torch.Tensor, from_fun, t_inner)
-        out = type(t).__tensor_unflatten__(t_inner_transformed, ctx)
+        transformed_tensors_dict = {}
+        for k, v in t_inner.items():
+            # recurse here, so we can support nested wrapper subclasses
+            transformed_tensors_dict[k] = from_fun(v)
+        out = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
         torch._mirror_autograd_meta(t, out)
         return out
 
@@ -809,7 +817,7 @@ def has_metadata_mutation(t):
     if is_traceable_wrapper_subclass(t):
         t_inners, _ = t.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
-        return any(has_metadata_mutation(t_inner) for t_inner in t_inners)
+        return any(has_metadata_mutation(t_inner) for t_inner in t_inners.values())
     else:
         assert isinstance(t, FunctionalTensor)
         return torch._functionalize_has_metadata_mutation(t.elem)
@@ -827,7 +835,7 @@ def was_updated(arg, new_arg):
         new_arg_inners, _ = new_arg.__tensor_flatten__()
         assert len(arg_inners) == len(new_arg_inners)
         # A tensor subclass was updated if any of its inner elements were updated
-        return any(was_updated(arg_inner, new_arg_inner) for arg_inner, new_arg_inner in zip(arg_inners, new_arg_inners))
+        return any(was_updated(arg_inner, new_arg_inner) for arg_inner, new_arg_inner in zip(arg_inners.values(), new_arg_inners.values()))
     else:
         return arg is not new_arg
 
@@ -884,6 +892,7 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
                 arg_count=curr_cnt,
                 original_subclass=a,
                 meta=meta,
+                inner_keys=list(inner_tensors.keys()),
             ))
         else:
             infos.append(idx)
@@ -2990,14 +2999,14 @@ def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
         for a in wrapped_args[0]:
             if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
-                unwrapped_args_fw += a_unwrapped
+                unwrapped_args_fw += list(a_unwrapped.values())
             else:
                 unwrapped_args_fw += [a]
         unwrapped_args_tangents = []
         for a in wrapped_args[1]:
             if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
-                unwrapped_args_tangents += a_unwrapped
+                unwrapped_args_tangents += list(a_unwrapped.values())
             else:
                 unwrapped_args_tangents += [a]
         unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
@@ -3007,7 +3016,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
         for a in wrapped_args:
             if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
-                unwrapped_args_fw += a_unwrapped
+                unwrapped_args_fw += list(a_unwrapped.values())
             else:
                 unwrapped_args_fw += [a]
         unwrapped_args = unwrapped_args_fw
@@ -3892,8 +3901,8 @@ def create_aot_dispatcher_function(
                     return x
                 if is_traceable_wrapper_subclass(x):
                     flat_inner_tensors, _ = x.__tensor_flatten__()
-                    if all(isinstance(inner, FakeTensor) for inner in flat_inner_tensors):
-                        assert all(inner.fake_mode is fake_mode for inner in flat_inner_tensors)
+                    if all(isinstance(inner, FakeTensor) for inner in flat_inner_tensors.values()):
+                        assert all(inner.fake_mode is fake_mode for inner in flat_inner_tensors.values())
                         return x
                 # TODO: Ensure that this codepath is never exercised from
                 # Dynamo

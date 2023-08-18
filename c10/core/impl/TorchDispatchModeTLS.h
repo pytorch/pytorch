@@ -60,7 +60,7 @@ struct C10_API TorchDispatchModeTLS {
       infra_modes_;
 };
 
-C10_API bool dispatch_mode_enabled(bool skip_infra_modes = false);
+C10_API bool dispatch_mode_enabled();
 
 C10_API std::string to_string(TorchDispatchModeKey mode_key);
 
