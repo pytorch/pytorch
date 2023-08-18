@@ -1669,6 +1669,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
   }
 
+  // Unfortunately, this needs to be public so we can write tp_traverse on
+  // Tensor
+  ExtraMeta* maybe_get_extra_meta() {
+    return extra_meta_.get();
+  }
+
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
