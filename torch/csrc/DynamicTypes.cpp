@@ -84,7 +84,7 @@ PyObject* createPyObject(const at::Storage& storage) {
   // When a user creates a python tensor wrapper subclass, the subclass
   // is a tensor object that has a nullptr storage.
   // We still allow users to call `my_subclass.untyped_storage()`, and get back
-  // a valid storage object (this can be useful for detecing aliasing
+  // a valid storage object (this can be useful for detecting aliasing
   // information about storages from python). However, any accesses to the
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()

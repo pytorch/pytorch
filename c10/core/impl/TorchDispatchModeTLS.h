@@ -46,7 +46,7 @@ struct C10_API TorchDispatchModeTLS {
   static const TorchDispatchModeTLS& get_state();
   static void set_state(TorchDispatchModeTLS state);
 
-  static bool any_modes_set(bool skip_infra_modes = false);
+  static bool any_modes_set();
 
  private:
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
