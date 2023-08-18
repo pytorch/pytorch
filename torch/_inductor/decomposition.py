@@ -8,9 +8,11 @@ import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._decomp.decompositions import pw_cast_for_opmath, _grid_sampler_2d as decomp_grid_sampler_2d
+from torch._decomp.decompositions import (
+    _grid_sampler_2d as decomp_grid_sampler_2d,
+    pw_cast_for_opmath,
+)
 from torch._decomp.decompositions_for_rng import extra_random_decomps
-from torch._prims_common import TensorSequenceType
 
 from . import config
 
@@ -414,9 +416,7 @@ def grid_sampler_2d(
     padding_mode: int = 0,
     align_corners: bool = False,
 ) -> torch.Tensor:
-
     # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
-    #
     if (
         a.device == torch.device("cpu")
         and interpolation_mode == 0
