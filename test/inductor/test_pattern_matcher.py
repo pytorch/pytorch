@@ -90,6 +90,25 @@ class TestPaternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
+    @inductor_config.patch(force_mixed_mm=True)
+    def test_mixed_mm_bad_cases(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda").t(),
+            ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+                torch.randint(0, 255, (2, 8), dtype=torch.uint8, device="cuda").t(),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, True)
+
     @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
@@ -169,6 +188,10 @@ class TestPaternMatcher(TestCase):
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda").t().contiguous().t(),
             ),
             (
                 torch.randn(8, 8, device="cuda"),
