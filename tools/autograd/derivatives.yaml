@@ -735,6 +735,18 @@
 - name: _indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
 
+- name: crow_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: col_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: ccol_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: row_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
 - name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
 
