@@ -222,8 +222,11 @@ class Diagnostic(infra.Diagnostic):
 
 
 @dataclasses.dataclass
-class DiagnosticContext(infra.DiagnosticContext):
+class DiagnosticContext(infra.DiagnosticContext[Diagnostic]):
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+    _bound_diagnostic_type: type[Diagnostic] = dataclasses.field(
+        init=False, default=Diagnostic
+    )
 
     def __enter__(self):
         self._previous_log_level = self.logger.level
