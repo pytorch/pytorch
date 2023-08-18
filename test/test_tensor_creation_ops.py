@@ -545,7 +545,6 @@ class TestTensorCreation(TestCase):
 
     @dtypes(*all_types_and_complex())
     def test_cat_out_fast_path_dim0_dim1(self, device, dtype):
-        x = torch.zeros((0), device=device, dtype=dtype)
         if dtype in integral_types():
             y = torch.randint(low=0, high=100, size=(4, 6), device=device, dtype=dtype)
         else:
@@ -604,6 +603,37 @@ class TestTensorCreation(TestCase):
                 dim1_cat.sum().backward()
                 self.assertEqual(c.grad, expected_c_grad)
                 self.assertEqual(d.grad, expected_d_grad)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex())
+    def test_cat_fast_big_in_parallel(self, device, dtype):
+        # Set the size big enough
+        if dtype in integral_types():
+            y = torch.randint(low=0, high=100, size=(10, 1024 * 32), device=device, dtype=dtype)
+        else:
+            y = torch.randn((10, 1024 * 32), device=device, dtype=dtype)
+        # Test concat on dimension 0
+        w = y.clone()
+        a = torch.cat([w[:3].contiguous(), w[3:5].contiguous(), w[5:9].contiguous(), w[9:10].contiguous()])
+        self.assertEqual(a, w)
+        # Finally, we need to make sure backward is not broken
+        # Integral types will not have grad
+        if dtype not in integral_types():
+            a = torch.randn((4, 1024 * 32), device=device, dtype=dtype, requires_grad=True)
+            b = torch.randn((2, 1024 * 32), device=device, dtype=dtype, requires_grad=True)
+            expected_a_grad = torch.ones((4, 1024 * 32), device=device, dtype=dtype)
+            expected_b_grad = torch.ones((2, 1024 * 32), device=device, dtype=dtype)
+            # All the new tensors should be contiguous here. Let us make sure
+            # to explicitly set them contiguous to enforce fast cat
+            dim0_cat = torch.cat([a.contiguous(), b.contiguous()], dim=0)
+            if dtype in complex_types():
+                dim0_cat.sum().abs().backward()
+                self.assertEqual(a.grad.abs(), expected_a_grad.abs())
+                self.assertEqual(b.grad.abs(), expected_b_grad.abs())
+            else:
+                dim0_cat.sum().backward()
+                self.assertEqual(a.grad, expected_a_grad)
+                self.assertEqual(b.grad, expected_b_grad)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
