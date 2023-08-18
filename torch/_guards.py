@@ -113,7 +113,8 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
-    stack: CapturedTraceback
+    # TODO: store this in slightly less formatted form
+    stack: str
 
 
 @dataclasses.dataclass
