@@ -3243,8 +3243,12 @@ def _grid_sampler_2d(
     align_corners: bool = False,
     _expand_grid: bool = True,
 ) -> Tensor:
-    # This method is also used in _inductor/decomposition.py and does not expand grid
-    # (_expand_grid=False) on cpu for performance reasons.
+    # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
+    # optionaly expand the input grid for performance reasons. Namely, we do not expand the grid (_expand_grid=False)
+    # on cpu for performance reasons. Experimenting locally it was found that compiled CUDA code
+    # can be accelerated by ~10-20x. If we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown on CPU bilinear mode channels last around ~0.8x,
+    # thus we do  not expand the grid for this case.
 
     torch._check(
         interpolation_mode in (0, 1, 2),
@@ -3365,16 +3369,6 @@ def _grid_sampler_2d(
 
         return get_summand(ix_nearest, iy_nearest, 1)
     else:  # interpolation_mode == 2, Bicubic
-        # Performance hack for channels last, bicubic, batch_size > 1 case:
-        # Convert to channels first, compute and convert back.
-        # By default without this hack:
-        # Times are in microseconds (us).
-        # - bicubic f32, CL, BS=2:  1233.0
-        # - bicubic f32, CL, BS=1:  34.9
-        # - bicubic f32, CF, BS=2:  51.2
-        if len(a) > 1 and a.is_contiguous(memory_format=torch.channels_last):
-            a = a.contiguous()
-
         ix = unnormalize(x, iW)
         iy = unnormalize(y, iH)
 
@@ -3404,9 +3398,6 @@ def _grid_sampler_2d(
             return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple(get_coeff(ofs) for ofs in range(4))
-        # As aten version does not respect memory_format for the output
-        # we do not return back to channels last memory format
-        # even if the input is channels last
         return _upsample_cubic_interp1d(coeffs, ty)
 
 

@@ -417,14 +417,32 @@ def grid_sampler_2d(
     align_corners: bool = False,
 ) -> torch.Tensor:
     # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
-    if (
+    # Experimenting locally it was found that compiled CUDA code can be accelerated by ~10-20x.
+    # If we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown on CPU bilinear mode channels last around ~0.8x,
+    # thus we apply this hack to not expand the grid for this case.
+    _expand_grid = not (
         a.device == torch.device("cpu")
         and interpolation_mode == 0
         and a.is_contiguous(memory_format=torch.contiguous_format)
+    )
+
+    # Performance hack for channels last, bicubic, batch_size > 1 case:
+    # Convert to channels first, compute and convert back.
+    # By default without this hack:
+    # Times are in microseconds (us).
+    # - bicubic f32, CL, BS=2:  1233.0
+    # - bicubic f32, CL, BS=1:  34.9
+    # - bicubic f32, CF, BS=2:  51.2
+    is_channels_last = False
+    if (
+        len(a) > 1
+        and a.is_contiguous(memory_format=torch.channels_last)
+        and interpolation_mode == 2
     ):
-        _expand_grid = False
-    else:
-        _expand_grid = True
+        is_channels_last = True
+        a = a.contiguous()
+
     output = decomp_grid_sampler_2d(
         a,
         grid=grid,
@@ -433,7 +451,14 @@ def grid_sampler_2d(
         align_corners=align_corners,
         _expand_grid=_expand_grid,
     )
-    if a.is_contiguous(memory_format=torch.channels_last):
+    # As eager mode does not respect memory_format for the output, i.e.
+    # it does not return the output as channels last memory format if the input
+    # is channels last. However, if the decomposition respects input memory format
+    # then compiled cuda code is faster than the one that does not respect the memory format
+    # Thus, we change the output memory format in _inductor/decomposition.py
+    # We can't do that in _decomp/decomposition.py as
+    # decomposition output should align with eager mode in terms of strides.
+    if is_channels_last:
         output = output.contiguous(memory_format=torch.channels_last)
     return output
 
