@@ -211,11 +211,13 @@ else()
 endif()
 
 # nvToolsExt
-add_library(torch::nvtoolsext INTERFACE IMPORTED)
-find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" "${CMAKE_CURRENT_LIST_DIR}/../../third_party/NVTX/c/include" NO_DEFAULT_PATH)
-find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
-target_include_directories(torch::nvtoolsext INTERFACE "${nvtx3_dir}")
+find_path(NVTOOLSEXT_INCLUDE_DIR NAMES "nvtx3/nvToolsExt.h" "nvToolsExt.h" PATHS "${CUDA_INCLUDE_DIRS}" "${CMAKE_CURRENT_LIST_DIR}/../../third_party/NVTX/c/include")
 
+add_library(torch::nvtoolsext INTERFACE IMPORTED)
+set_property(
+    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
+    CUDA::nvToolsExt)
+target_include_directories(torch::nvtoolsext INTERFACE "${NVTOOLSEXT_INCLUDE_DIR}")
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
