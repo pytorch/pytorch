@@ -56,8 +56,9 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
     if (si.is_symbolic()) {
-        // First check for actual symbolic values.
-        // Reason: so that we don't replace it by its integer replacement implicitly.
+      // First check for actual symbolic values.
+      // Reason: so that we don't replace it by its integer replacement
+      // implicitly.
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
@@ -66,8 +67,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
         throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
-        // Otherwise, we know that it is an actual integer value.
-        auto m = si.maybe_as_int();
+      // Otherwise, we know that it is an actual integer value.
+      auto m = si.maybe_as_int();
       if (torch::jit::tracer::isTracing()) {
         PyObject* py_size_tensor =
             THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
@@ -164,8 +165,8 @@ static PyObject* wrap_tuple_fn(Args... args) {
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
-auto sq_concat = PyTuple_Type.tp_as_sequence -> sq_concat;
-auto sq_repeat = PyTuple_Type.tp_as_sequence -> sq_repeat;
+auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
 binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 } // namespace
 

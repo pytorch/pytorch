@@ -33,11 +33,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    EqualityConstraint,
-    is_concrete_int,
-    SYMPY_INTERP,
-)
+from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
 
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 

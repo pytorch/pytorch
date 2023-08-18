@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Sequence, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch.fx
@@ -2004,7 +2004,11 @@ class ShapeEnvEvent:
     # mapping: an optional FX node converter. This is used for converting
     # the captured FX nodes from the old ShapeEnv by corresponding ones from
     # shape_env.
-    def __call__(self, shape_env: Optional["ShapeEnv"] = None, mapping: Optional[Callable[[torch.fx.Node], torch.fx.Node]] = None) -> Any:
+    def __call__(
+        self,
+        shape_env: Optional["ShapeEnv"] = None,
+        mapping: Optional[Callable[[torch.fx.Node], torch.fx.Node]] = None
+    ) -> Any:
         # Special handling for the constructor event.
         if self.f == ShapeEnv:
             assert shape_env is None and self.args is None and self.kwargs is not None
@@ -3789,7 +3793,10 @@ def _is_dim_dynamic(t, d):
 # It assumes the first event is the constructor call.
 #
 # fn: transforms an old FX node into one corresponding to the newly created ShapeEnv.
-def replay_shape_env_events(events: List[ShapeEnvEvent], fn: Optional[Callable[[torch.fx.Node, List[torch.fx.Node]], torch.fx.Node]] = None) -> ShapeEnv:
+def replay_shape_env_events(
+    events: List[ShapeEnvEvent],
+    fn: Optional[Callable[[torch.fx.Node, List[torch.fx.Node]], torch.fx.Node]] = None
+) -> ShapeEnv:
     constructor_event = events[0]
     assert constructor_event.f == ShapeEnv
 
