@@ -1979,6 +1979,115 @@ class DimConstraints:
 
 TLS = threading.local()
 
+# Event class for reconstructing ShapeEnv at arbitrary time.
+#
+# Represents a method call that mutates ShapeEnv in a way that affects the
+# issued guards, when ShapeEnv.produce_guards is called.
+@dataclass
+class ShapeEnvEvent:
+    # ShapeEnv method.
+    f: Callable
+
+    # Arguments and keyword arguments called with.
+    args: Optional[List[Any]] = None
+    kwargs: Optional[Dict[str, Any]] = None
+
+    # Length of tracked_fakes at the time the method was called.
+    tracked_fakes_length: Optional[int] = None
+
+    # Name of the captured event.
+    # Used for special handling of particular methods.
+    name: Optional[str] = None
+
+    # Replay itself, but using shape_env as self.
+    #
+    # mapping: an optional FX node converter. This is used for converting
+    # the captured FX nodes from the old ShapeEnv by corresponding ones from
+    # shape_env.
+    def __call__(self, shape_env: Optional["ShapeEnv"] = None, mapping: Optional[Callable[[torch.fx.Node], torch.fx.Node]] = None) -> Any:
+        # Special handling for the constructor event.
+        if self.f == ShapeEnv:
+            assert shape_env is None and self.args is None and self.kwargs is not None
+            return ShapeEnv(**self.kwargs)
+
+        assert shape_env is not None
+
+        args = list(self.args or list())
+        kwargs = dict(self.kwargs or dict())
+
+        # Converts FX nodes using the mapping argument.
+        def convert_node(x: Any) -> Any:
+            return x if mapping is None or not isinstance(x, torch.fx.Node) else mapping(x)
+
+        # Replaces the value of an specific argument by the result of fn.
+        def replacearg(index: int, key: str, fn: Callable):
+            if index < len(args):
+                args[index] = fn(args[index])
+            if key in kwargs:
+                kwargs[key] = fn(kwargs[key])
+
+        if self.is_create_fx_call_function():
+            # ShapeEnv.create_fx_call_function:
+            # "args" parameter is a tuple of FX nodes from the FX graph of the old ShapeEnv.
+            # They must be replaced, since a "call_function" FX node with this tuple as argument
+            # will be added to the FX graph of the new shape_env.
+            replacearg(index=1, key="args", fn=lambda args: tuple(convert_node(a) for a in args))
+        if self.is_evaluate_expr():
+            # ShapeEnv.evaluate_expr:
+            # "fx_node" parameter is an (optional) FX node that represents the evaluate expression.
+            # They must be replaced, since it will be part of a "call_function" FX node for
+            # torch._assert, which will be added to the FX graph of the new shape_env.
+            replacearg(index=3, key="fx_node", fn=convert_node)
+
+        # Actually call the method with the converted arguments.
+        return self.f(shape_env, *args, **kwargs)
+
+    def __str__(self) -> str:
+        name = self.name if self.name is not None else self.f.__name__
+        return f"event: {name} ({self.args}, {self.kwargs})"
+
+    def is_create_fx_call_function(self) -> bool:
+        return self.name == "create_fx_call_function"
+
+    def is_evaluate_expr(self) -> bool:
+        return self.name == "evaluate_expr"
+
+# Decorator for recording the given function as a replayable event.
+#
+# This decorator should be used at every function that mutates the state of
+# ShapeEnv in some way that affects the resulting issued guards (i.e. when
+# ShapeEnv.produce_guards is called).
+#
+# remember_fakes_length: flags whether we should add the length of the
+# ShapeEnv.tracked_fakes list to the event. This is used for calling
+# ShapeEnv.produce_guards at an arbitrary time (assuming the fakes list only
+# increases monotonically).
+def record_shapeenv_event(remember_fakes_length: bool = False) -> Callable:
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapper(self: "ShapeEnv", *args, **kwargs):
+            may_record_event = not self.recording_event and _translation_validation_enabled()
+
+            if may_record_event:
+                tracked_fakes_length = len(self.tracked_fakes) \
+                    if remember_fakes_length and self.tracked_fakes is not None \
+                    else None
+
+                # Actually record the event for 'fn'.
+                self.events.append(ShapeEnvEvent(fn, list(args), kwargs, tracked_fakes_length, fn.__name__))
+                # Inhibit the recording of any other events.
+                self.recording_event = True
+
+            try:
+                r = fn(self, *args, **kwargs)
+            finally:
+                if may_record_event:
+                    # Enable event recording, again.
+                    self.recording_event = False
+            return r
+        return wrapper
+    return decorator
+
 
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
@@ -2016,6 +2125,8 @@ class ShapeEnv:
         # For debugging
         frame_id=None,
         co_fields=None,
+        should_record_events=True,
+        tracked_fakes=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -2111,8 +2222,28 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
+        # There can be only one event being recorded at once.
+        # Only the top-level method call is recorded.
+        self.recording_event: bool = not should_record_events
+
         if _translation_validation_enabled():
             from torch.fx.experimental.validator import TranslationValidator
+
+            # List of events for reconstructing ShapeEnv at arbitrary points in time.
+            self.events: List[ShapeEnvEvent] = [
+                ShapeEnvEvent(ShapeEnv, kwargs={
+                    "allow_scalar_outputs": allow_scalar_outputs,
+                    "allow_dynamic_output_shape_ops": allow_dynamic_output_shape_ops,
+                    "assume_static_by_default": assume_static_by_default,
+                    "specialize_zero_one": specialize_zero_one,
+                    "duck_shape": duck_shape,
+                    "frame_id": frame_id,
+                    "co_fields": co_fields,
+                    "should_record_events": False,
+                })
+            ]
+
+            self.tracked_fakes = tracked_fakes
 
             self.validator = TranslationValidator()
             self.graph = torch.fx.Graph()
@@ -2120,6 +2251,7 @@ class ShapeEnv:
             # This is needed when 'deepcopy'-ing this object.
             self.graph.inserting_before(self.graph.output(None))
 
+    @record_shapeenv_event()
     def freeze(self):
         self.frozen = True
 
@@ -2147,6 +2279,7 @@ class ShapeEnv:
         if _translation_validation_enabled():
             self.validator.validate()
 
+    @record_shapeenv_event()
     def create_fx_call_function(
             self,
             op: Callable,
@@ -2207,13 +2340,23 @@ class ShapeEnv:
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
 
+    @record_shapeenv_event()
+    def suppress_guards_enter(self):
+        TLS.suppress_guards = True
+
+
+    @record_shapeenv_event()
+    def suppress_guards_exit(self):
+        TLS.suppress_guards = False
+
+
     @contextmanager
     def suppress_guards(self):
-        TLS.suppress_guards = True
+        self.suppress_guards_enter()
         try:
             yield
         finally:
-            TLS.suppress_guards = False
+            self.suppress_guards_exit()
 
     def _get_key(self):
         """
@@ -2223,14 +2366,14 @@ class ShapeEnv:
         return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
 
     def _produce_dyn_sizes(self,
-                           ex: torch.Tensor,
+                           ex_size: Sequence[int],
                            source: Source,
                            dynamic_dims: DimList[DimDynamic],
                            constraint_dims: DimList[DimConstraint],
                            ) -> List[sympy.Expr]:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
-        for i, val in enumerate(ex.size()):
+        for i, val in enumerate(ex_size):
             size.append(self.create_symbol(
                 val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
             ))
@@ -2249,7 +2392,29 @@ class ShapeEnv:
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        dim = ex.dim()
+        return self._create_symbolic_sizes_strides_storage_offset(
+            ex.size(),
+            ex.stride(),
+            ex.storage_offset(),
+            [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
+            source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims
+        )
+
+    @record_shapeenv_event()
+    def _create_symbolic_sizes_strides_storage_offset(
+        self,
+        ex_size: Sequence[int],
+        ex_stride: Sequence[int],
+        ex_storage_offset: int,
+        is_dim_dynamic: Sequence[bool],
+        source: Source,
+        *,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
+    ):
+        dim = len(ex_size)
 
         # Reimplement the legacy behavior
         if constraint_dims is None:
@@ -2259,7 +2424,7 @@ class ShapeEnv:
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
                 # bad.
-                if _is_dim_dynamic(ex, i):
+                if is_dim_dynamic[i]:
                     r = DimDynamic.DYNAMIC
                 elif self.assume_static_by_default:
                     r = DimDynamic.STATIC
@@ -2280,31 +2445,31 @@ class ShapeEnv:
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims, constraint_dims)
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex_size, source, dynamic_dims, constraint_dims)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex.stride()):
+        for i, val in enumerate(ex_stride):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
+                ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
+                if stride[i] is not None and ex_stride[i] >= 0
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None]
             )
             for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+                if stride[i] is None and ex_stride[i] in candidates:
+                    stride[i] = candidates[ex_stride[i]]
+                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
                     [
-                        (ex.stride()[i], i)
+                        (ex_stride[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
                     ]
@@ -2319,7 +2484,7 @@ class ShapeEnv:
 
         sym_sizes = [
             self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i))
-            for i, (sym, hint) in enumerate(zip(size, ex.size()))
+            for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -2327,19 +2492,20 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex.stride(i), source=TensorPropertySource(source, TensorProperty.STRIDE, i)
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)
             ))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
-            ex.storage_offset(),
+            ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
-        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+        ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
+    @record_shapeenv_event()
     def create_symintnode(
             self,
             sym: "sympy.Expr",
@@ -2366,6 +2532,7 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
 
+    @record_shapeenv_event()
     def create_unspecified_symint_and_symbol(self, value, source, dynamic_dim):
         return self.create_symintnode(
             self.create_unspecified_symbol(
@@ -2382,6 +2549,7 @@ class ShapeEnv:
         # for validation.
         return SymBool(SymNode(sym, self, bool, None))
 
+    @record_shapeenv_event()
     def create_unbacked_symfloat(self):
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
@@ -2393,6 +2561,7 @@ class ShapeEnv:
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
+    @record_shapeenv_event()
     def create_unbacked_symint(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
@@ -2404,6 +2573,7 @@ class ShapeEnv:
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
+    @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
@@ -2415,6 +2585,7 @@ class ShapeEnv:
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
+    @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
         val: int,
@@ -2426,6 +2597,7 @@ class ShapeEnv:
         # assume that it will be neither positive nor negative.
         return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
 
+    @record_shapeenv_event()
     def create_symbol(
         self,
         val: int,
@@ -2837,7 +3009,9 @@ class ShapeEnv:
 
         # First, issue all the non-trivial guards.
         for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr) is not None:
+            static_expr = self._maybe_evaluate_static(guard.expr)
+            if static_expr is not None:
+                self.log.debug("eval %s == %s [statically known]", guard.expr, static_expr)
                 continue
             issue_guard(guard)
 
@@ -3366,6 +3540,7 @@ class ShapeEnv:
             )
 
     @lru_cache(256)
+    @record_shapeenv_event(remember_fakes_length=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -3396,6 +3571,9 @@ class ShapeEnv:
             else:
                 eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
                 node = self.create_fx_call_function(torch._assert, (eql,))
+
+            assert node is not None
+            node.meta["event"] = len(self.events) - 1
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
@@ -3435,9 +3613,12 @@ class ShapeEnv:
 
             self._check_frozen(expr, concrete_val)
 
-            if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    expr = sympy.Not(expr)
+            if (
+                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    and isinstance(hint, bool)
+                    and isinstance(expr, (sympy.Eq, sympy.Ne))
+            ):
+                expr = sympy.Not(expr)
 
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
                 self._maybe_guard_eq(expr, bool(concrete_val))
@@ -3603,3 +3784,112 @@ def _is_int(expr):
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+# Replays the ShapeEnvEvents list.
+# It assumes the first event is the constructor call.
+#
+# fn: transforms an old FX node into one corresponding to the newly created ShapeEnv.
+def replay_shape_env_events(events: List[ShapeEnvEvent], fn: Optional[Callable[[torch.fx.Node, List[torch.fx.Node]], torch.fx.Node]] = None) -> ShapeEnv:
+    constructor_event = events[0]
+    assert constructor_event.f == ShapeEnv
+
+    # Constructs the new ShapeEnv.
+    shape_env = constructor_event()
+
+    # Creates the mapping function from fn.
+    def create_mapping_fn():
+        if fn is None:
+            return None
+        fn_ = fn
+        nodes = list(shape_env.graph.nodes)
+        return lambda node: fn_(node, nodes)
+
+    for event in events[1:]:
+        # Actually replays each event.
+        # We need to call create_mapping_fn every time, since the node list might
+        # change after each event is replayed.
+        event(shape_env, create_mapping_fn())
+
+    return shape_env
+
+# Translation validation bisection.
+#
+# Bisect into the torch._assert nodes recorded in the shape_env FX graph, and raise
+# the earliest ValidationException.
+#
+# As guards are added by ShapeEnv.evaluate_expr calls, some simplification errors
+# might be silently happening. This function tries to nail down exactly at which
+# point things went wrong from a validation perspective.
+def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
+    from torch.fx.experimental.validator import ValidationException
+
+    events = shape_env.events
+
+    # Mapping used for finding the corresponding FX node of the fresh ShapeEnv
+    # instances. Here, we assume the order of the FX nodes will remain the same.
+    node_to_index = {node: i for i, node in enumerate(shape_env.graph.nodes)}
+
+    # Retrieves the ShapeEnvEvent associated with node.
+    def get_node_event(node: torch.fx.Node) -> ShapeEnvEvent:
+        assert "event" in node.meta
+        return events[node.meta["event"]]
+
+    # Checks whether the given shape_env fails when produce_guards is called.
+    def check_shapeenv_fails(shape_env: ShapeEnv, tracked_fakes_length: Optional[int] = None) -> Optional[ValidationException]:
+        # Slice the list of tracked_fakes so as to "go back" to the state it
+        # was for shape_env. This assumes the list only increases monotonically.
+        sliced_tracked_fakes = tracked_fakes[:tracked_fakes_length]
+
+        try:
+            shape_env.produce_guards(
+                [a.fake for a in sliced_tracked_fakes],
+                [a.source for a in sliced_tracked_fakes],
+                constraint_inputs=[a.constraint_dims for a in sliced_tracked_fakes],
+            )
+        except ValidationException as e:
+            return e
+
+    # Checks whether the ShapeEnv reconstructed by replaying the events until
+    # node is created fails when produce_guards is called.
+    def check_node_fails(node: torch.fx.Node) -> Optional[ValidationException]:
+        number = node.meta["event"]
+
+        # Reconstruct shape_env until the event at event_number.
+        shape_env = replay_shape_env_events(
+            events[:number + 1],
+            lambda n, nodes: nodes[node_to_index[n]]
+        )
+
+        shape_env.graph.lint()
+        return check_shapeenv_fails(shape_env, events[number].tracked_fakes_length)
+
+    # Bisection happens on the assertion nodes of the recorded FX graph for
+    # dynamic shapes.
+    assert_nodes = [node for node in shape_env.graph.nodes if node.target == torch._assert]
+
+    # Preparing the indices for binary search.
+    left, mid, right = 0, 0, len(assert_nodes) - 1
+
+    # Cache the raised exception (if any) at each bisection point.
+    exception = {}
+    exception[right] = check_shapeenv_fails(shape_env)
+
+    if not exception[right]:
+        return
+
+    while left < right:
+        mid = (left + right) // 2
+
+        node = assert_nodes[mid]
+        log.debug("bisecting at %s: %s", mid, get_node_event(node))
+
+        # Check whether the new shape_env raises a ValidationException or not.
+        exception[mid] = check_node_fails(node)
+
+        if exception[mid]:
+            right = mid
+        else:
+            left = mid + 1
+
+    assert left in exception and isinstance(exception[left], ValidationException)
+    raise exception[left]

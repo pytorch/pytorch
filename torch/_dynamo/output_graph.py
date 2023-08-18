@@ -255,6 +255,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -263,6 +269,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
                 co_fields=self.co_fields,
+                tracked_fakes=self.tracked_fakes
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
@@ -284,12 +291,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        # tracked_fakes says where any tensor that was wrapped to fake came
-        # from.  It is similar to GraphArg, in that all GraphArgs will get
-        # will get added to TrackedFakes, but TrackedFakes also contains
-        # GraphArgs that got pruned, and things like Tensor attributes which
-        # aren't explicit graph inputs.  Used by shape guard
-        self.tracked_fakes: List[TrackedFake] = []
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
