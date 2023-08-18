@@ -833,13 +833,33 @@ class _Ops(types.ModuleType):
         if torch._running_with_deploy():
             return
 
-        path = _utils_internal.resolve_library_path(path)
-        with dl_open_guard():
-            # Import the shared library into the process, thus running its
-            # static (global) initialization code in order to register custom
-            # operators with the JIT.
-            ctypes.CDLL(path)
-        self.loaded_libraries.add(path)
+        # The loaded libraries may be tied to python imports. If so, we want
+        # to retrieve the imports and then import them.
+        # See NOTE: [Requiring Python imports with TORCH_LIBRARY] for more details.
+        torch._C._dispatch_clear_required_pyimports()
+        try:
+            path = _utils_internal.resolve_library_path(path)
+            with dl_open_guard():
+                # Import the shared library into the process, thus running its
+                # static (global) initialization code in order to register custom
+                # operators with the JIT.
+                ctypes.CDLL(path)
+            self.loaded_libraries.add(path)
+            imports = torch._C._dispatch_unsafe_get_required_pyimports()
+            try:
+                for import_name in imports:
+                    __import__(import_name)
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    f"torch.ops.load_library('{path}'): one of the loaded "
+                    f"libraries specified that it must be loaded together with "
+                    f"the following Python modules {imports} but we could not "
+                    f"import some of them (scroll up for module name). "
+                    f"Please check that you have installed the Python packages "
+                    f"and that they are available."
+                ) from e
+        finally:
+            torch._C._dispatch_clear_required_pyimports()
 
 
 # The ops "namespace"

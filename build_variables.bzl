@@ -1044,6 +1044,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/library.cpp",
     "aten/src/ATen/core/op_registration/infer_schema.cpp",
     "aten/src/ATen/core/op_registration/op_registration.cpp",
+    "aten/src/ATen/core/op_registration/pyimports.cpp",
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/TorchDispatchUtils.cpp",
     "aten/src/ATen/core/register_symbols.cpp",

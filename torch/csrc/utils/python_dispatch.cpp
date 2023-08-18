@@ -722,6 +722,13 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
 
+  m.def("_dispatch_unsafe_get_required_pyimports", [] {
+    return c10::impl::unsafe_get_required_pyimports();
+  });
+  m.def("_dispatch_clear_required_pyimports", [] {
+    return c10::impl::clear_required_pyimports();
+  });
+
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
   });

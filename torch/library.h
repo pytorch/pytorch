@@ -66,6 +66,7 @@
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/enum_tag.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/op_registration/pyimports.h>
 
 namespace torch {
 
@@ -603,6 +604,19 @@ class TORCH_API Library final {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, tags, rv);
   }
+
+  /// Specifies a Python import to tie this library to. When loading
+  /// the library via torch.ops.load_library("lib.so") from Python,
+  /// it will automatically import the Python module (if it has not already
+  /// been imported). This is useful for separating the custom operator
+  /// definitions between a Python module and a C++ shared library.
+  ///
+  /// See NOTE: [Requiring Python imports with TORCH_LIBRARY] for more details.
+  Library& require_pyimport(std::string pyimport) {
+    c10::impl::register_required_pyimport(std::move(pyimport));
+    return *this;
+  }
+
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
   /// on making use of the dispatcher to structure your operator

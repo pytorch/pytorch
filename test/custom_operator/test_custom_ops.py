@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import os.path
+import sys
 import tempfile
 
 import torch
@@ -17,6 +18,14 @@ class TestCustomOperators(TestCase):
 
     def test_custom_library_is_loaded(self):
         self.assertIn(self.library_path, ops.loaded_libraries)
+
+    def test_loading_library_also_imported_module(self):
+        # Check that the module was actually imported
+        self.assertIn("my_custom_ops", sys.modules.keys())
+
+        # Also just confirm: the module has some meta kernels
+        x = torch.randn(3, device='meta')
+        torch.ops.custom.sin.default(x)
 
     def test_calling_custom_op_string(self):
         output = ops.custom.op2("abc", "def")
