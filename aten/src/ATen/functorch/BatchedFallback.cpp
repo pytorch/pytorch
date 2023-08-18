@@ -396,6 +396,120 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   }
 }
 
+void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  // batchedTensorForLoopFallback(op, stack);
+  const auto& schema = op.schema();
+  const auto num_returns = schema.returns().size();
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments = torch::jit::last(stack, num_arguments);
+
+  TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
+              "Batching rule not implemented for ", schema.operator_name(), ". ",
+              "We could not generate a fallback.");
+
+  if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    c10::impl::ExcludeDispatchKeyGuard nt_guard(DispatchKey::BatchedNestedTensor);
+    op.callBoxed(stack);
+    return;
+  }
+
+  if (isInplaceOp(schema)) {
+    TORCH_INTERNAL_ASSERT(false, "Fallbacks not supported for in-place ops on nested tensors");
+    return;
+  }
+  TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
+              "Batching rule not implemented for ", schema.operator_name(), "; ",
+              "the fallback path doesn't work on out= or view ops.");
+  TORCH_CHECK(num_returns >= 1,
+              "Batching rule not implemented for ", schema.operator_name(), ". ",
+              "The fallback path does not support operations with no returns.");
+  warnFallback(schema, /*in_place*/false);
+
+  const auto arguments_begin = stack->size() - num_arguments;
+
+  // Figure out which arguments are BatchedTensor. Save them to a vector.
+  // For each BatchedTensor, also record what position of `arguments` they came from.
+  at::SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
+  VmapDimVector batched_tensor_inputs_position;
+  for (const auto idx : c10::irange(0, arguments.size())) {
+    const auto& ivalue = arguments[idx];
+    if (!ivalue.isTensor()) {
+      continue;
+    }
+    const auto& tensor = ivalue.toTensor();
+    if (!tensor.defined()) {
+      continue;
+    }
+    const auto* batched = maybeGetBatchedImpl(tensor);
+    if (!batched) {
+      continue;
+    }
+    batched_tensor_inputs.push_back(tensor);
+    batched_tensor_inputs_position.push_back(idx);
+  }
+  TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
+
+  std::vector<std::vector<Tensor>> unbound;
+  for (auto iter = batched_tensor_inputs.begin(); iter != batched_tensor_inputs.end(); ++iter) {
+    auto *batched_impl = maybeGetBatchedImpl(*iter);
+    TORCH_INTERNAL_ASSERT(batched_impl->value().is_nested() || batched_impl->bdim() == 0,
+        "Fallback not supported for mixed nested / non-nested arguments without bdim=0");
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
+    auto this_unbound = batched_impl->value().unbind();
+    if (unbound.size() > 0) {
+      TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
+          "Fallback not supported for differently-sized nested arguments");
+    }
+    unbound.push_back(this_unbound);
+  }
+
+  const auto num_components = unbound.front().size();
+  std::vector<Tensor> output_shards(num_components * num_returns);
+  for (const auto component_idx : c10::irange(0, num_components)) {
+    auto batched_idx = 0;
+    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    for (const auto arg_idx : c10::irange(0, num_arguments)) {
+      // We assume that torch::jit::Stack is backed by vector<IValue> for
+      // simplicity. When that is not the case, this code should be updated.
+      const auto& argument = (*stack)[arguments_begin + arg_idx];
+      if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
+          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+        // argument isn't a BatchedTensor
+        torch::jit::push(stack, argument);
+        continue;
+      }
+      // argument is a BatchedTensor
+      torch::jit::push(stack, unbound[batched_idx][component_idx]);
+      ++batched_idx;
+      ++batched_tensor_inputs_pos_iter;
+    }
+
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
+    op.callBoxed(stack);
+
+    // Store the result into `output_shards`. See NOTE: [Output shards layout]
+    // to learn about the details of how we store the shards.
+    const auto returns = torch::jit::last(stack, num_returns);
+    for (const auto return_idx : c10::irange(0, returns.size())) {
+      output_shards[num_components * return_idx + component_idx] = returns[return_idx].toTensor();
+    }
+    torch::jit::drop(stack, num_returns);
+  }
+
+  // For each output Tensor, stack the shards of the tensor together to form a nested return
+  // TODO: Determine when the output needs to be nested and when it can be non-nested
+  torch::jit::drop(stack, num_arguments);
+  auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_components);
+  for (const auto return_idx : c10::irange(0, num_returns)) {
+    auto shards = output_shards_chunks[return_idx];
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
+    auto out_nt = at::_nested_tensor_from_tensor_list(shards);
+    // TODO: Verify the args
+    torch::jit::push(stack, makeBatched(out_nt, 0, 1));
+  }
+}
+
 void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "Error: ", op.operator_name(), " requires special handling, and does not yet have a batching rule. Feel free to file a github issue!");
 }
