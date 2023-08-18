@@ -4,6 +4,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/range_native.h>
 #include <cmath>
 #include <limits>
 
