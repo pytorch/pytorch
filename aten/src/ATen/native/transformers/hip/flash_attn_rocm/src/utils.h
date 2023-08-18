@@ -12,7 +12,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <torch/torch.h>
 
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
@@ -27,6 +26,8 @@
 #include <ck/library/reference_tensor_operation/cpu/reference_softmax.hpp>
 #include <ck/library/reference_tensor_operation/cpu/reference_dropout.hpp>
 
+//#include <c10/core/ScalarType.h>
+//#include <ATen/ATen.h>
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -77,20 +78,20 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename dtype_t>
-static inline size_t get_size_in_bytes( size_t n, dtype_t dtype ){
+static inline size_t get_size_in_bytes( size_t n, dtype_t datatype ){
   return 0;
 };
 
 template <>
-static inline size_t get_size_in_bytes( size_t n, at::kFloat dtype ){
+static inline size_t get_size_in_bytes( size_t n, at::kFloat datatype ){
   return n * 4;
 };
 template <>
-static inline size_t get_size_in_bytes( size_t n, at::kBFloat16 dtype ){
+static inline size_t get_size_in_bytes( size_t n, at::kBFloat16 datatype ){
   return n * 2;
 };
 template <>
-static inline size_t get_size_in_bytes( size_t n, at::kHalf dtype ){
+static inline size_t get_size_in_bytes( size_t n, at::kHalf datatype ){
   return n * 2;
 };
 // template <>

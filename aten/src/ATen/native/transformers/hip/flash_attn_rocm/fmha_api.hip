@@ -14,7 +14,7 @@
 
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
 
-#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
+#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
 void run_flash_fwd(LaunchParams<FlashFwdParams> &launch_params) {
   HEADDIM_SWITCH(launch_params.params.d, [&] {
@@ -65,7 +65,7 @@ void set_params_fprop(FlashFwdParams &params,
                       bool is_deterministic,
                       bool is_using_qloop) {
 
-    auto acc_type = torch::kFloat32;
+    auto acc_type = at::kFloat32;
     auto data_type = q.dtype();
 
     // Reset the parameters
@@ -106,7 +106,7 @@ void set_params_fprop(FlashFwdParams &params,
             params.q_ptr.push_back(reinterpret_cast<void*>(q_ptr));
             q_ptr = q_ptr + temp_q_stride;
         }else{
-            auto q_each_tmp = q.index({torch::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
+            auto q_each_tmp = q.index({at::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
             params.q_tensors.push_back(q_each_tmp);
             params.q_ptr.push_back(reinterpret_cast<void*>(q_each_tmp.data_ptr()));          
         }
@@ -114,7 +114,7 @@ void set_params_fprop(FlashFwdParams &params,
             params.k_ptr.push_back(reinterpret_cast<void*>(k_ptr));
             k_ptr = k_ptr + temp_k_stride;
         }else{
-            auto k_each_tmp = k.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto k_each_tmp = k.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
             params.k_tensors.push_back(k_each_tmp);
             params.k_ptr.push_back(reinterpret_cast<void*>(k_each_tmp.data_ptr()));
         }
@@ -123,7 +123,7 @@ void set_params_fprop(FlashFwdParams &params,
             params.v_ptr.push_back(reinterpret_cast<void*>(v_ptr));     
             v_ptr = v_ptr + temp_k_stride;
         }else{
-            auto v_each_tmp = v.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto v_each_tmp = v.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
             params.v_tensors.push_back(v_each_tmp);
             params.v_ptr.push_back(reinterpret_cast<void*>(v_each_tmp.data_ptr()));
         }
@@ -181,7 +181,7 @@ void set_params_dgrad(FlashBwdParams &params,
                       bool is_performance_mode,
                       bool is_using_qloop) {
 
-    auto acc_type = torch::kFloat32;
+    auto acc_type = at::kFloat32;
     auto data_type = q.dtype();
 
     // Reset the parameters
@@ -231,8 +231,8 @@ void set_params_dgrad(FlashBwdParams &params,
             q_ptr = q_ptr + temp_q_stride;
             dq_ptr = dq_ptr + temp_dq_stride;
         }else{
-            auto q_each_tmp = q.index({torch::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
-            auto qgrad_each_tmp = dq.index({torch::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
+            auto q_each_tmp = q.index({at::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
+            auto qgrad_each_tmp = dq.index({at::indexing::Slice(params.host_seqlens_q[i], params.host_seqlens_q[i+1])}).contiguous();
             params.q_tensors.push_back(q_each_tmp);
             params.qgrad_tensors.push_back(qgrad_each_tmp);
             params.q_ptr.push_back(reinterpret_cast<const void*>(q_each_tmp.data_ptr()));
@@ -244,8 +244,8 @@ void set_params_dgrad(FlashBwdParams &params,
             k_ptr = k_ptr + temp_k_stride;
             dk_ptr = dk_ptr + temp_dk_stride;
         }else{
-            auto k_each_tmp = k.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
-            auto kgrad_each_tmp = dk.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto k_each_tmp = k.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto kgrad_each_tmp = dk.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
             params.k_tensors.push_back(k_each_tmp);
             params.kgrad_tensors.push_back(kgrad_each_tmp);
             params.k_ptr.push_back(reinterpret_cast<const void*>(k_each_tmp.data_ptr()));
@@ -257,8 +257,8 @@ void set_params_dgrad(FlashBwdParams &params,
             v_ptr = v_ptr + temp_k_stride;   
             dv_ptr = dv_ptr + temp_dk_stride;
         }else{
-            auto v_each_tmp = v.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
-            auto vgrad_each_tmp = dv.index({torch::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto v_each_tmp = v.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
+            auto vgrad_each_tmp = dv.index({at::indexing::Slice(params.host_seqlens_k[i], params.host_seqlens_k[i+1])}).contiguous();
             params.v_tensors.push_back(v_each_tmp);
             params.vgrad_tensors.push_back(vgrad_each_tmp);
             params.v_ptr.push_back(reinterpret_cast<const void*>(v_each_tmp.data_ptr()));
@@ -313,12 +313,12 @@ mha_fwd(const at::Tensor &q,
 
     auto q_dtype = q.dtype();
 
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16);
+    TORCH_CHECK(q_dtype == at::kFloat16 || q_dtype == at::kBFloat16);
     TORCH_CHECK(k.dtype() == q_dtype);
     TORCH_CHECK(v.dtype() == q_dtype);
     TORCH_CHECK(out.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == torch::kInt32);
-    TORCH_CHECK(cu_seqlens_k.dtype() == torch::kInt32);
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt32);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt32);
 
     TORCH_CHECK(q.is_cuda());
     TORCH_CHECK(k.is_cuda());
@@ -357,9 +357,9 @@ mha_fwd(const at::Tensor &q,
     auto opts = q.options();
 
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
-    // auto softmax_lse = torch::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
+    // auto softmax_lse = at::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
     at::Tensor s;
-    if (return_softmax) { s = torch::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts.dtype(at::kInt)); }
+    if (return_softmax) { s = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts.dtype(at::kInt)); }
     if (zero_tensors) {
         out.zero_();
         //softmax_lse.zero_();
@@ -443,7 +443,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
     auto q_dtype = q.dtype();
 
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16);
+    TORCH_CHECK(q_dtype == at::kFloat16 || q_dtype == at::kBFloat16);
     TORCH_CHECK(k.dtype() == q_dtype);
     TORCH_CHECK(v.dtype() == q_dtype);
     TORCH_CHECK(out.dtype() == q_dtype);
@@ -451,8 +451,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(dq.dtype() == q_dtype);
     TORCH_CHECK(dk.dtype() == q_dtype);
     TORCH_CHECK(dv.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == torch::kInt32);
-    TORCH_CHECK(cu_seqlens_k.dtype() == torch::kInt32);
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt32);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt32);
 
     TORCH_CHECK(q.is_cuda());
     TORCH_CHECK(k.is_cuda());
@@ -507,9 +507,9 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         dk_tmp = dk;
         dv_tmp = dv;
     }else{
-        dq_tmp = dq.to(torch::kFloat32);
-        dk_tmp = dk.to(torch::kFloat32);
-        dv_tmp = dv.to(torch::kFloat32);
+        dq_tmp = dq.to(at::kFloat32);
+        dk_tmp = dk.to(at::kFloat32);
+        dv_tmp = dv.to(at::kFloat32);
     }
     
     if (zero_tensors) {
@@ -551,19 +551,19 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     run_flash_bwd(launch_params);
 
     if(!q.is_contiguous()){
-        dq_tmp.copy_(torch::cat(launch_params.params.qgrad_tensors, 0).contiguous(), true);
+        dq_tmp.copy_(at::cat(launch_params.params.qgrad_tensors, 0).contiguous(), true);
     }
     if(dq.data_ptr() != dq_tmp.data_ptr()){
         dq.copy_(dq_tmp, true);
     }
     if(!k.is_contiguous()){
-        dk_tmp.copy_(torch::cat(launch_params.params.kgrad_tensors, 0).contiguous(), true);
+        dk_tmp.copy_(at::cat(launch_params.params.kgrad_tensors, 0).contiguous(), true);
     }
     if(dk.data_ptr() != dk_tmp.data_ptr()){
         dk.copy_(dk_tmp, true);
     }
     if(!v.is_contiguous()){
-        dv_tmp.copy_(torch::cat(launch_params.params.vgrad_tensors, 0).contiguous(), true);
+        dv_tmp.copy_(at::cat(launch_params.params.vgrad_tensors, 0).contiguous(), true);
     }
     if(dv.data_ptr() != dv_tmp.data_ptr()){
         dv.copy_(dv_tmp, true);
@@ -581,16 +581,16 @@ bool fwd_test(bool do_verification){
     int d = n / nheads; //head_size//64
 
     //initialize the tensors
-    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);//torch::kBFloat16;at::kHalf
-    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);
+    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);//at::kBFloat16;at::kHalf
+    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
 
     at::Tensor q = q_host.to(at::kCUDA);
     at::Tensor k = k_host.to(at::kCUDA);
     at::Tensor v = v_host.to(at::kCUDA);
 
     //initialize the output tensor
-    at::Tensor out_host = at::empty({batch_size*seqlen, nheads, d}, torch::kFloat16);
+    at::Tensor out_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
     at::Tensor out = out_host.to(at::kCUDA);
 
     //initialize seqlens vector (size is b+1)
@@ -786,9 +786,9 @@ bool fwd_test(bool do_verification){
 
         }
 
-        at::Tensor out_device_result = out.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
-        at::Tensor lse_device_result = result[0].to(torch::kCPU);
-        at::Tensor z_device_result = result[1].to(torch::kCPU);
+        at::Tensor out_device_result = out.to(at::kCPU).view({batch_size, seqlen, nheads, d});
+        at::Tensor lse_device_result = result[0].to(at::kCPU);
+        at::Tensor z_device_result = result[1].to(at::kCPU);
 
         for(std::size_t i = 0; i < batch_size; i++)
         {
@@ -800,7 +800,7 @@ bool fwd_test(bool do_verification){
             auto& lse_gs_ms_device_result = lse_tensors[i];
             //auto& c_gs_ms_os_device_buf    = *c_tensors_device[i];
 
-            //at::Tensor out_device_result = out.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
+            //at::Tensor out_device_result = out.to(at::kCPU).view({batch_size, seqlen, nheads, d});
             void* out_host_ptr_f = out_device_result[i].data_ptr();
             CDataType* out_host_ptr = reinterpret_cast<CDataType*>(out_host_ptr_f);
             std::vector<CDataType> result_vector(out_host_ptr, out_host_ptr + out_device_result[i].numel()); //transfer tensor into vector
@@ -935,17 +935,17 @@ bool bwd_test(bool do_verification){
     int d = n / nheads; //head_size//64
 
     //initialize the tensors
-    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);//torch::kBFloat16;at::kHalf
-    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor y_host = at::empty({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor z_host = at::empty({batch_size*nheads, seqlen, seqlen}, torch::kInt32);
-    at::Tensor lse_host = at::empty({batch_size, nheads, seqlen}, torch::kFloat32);
+    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);//at::kBFloat16;at::kHalf
+    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor y_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor z_host = at::empty({batch_size*nheads, seqlen, seqlen}, at::kInt32);
+    at::Tensor lse_host = at::empty({batch_size, nheads, seqlen}, at::kFloat32);
 
-    at::Tensor ygrad_host = at::rand({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor qgrad_host = at::empty({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor kgrad_host = at::empty({batch_size*seqlen, nheads, d}, torch::kFloat16);
-    at::Tensor vgrad_host = at::empty({batch_size*seqlen, nheads, d}, torch::kFloat16);
+    at::Tensor ygrad_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor qgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor kgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor vgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
 
     at::Tensor q = q_host.to(at::kCUDA);
     at::Tensor k = k_host.to(at::kCUDA);
@@ -1172,11 +1172,11 @@ bool bwd_test(bool do_verification){
         auto acc0_element_op = Scale{softmax_scale};
         auto b1_element_op   = QKVElementOp{};
         auto c_element_op    = YElementOp{};
-        qgrad_host = qgrad.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
-        kgrad_host = kgrad.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
-        vgrad_host = vgrad.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
-        lse_host = lse.to(torch::kCPU);
-        y_host = y.to(torch::kCPU).view({batch_size, seqlen, nheads, d});
+        qgrad_host = qgrad.to(at::kCPU).view({batch_size, seqlen, nheads, d});
+        kgrad_host = kgrad.to(at::kCPU).view({batch_size, seqlen, nheads, d});
+        vgrad_host = vgrad.to(at::kCPU).view({batch_size, seqlen, nheads, d});
+        lse_host = lse.to(at::kCPU);
+        y_host = y.to(at::kCPU).view({batch_size, seqlen, nheads, d});
 
         for(std::size_t i=0; i<batch_size; i++){
             std::vector<ck::index_t> q_gs_ms_ks_lengths{G0, G1, M, K};
