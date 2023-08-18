@@ -428,7 +428,7 @@ inline void map(
       data_fvec0 = fVec::loadu(input_data + d);
       data_fvec1 = fVec::loadu(input_data + d + fVec::size(), size - d - fVec::size());
     } else {
-      // choose to align with behaviour of bVec::louad(ptr, size),
+      // choose to align with behaviour of bVec::loadu(ptr, size),
       // which leaves data_fvec1 uninitialized
       data_fvec0 = fVec::loadu(input_data + d, size - d);
     }
