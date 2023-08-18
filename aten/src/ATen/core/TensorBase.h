@@ -741,7 +741,7 @@ class TORCH_API TensorBase {
     return *this;
   }
   bool requires_grad() const {
-    return impl_->requires_grad();
+    return impl_->requires_grad() && (is_floating_point() || is_complex());
   }
 
   // The Forward AD API functions below are low level and are not to be used by end
