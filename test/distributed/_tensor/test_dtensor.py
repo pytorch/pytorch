@@ -198,7 +198,7 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_to_local(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
+        shard_spec = (Shard(0),)
         dist_tensor_shape = torch.Size([self.world_size * 3, 3])
         local_tensor_with_grad = torch.randn(
             3, 3, device=self.device_type, requires_grad=True
