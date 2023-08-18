@@ -9,7 +9,14 @@ from torch.fx.experimental.symbolic_shapes import free_symbols
 from .. import ir
 
 from ..lowering import lowerings as L
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    filter_nodes,
+    get_arg_value,
+    KeywordArg,
+    MULTIPLE,
+)
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -629,7 +636,12 @@ if torch._C._has_mkldnn:
                 aten.reshape.default,
                 CallFunction(
                     mkldnn._linear_pointwise.default,
-                    CallFunction(aten.reshape.default, Arg(), KeywordArg("reshape_1")),
+                    CallFunction(
+                        aten.reshape.default,
+                        Arg(),
+                        KeywordArg("reshape_1"),
+                        _users=MULTIPLE,
+                    ),
                     Arg(),
                     Arg(),
                     Arg(),
@@ -642,14 +654,19 @@ if torch._C._has_mkldnn:
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
-            reshape_2 = kwargs.get("reshape_1")
+            reshape_2 = kwargs.get("reshape_2")
             graph = match.graph
             node = match.output_node()
             if reshape_1[0] == reduce(lambda x, y: x * y, reshape_2[:-1]):
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
                 repl.meta.update(node.meta)
                 node.replace_all_uses_with(repl)
-                match.erase_nodes(graph)
+                old_linear_node = node.args[0]
+                reshape_1_node = old_linear_node.args[0]
+                graph.erase_node(node)
+                graph.erase_node(old_linear_node)
+                if reshape_1_node.users == 0:
+                    graph.erase_node(reshape_1_node)
 
         def is_linear_add_bias(match):
             add_node = match.output_node()
