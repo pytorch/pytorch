@@ -44,7 +44,7 @@ import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
 
-from distutils.version import LooseVersion
+from packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -5013,19 +5013,13 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
                      error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got -4\)")
 
     # out of bounds start
-    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
-        # narrow_copy_dense_cpu_out
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=RuntimeError,
-                         error_regex=r"start \(11\) \+ length \(0\) exceeds dimension size \(10\)\.")
-    else:
-        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
-                         error_type=IndexError,
-                         error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got 11\)")
     # out of bounds start (negative)
     yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
                      error_type=IndexError,
-                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got -11\)")
 
     # out of bounds length
     yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),
@@ -8838,6 +8832,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        has_no_out_of_place=True,
     ),
 
     ForeachFuncInfo(
@@ -8937,6 +8932,12 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
+    ForeachFuncInfo(
+        "copy",
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
+        has_no_out_of_place=True,
+    )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -17133,11 +17134,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
