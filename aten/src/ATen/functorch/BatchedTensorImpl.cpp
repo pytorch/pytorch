@@ -15,7 +15,7 @@ namespace functorch {
 
 // Returns the base unbatched value of a tensor, unwrapping as many
 // levels of BatchedTensor as needed.
-Tensor get_base_unbatched_value(const Tensor& maybe_batched_tensor) {
+static Tensor get_base_unbatched_value(const Tensor& maybe_batched_tensor) {
   auto ret = maybe_batched_tensor;
   auto* batched = maybeGetBatchedImpl(maybe_batched_tensor);
   while(batched) {
