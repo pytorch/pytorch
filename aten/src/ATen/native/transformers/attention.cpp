@@ -35,6 +35,7 @@ DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
 DEFINE_DISPATCH(flash_attention_kernel);
+DEFINE_DISPATCH(flash_attention_backward_kernel);
 
 namespace {
 
@@ -794,10 +795,54 @@ _scaled_dot_product_flash_attention_cpu(
       query, key, value, dropout_p, is_causal, return_debug_mask, scale);
 
   output = output.transpose(1, 2);
+  logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp),
       cum_seq_q, cum_seq_k, max_q, max_k,
       philox_seed, philox_offset, debug_attn_mask);
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+_scaled_dot_product_flash_attention_backward_cpu(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    const Tensor& cum_seq_q,
+    const Tensor& cum_seq_k,
+    const int64_t max_q,
+    const int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
+    c10::optional<double> scale) {
+  if (!grad_out.defined()) {
+    std::cout << "!grad_out.defined()" << std::endl;
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+  auto grad_out_t = grad_out.transpose(1, 2);
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+  auto o_t = out.transpose(1, 2);
+  auto lse_t = logsumexp.transpose(1, 2);
+
+  auto grad_q = at::zeros(q_t.sizes(), query.options());
+  auto grad_k = at::zeros(k_t.sizes(), key.options());
+  auto grad_v = at::zeros(v_t.sizes(), value.options());
+
+  flash_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v,
+      grad_out_t, q_t, k_t, v_t, o_t, lse_t, cum_seq_q, cum_seq_k,
+      max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale);
+
+  grad_q = grad_q.transpose(1, 2);
+  grad_k = grad_k.transpose(1, 2);
+  grad_v = grad_v.transpose(1, 2);
+
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
 
 Tensor triton_multi_head_attention(
