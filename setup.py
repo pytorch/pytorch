@@ -29,9 +29,12 @@
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
 #     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
-#
+
 #   USE_CUDNN=0
 #     disables the cuDNN build
+#
+#   USE_CUSPARSELT=0
+#     disables the cuSPARSELt build
 #
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
@@ -424,6 +427,8 @@ def mirror_files_into_torchgen():
         ),
         ("torchgen/packaged/ATen/native/tags.yaml", "aten/src/ATen/native/tags.yaml"),
         ("torchgen/packaged/ATen/templates", "aten/src/ATen/templates"),
+        ("torchgen/packaged/autograd", "tools/autograd"),
+        ("torchgen/packaged/autograd/templates", "tools/autograd/templates"),
     ]
     for new_path, orig_path in paths:
         # Create the dirs involved in new_path if they don't exist
@@ -1252,7 +1257,7 @@ def main():
         "include/torch/csrc/distributed/autograd/context/*.h",
         "include/torch/csrc/distributed/autograd/functions/*.h",
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
-        "include/torch/csrc/dynamo/eval_frame.h",
+        "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
@@ -1360,6 +1365,8 @@ def main():
         "packaged/ATen/*",
         "packaged/ATen/native/*",
         "packaged/ATen/templates/*",
+        "packaged/autograd/*",
+        "packaged/autograd/templates/*",
     ]
     setup(
         name=package_name,
