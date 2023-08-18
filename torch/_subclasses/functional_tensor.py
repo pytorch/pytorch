@@ -4,6 +4,8 @@ import torch
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+
 
 class _ToFunctionalTensor(torch.autograd.Function):
     @staticmethod
@@ -155,6 +157,15 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        unrecognized_types = [
+            t for t in types if not issubclass(t, torch._subclasses.FakeTensor) and t not in [torch.Tensor, FunctionalTensor]
+        ]
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
+            )
+            return NotImplemented
 
         def assert_is_functional(x):
             assert torch._is_functional_tensor(x)
