@@ -213,7 +213,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
-        self._warned_fallback = {}
+        self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
@@ -764,6 +764,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # When we do a better job selecting layout, we should
                         # revisit this.
                         need_fixed_layout = [
+                            torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
