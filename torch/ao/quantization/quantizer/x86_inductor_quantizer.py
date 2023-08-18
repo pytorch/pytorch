@@ -31,7 +31,6 @@ from .quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
-    QuantizationSpecBase,
     Quantizer,
     SharedQuantizationSpec,
 )
@@ -559,9 +558,6 @@ class X86InductorQuantizer(Quantizer):
             if input_node not in input_qspec_map:
                 # There has the case of cat same nodes: torch.cat([input0, input0], 1)
                 assert isinstance(input_node, Node)
-                assert isinstance(
-                    share_qparams_with_input_act0_qspec, QuantizationSpecBase
-                )
                 input_qspec_map[input_node] = share_qparams_with_input_act0_qspec
 
         cat_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
@@ -618,6 +614,24 @@ class X86InductorQuantizer(Quantizer):
                 )
         return
 
+    def _annotate_output_share_observer_as_input(
+        self, input_node: Node, source_node: Node
+    ):
+        source_node_quantization_annotation = (
+            source_node.meta["quantization_annotation"]
+            if "quantization_annotation" in source_node.meta
+            else None
+        )
+        if (
+            source_node_quantization_annotation
+            and source_node_quantization_annotation._is_output_of_quantized_pattern
+        ):
+            edge_or_node = (input_node, source_node)
+            source_node_quantization_annotation.output_qspec = SharedQuantizationSpec(
+                edge_or_node
+            )
+        return
+
     def _annotate_output_for_int8_in_int8_out_pattern(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
@@ -651,50 +665,12 @@ class X86InductorQuantizer(Quantizer):
                     assert isinstance(input_act, Node)
                     assert isinstance(maxpool_node, Node)
                     edge_or_node = (input_act, maxpool_node)
-                    getitem_node.meta[
-                        "quantization_annotation"
-                    ].output_qspec = SharedQuantizationSpec(edge_or_node)
-            elif node.target is torch.ops.aten.cat.default:
-                cat_node = node
-                cat_quantization_annotation = (
-                    cat_node.meta["quantization_annotation"]
-                    if "quantization_annotation" in cat_node.meta
-                    else None
-                )
-                if (
-                    cat_quantization_annotation
-                    and cat_quantization_annotation._is_output_of_quantized_pattern
-                ):
-                    # Annotate the output_qspec of cat_node
-                    first_input_node = cat_node.all_input_nodes[0]
-                    assert isinstance(first_input_node, Node)
-                    assert isinstance(cat_node, Node)
-                    edge_or_node = (first_input_node, cat_node)
-                    cat_node.meta[
-                        "quantization_annotation"
-                    ].output_qspec = SharedQuantizationSpec(edge_or_node)
-            elif node.target is torch.ops.aten.avg_pool2d.default:
-                avg_pool2d_node = node
-                avg_pool2d_quantization_annotation = (
-                    avg_pool2d_node.meta["quantization_annotation"]
-                    if "quantization_annotation" in avg_pool2d_node.meta
-                    else None
-                )
-                if (
-                    avg_pool2d_quantization_annotation
-                    and avg_pool2d_quantization_annotation._is_output_of_quantized_pattern
-                ):
-                    # Annotate the output_qspec of cat_node
-                    input_node = avg_pool2d_node.all_input_nodes[0]
-                    assert isinstance(input_node, Node)
-                    assert isinstance(avg_pool2d_node, Node)
-                    edge_or_node = (input_node, avg_pool2d_node)
-                    avg_pool2d_node.meta[
-                        "quantization_annotation"
-                    ].output_qspec = SharedQuantizationSpec(edge_or_node)
+                    getitem_quantization_annotation.output_qspec = (
+                        SharedQuantizationSpec(edge_or_node)
+                    )
             else:
-                # TODO <leslie>: Enable recipes for more int8_in_int8_out_ops
-                pass
+                input_node = node.all_input_nodes[0]
+                self._annotate_output_share_observer_as_input(input_node, node)
         return
 
     def validate(self, model: torch.fx.GraphModule) -> None:
