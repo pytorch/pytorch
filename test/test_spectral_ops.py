@@ -326,7 +326,7 @@ class TestFFT(TestCase):
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
         # TODO: the messages for primOps are inconsistent need to validate if ok
-        default_msg = r"(expected scalar type \w+ but found|Unsupported dtype)"         
+        default_msg = r"(expected scalar type \w+ but found|Unsupported dtype)"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
         elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
