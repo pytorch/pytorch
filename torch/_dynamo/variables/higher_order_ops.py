@@ -198,18 +198,18 @@ def speculate_subgraph(
                 )
 
     except Unsupported as ex:
-        log.warning(
-            "TorchDynamo tracing of HigherOrderOperator did not go well. "
-            "Falling back to eager behavior. This can result in a slowdown."
+        msg = (
+            f"speculate_subgraph: while introspecting {description}, we were unable "
+            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"that Dynamo was unable to prove safety for this API and will "
+            f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
+        log.warning(msg)
         log.exception(ex)
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise Unsupported(
-            f"speculate_subgraph: while introspecting {description}, we were unable "
-            f"to trace function `{f.get_name()}` into a single graph. This means "
-            f"that Dynamo was unable to prove safety for this API and will "
-            f"fall back to eager-mode PyTorch. Scroll up for the stack trace "
+            f"{msg} Scroll up for the stack trace "
             f"of the initial exception. The reason was: {ex.msg}"
         ) from ex
 
