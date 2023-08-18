@@ -28,11 +28,7 @@ __all__ = [
     'log_softmax',
     'SparseSemiStructuredTensor',
     'to_sparse_semi_structured',
-<<<<<<< HEAD
-=======
-    'enable_sparse_outputs',
     'as_sparse_gradcheck',
->>>>>>> 7f918758817... Add torch.sparse.enable_sparse_support decorator of gradcheck that allows gradcheck input function to recieve and return sparse tensors
 ]
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
