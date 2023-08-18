@@ -9,8 +9,8 @@ import logging
 import multiprocessing
 import os
 import pathlib
-import platform
 import pickle
+import platform
 import re
 import shlex
 import shutil

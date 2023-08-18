@@ -345,8 +345,8 @@ def compile_fx_inner(
             fx_codegen_and_compile, graph_args, graph_kwargs
         )
     else:
-        compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs # type: ignore[arg-type]
+        compiled_graph = fx_codegen_and_compile(
+            *graph_args, **graph_kwargs  # type: ignore[arg-type]
         )
 
     if aot_mode:
