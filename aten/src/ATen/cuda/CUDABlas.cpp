@@ -197,6 +197,7 @@ static size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -897,6 +898,7 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     void* amax_ptr) {
+  #if CUDA_VERSION >= 11080
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -983,6 +985,9 @@ void scaled_gemm(
       computeType,
       " scaleType ",
       scaleType);
+  return;
+  #endif // CUDA_VERSION >= 11080
+  TORCH_CHECK(false, "scaled_gemm is only supported for CUDA 11.8 and above");
 }
 
 void int8_gemm(
