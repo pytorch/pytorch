@@ -498,15 +498,15 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   }
 
   // For each output Tensor, stack the shards of the tensor together to form a nested return
-  // TODO: Determine when the output needs to be nested and when it can be non-nested
+  // TODO: Determine when the output needs to be nested and when it can be non-nested?
   torch::jit::drop(stack, num_arguments);
   auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_components);
   for (const auto return_idx : c10::irange(0, num_returns)) {
     auto shards = output_shards_chunks[return_idx];
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto out_nt = at::_nested_tensor_from_tensor_list(shards);
-    // TODO: Verify the args
-    torch::jit::push(stack, makeBatched(out_nt, 0, 1));
+    // NB: NTs only support batching over dim 0
+    torch::jit::push(stack, makeBatched(out_nt, 0, maybeCurrentDynamicLayer()->layerId()));
   }
 }
 
