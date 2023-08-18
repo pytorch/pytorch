@@ -45,7 +45,7 @@ namespace autograd {
 static constexpr int MAX_DEPTH = 60;
 
 void set_device(int device);
-void validate_outputs(
+TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
@@ -134,6 +134,16 @@ struct TORCH_API Engine {
   static Engine& get_default_engine();
 
   static Engine& get_base_engine();
+
+  // compiled_autograd needs to live in a different .so file so that it
+  // can have python symbols, so we add a layer of indirection
+  // see [Note: Compiled Autograd]
+  typedef variable_list (*compiled_autograd_fn)(
+      const std::shared_ptr<Node>& graph_root,
+      GraphTask& graph_task,
+      bool accumulate_grad,
+      const edge_list& outputs);
+  static void set_compiled_autograd(compiled_autograd_fn fn);
 
   Engine(const Engine&) = delete;
   Engine(Engine&&) = delete;

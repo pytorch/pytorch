@@ -106,9 +106,10 @@ from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
 )
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     EdgeOrNode,
     QuantizationSpec,
+    QuantizationSpecBase,
     FixedQParamsQuantizationSpec,
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
@@ -155,13 +156,23 @@ _TORCH_DTYPE_TO_QDTYPE = {
     torch.float32: torch.float32,
 }
 
-def _get_observer_kwargs(quant_spec: QuantizationSpec):
+def _get_observer_kwargs(quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec]):
     kwargs_dict = asdict(quant_spec)
+    # TODO: refactor observer to accept plain types
     kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
     return copy.deepcopy(kwargs_dict)
 
+def _get_qspec_for_arg(
+    arg: Node,
+    input_qspec_map: Dict[Node, QuantizationSpecBase],
+    named_modules: Dict[str, torch.nn.Module]
+) -> Optional[QuantizationSpecBase]:
+    while _is_activation_post_process_node(arg, named_modules):
+        arg = arg.args[0]  # type: ignore[assignment]
+    return input_qspec_map.get(arg, None)
+
 def _create_obs_or_fq_from_qspec(
-    quantization_spec: QuantizationSpec,
+    quantization_spec: Optional[QuantizationSpecBase],
     obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
@@ -201,6 +212,7 @@ def _create_obs_or_fq_from_qspec(
         else:
             return observer_ctr()
 
+    assert isinstance(quantization_spec, QuantizationSpec)
     observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
     kwargs = _get_observer_kwargs(quantization_spec)
     kwargs.pop("observer_or_fake_quant_ctr")
@@ -238,7 +250,7 @@ def _needs_obs_or_fq(
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
         assert cur_target_dtype in _OBS_DTYPE_LIST, \
-            "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
+            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return is_zeroth_arg
     if reuse_input_obs_or_fq:
@@ -685,13 +697,12 @@ def _get_arg_as_input_act_obs_or_fq(
     #
     if "quantization_annotation" in node.meta:
         input_qspec_map = node.meta["quantization_annotation"].input_qspec_map
-        input_act_obs_or_fq = _DEFAULT_FP32_OBS_OR_FQ_CTR()
-        # skip observer modules
-        while _is_activation_post_process_node(arg, named_modules):
-            arg = arg.args[0]
-        if arg in input_qspec_map:
-            input_act_obs_or_fq = _create_obs_or_fq_from_qspec(input_qspec_map[arg], obs_or_fq_map, is_qat)
-        return input_act_obs_or_fq
+        input_arg_qspec = _get_qspec_for_arg(arg, input_qspec_map, named_modules)
+        if input_arg_qspec is None:
+            input_arg_obs_or_fq = _DEFAULT_FP32_OBS_OR_FQ_CTR()
+        else:
+            input_arg_obs_or_fq = _create_obs_or_fq_from_qspec(input_arg_qspec, obs_or_fq_map, is_qat)
+        return input_arg_obs_or_fq
 
     # we can remove the following path in the future if fx graph mode quantization is
     # no longer used
@@ -1370,7 +1381,7 @@ def insert_observers_for_model(
     # Step 1, set the observer or fake quantize module constructor for each node in the
     # matched_node_pattern
 
-    for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
+    for match_res_with_qconfig in node_name_to_match_result_with_qconfig.values():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         assert qhandler is not None
         _set_target_dtype_info_for_matched_node_pattern(
@@ -1425,7 +1436,7 @@ def insert_observers_for_model(
 
     # reset the counters and set of processed_nodes
     processed_nodes: Set[Node] = set()
-    for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
+    for match_res_with_qconfig in node_name_to_match_result_with_qconfig.values():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
             pattern, matched_node_pattern, qconfig, backend_config)
@@ -1654,10 +1665,7 @@ def _run_prepare_fx_on_standalone_modules(
     not modify the graph, it just replaces the unobserved modules with
     their observed versions.
     """
-    for (
-        node_name,
-        (root_node, _, pattern, qhandler, qconfig),
-    ) in node_name_to_match_result_with_qconfig.items():
+    for (root_node, _, pattern, qhandler, qconfig) in node_name_to_match_result_with_qconfig.values():
         if qhandler is None:
             continue
         elif not qhandler.is_standalone_module():
