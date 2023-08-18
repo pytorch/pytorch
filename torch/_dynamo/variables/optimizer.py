@@ -204,7 +204,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 for name in names_to_delete:
                     gm._buffers.pop(name, None)
                     gm._parameters.pop(name, None)
-                    tc.params_flat.clear()
+                    if tc.params_flat:
+                        tc.params_flat.clear()
 
             weakref.finalize(value, clear_static_tensor_refs)
 
