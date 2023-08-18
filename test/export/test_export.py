@@ -6,7 +6,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._export import export, dynamic_dim, DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export.constraints import constrain_as_size, constrain_as_value
-from torch._export.utils import register_dataclass_as_pytree_node
+from torch._export.utils import register_dataclass_as_pytree_node, is_param, get_param
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_flatten, tree_unflatten, LeafSpec, TreeSpec
@@ -433,6 +433,27 @@ class TestExport(TestCase):
 
         unflat = tree_unflatten(flat, spec)
         self.assertEqual(unflat, inp)
+
+    def test_param_util(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        ep = export(Basic(), (torch.randn(5, 10),))
+        num_params = 0
+        params = []
+        for node in ep.graph.nodes:
+            if is_param(ep, node):
+                num_params += 1
+                params.append(get_param(ep, node))
+        self.assertEqual(num_params, 2)
+        self.assertEqual(params[0].shape, [1, 10])  # weight
+        self.assertEqual(params[1].shape, [1])  # bias
+
 
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
