@@ -29,7 +29,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
-from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
+from ..allowed_functions import (
+    is_allowed,
+    is_builtin_callable,
+    is_numpy,
+    is_user_defined_allowed,
+)
 from ..exc import unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -49,6 +54,7 @@ from ..utils import (
     build_checkpoint_variable,
     clone_input,
     get_fake_value,
+    get_static_address_type,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -447,6 +453,8 @@ class VariableBuilder:
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(
                 value,
                 source=self.source,
@@ -845,6 +853,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
+            or get_static_address_type(value) is not None
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(
@@ -898,12 +907,6 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
-
-        if not self.tx.output.export:
-            # Export has (supposedly) valid cases for fake tensors as inputs here.
-            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
-            # in real_value_tensor_positive_aliases in the common case)
-            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
 
         # We have accessed the SAME tensor from a different source.  In some
         # situations, it doesn't matter if you have the same tensor identity
@@ -1225,8 +1228,8 @@ def wrap_fx_proxy_cls(
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            # tensor subclasses that are not fakified need to be cloned
+            if not is_fake(value):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -1588,6 +1591,8 @@ class SourcelessBuilder:
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
