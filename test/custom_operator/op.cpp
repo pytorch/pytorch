@@ -76,6 +76,6 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
     m.def("sin(Tensor x) -> Tensor");
 }
 
-TORCH_LIBRARY_IMPL(custom, "CPU", m) {
+TORCH_LIBRARY_IMPL(custom, CPU, m) {
   m.impl("sin", &custom_sin)
 }
