@@ -4715,51 +4715,50 @@ def meta__scaled_dot_product_flash(
             torch.empty((), dtype=torch.long, device="meta"),
             torch.empty((), dtype=query.dtype, device=query.device),
         )
-    else:
-        max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_seqlen_q),
-            dtype=torch.float,
+    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+    cumulative_sequence_length_q = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
+    )
+    cumulative_sequence_length_k = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
+    )
+
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            dtype=query.dtype,
             device=query.device,
         )
-        cumulative_sequence_length_q = torch.empty(
-            batch_size + 1, dtype=torch.int32, device="meta"
-        )
-        cumulative_sequence_length_k = torch.empty(
-            batch_size + 1, dtype=torch.int32, device="meta"
-        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-        if return_debug_mask:
-            blocksize_c = 128 if head_dim > 64 else 256
-            max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-            if max_seqlen_batch_k <= 128:
-                max_seqlen_k = 128
-            elif max_seqlen_batch_k <= 256:
-                max_seqlen_k = 256
-            debug_mask = torch.empty(
-                (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
-                dtype=query.dtype,
-                device=query.device,
-            )
-        else:
-            debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
+    # capturing or not, but at the time of tracing we don't know if we
+    # are going to use cudagraphs or not, so we return meta tensors here
+    # it's possible we'll need to have some special handling in inductor for sdpa
 
-        # Note [Seed and Offset]: device for seed and offset below depends on whether we are
-        # capturing or not, but at the time of tracing we don't know if we
-        # are going to use cudagraphs or not, so we return meta tensors here
-        # it's possible we'll need to have some special handling in inductor for sdpa
-
-        return (
-            attention,
-            logsumexp,
-            cumulative_sequence_length_q,
-            cumulative_sequence_length_k,
-            max_seqlen_batch_q,
-            max_seqlen_batch_k,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            debug_mask,
-        )
+    return (
+        attention,
+        logsumexp,
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_k,
+        max_seqlen_batch_q,
+        max_seqlen_batch_k,
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
+        debug_mask,
+    )
 
 
 @register_meta(
