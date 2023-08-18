@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
-// #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+#endif
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
@@ -2113,9 +2115,10 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
-  // initNvFuserPythonBindings(module);
+  initNvFuserPythonBindings(module);
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
   initOnednnPythonBindings(module);
-
+#endif
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
     try {
