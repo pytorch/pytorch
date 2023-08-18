@@ -89,12 +89,12 @@ Tensor new_with_storage(
   return tensor;
 }
 
-std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
-  bool is_storage = isStorage(seq);
+std::vector<int64_t> compute_sizes(PyObject* seq_or_set, ScalarType scalar_type) {
+  bool is_storage = isStorage(seq_or_set);
   std::vector<int64_t> sizes;
-  THPObjectPtr handle;
-  while (PySequence_Check(seq)) {
-    auto length = PySequence_Length(seq);
+  while (PySequence_Check(seq_or_set) || PyAnySet_Check(seq_or_set)) {
+    THPObjectPtr wrapped(PySequence_Fast(seq_or_set, "not a sequence or set"));
+    auto length = PySequence_Fast_GET_SIZE(wrapped.get());
     if (length < 0)
       throw python_error();
     if (is_storage) {
@@ -102,17 +102,11 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
-      throw ValueError("too many dimensions '%s'", Py_TYPE(seq)->tp_name);
+      throw ValueError("too many dimensions '%s'", Py_TYPE(seq_or_set)->tp_name);
     }
     if (length == 0)
       break;
-    handle = THPObjectPtr(PySequence_GetItem(seq, 0));
-    if (!handle) {
-      throw ValueError(
-          "could not determine the shape of object type '%s'",
-          Py_TYPE(seq)->tp_name);
-    }
-    seq = handle.get();
+    seq_or_set = PySequence_Fast_GET_ITEM(wrapped.get(), 0);
   }
 
   return sizes;
@@ -165,22 +159,22 @@ ScalarType infer_scalar_type(PyObject* obj) {
   if (THPUtils_checkString(obj)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
   }
-  if (PySequence_Check(obj)) {
+  if (PySequence_Check(obj) || PyAnySet_Check(obj)) {
     c10::optional<ScalarType> scalarType;
-    auto length = PySequence_Length(obj);
+    auto wrapped_obj = THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
+    if (!wrapped_obj)
+      throw python_error();
+    auto length = PySequence_Fast_GET_SIZE(wrapped_obj.get());
     if (length < 0)
       throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
+    PyObject **items = PySequence_Fast_ITEMS(wrapped_obj.get());
     for (const auto i : c10::irange(length)) {
-      THPObjectPtr handle(PySequence_GetItem(obj, i));
-      if (!handle)
-        throw python_error();
-      auto cur_item = handle.get();
-      if (cur_item == obj)
-        throw TypeError("new(): self-referential lists are incompatible");
-      ScalarType item_scalarType = infer_scalar_type(cur_item);
+      if (items[i] == obj)
+        throw TypeError("new(): self-referential containers are incompatible");
+      ScalarType item_scalarType = infer_scalar_type(items[i]);
       scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
                                 : item_scalarType;
       if (scalarType == ScalarType::ComplexDouble) {
@@ -241,26 +235,26 @@ void recursive_store(
   }
 
   auto n = sizes[dim];
-  auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
-  if (!seq)
+  auto wrapped = THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
+  if (!wrapped)
     throw python_error();
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
-  if (seq_size != n) {
+  auto size = PySequence_Fast_GET_SIZE(wrapped.get());
+  if (size != n) {
     throw ValueError(
         "expected sequence of length %lld at dim %lld (got %lld)",
         (long long)n,
         (long long)dim,
-        (long long)seq_size);
+        (long long)size);
   }
 
-  PyObject** items = PySequence_Fast_ITEMS(seq.get());
+  PyObject **items = PySequence_Fast_ITEMS(wrapped.get());
   for (const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
     if (is_numpy_available() && PyArray_Check(items[i])) {
       TORCH_WARN_ONCE(
-          "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
-          "Please consider converting the list to a single numpy.ndarray with "
+          "Creating a tensor from a container of numpy.ndarrays is extremely slow. "
+          "Please consider converting the container to a single numpy.ndarray with "
           "numpy.array() before converting to a tensor.");
     }
 #endif
@@ -472,9 +466,9 @@ Tensor legacy_new_from_sequence(
     at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
-  if (!PySequence_Check(data)) {
+  if (!PySequence_Check(data) && !PyAnySet_Check(data)) {
     throw TypeError(
-        "new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
+        "new(): data must be a sequence or set (got %s)", Py_TYPE(data)->tp_name);
   }
   return internal_new_from_data(
       options,
