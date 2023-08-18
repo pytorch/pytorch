@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
-from distutils.version import LooseVersion
+from packaging import version
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
@@ -55,7 +55,7 @@ load_tests = load_tests
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
-    IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
+    IS_WINDOWS and torch.version.cuda and version.parse(torch.version.cuda) > version.parse("11.2")
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
