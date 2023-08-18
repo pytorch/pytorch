@@ -244,8 +244,12 @@ class CoordescTuner:
         baseline_timing: Optional[float] = None,
     ) -> "triton.Config":
         if baseline_timing is None:
-            baseline_timing = self.call_func(func, baseline_config)
-
+            try:
+                baseline_timing = self.call_func(func, baseline_config)
+            except Exception as e:
+                log.debug("Got exception %s", e)
+                baseline_timing = float("inf")
+            
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
             "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
