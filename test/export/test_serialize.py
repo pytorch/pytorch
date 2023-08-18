@@ -370,6 +370,7 @@ class TestDeserialize(TestCase):
 
 instantiate_parametrized_tests(TestDeserialize)
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSchemaVersioning(TestCase):
     def test_error(self):
         def f(x):
