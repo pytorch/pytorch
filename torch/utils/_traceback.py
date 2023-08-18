@@ -226,7 +226,7 @@ class CapturedTraceback:
         delayed_idxs = []
         for i, tb in enumerate(tbs):
             if tb.tb is None:
-                rs.append(traceback.StackSummary())
+                rs.append([])
             else:
                 rs.append(None)
                 delayed_idxs.append(i)
