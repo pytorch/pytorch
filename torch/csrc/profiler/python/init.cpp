@@ -422,7 +422,14 @@ void initPythonBindings(PyObject* module) {
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", py_symbolize);
+  m.def("symbolize_tracebacks", [](py::list tbs) {
+    std::vector<CapturedTraceback*> tb_ptrs;
+    tb_ptrs.reserve(tbs.size());
+    for (py::handle tb : tbs) {
+      tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
+    }
+    return py_symbolize(tb_ptrs);
+  });
   installCapturedTracebackPython();
 }
 } // namespace profiler
