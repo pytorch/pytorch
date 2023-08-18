@@ -6296,6 +6296,21 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_symint(self):
+        from torch._export.constraints import constrain_as_size
+
+        @torch.compile(backend="eager")
+        def f(lengths, values):
+            sizes = lengths.tolist()
+            for s in sizes:
+                constrain_as_size(s, min=2, max=100)
+            return torch.split(values, sizes)
+
+        f(torch.tensor([2, 3, 4]), torch.randn(9))
+
     def test_simple_set_usage(self):
         def foo(x, y):
             setty = {x, y}
@@ -6564,6 +6579,47 @@ def ___make_guard_fn():
         compiled = torch._dynamo.optimize(counter)(indirect)(x)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_input(self):
+        a = torch.randn([2, 3])
+        b = torch.randn([2, 3])
+        d1 = collections.deque([a, b])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([a, b])
+        d2.insert(0, "foo")
+
+        def fn(q):
+            a = q.pop()
+            b = q.pop()
+            return a * b
+
+        eager = fn(d1)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_append_left(self):
+        d1 = collections.deque([10, 10])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([10, 10])
+        d2.insert(0, "foo")
+
+        def fn(q, a, b):
+            q.appendleft(a)
+            q.appendleft(b)
+            return q.popleft() * q.popleft()
+
+        a = torch.randn([3, 3])
+        b = torch.randn([3, 3])
+        eager = fn(d1, a, b)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2, a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertTrue(isinstance(compiled, torch.Tensor))
 
 
 class TestTracer(JitTestCase):
