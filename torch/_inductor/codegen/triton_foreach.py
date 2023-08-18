@@ -5,7 +5,7 @@ from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_to_meta
 
 
 class ForeachKernel(Kernel):
@@ -84,9 +84,11 @@ class ForeachKernel(Kernel):
         return sub_kernel
 
     def jit_line(self):
+        can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
+        index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
             "device": V.graph.scheduler.current_device.index,
             "constants": {},
         }

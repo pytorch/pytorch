@@ -11,11 +11,15 @@ exclude_patterns = [
     'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
+    'fb/**',
+    '**/fb/**',
     'functorch/docs/**',
     'functorch/examples/**',
     'functorch/notebooks/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    # Tests from the NumPy test suite
+    'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
     'torch/include/**',
     'torch/lib/**',
@@ -66,6 +70,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
+    '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
 ]
@@ -105,10 +110,12 @@ include_patterns = [
     'test/test_type_info.py',
 ]
 exclude_patterns = [
+    '**/fb/**',
     'torch/include/**',
     'torch/csrc/**',
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
+    'torch/_numpy/**/*.py',
     'torch/_functorch/aot_autograd.py',
     'torch/_functorch/benchmark_utils.py',
     'torch/_functorch/compile_utils.py',
@@ -151,7 +158,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     'numpy==1.24.3',
-    'expecttest==0.1.3',
+    'expecttest==0.1.6',
     'mypy==1.4.1',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
@@ -181,13 +188,19 @@ include_patterns = [
     'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/autotune_process.py',
     'torch/_inductor/graph.py',
+    'torch/_inductor/codegen/common.py',
     'torch/_inductor/codegen/wrapper.py',
     'torch/_inductor/cudagraph_trees.py',
+    'torch/_inductor/compile_fx.py',
     'torch/_inductor/lowering.py',
+    'torch/_inductor/metrics.py',
+    'torch/_inductor/select_algorithm.py',
+    'torch/_inductor/wrapper_benchmark.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -212,6 +225,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     # (linbinyu) copied from internal repo
+    '**/fb/**',
     'tools/code_analyzer/gen_operators_yaml.py',
     'tools/dynamo/verify_dynamo.py',
     'tools/gen_vulkan_spv.py',
@@ -246,6 +260,7 @@ exclude_patterns = [
     # that are not easily converted to accepted c++
     'c10/cuda/**/*.cpp',
     'c10/test/**/*.cpp',
+    '**/fb/**',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
     'torch/csrc/jit/serialization/onnx.cpp',
@@ -281,6 +296,8 @@ command = [
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
+    'fb/**',
+    '**/fb/**',
     'test/test_jit.py',
 ]
 command = [
@@ -300,7 +317,11 @@ command = [
 [[linter]]
 code = 'NOQA'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = ['caffe2/**']
+exclude_patterns = [
+    'caffe2/**',
+    'fb/**',
+    '**/fb/**'
+    ]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -353,6 +374,8 @@ exclude_patterns=[
     '**/*.ipynb',
     '**/*.ps1',
     '**/*.ptl',
+    'fb/**',
+    '**/fb/**',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
@@ -385,6 +408,8 @@ exclude_patterns = [
     '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'fb/**',
+    '**/fb/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
@@ -412,6 +437,8 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'fb/**',
+    '**/fb/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
@@ -443,6 +470,7 @@ exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'aten/src/ATen/native/vulkan/glsl/**',
+    '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
 ]
@@ -502,6 +530,9 @@ include_patterns = [
     'torch/_decomp/**/*.py',
     'torch/_meta_registrations.py',
 ]
+exclude_patterns = [
+    '**/fb/**',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -534,6 +565,8 @@ exclude_patterns = [
     # These specializations are non-orphan
     'torch/csrc/distributed/c10d/init.cpp',
     'torch/csrc/jit/python/pybind.h',
+    'fb/**',
+    '**/fb/**',
     # These are safe to exclude as they do not have Python
     'c10/**/*',
 ]
@@ -564,6 +597,7 @@ exclude_patterns = [
     '**/*.py',
     '**/*.md',
     '**/*.diff',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -595,6 +629,8 @@ exclude_patterns = [
     '**/git-pre-commit',
     '**/git-clang-format',
     '**/gradlew',
+    'fb/**',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -608,6 +644,7 @@ code = 'CUBINCLUDE'
 include_patterns = ['aten/**']
 exclude_patterns = [
     'aten/src/ATen/cuda/cub*.cuh',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -634,6 +671,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -664,6 +702,7 @@ exclude_patterns = [
     'c10/cuda/CUDAGuard.h',
     'c10/cuda/impl/CUDATest.cpp',
     'torch/csrc/cuda/nccl.cpp',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -694,6 +733,8 @@ exclude_patterns = [
     'functorch/benchmarks/**',
     # Grandfathered in
     'caffe2/**',
+    'fb/**',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -744,6 +785,8 @@ exclude_patterns = [
     'cmake/TorchConfig.cmake.in',
     'cmake/TorchConfigVersion.cmake.in',
     'cmake/cmake_uninstall.cmake.i',
+    'fb/**',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -763,6 +806,9 @@ init_command = [
 code = 'SHELLCHECK'
 include_patterns = [
     '.ci/pytorch/**/*.sh'
+]
+exclude_patterns = [
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -785,6 +831,9 @@ include_patterns = [
     # actionlint does not support composite actions yet
     # '.github/actions/**/*.yml',
     # '.github/actions/**/*.yaml',
+]
+exclude_patterns = [
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -811,6 +860,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'test/run_test.py',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -828,6 +878,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'c10/util/CallOnce.h',
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -849,6 +900,9 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
+]
+exclude_patterns = [
+    '**/fb/**',
 ]
 command = [
     'python3',
@@ -906,6 +960,8 @@ exclude_patterns = [
     # formatting on them
     'caffe2/**/*.py',
     'caffe2/**/*.pyi',
+    'fb/**',
+    '**/fb/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     # These files are all grandfathered in, feel free to remove from this list
@@ -1533,6 +1589,7 @@ exclude_patterns = [
     'test/test_view_ops.py',
     'test/test_vulkan.py',
     'test/test_xnnpack_integration.py',
+    'test/torch_np/numpy_test/**/*.py',
     'test/typing/fail/bitwise_ops.py',
     'test/typing/fail/creation_ops.py',
     'test/typing/fail/random.py',
@@ -1606,7 +1663,6 @@ exclude_patterns = [
     'torch/_export/serde/upgrade.py',
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
-    'torch/_export/workflow.py',
     'torch/_functorch/__init__.py',
     'torch/_functorch/aot_autograd.py',
     'torch/_functorch/apis.py',
@@ -2519,7 +2575,11 @@ is_formatter = true
 [[linter]]
 code = 'COPYRIGHT'
 include_patterns = ['**']
-exclude_patterns = ['.lintrunner.toml']
+exclude_patterns = [
+    '.lintrunner.toml',
+    'fb/**',
+    '**/fb/**',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -2558,6 +2618,10 @@ is_formatter = true
 [[linter]]
 code = 'LINTRUNNER_VERSION'
 include_patterns = ['**']
+exclude_patterns = [
+    'fb/**',
+    '**/fb/**',
+]
 command = [
     'python3',
     'tools/linter/adapters/lintrunner_version_linter.py'
@@ -2572,6 +2636,8 @@ exclude_patterns = [
     'functorch/notebooks/**',
     'scripts/**',
     'third_party/**',
+    'fb/**',
+    '**/fb/**',
 ]
 command = [
     'python3',

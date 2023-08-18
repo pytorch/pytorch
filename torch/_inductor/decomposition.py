@@ -2,13 +2,15 @@ import functools
 import logging
 import math
 import numbers
+import typing
 
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions import pw_cast_for_opmath, _grid_sampler_2d as decomp_grid_sampler_2d
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._prims_common import TensorSequenceType
 
 from . import config
 
@@ -175,6 +177,33 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.bmm])
+def bmm(self, batch2):
+    if self.device == "cpu":
+        if self.size(1) == 1 and batch2.size(-1) == 1:
+            return torch.sum(
+                self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
+            ).unsqueeze(1)
+    return NotImplemented
+
+
+@register_decomposition([aten.mm])
+def mm(self, input2):
+    if self.device == "cpu":
+        if (
+            self.size(-1) == 1
+            and input2.size(0) == 1
+            and (self.dtype == input2.dtype)
+            and ((torch.numel(self) + torch.numel(input2)) <= 32)
+        ):
+            return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
+        if self.size(0) == 1 and input2.size(-1) == 1:
+            return torch.sum(
+                self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
+            ).unsqueeze(0)
+    return NotImplemented
 
 
 @register_decomposition([aten.cat.default])
@@ -376,6 +405,39 @@ def dequantize_per_tensor_tensor_decomp_impl(
     return (input.to(torch.float32) - zero_point) * scale
 
 
+@register_decomposition([aten.grid_sampler_2d])
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: torch.Tensor,
+    grid: torch.Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> torch.Tensor:
+
+    # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
+    #
+    if (
+        a.device == torch.device("cpu")
+        and interpolation_mode == 0
+        and a.is_contiguous(memory_format=torch.contiguous_format)
+    ):
+        _expand_grid = False
+    else:
+        _expand_grid = True
+    output = decomp_grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+        _expand_grid=_expand_grid,
+    )
+    if a.is_contiguous(memory_format=torch.channels_last):
+        output = output.contiguous(memory_format=torch.channels_last)
+    return output
+
+
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
     return aten._foreach_add.List(
@@ -397,6 +459,38 @@ def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
         aten._foreach_mul.Scalar(
             aten._foreach_sub.List(end_tensors, start_tensors), weight
         ),
+    )
+
+
+@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: typing.Optional[torch.Tensor],
+    running_mean: typing.Optional[torch.Tensor],
+    running_var: typing.Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
     )
 
 

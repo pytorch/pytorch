@@ -399,12 +399,22 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
-  for (const auto i : c10::irange(devices_.size())) {
-    // Checking the work's corresponding CUDA events' status
-    if (!(*ncclStartEvents_)[i].query()) {
-      return false;
+  try {
+    for (const auto i : c10::irange(devices_.size())) {
+      // Checking the work's corresponding CUDA events' status
+      if (!(*ncclStartEvents_)[i].query()) {
+        return false;
+      }
     }
+  } catch (const std::exception& e) {
+    if (std::string(e.what()).find("driver shutting down") ==
+        std::string::npos) {
+      throw;
+    }
+    LOG(INFO) << "[Rank " << rank_
+              << "] Event query failed with exception: " << e.what();
   }
+
   return true;
 }
 
@@ -662,18 +672,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialized with following options:"
-            << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
-            << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
-            << "\nTIMEOUT(ms): " << options_->timeout.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: "
+  LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options:"
+            << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
-            << "\nTORCH_DISTRIBUTED_DEBUG: "
+            << ", TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
-            << "\nNCCL_DEBUG: " << std::string(nccl_debug)
-            << "\nID=" << this->getID();
+            << ", NCCL_DEBUG: " << std::string(nccl_debug)
+            << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -825,10 +834,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     workCleanupLoop();
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << "[Rank " << rank_
+            << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     // Append error message reported from workCleanupLoop
     const auto exitMsg = c10::str(
@@ -1455,6 +1464,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevices(devices);
   auto& ncclStreams = ncclStreams_[key];
+  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   for (const auto i : c10::irange(devices.size())) {
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
@@ -1465,7 +1475,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
-
+  if (avoidRecordStreams_) {
+    // other functions expect an initialized ptr if avoidRecordStreams_ is set
+    work->stashed_for_allocator_safety_ =
+        std::make_shared<std::vector<at::Tensor>>();
+  }
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 

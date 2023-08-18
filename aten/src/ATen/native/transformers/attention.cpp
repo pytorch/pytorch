@@ -572,15 +572,45 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // Then slices the padded bias to the original size
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
+
+template <int alignment>
+bool is_aligned(const SymInt& size){
+  return size % alignment == 0;
+}
+
+template <int alignment>
 at::Tensor pad_bias(const at::Tensor& attn_bias) {
-  int align_to = 16;
   auto last_dim_size = attn_bias.sym_size(-1);
-  if (last_dim_size % align_to == 0) {
-    return attn_bias;
-  }
-  auto pad_count = align_to - (last_dim_size % align_to);
+  auto pad_count = alignment - (last_dim_size % alignment);
   auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
   return padded_bias.slice_symint(-1, 0, last_dim_size);
+}
+
+at::Tensor preprocess_mask(
+    const at::Tensor& mask,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value) {
+  constexpr int mem_eff_alignment = 16;
+  // Expand to 4d case
+  at::Tensor attn_mask = mask.expand_symint(
+      {query.sym_size(0),
+       query.sym_size(1),
+       query.sym_size(2),
+       key.sym_size(2)});
+
+  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
+  // Apply pad_bias and store the result in attn_mask
+  if (!aligned_last_dim) {
+    return pad_bias<mem_eff_alignment>(attn_mask);
+  }
+  // Check and make the tensor contiguous if needed
+  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
+      attn_mask.sym_stride(2) % 16 != 0) {
+    return attn_mask.contiguous();
+  }
+
+  return attn_mask;
 }
 
 } // namespace
@@ -640,13 +670,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       if (attn_mask.has_value()) {
-        // Expand to 4d case
-        attn_mask = attn_mask.value().expand_symint(
-            {query_.sym_size(0),
-             query_.sym_size(1),
-             query_.sym_size(2),
-             key.sym_size(2)});
-        attn_mask = pad_bias(attn_mask.value());
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);

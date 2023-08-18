@@ -52,7 +52,7 @@ from torch.distributed.fsdp.flat_param import (
     FlatParamHandle,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _FSDPPolicy
+from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -78,10 +78,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -97,7 +97,7 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
-    policy: Optional[_FSDPPolicy],
+    policy: Optional[_Policy],
 ) -> _FSDPState:
     is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
     if is_hybrid_strategy:
@@ -274,6 +274,10 @@ def _init_ignored_module_states(
         state._ignored_modules,
         ignored_parameters,
     )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
+    )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
     # however, FSDP still imposes some semantics on buffers (e.g. buffer mixed
@@ -445,8 +449,6 @@ def _init_runtime_state(
     state._comm_hook = None
     state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 
@@ -458,14 +460,6 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
-    _handles_prefetched: Dict[FlatParamHandle, bool] = {}
-    state._handles_prefetched = _handles_prefetched
-    # Used for guarding against mistargeted backward prefetches
-    _needs_pre_backward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_backward_unshard = _needs_pre_backward_unshard
-    # Used for guarding against mistargeted forward prefetches
-    _needs_pre_forward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_forward_unshard = _needs_pre_forward_unshard
     # The data structures use tuples of handles to generalize over the case
     # where a module's forward involves multiple handles.
     return state
@@ -643,6 +637,37 @@ def _get_ignored_params(
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
+
+
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """
+    Returns the cleaned buffer FQNs in ``ignored_modules``
+    """
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:

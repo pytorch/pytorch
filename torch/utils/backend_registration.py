@@ -21,7 +21,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     (1) (In C++) implement kernels for various torch operations, and register them
         to the PrivateUse1 dispatch key.
-    (2) (In python) call torch.register_privateuse1_backend("foo")
+    (2) (In python) call torch.utils.rename_privateuse1_backend("foo")
 
     You can now use "foo" as an ordinary device string in python.
 
@@ -80,7 +80,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     Example::
 
         >>> # xdoctest: +SKIP("failing")
-        >>> torch.register_privateuse1_backend("foo")
+        >>> torch.utils.rename_privateuse1_backend("foo")
         # This will work, assuming that you've implemented the right C++ kernels
         # to implement torch.ones.
         >>> a = torch.ones(2, device="foo")
@@ -285,8 +285,8 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
     Example::
 
         >>> # xdoctest: +SKIP("failing")
-        >>> torch.utils.register_privateuse1_backend("foo")
-        >>> torch.utils.generate_for_privateuse1_backend()
+        >>> torch.utils.rename_privateuse1_backend("foo")
+        >>> torch.utils.generate_methods_for_privateuse1_backend()
         # Then automatically generate backend-related attributes and methods.
         >>> a = torch.tensor(2).foo()
         >>> a.is_foo

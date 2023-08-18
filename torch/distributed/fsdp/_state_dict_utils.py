@@ -250,8 +250,11 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            buffer_clean_fqns.append(clean_key)
-            buffers.append(state_dict[fqn])
+            # skip upcasting for ignored buffers
+            if clean_key not in fsdp_state._ignored_buffer_names:
+                buffer_clean_fqns.append(clean_key)
+                buffers.append(state_dict[fqn])
+
     if buffers:
         mixed_precision_enabled_for_buffers = (
             fsdp_state._mixed_precision_enabled_for_buffers()

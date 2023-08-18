@@ -3,6 +3,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import math
@@ -30,8 +31,14 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
+from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.utils import (
+    add_scheduler_init_hook,
+    run_and_get_code,
+    run_and_get_triton_code,
+)
+from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -121,6 +128,7 @@ class TestCase(TorchTestCase):
 
     def setUp(self):
         torch._dynamo.reset()
+        torch._inductor.metrics.reset()
         super().setUp()
         self._start = time.perf_counter()
 
@@ -312,13 +320,17 @@ def check_model(
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
-    if reference_in_float:
-        correct_flat = tuple(
+
+    def reference_to_expect(actual_flat, correct_flat):
+        return tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float:
+        correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
@@ -361,8 +373,7 @@ def check_model(
             g /= g.norm()
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
-        flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all(x is None for x in flat_grads)
+        all_none_grads = all(x is None for x in correct_grad)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -379,9 +390,15 @@ def check_model(
             self.assertEqual(len(results_that_require_grad), 0)
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+
+            if reference_in_float:
+                expect_grad = reference_to_expect(actual_grad, correct_grad)
+            else:
+                expect_grad = correct_grad
+
             self.assertEqual(
                 actual_grad,
-                correct_grad,
+                expect_grad,
                 atol=atol,
                 rtol=rtol,
                 equal_nan=True,
@@ -913,6 +930,15 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_multilayer_prime_size(self):
+        def fn(a):
+            return torch.max(a), torch.sum(a)
+
+        # Requires masked loading for the intermediate reduction
+        sample = torch.full((3999971,), 0, dtype=torch.int64)
+        sample[-1] = 1
+        self.common(fn, (sample,))
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -1745,6 +1771,34 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                ),
+                check_lowp=True,
+            )
+
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm2(self):
+        def fn(a, b, scale, bias):
+            return torch.mm(a, b.to(a.dtype)) * scale + bias
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                    torch.randn(8),
+                    torch.randn(8),
+                ),
+                check_lowp=True,
+            )
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
@@ -2396,6 +2450,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2831,7 +2886,6 @@ class CommonTemplate:
         )
 
     # From yolov3
-    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4110,7 +4164,7 @@ class CommonTemplate:
         inputs = (rand_strided((8,), (1,), device=self.device),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -4123,7 +4177,7 @@ class CommonTemplate:
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
@@ -4962,7 +5016,7 @@ class CommonTemplate:
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True] if not torch.version.hip else [False]:
+        for cg in [False, True]:
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
@@ -5963,9 +6017,7 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch(
-                    {"triton.cudagraphs": True if not torch.version.hip else False}
-                ),
+                lambda: config.patch({"triton.cudagraphs": True}),
             ]
 
         for context in contexts:
@@ -5996,6 +6048,8 @@ class CommonTemplate:
                         nonlocal matmul_seen
 
                         # by matmul, inputs should be deallocated
+                        # TODO: should not be necessary, ref-cycle ?
+                        gc.collect()
                         if func is aten.mm.out:
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
@@ -6268,7 +6322,9 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6658,11 +6714,9 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    def test_inductor_bucketize(self):
+    def test_bucketize(self):
         def fn(input, boundaries, out_int32, right):
-            return torch.ops.prims._inductor_bucketize(
-                input, boundaries, out_int32=out_int32, right=right
-            )
+            return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
 
         input = torch.rand((64, 64)) * 2 - 1
         boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
@@ -6673,9 +6727,9 @@ class CommonTemplate:
                 right = False
                 self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
 
-    def test_inductor_bucketize_default_kwargs(self):
+    def test_bucketize_default_kwargs(self):
         def fn(input, offsets):
-            return torch.ops.prims._inductor_bucketize(input, offsets)
+            return torch.bucketize(input, offsets)
 
         input = torch.tensor(
             [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
@@ -6684,11 +6738,9 @@ class CommonTemplate:
 
         self.common(fn, (input, offsets), check_lowp=False)
 
-    def test_inductor_bucketize_int(self):
+    def test_bucketize_int(self):
         def fn(input, offsets, out_int32, right):
-            return torch.ops.prims._inductor_bucketize(
-                input, offsets, out_int32=out_int32, right=right
-            )
+            return torch.bucketize(input, offsets, out_int32=out_int32, right=right)
 
         input = torch.randint(0, 102, (64, 64))
         offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
@@ -6698,14 +6750,11 @@ class CommonTemplate:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
     @patch.object(config.triton, "autotune_pointwise", True)
-    def test_inductor_bucketize_add_autotune(self):
-        """
-        Causes a @pointwise(size_hints) where size_hints is 2D
-        """
-        torch._inductor.metrics.generated_kernel_count = 0
+    def test_bucketize_add_autotune(self):
+        # Causes a @pointwise(size_hints) where size_hints is 2D
 
         def fn(input, offsets, add_value):
-            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+            return torch.bucketize(input, offsets) + add_value
 
         input = torch.rand((16, 16, 64, 64))
         boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
@@ -6717,9 +6766,9 @@ class CommonTemplate:
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    def test_inductor_bucketize_computed_offsets(self):
+    def test_bucketize_computed_offsets(self):
         def fn(inp, offsets):
-            return torch.ops.prims._inductor_bucketize(inp, offsets + 0.01)
+            return torch.bucketize(inp, offsets + 0.01)
 
         inp = torch.tensor(
             [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
@@ -6819,6 +6868,43 @@ class CommonTemplate:
         self.assertEqual(U, U_e)
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
+
+    def test_inner_fn_str_and_stride(self):
+        def f(x):
+            x = x + 1
+            x = test_operators.realize(x)
+            x = x * 2
+            x = test_operators.realize(x)
+            return x
+
+        x = torch.rand(3, 2, device=self.device).t()
+        ref = f(x)
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+
+            if self.device != "cpu":
+                self.assertEqual(len(nodes), 3)
+                _, mul_buf, _ = nodes
+                self.assertTrue(
+                    all(
+                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
+                        for buf in nodes
+                    )
+                )
+                # before the fix, the wrong index expression
+                # 'i1 + 3 * i0' is cached.
+                self.assertTrue(
+                    "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                )
+
+        with add_scheduler_init_hook(hook_fn):
+            actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(ref, actual)
+        self.assertTrue(called)
 
 
 @dataclasses.dataclass
@@ -6982,6 +7068,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_optimize_indexing_dtype_with_constraint(self):
+            def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                x = torch.arange(0, b.shape[0], device="cuda")
+                y = ((x + x) / 3).int()
+                return a[y.to(torch.int64)]
+
+            def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                constrain_as_size(b.shape[0], 2, 100)
+                return fn1(a, b)
+
+            fn1_opt = torch._dynamo.optimize("inductor")(fn1)
+            fn2_opt = torch._dynamo.optimize("inductor")(fn2)
+
+            a = torch.rand([100, 100], device="cuda")
+            b = torch.rand([100], device="cuda")
+            torch._dynamo.mark_dynamic(b, 0)
+            inps = [a, b]
+
+            code1 = run_and_get_triton_code(fn1_opt, *inps)
+            code2 = run_and_get_triton_code(fn2_opt, *inps)
+
+            # The function with the constrained tensor should be optimized, but
+            # the other should not:
+            self.assertTrue("to(tl.int64)" in code1)
+            self.assertTrue("to(tl.int32)" in code2)
+            self.assertFalse("to(tl.int64)" in code2)
+
+            self.assertEqual(fn1_opt(*inps), fn1(*inps))
+            self.assertEqual(fn2_opt(*inps), fn1(*inps))
+
         def test_constant_folding_deallocation(self):
             import torch._inductor
 
@@ -7131,6 +7247,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_numpy_on_cuda(self):
+            x = np.arange(10, dtype=np.float32)
+
+            @torch.compile
+            def fn(x):
+                return np.sin(x)
+
+            def fn_cuda(x):
+                with torch.device("cuda"):
+                    return fn(x)
+
+            r = fn_cuda(x)
+            code = run_and_get_triton_code(fn_cuda, x)
+            self.assertIn("tl.sin", code)
+            self.assertEqual(type(r), np.ndarray)
+            self.assertEqual(r, np.sin(x))
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
