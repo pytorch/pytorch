@@ -3497,8 +3497,9 @@ class ShapeEnv:
             g.stack.cleanup()
         for s in self.var_to_stack.values():
             s.cleanup()
-        for ra in self.deferred_runtime_asserts:
-            ra.stack.cleanup()
+        for ras in self.deferred_runtime_asserts.values():
+            for ra in ras:
+                ra.stack.cleanup()
 
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         expr = orig_expr
