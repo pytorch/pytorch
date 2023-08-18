@@ -22,6 +22,7 @@ from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
@@ -37,7 +38,6 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
-
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -474,8 +474,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        left = ops.where(ops.lt("0", x), 1, 0)
-        right = ops.where(ops.lt(x, "0"), 1, 0)
+        def to_int(s):
+            return f"{s}.to(tl.int8)"
+
+        left = to_int(ops.lt("0", x))
+        right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 
@@ -820,11 +823,14 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        names = list(
+            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
+        ) + ["rindex"]
         for i in range(len(self.numels)):
+            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
         for tree in self.range_trees:
@@ -1768,6 +1774,7 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
@@ -1895,6 +1902,13 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
+
+        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
+            sizes[0:3] = reversed(sizes[0:3])
+
+        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
+            sizes[0:2] = reversed(sizes[0:2])
+
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):
@@ -1993,7 +2007,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling:
+class TritonScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
 

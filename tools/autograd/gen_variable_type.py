@@ -1001,6 +1001,7 @@ _foreach_ops_without_differentiability_info = {
     # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
     ("_foreach_addcdiv", "Tensor"),
     ("_foreach_addcmul", "Tensor"),
+    ("_foreach_copy", ""),
 }
 
 _foreach_ops_with_different_arity = {
