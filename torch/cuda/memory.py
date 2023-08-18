@@ -676,14 +676,13 @@ def _record_memory_history_legacy(
     device: Union[Device, int] = None,
     record_context_cpp=False,
 ):
-    with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(
-            enabled,
-            record_context,
-            record_context_cpp,
-            trace_alloc_max_entries,
-            trace_alloc_record_context,
-        )
+    _C._cuda_record_memory_history_legacy(
+        enabled,
+        record_context,
+        record_context_cpp,
+        trace_alloc_max_entries,
+        trace_alloc_record_context,
+    )
 
 
 def _record_memory_history(enabled="all", *args, **kwargs):
@@ -713,7 +712,8 @@ def _record_memory_history(enabled="all", *args, **kwargs):
         context (Optional[str], optional):
             None - Do not record any tracebacks.
             "state" - Record tracebacks for currently allocated memory.
-            "all" - additionally keep tracebacks for alloc/free calls
+            "alloc" - additionally keep tracebacks for alloc calls
+            "all" - additionally keep tracebacks for free calls
              Defaults to "all".
         stacks (str, optional):
             "python" - include Python, TorchScript, and inductor frames in tracebacks
@@ -739,26 +739,7 @@ def _record_memory_history_impl(
     max_entries: int = sys.maxsize,
     device: Union[Device, int] = None,
 ):
-    if enabled not in ["state", "all", None]:
-        raise TypeError("expected state to be 'state', 'all', or None")
-    if context not in ["state", "all", None]:
-        raise TypeError("expected context to be 'state', 'all', or None")
-    if stacks not in ["python", "all"]:
-        raise TypeError("expected stacks to be 'python', or 'all'")
-
-    enabled_ = enabled is not None
-    record_context = context is not None
-    trace_alloc_max_entries = max_entries if enabled == "all" else 1
-    trace_alloc_record_context = context == "all"
-    record_context_cpp = stacks == "all"
-    with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(
-            enabled_,
-            record_context,
-            record_context_cpp,
-            trace_alloc_max_entries,
-            trace_alloc_record_context,
-        )
+    _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
 
 
 def _snapshot(device: Union[Device, int] = None):
