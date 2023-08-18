@@ -77,24 +77,13 @@ install_ubuntu() {
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
 
-  # cuda-toolkit does not work with gcc-11.2.0 which is default in Ubunutu 22.04
-  # see: https://github.com/NVlabs/instant-ngp/issues/119
-  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
-    apt-get install -y g++-10
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 30
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 30
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-10 30
-
-    # https://www.spinics.net/lists/libreoffice/msg07549.html
-    sudo rm -rf /usr/lib/gcc/x86_64-linux-gnu/11
-  fi
-
   # Required to install the fortran after gcc update
   if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
     apt autoremove -y gfortran
     apt-get update -y
-    apt-get install -y gfortran
+    apt-get install -y gfortran libopenblas-dev
   fi
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
