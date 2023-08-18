@@ -155,8 +155,8 @@ namespace detail {
 namespace meta {
 
 #define ADDMM_META() \
-  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype"); \
-  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype"); \
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type()); \
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type()); \
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
   TORCH_CHECK( \
@@ -1310,6 +1310,18 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   return self.reshape_symint({self.sym_size(0), 1}) * vec2;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1438,9 +1450,7 @@ static void addmm_impl_cpu_(
 
   if(!dispatched) {
     // Apply BLAS routine
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
-        result.scalar_type(), "addmm_impl_cpu_",
-        [&]{
+    _AT_DISPATCH_ADDMM_TYPES(result.scalar_type(), "addmm_impl_cpu_", [&]{
           using opmath_t = at::opmath_type<scalar_t>;
           at::native::cpublas::gemm(
               transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,

@@ -1007,7 +1007,7 @@ def sample_inputs_linalg_solve(
         nrhs = [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+        yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
 
 
 def sample_inputs_linalg_solve_triangular(
@@ -2405,22 +2405,18 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
-        supports_nvfuser=False,  # clone_default
         op_db=op_db,
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",
         torch_opinfo_name="linalg.matrix_norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2430,8 +2426,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.norm",
         torch_opinfo_name="linalg.norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2441,14 +2435,12 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.svd",
         torch_opinfo_name="linalg.svd",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
         torch_opinfo_name="linalg.svdvals",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
 ]
