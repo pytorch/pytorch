@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Sequence, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch.fx
