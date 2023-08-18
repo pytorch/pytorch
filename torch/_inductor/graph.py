@@ -26,6 +26,11 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir, metrics
+from .codegen.common import (
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    register_backend_for_device,
+)
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -44,13 +49,7 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import (
-    convert_shape_to_inductor,
-    gather_origins,
-    get_dtype_size,
-    get_sympy_Expr_dtype,
-    sympy_product,
-)
+from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -145,6 +144,17 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
+    def init_backend_registration(self):
+        if get_scheduling_for_device("cpu") is None:
+            from .codegen.cpp import CppScheduling
+
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+
+        if get_scheduling_for_device("cuda") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -214,6 +224,7 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
+        self.init_backend_registration()
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -868,7 +879,20 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        self.wrapper_code = WrapperCodeGen()
+        device_types = self.device_types.copy()
+        # In terms of some operations that don't have input tensors, we need to
+        # check the deivce of the buffers.
+        for buffer in self.buffers:
+            device_types.add(buffer.get_device().type)
+        device_types.discard("cpu")
+        # TODO(Eikan): Only support mixing cpu and other device now.
+        assert len(device_types) <= 1, "Does not support mixing {}".format(
+            "+".join(device_types)
+        )
+        only_cpu = len(device_types) == 0
+        device_type = "cpu" if only_cpu else device_types.pop()
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -882,45 +906,19 @@ class GraphLowering(torch.fx.Interpreter):
         return self.wrapper_code.generate()
 
     def count_bytes(self):
-        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+        from .scheduler import Scheduler
 
         scheduler = Scheduler(self.buffers)
 
-        def get_read_write_buffers_sizes(node):
-            if isinstance(node, NopKernelSchedulerNode):
-                return 0
-            reads = {dep.name for dep in node.read_writes.reads}
-            writes = {dep.name for dep in node.read_writes.writes}
-
-            def is_materialized(buf):
-                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
-                return len(buf_uses - set(node.snodes)) > 0
-
-            if isinstance(node, FusedSchedulerNode):
-                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
-                writes = writes - removed_buffers
-                reads = reads - removed_buffers
-            node_bytes = 0
-            for buf in reads | writes:
-                if buf in self.name_to_buffer:
-                    buf = self.name_to_buffer[buf]
-                elif buf in self.graph_inputs:
-                    buf = self.graph_inputs[buf]
-                else:
-                    continue
-
-                node_bytes += V.graph.sizevars.size_hint(
-                    sympy_product(buf.get_size())
-                ) * get_dtype_size(buf.get_dtype())
-            return node_bytes
-
         total_bytes = 0
         node_counts = []
+        node_runtimes = []
         for node in scheduler.nodes:
-            num_bytes = get_read_write_buffers_sizes(node)
-            node_counts.append((node, num_bytes // 4))
+            num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
-        return total_bytes, node_counts
+            node_counts.append((node, num_bytes // 4))
+            node_runtimes.append((node, node.get_estimated_runtime()))
+        return total_bytes, node_counts, node_runtimes
 
     @dynamo_timed
     def compile_to_module(self):
