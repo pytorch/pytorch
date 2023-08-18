@@ -1,11 +1,13 @@
+import hashlib
 import logging
 import operator
 import os
 import re
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -24,6 +26,11 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir, metrics
+from .codegen.common import (
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    register_backend_for_device,
+)
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -42,13 +49,7 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import (
-    convert_shape_to_inductor,
-    gather_origins,
-    get_dtype_size,
-    get_sympy_Expr_dtype,
-    sympy_product,
-)
+from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex64,
         # torch.float16, # TODO: implement this
     }
     if cuda:
@@ -142,6 +144,17 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
+    def init_backend_registration(self):
+        if get_scheduling_for_device("cpu") is None:
+            from .codegen.cpp import CppScheduling
+
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+
+        if get_scheduling_for_device("cuda") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -177,6 +190,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
+        self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
@@ -186,8 +200,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
+        self.mutated_input_idxs: List[int] = []
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
@@ -206,6 +222,9 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        # Used if lowering encounters cases where cudagraphs are not supported
+        self.disable_cudagraphs = False
+        self.init_backend_registration()
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -223,6 +242,18 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
 
         # Followering models are skipped due to this:
         # jx_nest_base
@@ -275,7 +306,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug(
-                "Skip layout optimization because some convoluttions have smaller out_channel"
+                "Skip layout optimization because some convolutions have smaller out_channel"
             )
             return False
 
@@ -368,7 +399,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            perf_hint_log.warning("Using FallbackKernel: %s", name)
+            perf_hint_log.info("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -431,6 +462,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
+    def register_users_of(self, node_output):
+        def register(value):
+            if isinstance(value, (list, tuple)):
+                for x in value:
+                    register(x)
+            if isinstance(value, ir.IRNode):
+                if (
+                    not hasattr(value, "data")
+                    or not isinstance(value.data, ir.IRNode)
+                    or not isinstance(value.data.data, ir.IRNode)
+                ):
+                    return
+
+                for read_name in value.get_read_names():
+                    self.name_to_users[read_name].append(value)
+
+        register(node_output)
+
     def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
@@ -439,25 +488,18 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
-        def visit(value):
-            if isinstance(value, (list, tuple)):
-                return [visit(x) for x in value]
-            if isinstance(value, ir.IRNode):
-                if value.is_user_of(name):
-                    value.realize()
-            return value
+        if name not in self.name_to_users:
+            return
 
-        for key, value in self.env.items():
-            try:
-                visit(value)
-            except Exception:
-                log.warning("error in mark_buffer_mutated", exc_info=True)
+        for user in self.name_to_users[name]:
+            user.realize()
 
     def add_tensor_constant(self, data):
         def allocate():
             for name, value in self.constants.items():
                 if (
-                    data.size() == value.size()
+                    not data.is_mkldnn
+                    and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
                     and data.device == value.device
@@ -466,6 +508,9 @@ class GraphLowering(torch.fx.Interpreter):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
+            self.constant_reprs[name] = hashlib.sha256(
+                repr(data).encode("utf-8")
+            ).hexdigest()
             return name
 
         return TensorBox.create(
@@ -596,7 +641,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
-                    sympy.Rel,
+                    sympy.logic.boolalg.Boolean,
                     int,
                 ),
             )
@@ -652,6 +697,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -672,23 +724,26 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
             ]
-            if any(
-                user.op == "output" or user.target in as_strided_ops for user in n.users
-            ) and isinstance(n.meta["val"], torch.Tensor):
+            is_output = any(user.op == "output" for user in n.users)
+            is_input_for_as_strided = any(
+                user.target in as_strided_ops for user in n.users
+            )
+            if (is_output or is_input_for_as_strided) and isinstance(
+                n.meta["val"], torch.Tensor
+            ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
-
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
                         and n.name not in self.user_visible_outputs
+                        and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
@@ -723,6 +778,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.aten.mkldnn_rnn_layer.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -769,6 +825,8 @@ class GraphLowering(torch.fx.Interpreter):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
                         result.data.data.inputs[0].origin_node = n
 
+        self.register_users_of(result)
+
         return result
 
     def check_cpp_codegen_disabled(self):
@@ -780,7 +838,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("platform not linux")
 
     def check_input_for_cpp_buffer(self):
-        for _, value in self.graph_inputs.items():
+        for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
@@ -820,7 +878,20 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        self.wrapper_code = WrapperCodeGen()
+        device_types = self.device_types.copy()
+        # In terms of some operations that don't have input tensors, we need to
+        # check the deivce of the buffers.
+        for buffer in self.buffers:
+            device_types.add(buffer.get_device().type)
+        device_types.discard("cpu")
+        # TODO(Eikan): Only support mixing cpu and other device now.
+        assert len(device_types) <= 1, "Does not support mixing {}".format(
+            "+".join(device_types)
+        )
+        only_cpu = len(device_types) == 0
+        device_type = "cpu" if only_cpu else device_types.pop()
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -834,45 +905,19 @@ class GraphLowering(torch.fx.Interpreter):
         return self.wrapper_code.generate()
 
     def count_bytes(self):
-        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+        from .scheduler import Scheduler
 
         scheduler = Scheduler(self.buffers)
 
-        def get_read_write_buffers_sizes(node):
-            if isinstance(node, NopKernelSchedulerNode):
-                return 0
-            reads = {dep.name for dep in node.read_writes.reads}
-            writes = {dep.name for dep in node.read_writes.writes}
-
-            def is_materialized(buf):
-                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
-                return len(buf_uses - set(node.snodes)) > 0
-
-            if isinstance(node, FusedSchedulerNode):
-                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
-                writes = writes - removed_buffers
-                reads = reads - removed_buffers
-            node_bytes = 0
-            for buf in reads | writes:
-                if buf in self.name_to_buffer:
-                    buf = self.name_to_buffer[buf]
-                elif buf in self.graph_inputs:
-                    buf = self.graph_inputs[buf]
-                else:
-                    continue
-
-                node_bytes += V.graph.sizevars.size_hint(
-                    sympy_product(buf.get_size())
-                ) * get_dtype_size(buf.get_dtype())
-            return node_bytes
-
         total_bytes = 0
         node_counts = []
+        node_runtimes = []
         for node in scheduler.nodes:
-            num_bytes = get_read_write_buffers_sizes(node)
-            node_counts.append((node, num_bytes // 4))
+            num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
-        return total_bytes, node_counts
+            node_counts.append((node, num_bytes // 4))
+            node_runtimes.append((node, node.get_estimated_runtime()))
+        return total_bytes, node_counts, node_runtimes
 
     @dynamo_timed
     def compile_to_module(self):
@@ -897,16 +942,17 @@ class GraphLowering(torch.fx.Interpreter):
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
-        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode:
+        if self.aot_mode and self.cpp_wrapper:
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            # Directly return the file path with the compiled code
             return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call

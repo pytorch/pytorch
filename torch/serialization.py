@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
+from enum import Enum
 from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
@@ -48,6 +49,9 @@ __all__ = [
     'save',
     'load',
     'StorageType',
+    'LoadEndianness',
+    'get_default_load_endianness',
+    'set_default_load_endianness',
 ]
 
 
@@ -66,6 +70,41 @@ def mkdtemp():
 
 _package_registry = []
 
+class LoadEndianness(Enum):
+    NATIVE = 1
+    LITTLE = 2
+    BIG = 3
+
+_default_load_endian: Optional[LoadEndianness] = None
+
+def get_default_load_endianness() -> Optional[LoadEndianness]:
+    '''
+    Get fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Returns:
+        default_load_endian: Optional[LoadEndianness]
+    '''
+    return _default_load_endian
+
+def set_default_load_endianness(endianness):
+    '''
+    Set fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Args:
+        endianness: the new fallback byte order
+    '''
+    global _default_load_endian
+    if not isinstance(endianness, LoadEndianness) and endianness is not None:
+        raise TypeError("Invalid argument type in function set_default_load_endianness")
+    _default_load_endian = endianness
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -163,9 +202,9 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
     except Exception as e:
         message = (
-            "'%s' module version string is malformed '%s' and cannot be compared"
-            " with tuple %s"
-        ) % (
+            "'{}' module version string is malformed '{}' and cannot be compared"
+            " with tuple {}"
+        ).format(
             module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
@@ -510,9 +549,9 @@ def _check_dill_version(pickle_module) -> None:
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
-                "'torch' supports dill >= %s, but you have dill %s."
+                "'torch' supports dill >= {}, but you have dill {}."
                 " Please upgrade dill or switch to 'pickle'"
-            ) % (
+            ).format(
                 '.'.join([str(num) for num in required_dill_version]),
                 pickle_module.__version__
             ))
@@ -520,9 +559,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(
@@ -822,7 +861,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
-    mmap: bool = None,
+    mmap: Optional[bool] = None,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -830,7 +869,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -874,9 +913,9 @@ def load(
             loading only tensors, primitive types and dictionaries
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
-            are moved to the location that they were tagged with when saving, or specified by `map_location`. This
-            second step is a no-op if the final location is CPU. When the `mmap` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, f is mmaped.
+            are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
+            second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -1046,11 +1085,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                         if file_size == 0:
                             f.write(lines)
                         elif file_size != len(lines) or f.read() != lines:
-                            raise IOError
+                            raise OSError
                     msg = ("Saved a reverse patch to " + file_name + ". "
                            "Run `patch -p0 < " + file_name + "` to revert your "
                            "changes.")
-                except IOError:
+                except OSError:
                     msg = ("Tried to save a patch, but couldn't create a "
                            "writable file " + file_name + ". Make sure it "
                            "doesn't exist and your working directory is "
@@ -1182,7 +1221,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 res = typed_storage
             return res
         else:
-            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+            raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
     _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
@@ -1211,7 +1250,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+        raise RuntimeError(f"Invalid protocol version: {protocol_version}")
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = UnpicklerWrapper(f, **pickle_load_args)
@@ -1269,7 +1308,7 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-class StorageType():
+class StorageType:
     def __init__(self, name):
         self.dtype = _get_dtype_from_pickle_storage_type(name)
 
@@ -1289,6 +1328,27 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+    elif get_default_load_endianness() == LoadEndianness.LITTLE:
+        byteorderdata = b'little'
+    elif get_default_load_endianness() == LoadEndianness.BIG:
+        byteorderdata = b'big'
+    elif get_default_load_endianness() == LoadEndianness.NATIVE or \
+            get_default_load_endianness() is None:
+        pass
+    else:
+        raise ValueError('Invalid load endianness type')
+
+    if not zip_file.has_record(byteordername) and \
+            get_default_load_endianness() is None and \
+            sys.byteorder == 'big':
+        # Default behaviour should be changed in future
+        # See https://github.com/pytorch/pytorch/issues/101688
+        warnings.warn("The default load endianness for checkpoints without a byteorder mark "
+                      "on big endian machines will be changed from 'native' to 'little' endian "
+                      "in a future release, to avoid this behavior please use "
+                      "torch.serialization.set_default_load_endianness to set "
+                      "the desired default load endianness",
+                      DeprecationWarning)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

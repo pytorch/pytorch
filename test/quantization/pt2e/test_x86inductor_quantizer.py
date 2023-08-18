@@ -3,12 +3,12 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     X86InductorQuantizer,
 )
-from torch.ao.quantization._quantize_pt2e import (
+from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
-    prepare_pt2e_quantizer,
+    prepare_pt2e,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -19,7 +19,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 
 class Conv2DType(Enum):
@@ -171,7 +171,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, quantizer)
+        m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
@@ -265,17 +265,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of conv2d with binary post ops (such as add) with X86InductorQuantizer.
         Currently, only add as binary post op is supported.
         """
-        inplace_add_list = [True, False]
-        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
-        use_bias_list = [True, False]
-
+        conv2d_type_list = [Conv2DType.left, Conv2DType.both]
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_add, conv2d_type, use_bias in itertools.product(inplace_add_list, conv2d_type_list, use_bias_list):
-                m = TestHelperModules.Conv2dAddModule(inplace_add=inplace_add, conv2d_type=conv2d_type, use_bias=use_bias).eval()
-                example_inputs = (torch.randn(2, 3, 16, 16),)
-                quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
-                )
+            for conv2d_type in conv2d_type_list:
+                m = TestHelperModules.Conv2dAddModule(conv2d_type=conv2d_type).eval()
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input and weight of the conv
@@ -302,7 +299,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.convolution.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -320,28 +317,16 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of conv2d with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
         Currently, only add as binary post op and relu as unary post op are supported.
         """
-        inplace_add_list = [True, False]
-        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
-        inplace_relu_list = [True, False]
-        use_bias_list = [True, False]
-
+        conv2d_type_list = [Conv2DType.left, Conv2DType.both]
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_add, conv2d_type, inplace_relu, use_bias in itertools.product(
-                    inplace_add_list,
-                    conv2d_type_list,
-                    inplace_relu_list,
-                    use_bias_list,
-            ):
+            for conv2d_type in conv2d_type_list:
                 m = TestHelperModules.Conv2dAddReLUModule(
-                    inplace_add=inplace_add,
                     conv2d_type=conv2d_type,
-                    inplace_relu=inplace_relu,
-                    use_bias=use_bias
                 ).eval()
-                example_inputs = (torch.randn(2, 3, 16, 16),)
-                quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
-                )
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input and weight of the conv
@@ -368,7 +353,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.convolution.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]

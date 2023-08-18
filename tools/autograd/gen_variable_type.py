@@ -298,7 +298,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addr",
     "linalg_householder_product",
     "ormqr",
-    "constant_pad_nd",
     "reflection_pad1d",
     "reflection_pad2d",
     "reflection_pad3d",
@@ -316,7 +315,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad1d",
     "replication_pad2d",
     "replication_pad3d",
-    "take",
     "put",
     "put_",
     "_to_copy",
@@ -963,7 +961,7 @@ def gen_variable_type_func(
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key, _ in fn.info.items():
+                for key in fn.info.keys():
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(
                             f.func.returns, symint=True
@@ -1003,6 +1001,7 @@ _foreach_ops_without_differentiability_info = {
     # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
     ("_foreach_addcdiv", "Tensor"),
     ("_foreach_addcmul", "Tensor"),
+    ("_foreach_copy", ""),
 }
 
 _foreach_ops_with_different_arity = {
@@ -1030,7 +1029,8 @@ def emit_body(
     base_name = get_base_name(f)
     view_info = get_view_info(f)
 
-    is_inplace_foreach = name.startswith("_foreach") and inplace
+    is_foreach = name.startswith("_foreach")
+    is_inplace_foreach = is_foreach and inplace
     if is_inplace_foreach:
         inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
         refargname2inplace_foreacharg: Dict[str, Argument] = {}
@@ -1051,7 +1051,9 @@ def emit_body(
             for foreach_arg, ref_arg in zip(
                 f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
             ):
-                foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
+                foreach_arg_type = foreach_arg.type
+                if isinstance(foreach_arg_type, ListType):
+                    foreach_arg_type = foreach_arg_type.elem
                 assert foreach_arg_type == ref_arg.type
                 inplace_foreacharg2refarg[foreach_arg] = ref_arg
                 refargname2inplace_foreacharg[ref_arg.name] = foreach_arg
@@ -1460,8 +1462,12 @@ def emit_body(
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
                 or type == BaseCType(iTensorListRefT)
+                or type == VectorCType(BaseCType(tensorT))
             ):
-                expr = f"make_saved_variable_list({name})"
+                # See Note [nuanced return type of out-of-place foreach functions]
+                if type == VectorCType(BaseCType(tensorT)):
+                    assert is_foreach and is_output
+                expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
@@ -1854,7 +1860,7 @@ def emit_body(
                         )
                     )
             if derivative.required_original_self_value:
-                input_suffix = "s[i]" if is_input_tensorlist else ""
+                input_suffix = "s[i]" if is_inplace_foreach else ""
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                     inp_name="original_self",
                     inp="original_self" + input_suffix,

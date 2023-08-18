@@ -12,14 +12,15 @@ import weakref
 import torch
 
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
-from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
@@ -32,8 +33,8 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 
@@ -91,9 +92,9 @@ class TestCase(TorchTestCase):
 
 
 class ConvBN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
+    def __init__(self, in_channels, out_channels, bias=False, **kwargs):
         super().__init__()
-        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
 
     def forward(self, x):
@@ -167,6 +168,11 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.assertEqual(out_eager, out_compiled)
 
     def test_mm_concat(self):
+        # CPU path will replace mm with mkl._linear,
+        # skip this case for now.
+        if self.device == "cpu":
+            raise unittest.SkipTest("NYI CPU")
+
         class MM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -274,23 +280,138 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
     def test_folded_conv_bn(self):
-        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+        for use_bias, dtype in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        ):
+            if self.device == "cpu" and dtype == torch.float16:
+                continue
+
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+                continue
+
+            mod = (
+                ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
+                .eval()
+                .to(self.device)
+                .to(dtype)
+            )
+
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            # TODO - bias is separate kernel right now, we should only unfuse it
+            # from conv if it can be fused
+
+            with torch.no_grad():
+                out_eager = mod(x)
+                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+            self.assertNotIn(
+                "aten._native_batch_norm_legit_no_training(",
+                code[0],
+            )
+
+            # we unfuse the conv bias, but it should only have one constant in the kernel
+            if self.device == "cuda":
+                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                    "constant"
+                ).check_not("constant").check_next("return").run(code[0])
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+
+    def test_folded_conv_bn_relu6(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_bn = ConvBN(3, 32, bias=True, kernel_size=3, stride=2)
+                self.relu6 = torch.nn.ReLU6()
+
+            def forward(self, x):
+                return self.relu6(self.conv_bn(x))
+
+        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
+            if self.device == "cpu" and dtype == torch.float16:
+                continue
+
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+                continue
+
+            mod = Model().eval().to(self.device).to(dtype)
+
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out_eager = mod(x)
+                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+            # we unfuse the conv bias, but it should only have one constant in the kernel
+            if self.device == "cuda":
+                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                    "constant"
+                ).check_not("constant").check_next("return").run(code[0])
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+
+    def test_conv_bn_with_conv_multi_users(self):
+        class Model(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, bias=False, **kwargs):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.bn = torch.nn.BatchNorm2d(
+                    out_channels, eps=0.001, dtype=torch.float
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.bn(x), x.relu()
+
+        mod = Model(3, 32, bias=False, kernel_size=3, stride=2).eval().to(self.device)
+
         x = torch.rand(3, 3, 32, 32).to(self.device)
 
         @torch.compile()
         def foo(mod, x):
             return mod(x)
 
-        # TODO - bias is separate kernel right now, we should only unfuse it
-        # from conv if it can be fused
-
         with torch.no_grad():
             out_eager = mod(x)
-            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+            out_compiled = foo(mod, x)
 
-        FileCheck().check_not("native_batch_norm_legit_no_training").run(code[0])
+            self.assertEqual(out_eager, out_compiled)
 
-        self.assertEqual(out_optimized_for_infernece, out_eager)
+    def test_dont_change_dtype_folding(self):
+        dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
+
+        mod = (
+            torch.nn.Conv2d(3, 32, bias=None, kernel_size=3, stride=2)
+            .eval()
+            .to(self.device)
+            .to(dtype)
+        )
+        x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+        def foo(mod, x):
+            return mod(x) * torch.full([1], 2.0, device=self.device)
+
+        foo_c = torch.compile(foo)
+
+        with torch.no_grad():
+            out_eager = foo(mod, x)
+            out_compiled = foo_c(mod, x)
+            self.assertEqual(out_eager, out_compiled)
 
     def test_param_deallocated(self):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
@@ -323,6 +444,88 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
+
+    def test_conv_with_as_strided(self):
+        class Model(nn.Module):
+            def __init__(self, groups):
+                super().__init__()
+                self.kv = torch.nn.Conv2d(
+                    256,
+                    384,
+                    kernel_size=(1, 1),
+                    stride=(1, 1),
+                    bias=False,
+                    groups=groups,
+                )
+
+            def forward(self, x):
+                convolution = self.kv(x)
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    convolution, [2, 2, 2, 2], 0.0
+                )
+                # as_strided inputs are depend on input's size and stide.
+                as_strided = torch.ops.aten.as_strided.default(
+                    constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided, [8, 384, 2, 2, 12, 12], [153600, 400, 160, 8, 20, 1]
+                )
+                clone = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                return clone
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        with torch.no_grad():
+            x = torch.randn(8, 256, 16, 16).to(self.device)
+            for groups in [1, 2]:
+                mod = Model(groups).to(self.device).eval()
+                mod_eager = mod(x)
+                self.assertEqual(foo(mod, x), mod_eager)
+
+    @skipIfRocm
+    def test_cpp_wrapper(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile(options={"cpp_wrapper": True})
+        def foo(mod, x):
+            return mod(x)
+
+        out_eager = mod(x)
+
+        with torch.no_grad():
+            self.assertEqual(foo(mod, x), out_eager)
+            self.assertEqual(foo(mod, x), out_eager)
+
+    def test_conv_layout_convert_with_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+                self.bn = nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.bn(x)
+                x = self.conv(x)
+                return torch.flatten(x, 1)
+
+        mod = Model().to(self.device).eval()
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        with torch.no_grad():
+            x = torch.rand(2, 3, 5, 5).to(self.device)
+            mod_eager = mod(x)
+            self.assertEqual(foo(mod, x), mod_eager)
 
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
@@ -490,7 +693,7 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
             # int8_weight -> dequant_per_channel -> convolution
             self.assertTrue(torch._inductor.config.freezing)
 
-            prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+            prepare_model = prepare_pt2e(export_model, quantizer)
             prepare_model(*example_inputs)
 
             convert_model = convert_pt2e(prepare_model)
@@ -506,5 +709,5 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

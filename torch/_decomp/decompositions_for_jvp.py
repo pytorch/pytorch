@@ -46,7 +46,7 @@ def maybe_register_decomposition(op):
 
 # Functions where we need a special decomposition for jvp but there's another version that
 # should be used more generally (ex. for jvp we need to recompute the mean and variance for
-# the backwards of a normalization function. Without jvp, it should used the saved value)
+# the backwards of a normalization function. Without jvp, it should use the saved value)
 decomposition_table_for_jvp = {}
 
 

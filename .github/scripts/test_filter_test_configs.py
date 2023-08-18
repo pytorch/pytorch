@@ -697,6 +697,9 @@ class TestConfigFilter(TestCase):
         )
         self.assertEqual(parse_reenabled_issues(pr_body), [])
 
+        pr_body = None
+        self.assertEqual(parse_reenabled_issues(pr_body), [])
+
 
 if __name__ == "__main__":
     main()

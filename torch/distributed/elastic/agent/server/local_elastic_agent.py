@@ -164,7 +164,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             log.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
-            for _, worker_env in envs.items():
+            for worker_env in envs.values():
                 worker_env[watchdog_file_env_name] = watchdog_file_path
 
 
