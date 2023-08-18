@@ -815,7 +815,7 @@ class TestFakeProxyTensor(TestCase):
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
-                lr=torch.tensor(0.1),
+                lr=0.1,
                 beta1=0.9,
                 beta2=0.999,
                 weight_decay=0.01,
