@@ -286,14 +286,6 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
-    @graph_module.setter
-    def graph_module(self, gm: torch.fx.GraphModule) -> None:
-        """
-        Set the underlying ``GraphModule`` for this ``ExportedProgram``.
-        """
-        assert isinstance(gm, torch.fx.GraphModule), f'Expected a GraphModule instance, but got {type(gm)}'
-        self._graph_module = gm
-
     @property
     @compatibility(is_backward_compatible=True)
     def graph(self):
