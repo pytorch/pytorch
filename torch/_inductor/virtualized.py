@@ -274,7 +274,7 @@ class _V:
     set_interpreter_handler = _interpreter._set_handler
 
     @property
-    def ops(self):
+    def ops(self) -> MockHandler:  # type: ignore[valid-type]
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 
