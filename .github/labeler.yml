@@ -26,6 +26,8 @@
 - torch/_functorch/aot_autograd.py
 - .ci/docker/ci_commit_pins/**
 - .github/ci_commit_pins/**
+- c10/core/Sym*
+- torch/fx/experimental/symbolic_shapes.py
 
 "module: cpu":
 - aten/src/ATen/cpu/**

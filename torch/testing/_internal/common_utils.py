@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
@@ -203,7 +203,7 @@ slow_tests_dict = {}
 
 def maybe_load_json(filename):
     if os.path.isfile(filename):
-        with open(filename, 'r') as fp:
+        with open(filename) as fp:
             return json.load(fp)
     log.warning("Attempted to load json file '%s' but it does not exist.", filename)
     return {}
@@ -214,7 +214,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta', torch._C._get_privateuse1_backend_name())
 
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
@@ -355,12 +355,12 @@ def instantiate_parametrized_tests(generic_cls):
             def instantiated_test(self, param_kwargs=param_kwargs):
                 test(self, **param_kwargs)
 
-            assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
+            assert not hasattr(generic_cls, name), f"Redefinition of test {name}"
             setattr(generic_cls, name, instantiated_test)
 
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
-            full_name = '{}_{}'.format(test.__name__, test_suffix)
+            full_name = f'{test.__name__}_{test_suffix}'
 
             # Apply decorators based on full param kwargs.
             for decorator in decorator_fn(param_kwargs):
@@ -462,7 +462,7 @@ class parametrize(_TestParametrizer):
             return value.formatted_name
         else:
             # Include name and value separated by underscore.
-            return '{}_{}'.format(name, str(value).replace('.', '_'))
+            return f"{name}_{str(value).replace('.', '_')}"
 
     def _default_subtest_name(self, values):
         return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
@@ -686,12 +686,18 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = p.wait(timeout=5)
+        exit_status = None
+        try:
+            exit_status = p.wait(timeout=5)
+        # try to handle the case where p.wait(timeout=5) times out as well as
+        # otherwise the wait() call in the finally block can potentially hang
+        except subprocess.TimeoutExpired:
+            pass
         if exit_status is not None:
             return exit_status
         else:
             p.kill()
-            raise
+        raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -830,7 +836,7 @@ def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
-            with open(SLOW_TESTS_FILE, 'r') as fp:
+            with open(SLOW_TESTS_FILE) as fp:
                 global slow_tests_dict
                 slow_tests_dict = json.load(fp)
                 # use env vars so pytest-xdist subprocesses can still access them
@@ -839,7 +845,7 @@ def run_tests(argv=UNITTEST_ARGS):
             warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
-            with open(DISABLED_TESTS_FILE, 'r') as fp:
+            with open(DISABLED_TESTS_FILE) as fp:
                 global disabled_tests_dict
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
@@ -905,7 +911,7 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -1055,6 +1061,8 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
+custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
+TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
 TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
@@ -1062,6 +1070,8 @@ TEST_DILL = _check_module_exists('dill')
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
+
+TEST_Z3 = _check_module_exists('z3')
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
@@ -1294,7 +1304,7 @@ def skipIfRocmVersionLessThan(version=None):
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    reason = f"ROCm {rocm_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
@@ -1315,10 +1325,11 @@ def skipIfNotMiopenSuggestNHWC(fn):
 def setLinalgBackendsToDefaultFinally(fn):
     @wraps(fn)
     def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_linalg_library()
         try:
             fn(*args, **kwargs)
         finally:
-            torch.backends.cuda.preferred_linalg_library('default')
+            torch.backends.cuda.preferred_linalg_library(_preferred_backend)
     return _fn
 
 
@@ -1536,9 +1547,8 @@ def slowTest(fn):
     return wrapper
 
 
-def slowAwareTest(fn):
-    fn.__dict__['slow_test'] = True
-    return fn
+def slowTestIf(condition):
+    return slowTest if condition else lambda fn: fn
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
@@ -1672,7 +1682,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
     return True
 
 
-class CudaNonDefaultStream():
+class CudaNonDefaultStream:
     def __enter__(self):
         # Before starting CUDA test save currently active streams on all
         # CUDA devices and set new non default streams to all CUDA devices
@@ -1698,7 +1708,7 @@ class CudaNonDefaultStream():
                                      device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-class CudaMemoryLeakCheck():
+class CudaMemoryLeakCheck:
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
@@ -1848,7 +1858,7 @@ def print_repro_on_failure(repro_str):
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+            e.args = (f"{e.args[0]}\n{repro_str}", *e.args[1:])
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
@@ -2104,7 +2114,7 @@ class TensorOrArrayPair(TensorLikePair):
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
-        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        actual, expected = (self._to_tensor(input) for input in (actual, expected))
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
@@ -2201,7 +2211,7 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 
-class NoTest():
+class NoTest:
     # causes pytest to not recognize this class as a test
     __test__ = False
 
@@ -2311,6 +2321,19 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
     def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
+
+    # Munges exceptions that internally contain stack traces, using munge_exc
+    def assertExpectedInlineMunged(
+        self, exc_type, callable, expect, *, suppress_suffix=True
+    ):
+        try:
+            callable()
+        except exc_type as e:
+            self.assertExpectedInline(
+                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+            )
+            return
+        self.fail(msg="Did not raise when expected to")
 
     def assertLogs(self, logger=None, level=None):
         if logger is None:
@@ -3245,8 +3268,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         )
 
         if error_metas:
+            # See [ErrorMeta Cycles]
+            error_metas = [error_metas]
             # TODO: compose all metas into one AssertionError
-            raise error_metas[0].to_error(
+            raise error_metas.pop()[0].to_error(
                 # This emulates unittest.TestCase's behavior if a custom message passed and
                 # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
                 # is True (default)
@@ -3408,12 +3433,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         subname_output = ""
         if subname:
             expected_file += "-" + subname
-            subname_output = " ({})".format(subname)
+            subname_output = f" ({subname})"
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
+            print(f"Accepting {update_type} for {munged_id}{subname_output}:\n\n{s}")
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
@@ -3423,7 +3448,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         try:
             with open(expected_file) as f:
                 expected = f.read()
-        except IOError as e:
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
             elif expecttest.ACCEPT:
@@ -3442,7 +3467,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Adjust for producer_version
         expected = expected.replace(
             'producer_version: "CURRENT_VERSION"',
-            'producer_version: "{}"'.format(torch.onnx.producer_version)
+            f'producer_version: "{torch.onnx.producer_version}"'
         )
         if expecttest.ACCEPT:
             if expected != s:
@@ -3600,7 +3625,7 @@ def download_file(url, binary=True):
             f.write(data)
         return path
     except error.URLError as e:
-        msg = "could not download test file '{}'".format(url)
+        msg = f"could not download test file '{url}'"
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
@@ -4359,7 +4384,7 @@ def set_single_threaded_if_parallel_tbb(fn):
     return wrap_fn
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def get_cycles_per_ms() -> float:
     """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
     """
@@ -4614,3 +4639,34 @@ def make_lazy_class(cls):
 @make_lazy_class
 class LazyVal:
     pass
+
+
+def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    if file is None:
+        file = inspect.stack()[1 + skip].filename  # skip one frame
+
+    s = str(e)
+
+    # Remove everything that looks like stack frames in NOT this file
+    def repl_frame(m):
+        if m.group(1) != file:
+            return ""
+        # Don't accept top-level, even for this script, these will wobble
+        # depending on how the testing script was invoked
+        if m.group(2) == "<module>":
+            return ""
+
+        return m.group(0)
+
+    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(file, os.path.basename(file), s)
+    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
+    s = re.sub(r"\\", "/", s)  # for Windows
+    if suppress_suffix:
+        s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+    if suppress_prefix:
+        s = re.sub(r"Cannot export model.+\n\n", "", s)
+    s = re.sub(r" +$", "", s, flags=re.M)
+    return s
