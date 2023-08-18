@@ -440,13 +440,12 @@ auto handle_torch_function_no_python_arg_parser(
   // torch_dispatch modes.
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  const auto is_mode_active = [&](bool skip_infra_modes) {
+  const auto is_mode_active = [&]() {
     return is_torch_function
         ? at::impl::torch_function_mode_enabled()
         // Check if any *user* torch_dispatch modes are active (not including
         // fake and proxy modes, which are special)
-        : c10::impl::dispatch_mode_enabled(
-              /*skip_infra_modes=*/skip_infra_modes);
+        : c10::impl::dispatch_mode_enabled();
   };
   // Note [__torch_dispatch__ dispatching order]
   // The high-level idea motivating the dispatching
@@ -486,8 +485,9 @@ auto handle_torch_function_no_python_arg_parser(
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
   // which would mean a mode would be **required** to access their metadata.
 
-  if (is_mode_active(/*skip_infra_modes=*/true)) {
-    // Step 1: Try to dispatch on any user TorchDispatchModes
+  if (is_mode_active()) {
+    // Step 1: Try to dispatch on any user TorchDispatchModes (including infra modes,
+    // which will always be at the bottom of the mode stack).
     auto ret_ = dispatch_on_mode(
         args,
         kwargs,
@@ -502,6 +502,9 @@ auto handle_torch_function_no_python_arg_parser(
   // Step 2: Try to dispatch based on any user subclasses,
   // ignoring any subclasses that have a _mode_key field
   // (corresponding to infra subclasses)
+  // Note: user subclasses should always run *before* infra modes like proxy/fake.
+  // This is handles by having proxy/fake modes return NotImplemented when they
+  // see a user subclass that they don't understand.
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     auto curr_ret = dispatch_on_subclass(
         args,
@@ -516,27 +519,7 @@ auto handle_torch_function_no_python_arg_parser(
     }
   }
 
-  // Step 3: Try to dispatch on any infra modes
-  // (in practice, this is FunctionalTensorMode, ProxyTorchDispatchMode, and
-  // FakeTensorMode)
-  if ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
-      is_mode_active(/*skip_infra_modes=*/false)) {
-    auto ret_and_mode = dispatch_on_mode(
-        args,
-        kwargs,
-        py_types,
-        torch_api_function,
-        is_torch_function,
-        torch_function_name_str);
-    auto curr_ret = std::get<0>(ret_and_mode);
-    auto curr_mode_obj = std::get<1>(ret_and_mode);
-    if (curr_ret.ptr() != nullptr) {
-      ret = curr_ret;
-      mode_obj = curr_mode_obj;
-    }
-  }
-
-  // Step 4: Try to dispatch based on any infra subclasses,
+  // Step 3: Try to dispatch based on any infra subclasses,
   // by dispatching on any args that have a _mode_key field
   // (in practice, this is only FakeTensor)
   // Also, we only do this for __torch_dispatch__ dispatching
