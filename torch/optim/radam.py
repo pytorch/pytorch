@@ -1,10 +1,19 @@
 import math
+from typing import List, Optional
+
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc)
-from typing import List, Optional
+from .optimizer import (
+    Optimizer,
+    _default_to_fused_or_foreach,
+    _differentiable_doc,
+    _dispatch_sqrt,
+    _foreach_doc,
+    _get_value,
+    _stack_if_compiling,
+    _use_grad_for_differentiable,
+)
 
 __all__ = ["RAdam", "radam"]
 
@@ -17,6 +26,7 @@ class RAdam(Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
+        decoupled_weight_decay: bool=False,
         *,
         foreach: Optional[bool] = None,
         differentiable: bool = False,
@@ -37,6 +47,7 @@ class RAdam(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             foreach=foreach,
+            decoupled_weight_decay=decoupled_weight_decay,
             differentiable=differentiable,
         )
         super().__init__(params, defaults)
@@ -46,6 +57,7 @@ class RAdam(Optimizer):
         for group in self.param_groups:
             group.setdefault("foreach", None)
             group.setdefault("differentiable", False)
+            group.setdefault("decoupled_weight_decay", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -115,6 +127,7 @@ class RAdam(Optimizer):
                 eps=group["eps"],
                 foreach=group["foreach"],
                 differentiable=group["differentiable"],
+                decoupled_weight_decay=group["decoupled_weight_decay"],
             )
 
         return loss
@@ -128,7 +141,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
                 \lambda \text{ (weightdecay)},                                                   \\
-            &\hspace{13mm} \epsilon \text{ (epsilon)}                                            \\
+            &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
             &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
@@ -136,7 +149,10 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
+            &\hspace{15mm} \theta_t \leftarrow \theta_t - \gamma \lambda \theta_{t-1}                    \\
+            &\hspace{10mm}\textbf{else}                                                          \\
+            &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
             &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{6mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
             &\hspace{6mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
@@ -169,6 +185,8 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        decoupled_weight_decay (bool, optional): whether to use decoupled weight
+            decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
 
@@ -176,6 +194,8 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         https://arxiv.org/abs/1908.03265
     .. _author's implementation:
         https://github.com/LiyuanLucasLiu/RAdam
+    .. _Decoupled Weight Decay Regularization:
+        https://arxiv.org/abs/1711.05101
 
     """
 
@@ -188,6 +208,7 @@ def radam(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool=False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     *,
@@ -229,6 +250,7 @@ def radam(
         lr=lr,
         weight_decay=weight_decay,
         eps=eps,
+        decoupled_weight_decay=decoupled_weight_decay,
         differentiable=differentiable,
     )
 
@@ -246,6 +268,7 @@ def _single_tensor_radam(
     weight_decay: float,
     eps: float,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
 
     for i, param in enumerate(params):
@@ -261,7 +284,10 @@ def _single_tensor_radam(
         bias_correction2 = 1 - beta2 ** step
 
         if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+            if decoupled_weight_decay:
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - beta1)
@@ -306,6 +332,7 @@ def _multi_tensor_radam(
     lr: float,
     weight_decay: float,
     eps: float,
+    decoupled_weight_decay: bool,
     differentiable: bool,
 ):
 
@@ -332,7 +359,10 @@ def _multi_tensor_radam(
                       (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            if decoupled_weight_decay:
+                torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
