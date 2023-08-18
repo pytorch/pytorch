@@ -29,6 +29,7 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
+from .cache_size import compute_cache_size, exceeds_cache_size, is_recompilation
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -217,21 +218,6 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
-def is_recompilation(cache_size):
-    # cache_size here refers to the number of total cached entries on the code
-    # object.
-    return cache_size >= 1
-
-
-def compute_cache_size(cache_entry):
-    # Walk the linked list to calculate the cache size
-    running_cache_size = 0
-    while cache_entry:
-        running_cache_size += 1
-        cache_entry = cache_entry.next
-    return running_cache_size
-
-
 FRAME_COUNTER = 0
 
 
@@ -255,8 +241,8 @@ def convert_frame_assert(
 
         code = frame.f_code
 
-        cache_size = compute_cache_size(cache_entry)
-        if is_recompilation(cache_size) and (
+        cache_size = compute_cache_size(frame, cache_entry)
+        if is_recompilation(frame, cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
@@ -317,7 +303,8 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if cache_size >= config.cache_size_limit:
+        if exceeds_cache_size(frame, cache_size):
+            # cache_size >= config.cache_size_limit:
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"

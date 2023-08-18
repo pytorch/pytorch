@@ -196,6 +196,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+        self.id_matched_objs: Dict[str, WeakIdRef] = {}
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -258,7 +259,12 @@ class GuardBuilder(GuardBuilderBase):
                 Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
             )
 
-        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        arg_ref = self.arg_ref(guard)
+        obj = self.get(guard.name)
+        # TODO - Attach a callback to automatically delete the corresponding
+        # cache line when obj dies.
+        self.id_matched_objs[arg_ref] = weakref.ref(obj)
+        code = f"___check_obj_id({arg_ref}, {self.id_ref(obj)})"
         self._produce_guard_code(guard, [code])
 
     def NAME_MATCH(self, guard: Guard):
@@ -873,6 +879,7 @@ class CheckFunctionManager:
         global_builder = GuardBuilder(
             self.id_ref, source_ref, output_graph.global_scope, self, local=False
         )
+
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
         # the inverse is illegal.
@@ -897,6 +904,7 @@ class CheckFunctionManager:
             local_builder, global_builder, guards, guard_fail_fn
         )
         self._seen_ids.clear()
+        self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
@@ -1037,7 +1045,8 @@ class CheckFunctionManager:
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._seen_ids:
-                self._weakrefs.append(weakref.ref(obj, self.invalidate))
+                obj_weakref = weakref.ref(obj, self.invalidate)
+                self._weakrefs.append(obj_weakref)
                 self._seen_ids.add(id(obj))
         except TypeError:
             pass  # cannot weakref bool object
