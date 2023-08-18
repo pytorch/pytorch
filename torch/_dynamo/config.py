@@ -66,6 +66,17 @@ assume_static_by_default = True
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
 
+# This flag changes how the shapes of parameters are treated.
+# If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
+# If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
+# while the shapes of torch.Tensor are assumed to be dynamic.
+force_parameter_static_shapes = True
+
+# This flag ensures that the shapes of a nn module are always assumed to be static
+# If the flag is set to True, then the shapes of a nn.module are assumed to be static
+# If the flag is set to False, then the shapes of a nn.module can be dynamic
+force_nn_module_property_static_shapes = True
+
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
 # that we don't error at all.  This is helpful for our CI where I'm using a
@@ -98,7 +109,7 @@ traceable_tensor_subclasses = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-suppress_errors = os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", "1") == "1"
+suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
@@ -231,9 +242,6 @@ report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
-numpy_ndarray_as_tensor = False
-
 # Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
@@ -242,6 +250,12 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+
+# Default NumPy dtypes when tracing with torch.compile
+# We default to 64bits. For efficiency, one may want to change these to float32
+numpy_default_float = "float64"
+numpy_default_complex = "complex128"
+numpy_default_int = "int64"
 
 
 def is_fbcode():
@@ -271,6 +285,10 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
+
+# simulates what would happen if we didn't have support for BUILD_SET opcode,
+# used for testing
+inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",

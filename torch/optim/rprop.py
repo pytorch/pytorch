@@ -307,7 +307,7 @@ def _multi_tensor_rprop(
                 grouped_prevs[i].copy_(grouped_grads[i])
         grouped_grads = grouped_prevs
 
-        signs = [s.sign() for s in signs]
+        torch._foreach_sign_(signs)
         for sign in signs:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus

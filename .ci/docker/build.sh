@@ -174,15 +174,6 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
@@ -288,6 +279,15 @@ case "$image" in
     VISION=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3-clang12-asan)
+    ANACONDA_PYTHON_VERSION=3.9
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
@@ -375,7 +375,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906;gfx90a}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

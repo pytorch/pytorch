@@ -549,6 +549,21 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
+static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  auto outBytes = out.nbytes();
+  char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
+  size_t totalBytes = 0;
+  for (const Tensor& input : inputs) {
+    TORCH_CHECK(outBytes >= totalBytes);
+    if (input.nbytes() > 0) {
+      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    }
+    totalBytes += input.nbytes();
+  }
+  TORCH_CHECK(outBytes == totalBytes);
+}
+
+
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -564,10 +579,20 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   auto materialized = tensors.materialize();
 
-  // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = at::isFloatingType(dtype);
+  // fast path for single thread when both inputs and result are contiguous and
+  // not empty, and concat dim is 0
+  if (use_serial_kernel && all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format)) {
+    if (dim == 0) {
+      fastCatOutDim0(result, materialized);
+      return;
+    }
+    // TODO: Add fast cat for higher dimensions and support multi-threaded fast cat
+  }
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
@@ -1521,21 +1546,21 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-Tensor tile(const Tensor& self, IntArrayRef reps){
+Tensor tile_symint(const Tensor& self, SymIntArrayRef reps){
   // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0){
-    std::vector<int64_t> new_reps(size_diff, 1);
+    std::vector<c10::SymInt> new_reps(size_diff, 1);
     for (const auto i : c10::irange(reps.size())) {
       new_reps.emplace_back(reps[i]);
     }
-    return self.repeat(IntArrayRef(new_reps));
+    return self.repeat_symint(SymIntArrayRef(new_reps));
   }
   // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
-  return self.repeat(reps);
+  return self.repeat_symint(reps);
 }
 
 //

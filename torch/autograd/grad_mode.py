@@ -297,16 +297,15 @@ class _force_original_view_tracking(_DecoratorContextManager):
     """
 
     def __init__(self, mode: bool) -> None:
+        self.prev = torch._C._is_view_replay_enabled()
+        torch._C._set_view_replay_enabled(mode)
         self.mode = mode
 
     def __enter__(self) -> None:
-        self._force_original_view_tracking_context = torch._C._ViewReplayEnabled(
-            self.mode
-        )
-        self._force_original_view_tracking_context.__enter__()
+        pass
 
-    def __exit__(self, *args) -> None:
-        self._force_original_view_tracking_context.__exit__(*args)
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_view_replay_enabled(self.prev)
 
     def clone(self):
         return self.__class__(self.mode)

@@ -366,15 +366,6 @@ _memory_viz_template = r"""
 <!DOCTYPE html>
 <html>
 <head>
-<style>
-pre {
-    margin: 0px;
-}
-html, body {
-    height: 100%;
-    overflow: clip;
-}
-</style>
 </head>
 <body>
 <script type="module">

@@ -121,7 +121,6 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
