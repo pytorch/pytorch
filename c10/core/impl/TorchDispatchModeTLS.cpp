@@ -11,17 +11,15 @@ namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
-bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
+bool TorchDispatchModeTLS::any_modes_set() {
   if (!torchDispatchModeState.stack_.empty())
     return true;
-  if (!skip_infra_modes) {
-    for (const auto i : c10::irange(
-             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-      if (torchDispatchModeState.infra_modes_[i] != c10::nullopt)
-        return true;
+  for (const auto i : c10::irange(
+           static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+    if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+      return true;
     }
   }
-  return false;
 }
 
 void TorchDispatchModeTLS::push_onto_stack(
@@ -185,10 +183,9 @@ void TorchDispatchModeTLS::set_state(TorchDispatchModeTLS state) {
 
 // UTIL
 
-bool dispatch_mode_enabled(bool skip_infra_modes) {
+bool dispatch_mode_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
-      TorchDispatchModeTLS::any_modes_set(
-          /*skip_infra_modes=*/skip_infra_modes);
+      TorchDispatchModeTLS::any_modes_set();
 }
 
 std::string to_string(TorchDispatchModeKey mode_key) {
