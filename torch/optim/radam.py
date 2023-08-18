@@ -38,8 +38,8 @@ class RAdam(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             foreach=foreach,
-            differentiable=differentiable,
             decoupled_weight_decay=decoupled_weight_decay,
+            differentiable=differentiable,
         )
         super().__init__(params, defaults)
 
