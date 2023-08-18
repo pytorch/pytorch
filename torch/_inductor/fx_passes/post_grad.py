@@ -77,9 +77,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # It's probably a good idea to keep this last, since it introduces
     # mutation.
-    # print(gm.graph)
     reinplace_scatters(gm.graph)
-    # print(gm.graph)
     gm.recompile()
     gm.graph.lint()
 
@@ -498,7 +496,8 @@ def _get_node_storage(node):
 def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1)
+    is only used by the scatter (users == 1), and the node being mutated
+    shares storage with no other nodes.
 
     Also handles input mutations when there is a corresponding copy node.
     """
