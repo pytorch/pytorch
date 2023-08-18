@@ -62,9 +62,7 @@ class TestQuantizationDocs(QuantizationTestCase):
             if "\n" not in unique_identifier:
                 unique_identifier += "\n"
 
-            assert unique_identifier in content, "could not find {} in {}".format(
-                unique_identifier, path_to_file
-            )
+            assert unique_identifier in content, f"could not find {unique_identifier} in {path_to_file}"
 
             # get index of first line of code
             line_num_start = content.index(unique_identifier) + 1
