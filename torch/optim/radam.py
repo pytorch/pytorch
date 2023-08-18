@@ -20,6 +20,7 @@ class RAdam(Optimizer):
         *,
         foreach: Optional[bool] = None,
         differentiable: bool = False,
+        decoupled_weight_decay: bool=False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -38,6 +39,7 @@ class RAdam(Optimizer):
             weight_decay=weight_decay,
             foreach=foreach,
             differentiable=differentiable,
+            decoupled_weight_decay=decoupled_weight_decay,
         )
         super().__init__(params, defaults)
 
@@ -46,6 +48,7 @@ class RAdam(Optimizer):
         for group in self.param_groups:
             group.setdefault("foreach", None)
             group.setdefault("differentiable", False)
+            group.setdefault("decoupled_weight_decay", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -115,6 +118,7 @@ class RAdam(Optimizer):
                 eps=group["eps"],
                 foreach=group["foreach"],
                 differentiable=group["differentiable"],
+                decoupled_weight_decay=group["decoupled_weight_decay"],
             )
 
         return loss
@@ -196,6 +200,7 @@ def radam(
     lr: float,
     weight_decay: float,
     eps: float,
+    decoupled_weight_decay: bool=False,
 ):
     r"""Functional API that performs RAdam algorithm computation.
 
@@ -230,6 +235,7 @@ def radam(
         weight_decay=weight_decay,
         eps=eps,
         differentiable=differentiable,
+        decoupled_weight_decay=decoupled_weight_decay,
     )
 
 
@@ -246,6 +252,7 @@ def _single_tensor_radam(
     weight_decay: float,
     eps: float,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
 
     for i, param in enumerate(params):
@@ -261,7 +268,10 @@ def _single_tensor_radam(
         bias_correction2 = 1 - beta2 ** step
 
         if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+            if decoupled_weight_decay:
+                param = param.add(param, alpha=-weight_decay * lr)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - beta1)
@@ -307,6 +317,7 @@ def _multi_tensor_radam(
     weight_decay: float,
     eps: float,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
 
     if len(params) == 0:
@@ -332,7 +343,10 @@ def _multi_tensor_radam(
                       (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            if decoupled_weight_decay:
+                grouped_params = torch._foreach_add(grouped_params, grouped_params, alpha=-weight_decay * lr)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
