@@ -562,14 +562,14 @@ class CodeGen:
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         for i, node in enumerate(nodes):
-            # emit a counter comment to keep track of
-            # node index, which will be deleted later
-            # after going through _body_transformer
-            body.append(f"# COUNTER: {i}\n")
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
             if verbose:
                 append_stacktrace_summary(node)
+            # emit a counter comment to keep track of
+            # node index, which will be deleted later
+            # after going through _body_transformer
+            body.append(f"# COUNTER: {i}\n")
             emit_node(node)
             delete_unused_values(node)
 

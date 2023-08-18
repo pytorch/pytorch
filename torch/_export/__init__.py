@@ -309,12 +309,10 @@ def export(
                                     params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
             # Fix the graph output signature to be tuple if scalar
-            # because aot_export expects a tuple as return type
-            return_val = f(*args, **kwargs)
             out_spec = orig_out_spec = gm_torch_level._out_spec
-            # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple)):
-                out_spec = pytree.tree_flatten((return_val,))[1]
+            # aot_export expect the return type to always be a tuple.
+            if out_spec.type not in (list, tuple):
+                out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
