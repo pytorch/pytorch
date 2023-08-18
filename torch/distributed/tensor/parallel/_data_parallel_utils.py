@@ -1,5 +1,5 @@
 import copy
-from typing import cast, List, NamedTuple, Optional, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -15,26 +15,12 @@ from torch.distributed._shard.sharded_tensor import (
 
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor as DistributedTensor,
-    Shard as DShard,
-)
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed._tensor import DTensor as DistributedTensor, Shard as DShard
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
-
-
-class _STShardingInfo(NamedTuple):
-    """:class:`ShardedTensor` sharding information."""
-
-    sharding_spec: Optional[shard_spec.ShardingSpec]
-    global_size: Optional[torch.Size]
-    process_group: Optional[c10d.ProcessGroup]
-    device_mesh: Optional[DeviceMesh]
-    placements: Optional[List[Placement]]
 
 
 def _get_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
@@ -155,51 +141,21 @@ def _rewrite_spec_if_needed(
 
 def _flatten_tensor(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
-    if type(tensor) is ShardedTensor:
-        return tensor.local_tensor(), _STShardingInfo(
-            tensor.sharding_spec(),
-            tensor.size(),
-            tensor._process_group,
-            None,
-            None,
-        )
-    elif type(tensor) is DistributedTensor:
+) -> Tuple[torch.Tensor, Optional[DTensorSpec]]:
+    if isinstance(tensor, DistributedTensor):
         tensor._local_tensor.requires_grad_()
-        return tensor._local_tensor, _STShardingInfo(
-            None,
-            None,
-            None,
-            tensor.device_mesh,
-            list(tensor.placements),
-        )
+        return tensor._local_tensor, tensor._spec
     return tensor, None
 
 
-def _unflatten_tensor(
-    tensor: torch.Tensor, sharding_info: _STShardingInfo
-) -> torch.Tensor:
-    result: torch.Tensor
+def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
 
-    if sharding_info.sharding_spec is not None:
-        assert sharding_info.global_size is not None
-        result = ShardedTensor._init_from_local_tensor(
-            tensor,
-            _rewrite_spec_if_needed(
-                sharding_info.sharding_spec,
-                tensor,
-                dist.get_rank(sharding_info.process_group),
-            ),
-            sharding_info.global_size,
-            process_group=cast(dist.ProcessGroup, sharding_info.process_group),
-        )
-    else:
-        result = DistributedTensor.from_local(
-            tensor,
-            device_mesh=sharding_info.device_mesh,
-            placements=sharding_info.placements,
-            run_check=False,
-        )
+    result = DistributedTensor.from_local(
+        tensor,
+        device_mesh=spec.mesh,
+        placements=spec.placements,
+        run_check=False,
+    )
 
     _set_fsdp_flattened(result)
     return result
