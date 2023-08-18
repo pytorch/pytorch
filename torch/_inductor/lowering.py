@@ -1709,6 +1709,7 @@ FALLBACK_ALLOW_LIST = {
     "torchvision::roi_align",
 }
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
+make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten._embedding_bag, require_contiguous)
@@ -1747,7 +1748,6 @@ make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
