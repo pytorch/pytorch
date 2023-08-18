@@ -215,8 +215,9 @@ class inference_mode(_DecoratorContextManager):
         more information on how they compare.
 
     Args:
-        mode_or_func (bool or function): Either a boolean flag whether to enable or disable inference mode
-            or a Python function to decorate with inference mode enabled
+        mode (bool or function): Either a boolean flag whether to enable or
+            disable inference mode or a Python function to decorate with
+            inference mode enabled
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
@@ -253,10 +254,10 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __new__(cls, mode_or_func=True):
-        if isinstance(mode_or_func, bool):
+    def __new__(cls, mode=True):
+        if isinstance(mode, bool):
             return super().__new__(cls)
-        return cls()(mode_or_func)
+        return cls()(mode)
 
     def __enter__(self) -> None:
         self._inference_mode_context = torch._C._InferenceMode(self.mode)

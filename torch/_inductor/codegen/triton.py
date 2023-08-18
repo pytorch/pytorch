@@ -22,6 +22,7 @@ from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
@@ -37,7 +38,6 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
-
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -1774,6 +1774,7 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
@@ -2006,7 +2007,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling:
+class TritonScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
