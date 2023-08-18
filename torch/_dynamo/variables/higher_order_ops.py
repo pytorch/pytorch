@@ -482,6 +482,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def non_single_tensor_return_unsupported(api, ret):
+    from . import TensorVariable
+
+    if not isinstance(ret, TensorVariable):
+        raise Unsupported(
+            f"{api} over function that returns something " f"other than one Tensor"
+        )
+
+
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -546,6 +555,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
+        non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r.new_empty(
             [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
@@ -983,6 +993,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
+        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r
 
