@@ -147,7 +147,8 @@ class C10_API SymInt {
 
   // Distinguish actual symbolic values from large negative integers.
   bool is_symbolic() const {
-    return is_heap_allocated() && toSymNodeImplUnowned()->large_negative_int() == 0;
+    return is_heap_allocated() &&
+        toSymNodeImplUnowned()->large_negative_int() == 0;
   }
 
   // N.B. It's important to keep this definition in the header
