@@ -674,6 +674,7 @@ if(BUILD_ONEDNN_GRAPH)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/layout_propagation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/prepare_binary.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/guard_shape.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/python_bindings.cpp
   )
 endif()
 
