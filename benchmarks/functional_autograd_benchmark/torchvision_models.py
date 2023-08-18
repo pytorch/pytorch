@@ -1,22 +1,33 @@
 # Taken from https://github.com/pytorch/vision
 # So that we don't need torchvision to be installed
+from collections import OrderedDict
+
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from torch.jit.annotations import Dict
-from collections import OrderedDict
+from torch.nn import functional as F
 
 try:
     from scipy.optimize import linear_sum_assignment
+
     scipy_available = True
 except Exception:
     scipy_available = False
 
+
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=dilation, groups=groups, bias=False, dilation=dilation)
+    return nn.Conv2d(
+        in_planes,
+        out_planes,
+        kernel_size=3,
+        stride=stride,
+        padding=dilation,
+        groups=groups,
+        bias=False,
+        dilation=dilation,
+    )
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -27,13 +38,22 @@ def conv1x1(in_planes, out_planes, stride=1):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, dilation=1, norm_layer=None):
+    def __init__(
+        self,
+        inplanes,
+        planes,
+        stride=1,
+        downsample=None,
+        groups=1,
+        base_width=64,
+        dilation=1,
+        norm_layer=None,
+    ):
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         if groups != 1 or base_width != 64:
-            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+            raise ValueError("BasicBlock only supports groups=1 and base_width=64")
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
@@ -63,6 +83,7 @@ class BasicBlock(nn.Module):
 
         return out
 
+
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
     # while original implementation places the stride at the first 1x1 convolution(self.conv1)
@@ -72,12 +93,21 @@ class Bottleneck(nn.Module):
 
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, dilation=1, norm_layer=None):
+    def __init__(
+        self,
+        inplanes,
+        planes,
+        stride=1,
+        downsample=None,
+        groups=1,
+        base_width=64,
+        dilation=1,
+        norm_layer=None,
+    ):
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        width = int(planes * (base_width / 64.)) * groups
+        width = int(planes * (base_width / 64.0)) * groups
         # Both self.conv2 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv1x1(inplanes, width)
         self.bn1 = norm_layer(width)
@@ -111,11 +141,19 @@ class Bottleneck(nn.Module):
 
         return out
 
-class ResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
-                 groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None):
+class ResNet(nn.Module):
+    def __init__(
+        self,
+        block,
+        layers,
+        num_classes=1000,
+        zero_init_residual=False,
+        groups=1,
+        width_per_group=64,
+        replace_stride_with_dilation=None,
+        norm_layer=None,
+    ):
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -128,28 +166,34 @@ class ResNet(nn.Module):
             # the 2x2 stride with a dilated convolution instead
             replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
-            raise ValueError("replace_stride_with_dilation should be None "
-                             "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
+            raise ValueError(
+                "replace_stride_with_dilation should be None "
+                "or a 3-element tuple, got {}".format(replace_stride_with_dilation)
+            )
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=False)
+        self.conv1 = nn.Conv2d(
+            3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
+        )
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
-                                       dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
-                                       dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
-                                       dilate=replace_stride_with_dilation[2])
+        self.layer2 = self._make_layer(
+            block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
+        )
+        self.layer3 = self._make_layer(
+            block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1]
+        )
+        self.layer4 = self._make_layer(
+            block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2]
+        )
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -178,13 +222,30 @@ class ResNet(nn.Module):
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, previous_dilation, norm_layer))
+        layers.append(
+            block(
+                self.inplanes,
+                planes,
+                stride,
+                downsample,
+                self.groups,
+                self.base_width,
+                previous_dilation,
+                norm_layer,
+            )
+        )
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, dilation=self.dilation,
-                                norm_layer=norm_layer))
+            layers.append(
+                block(
+                    self.inplanes,
+                    planes,
+                    groups=self.groups,
+                    base_width=self.base_width,
+                    dilation=self.dilation,
+                    norm_layer=norm_layer,
+                )
+            )
 
         return nn.Sequential(*layers)
 
@@ -209,6 +270,7 @@ class ResNet(nn.Module):
     def forward(self, x):
         return self._forward_impl(x)
 
+
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     model = ResNet(block, layers, **kwargs)
     # if pretrained:
@@ -217,6 +279,7 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     #     model.load_state_dict(state_dict)
     return model
 
+
 def resnet18(pretrained=False, progress=True, **kwargs):
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -224,8 +287,8 @@ def resnet18(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
-                   **kwargs)
+    return _resnet("resnet18", BasicBlock, [2, 2, 2, 2], pretrained, progress, **kwargs)
+
 
 def resnet50(pretrained=False, progress=True, **kwargs):
     r"""ResNet-50 model from
@@ -234,8 +297,8 @@ def resnet50(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet50', Bottleneck, [3, 4, 6, 3], pretrained, progress,
-                   **kwargs)
+    return _resnet("resnet50", Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs)
+
 
 class IntermediateLayerGetter(nn.ModuleDict):
     """
@@ -263,13 +326,16 @@ class IntermediateLayerGetter(nn.ModuleDict):
         >>>     [('feat1', torch.Size([1, 64, 56, 56])),
         >>>      ('feat2', torch.Size([1, 256, 14, 14]))]
     """
+
     _version = 2
     __annotations__ = {
         "return_layers": Dict[str, str],
     }
 
     def __init__(self, model, return_layers):
-        if not set(return_layers).issubset([name for name, _ in model.named_children()]):
+        if not set(return_layers).issubset(
+            [name for name, _ in model.named_children()]
+        ):
             raise ValueError("return_layers are not present in model")
         orig_return_layers = return_layers
         return_layers = {str(k): str(v) for k, v in return_layers.items()}
@@ -293,8 +359,9 @@ class IntermediateLayerGetter(nn.ModuleDict):
                 out[out_name] = x
         return out
 
+
 class _SimpleSegmentationModel(nn.Module):
-    __constants__ = ['aux_classifier']
+    __constants__ = ["aux_classifier"]
 
     def __init__(self, backbone, classifier, aux_classifier=None):
         super().__init__()
@@ -310,16 +377,17 @@ class _SimpleSegmentationModel(nn.Module):
         result = OrderedDict()
         x = features["out"]
         x = self.classifier(x)
-        x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+        x = F.interpolate(x, size=input_shape, mode="bilinear", align_corners=False)
         result["out"] = x
 
         if self.aux_classifier is not None:
             x = features["aux"]
             x = self.aux_classifier(x)
-            x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+            x = F.interpolate(x, size=input_shape, mode="bilinear", align_corners=False)
             result["aux"] = x
 
         return result
+
 
 class FCN(_SimpleSegmentationModel):
     """
@@ -333,7 +401,9 @@ class FCN(_SimpleSegmentationModel):
             the backbone and returns a dense prediction.
         aux_classifier (nn.Module, optional): auxiliary classifier used during training
     """
+
     pass
+
 
 class FCNHead(nn.Sequential):
     def __init__(self, in_channels, channels):
@@ -343,10 +413,11 @@ class FCNHead(nn.Sequential):
             nn.BatchNorm2d(inter_channels),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Conv2d(inter_channels, channels, 1)
+            nn.Conv2d(inter_channels, channels, 1),
         ]
 
         super().__init__(*layers)
+
 
 def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True):
     # backbone = resnet.__dict__[backbone_name](
@@ -355,12 +426,12 @@ def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True
     # Hardcoded resnet 50
     assert backbone_name == "resnet50"
     backbone = resnet50(
-        pretrained=pretrained_backbone,
-        replace_stride_with_dilation=[False, True, True])
+        pretrained=pretrained_backbone, replace_stride_with_dilation=[False, True, True]
+    )
 
-    return_layers = {'layer4': 'out'}
+    return_layers = {"layer4": "out"}
     if aux:
-        return_layers['layer3'] = 'aux'
+        return_layers["layer3"] = "aux"
     backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
 
     aux_classifier = None
@@ -370,7 +441,7 @@ def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True
 
     model_map = {
         # 'deeplabv3': (DeepLabHead, DeepLabV3), # Not used
-        'fcn': (FCNHead, FCN),
+        "fcn": (FCNHead, FCN),
     }
     inplanes = 2048
     classifier = model_map[name][0](inplanes, num_classes)
@@ -379,7 +450,10 @@ def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True
     model = base_model(backbone, classifier, aux_classifier)
     return model
 
-def _load_model(arch_type, backbone, pretrained, progress, num_classes, aux_loss, **kwargs):
+
+def _load_model(
+    arch_type, backbone, pretrained, progress, num_classes, aux_loss, **kwargs
+):
     if pretrained:
         aux_loss = True
     model = _segm_resnet(arch_type, backbone, num_classes, aux_loss, **kwargs)
@@ -393,15 +467,19 @@ def _load_model(arch_type, backbone, pretrained, progress, num_classes, aux_loss
     #         model.load_state_dict(state_dict)
     return model
 
-def fcn_resnet50(pretrained=False, progress=True,
-                 num_classes=21, aux_loss=None, **kwargs):
+
+def fcn_resnet50(
+    pretrained=False, progress=True, num_classes=21, aux_loss=None, **kwargs
+):
     """Constructs a Fully-Convolutional Network model with a ResNet-50 backbone.
     Args:
         pretrained (bool): If True, returns a model pre-trained on COCO train2017 which
             contains the same classes as Pascal VOC
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _load_model('fcn', 'resnet50', pretrained, progress, num_classes, aux_loss, **kwargs)
+    return _load_model(
+        "fcn", "resnet50", pretrained, progress, num_classes, aux_loss, **kwargs
+    )
 
 
 # Taken from @fmassa example slides and https://github.com/facebookresearch/detr
@@ -417,8 +495,15 @@ class DETR(nn.Module):
     The model achieves ~40 AP on COCO val5k and runs at ~28 FPS on Tesla V100.
     Only batch size 1 supported.
     """
-    def __init__(self, num_classes, hidden_dim=256, nheads=8,
-                 num_encoder_layers=6, num_decoder_layers=6):
+
+    def __init__(
+        self,
+        num_classes,
+        hidden_dim=256,
+        nheads=8,
+        num_encoder_layers=6,
+        num_decoder_layers=6,
+    ):
         super().__init__()
 
         # create ResNet-50 backbone
@@ -430,7 +515,8 @@ class DETR(nn.Module):
 
         # create a default PyTorch transformer
         self.transformer = nn.Transformer(
-            hidden_dim, nheads, num_encoder_layers, num_decoder_layers)
+            hidden_dim, nheads, num_encoder_layers, num_decoder_layers
+        )
 
         # prediction heads, one extra class for predicting non-empty slots
         # note that in baseline DETR linear_bbox layer is 3-layer MLP
@@ -462,10 +548,17 @@ class DETR(nn.Module):
 
         # construct positional encodings
         H, W = h.shape[-2:]
-        pos = torch.cat([
-            self.col_embed[:W].unsqueeze(0).repeat(H, 1, 1),
-            self.row_embed[:H].unsqueeze(1).repeat(1, W, 1),
-        ], dim=-1).flatten(0, 1).unsqueeze(1)
+        pos = (
+            torch.cat(
+                [
+                    self.col_embed[:W].unsqueeze(0).repeat(H, 1, 1),
+                    self.row_embed[:H].unsqueeze(1).repeat(1, W, 1),
+                ],
+                dim=-1,
+            )
+            .flatten(0, 1)
+            .unsqueeze(1)
+        )
 
         # propagate through the transformer
         # TODO (alband) Why this is not automatically broadcasted? (had to add the repeat)
@@ -475,8 +568,11 @@ class DETR(nn.Module):
         h = self.transformer(f, s).transpose(0, 1)
 
         # finally project transformer outputs to class labels and bounding boxes
-        return {'pred_logits': self.linear_class(h),
-                'pred_boxes': self.linear_bbox(h).sigmoid()}
+        return {
+            "pred_logits": self.linear_class(h),
+            "pred_boxes": self.linear_bbox(h).sigmoid(),
+        }
+
 
 def generalized_box_iou(boxes1, boxes2):
     """
@@ -499,11 +595,12 @@ def generalized_box_iou(boxes1, boxes2):
 
     return iou - (area - union) / area
 
+
 def box_cxcywh_to_xyxy(x):
     x_c, y_c, w, h = x.unbind(-1)
-    b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
-         (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h), (x_c + 0.5 * w), (y_c + 0.5 * h)]
     return torch.stack(b, dim=-1)
+
 
 def box_area(boxes):
     """
@@ -516,6 +613,7 @@ def box_area(boxes):
         area (Tensor[N]): area for each box
     """
     return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+
 
 # modified from torchvision to also return the union
 def box_iou(boxes1, boxes2):
@@ -533,12 +631,15 @@ def box_iou(boxes1, boxes2):
     iou = inter / union
     return iou, union
 
+
 def is_dist_avail_and_initialized():
     return False
+
 
 def get_world_size():
     if not is_dist_avail_and_initialized():
         return 1
+
 
 @torch.no_grad()
 def accuracy(output, target, topk=(1,)):
@@ -558,14 +659,16 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
+
 class SetCriterion(nn.Module):
-    """ This class computes the loss for DETR.
+    """This class computes the loss for DETR.
     The process happens in two steps:
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
+
     def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses):
-        """ Create the criterion.
+        """Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
             matcher: module able to compute a matching between targets and proposals
@@ -581,67 +684,81 @@ class SetCriterion(nn.Module):
         self.losses = losses
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
-        self.register_buffer('empty_weight', empty_weight)
+        self.register_buffer("empty_weight", empty_weight)
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
-        assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
+        assert "pred_logits" in outputs
+        src_logits = outputs["pred_logits"]
 
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
+        target_classes_o = torch.cat(
+            [t["labels"][J] for t, (_, J) in zip(targets, indices)]
+        )
+        target_classes = torch.full(
+            src_logits.shape[:2],
+            self.num_classes,
+            dtype=torch.int64,
+            device=src_logits.device,
+        )
         target_classes[idx] = target_classes_o
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
-        losses = {'loss_ce': loss_ce}
+        loss_ce = F.cross_entropy(
+            src_logits.transpose(1, 2), target_classes, self.empty_weight
+        )
+        losses = {"loss_ce": loss_ce}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
-            losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
+            losses["class_error"] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
 
     @torch.no_grad()
     def loss_cardinality(self, outputs, targets, indices, num_boxes):
-        """ Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes
+        """Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes
         This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients
         """
-        pred_logits = outputs['pred_logits']
+        pred_logits = outputs["pred_logits"]
         device = pred_logits.device
-        tgt_lengths = torch.as_tensor([len(v["labels"]) for v in targets], device=device)
+        tgt_lengths = torch.as_tensor(
+            [len(v["labels"]) for v in targets], device=device
+        )
         # Count the number of predictions that are NOT "no-object" (which is the last class)
         card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
         card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
-        losses = {'cardinality_error': card_err}
+        losses = {"cardinality_error": card_err}
         return losses
 
     def loss_boxes(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-           The target boxes are expected in format (center_x, center_y, h, w), normalized by the image size.
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, h, w), normalized by the image size.
         """
-        assert 'pred_boxes' in outputs
+        assert "pred_boxes" in outputs
         idx = self._get_src_permutation_idx(indices)
-        src_boxes = outputs['pred_boxes'][idx]
-        target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        src_boxes = outputs["pred_boxes"][idx]
+        target_boxes = torch.cat(
+            [t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0
+        )
 
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction="none")
 
         losses = {}
-        losses['loss_bbox'] = loss_bbox.sum() / num_boxes
+        losses["loss_bbox"] = loss_bbox.sum() / num_boxes
 
-        loss_giou = 1 - torch.diag(generalized_box_iou(
-            box_cxcywh_to_xyxy(src_boxes),
-            box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_boxes
+        loss_giou = 1 - torch.diag(
+            generalized_box_iou(
+                box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes)
+            )
+        )
+        losses["loss_giou"] = loss_giou.sum() / num_boxes
         return losses
 
     def loss_masks(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the masks: the focal loss and the dice loss.
-           targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
+        targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
         """
         assert "pred_masks" in outputs
 
@@ -651,13 +768,19 @@ class SetCriterion(nn.Module):
         src_masks = outputs["pred_masks"]
 
         # TODO use valid to mask invalid areas due to padding in loss
-        target_masks, valid = nested_tensor_from_tensor_list([t["masks"] for t in targets]).decompose()
+        target_masks, valid = nested_tensor_from_tensor_list(
+            [t["masks"] for t in targets]
+        ).decompose()
         target_masks = target_masks.to(src_masks)
 
         src_masks = src_masks[src_idx]
         # upsample predictions to the target size
-        src_masks = interpolate(src_masks[:, None], size=target_masks.shape[-2:],
-                                mode="bilinear", align_corners=False)
+        src_masks = interpolate(
+            src_masks[:, None],
+            size=target_masks.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
         src_masks = src_masks[:, 0].flatten(1)
 
         target_masks = target_masks[tgt_idx].flatten(1)
@@ -670,41 +793,47 @@ class SetCriterion(nn.Module):
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
-        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
+        batch_idx = torch.cat(
+            [torch.full_like(src, i) for i, (src, _) in enumerate(indices)]
+        )
         src_idx = torch.cat([src for (src, _) in indices])
         return batch_idx, src_idx
 
     def _get_tgt_permutation_idx(self, indices):
         # permute targets following indices
-        batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
+        batch_idx = torch.cat(
+            [torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)]
+        )
         tgt_idx = torch.cat([tgt for (_, tgt) in indices])
         return batch_idx, tgt_idx
 
     def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
         loss_map = {
-            'labels': self.loss_labels,
-            'cardinality': self.loss_cardinality,
-            'boxes': self.loss_boxes,
-            'masks': self.loss_masks
+            "labels": self.loss_labels,
+            "cardinality": self.loss_cardinality,
+            "boxes": self.loss_boxes,
+            "masks": self.loss_masks,
         }
-        assert loss in loss_map, f'do you really want to compute {loss} loss?'
+        assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
 
     def forward(self, outputs, targets):
-        """ This performs the loss computation.
+        """This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
              targets: list of dicts, such that len(targets) == batch_size.
                       The expected keys in each dict depends on the losses applied, see each loss' doc
         """
-        outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
+        outputs_without_aux = {k: v for k, v in outputs.items() if k != "aux_outputs"}
 
         # Retrieve the matching between the outputs of the last layer and the targets
         indices = self.matcher(outputs_without_aux, targets)
 
         # Compute the average number of target boxes across all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
+        num_boxes = torch.as_tensor(
+            [num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device
+        )
         if is_dist_avail_and_initialized():
             torch.distributed.all_reduce(num_boxes)
         num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
@@ -715,22 +844,25 @@ class SetCriterion(nn.Module):
             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
-        if 'aux_outputs' in outputs:
-            for i, aux_outputs in enumerate(outputs['aux_outputs']):
+        if "aux_outputs" in outputs:
+            for i, aux_outputs in enumerate(outputs["aux_outputs"]):
                 indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
-                    if loss == 'masks':
+                    if loss == "masks":
                         # Intermediate masks losses are too costly to compute, we ignore them.
                         continue
                     kwargs = {}
-                    if loss == 'labels':
+                    if loss == "labels":
                         # Logging is enabled only for the last layer
-                        kwargs = {'log': False}
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
-                    l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
+                        kwargs = {"log": False}
+                    l_dict = self.get_loss(
+                        loss, aux_outputs, targets, indices, num_boxes, **kwargs
+                    )
+                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
 
         return losses
+
 
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
@@ -739,7 +871,9 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
 
-    def __init__(self, cost_class: float = 1, cost_bbox: float = 1, cost_giou: float = 1):
+    def __init__(
+        self, cost_class: float = 1, cost_bbox: float = 1, cost_giou: float = 1
+    ):
         """Creates the matcher
         Params:
             cost_class: This is the relative weight of the classification error in the matching cost
@@ -750,11 +884,13 @@ class HungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
-        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
+        assert (
+            cost_class != 0 or cost_bbox != 0 or cost_giou != 0
+        ), "all costs cant be 0"
 
     @torch.no_grad()
     def forward(self, outputs, targets):
-        """ Performs the matching
+        """Performs the matching
         Params:
             outputs: This is a dict that contains at least these entries:
                  "pred_logits": Tensor of dim [batch_size, num_queries, num_classes] with the classification logits
@@ -773,7 +909,9 @@ class HungarianMatcher(nn.Module):
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
-        out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
+        out_prob = (
+            outputs["pred_logits"].flatten(0, 1).softmax(-1)
+        )  # [batch_size * num_queries, num_classes]
         out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
         # Also concat the target labels and boxes
@@ -789,15 +927,31 @@ class HungarianMatcher(nn.Module):
         cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
 
         # Compute the giou cost betwen boxes
-        cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
+        cost_giou = -generalized_box_iou(
+            box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox)
+        )
 
         # Final cost matrix
-        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
+        C = (
+            self.cost_bbox * cost_bbox
+            + self.cost_class * cost_class
+            + self.cost_giou * cost_giou
+        )
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
         if not scipy_available:
-            raise RuntimeError("The 'detr' model requires scipy to run. Please make sure you have it installed"
-                               " if you enable the 'detr' model.")
-        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
-        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+            raise RuntimeError(
+                "The 'detr' model requires scipy to run. Please make sure you have it installed"
+                " if you enable the 'detr' model."
+            )
+        indices = [
+            linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))
+        ]
+        return [
+            (
+                torch.as_tensor(i, dtype=torch.int64),
+                torch.as_tensor(j, dtype=torch.int64),
+            )
+            for i, j in indices
+        ]

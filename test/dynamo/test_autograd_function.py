@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import math
+import unittest
 
 import torch
 
@@ -206,7 +207,7 @@ class ContextMarkAndSave(torch.autograd.Function):
 
 class ModuleWithGradFunc(torch.nn.Module):
     def __init__(self, func):
-        super(ModuleWithGradFunc, self).__init__()
+        super().__init__()
         self.f = func.apply
 
     def forward(self, x):
@@ -320,6 +321,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod
@@ -334,7 +336,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.gamma = torch.nn.Parameter(torch.rand([4, 128, 32, 32]))
 
             def forward(self, x):

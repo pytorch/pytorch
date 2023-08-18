@@ -217,7 +217,7 @@ def _dump_DDP_relevant_env_vars():
     formatted_output = ""
     for var in relevant_env_vars:
         value = os.environ[var] if var in os.environ else "N/A"
-        formatted_output += "env:%s=%s\n" % (var, value)
+        formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
 
@@ -671,7 +671,7 @@ class DistributedDataParallel(Module, Joinable):
             for n, p in module.named_parameters()
             if n not in self.parameters_to_ignore
         ]
-        if not any((p.requires_grad for p in self._module_parameters)):
+        if not any(p.requires_grad for p in self._module_parameters):
             if len(self._delay_all_reduce_params):
                 logger.info("Delay the AllReduce of all parameters.")
             else:
@@ -861,7 +861,7 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
-        self._setup_in_backward_optimizers()
+        self._lazy_init_ran = False
 
     def _register_delay_all_reduce_hook(
         self,
@@ -1344,6 +1344,7 @@ class DistributedDataParallel(Module, Joinable):
     # for the 'module_to_run' underneath
     # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
+    @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self
         try:
@@ -1376,7 +1377,15 @@ class DistributedDataParallel(Module, Joinable):
             if all_param_grad_none:
                 self._delay_grad_buffer.zero_()
 
+    def _lazy_init(self):
+        # Initialization for DDP that occurs after construction, but lazily
+        # before the first forward pass.
+        self._setup_in_backward_optimizers()
+        self._lazy_init_ran = True
+
     def _pre_forward(self, *inputs, **kwargs):
+        if not self._lazy_init_ran:
+            self._lazy_init()
         if self._delay_all_reduce_all_params:
             return inputs, kwargs
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import sys
 import warnings
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 
 import torch
 from torch import _C
@@ -469,7 +469,6 @@ def masked_scatter(g: jit_utils.GraphContext, self, mask, source):
         axes=torch.LongTensor([0]),
         starts=torch.LongTensor([0]),
         ends=opset9.size(g, index, torch.LongTensor([0])),
-        dynamic_slice=True,
     )
     return g.op("ScatterND", self, index, source)
 
@@ -576,74 +575,6 @@ def _unique2(g: jit_utils.GraphContext, self, sorted, return_inverse, return_cou
         "Unique", self, sorted_i=sorted, outputs=4
     )
     return u, inverse_indices, counts
-
-
-@_onnx_symbolic(
-    "aten::avg_pool1d",
-    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
-)
-@_onnx_symbolic(
-    "aten::avg_pool2d",
-    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
-)
-@_onnx_symbolic(
-    "aten::avg_pool3d",
-    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
-)
-@_beartype.beartype
-def _avg_pool(name, tuple_fn):
-    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
-    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
-    @_beartype.beartype
-    def symbolic_fn(
-        g,
-        input: _C.Value,
-        kernel_size: Sequence[int],
-        stride: Sequence[int],
-        padding: Union[int, Sequence[int]],
-        ceil_mode: int,
-        count_include_pad: int,
-        divisor_override=None,
-    ):
-        # Although onnx::AvgPool provides count_include_pad and ceil_mode,
-        # The corner case of Average Pooling with ceil_mode on
-        # PyTorch allows sliding window go off bound, which leads to
-        # this accommodation.
-        # More detail on https://github.com/pytorch/pytorch/issues/57178
-        if not stride:
-            stride = kernel_size
-        padding = symbolic_helper._avgpool_helper(
-            tuple_fn, padding, kernel_size, stride, divisor_override, name
-        )
-        assert isinstance(padding, tuple)
-        adjusted_padding = padding
-        if count_include_pad:
-            input = g.op(
-                "Pad",
-                input,
-                g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
-                mode_s="constant",
-            )
-            adjusted_padding = (0,) * len(padding)
-        if ceil_mode:
-            padding_ceil = opset9.get_pool_ceil_padding(
-                input, kernel_size, stride, padding
-            )
-            adjusted_padding = adjusted_padding + tuple(
-                a + b for (a, b) in zip(padding_ceil, adjusted_padding)
-            )
-        else:
-            adjusted_padding = adjusted_padding * 2
-        output = g.op(
-            "AveragePool",
-            input,
-            kernel_shape_i=tuple_fn(kernel_size),
-            strides_i=tuple_fn(stride),
-            pads_i=adjusted_padding,
-        )
-        return output
-
-    return symbolic_fn
 
 
 @_onnx_symbolic("aten::unique_dim")
@@ -889,7 +820,7 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 and all((isinstance(val, int) for val in args)):
+    if len(args) == 2 and all(isinstance(val, int) for val in args):
         # aten::arange(Scalar start, Scalar end)
         dtype = torch.int64
         # Start index.
@@ -969,6 +900,7 @@ def _dim_arange(g: jit_utils.GraphContext, like, dim):
 
 
 @_onnx_symbolic("aten::size")
+@symbolic_helper.quantized_args(True, quantize_output=False)
 @_beartype.beartype
 def size(g: jit_utils.GraphContext, self, dim=None):
     if dim is None:
@@ -1298,9 +1230,7 @@ def im2col(g: jit_utils.GraphContext, input, kernel_size, dilation, padding, str
 @_beartype.beartype
 def narrow(g: jit_utils.GraphContext, input, dim, start, length):
     end = g.op("Add", start, length)
-    return symbolic_helper._slice_helper(
-        g, input, axes=dim, starts=start, ends=end, dynamic_slice=True
-    )
+    return symbolic_helper._slice_helper(g, input, axes=dim, starts=start, ends=end)
 
 
 @_onnx_symbolic("aten::flatten")

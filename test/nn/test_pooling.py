@@ -138,7 +138,7 @@ class TestPoolingNN(NNTestCase):
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                cls_name = f'Adaptive{pool_type}Pool{numel}d'
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * (numel - 1) + (None,)
                 module = module_cls(output_size)
@@ -754,7 +754,10 @@ torch.cuda.synchronize()
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                # adapative_avg_pool2d for int is implemented
+                if numel == 2 and pool_type == 'Avg':
+                    continue
+                cls_name = f'Adaptive{pool_type}Pool{numel}d'
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * numel
                 module = module_cls(output_size)
@@ -1206,9 +1209,10 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)
+            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)  # noqa: UP032
         else:
-            cls_name = 'MaxPool{}d'.format(num_dim)
+            # FIXME(#105716): Test fails when using f-string
+            cls_name = 'MaxPool{}d'.format(num_dim)  # noqa: UP032
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)
@@ -1320,7 +1324,7 @@ torch.cuda.synchronize()
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
-                fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
+                fn_name = f'{adaptive}max_pool{num_dim}d'
                 fn = getattr(F, fn_name)
 
                 x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
@@ -1420,7 +1424,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
-            fn_name = 'FractionalMaxPool{}d'.format(num_dim)
+            fn_name = f'FractionalMaxPool{num_dim}d'
             fn = getattr(nn, fn_name)(kernel_size=2, output_size=1)
             x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
             res = fn(x)
@@ -1436,13 +1440,13 @@ torch.cuda.synchronize()
     def test_pooling_zero_stride(self, device):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 fn = getattr(F, fn_name)
                 x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn(x, kernel_size=2, stride=0))
 
-                fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
+                fn_module_name = f'{op.title()}Pool{num_dim}d'
                 fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
@@ -1453,7 +1457,7 @@ torch.cuda.synchronize()
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 fn = getattr(F, fn_name)
                 # 16777217 is the smallest integer not expressible in float32
                 x = torch.ones([1, 1, 16777217] + (num_dim - 1) * [1],
@@ -1483,7 +1487,7 @@ torch.cuda.synchronize()
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 if op == 'max':
                     # New implementation without indices supports empty tensors
                     # TODO(Heitor) change once with_indices code is updated

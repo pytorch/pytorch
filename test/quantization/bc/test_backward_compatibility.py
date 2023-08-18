@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 import sys
@@ -42,7 +41,7 @@ def get_filenames(self, subname):
     subname_output = ""
     if subname:
         base_name += "_" + subname
-        subname_output = " ({})".format(subname)
+        subname_output = f" ({subname})"
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"

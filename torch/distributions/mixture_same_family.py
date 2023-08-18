@@ -1,10 +1,11 @@
-import torch
-from torch.distributions.distribution import Distribution
-from torch.distributions import Categorical
-from torch.distributions import constraints
 from typing import Dict
 
-__all__ = ['MixtureSameFamily']
+import torch
+from torch.distributions import Categorical, constraints
+from torch.distributions.distribution import Distribution
+
+__all__ = ["MixtureSameFamily"]
+
 
 class MixtureSameFamily(Distribution):
     r"""
@@ -51,57 +52,66 @@ class MixtureSameFamily(Distribution):
     arg_constraints: Dict[str, constraints.Constraint] = {}
     has_rsample = False
 
-    def __init__(self,
-                 mixture_distribution,
-                 component_distribution,
-                 validate_args=None):
+    def __init__(
+        self, mixture_distribution, component_distribution, validate_args=None
+    ):
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
 
         if not isinstance(self._mixture_distribution, Categorical):
-            raise ValueError(" The Mixture distribution needs to be an "
-                             " instance of torch.distributions.Categorical")
+            raise ValueError(
+                " The Mixture distribution needs to be an "
+                " instance of torch.distributions.Categorical"
+            )
 
         if not isinstance(self._component_distribution, Distribution):
-            raise ValueError("The Component distribution need to be an "
-                             "instance of torch.distributions.Distribution")
+            raise ValueError(
+                "The Component distribution need to be an "
+                "instance of torch.distributions.Distribution"
+            )
 
         # Check that batch size matches
         mdbs = self._mixture_distribution.batch_shape
         cdbs = self._component_distribution.batch_shape[:-1]
         for size1, size2 in zip(reversed(mdbs), reversed(cdbs)):
             if size1 != 1 and size2 != 1 and size1 != size2:
-                raise ValueError("`mixture_distribution.batch_shape` ({0}) is not "
-                                 "compatible with `component_distribution."
-                                 "batch_shape`({1})".format(mdbs, cdbs))
+                raise ValueError(
+                    f"`mixture_distribution.batch_shape` ({mdbs}) is not "
+                    "compatible with `component_distribution."
+                    f"batch_shape`({cdbs})"
+                )
 
         # Check that the number of mixture component matches
         km = self._mixture_distribution.logits.shape[-1]
         kc = self._component_distribution.batch_shape[-1]
         if km is not None and kc is not None and km != kc:
-            raise ValueError("`mixture_distribution component` ({0}) does not"
-                             " equal `component_distribution.batch_shape[-1]`"
-                             " ({1})".format(km, kc))
+            raise ValueError(
+                f"`mixture_distribution component` ({km}) does not"
+                " equal `component_distribution.batch_shape[-1]`"
+                f" ({kc})"
+            )
         self._num_component = km
 
         event_shape = self._component_distribution.event_shape
         self._event_ndims = len(event_shape)
-        super().__init__(batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args)
+        super().__init__(
+            batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args
+        )
 
     def expand(self, batch_shape, _instance=None):
         batch_shape = torch.Size(batch_shape)
         batch_shape_comp = batch_shape + (self._num_component,)
         new = self._get_checked_instance(MixtureSameFamily, _instance)
-        new._component_distribution = \
-            self._component_distribution.expand(batch_shape_comp)
-        new._mixture_distribution = \
-            self._mixture_distribution.expand(batch_shape)
+        new._component_distribution = self._component_distribution.expand(
+            batch_shape_comp
+        )
+        new._mixture_distribution = self._mixture_distribution.expand(batch_shape)
         new._num_component = self._num_component
         new._event_ndims = self._event_ndims
         event_shape = new._component_distribution.event_shape
-        super(MixtureSameFamily, new).__init__(batch_shape=batch_shape,
-                                               event_shape=event_shape,
-                                               validate_args=False)
+        super(MixtureSameFamily, new).__init__(
+            batch_shape=batch_shape, event_shape=event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
@@ -122,18 +132,21 @@ class MixtureSameFamily(Distribution):
     @property
     def mean(self):
         probs = self._pad_mixture_dimensions(self.mixture_distribution.probs)
-        return torch.sum(probs * self.component_distribution.mean,
-                         dim=-1 - self._event_ndims)  # [B, E]
+        return torch.sum(
+            probs * self.component_distribution.mean, dim=-1 - self._event_ndims
+        )  # [B, E]
 
     @property
     def variance(self):
         # Law of total variance: Var(Y) = E[Var(Y|X)] + Var(E[Y|X])
         probs = self._pad_mixture_dimensions(self.mixture_distribution.probs)
-        mean_cond_var = torch.sum(probs * self.component_distribution.variance,
-                                  dim=-1 - self._event_ndims)
-        var_cond_mean = torch.sum(probs * (self.component_distribution.mean -
-                                           self._pad(self.mean)).pow(2.0),
-                                  dim=-1 - self._event_ndims)
+        mean_cond_var = torch.sum(
+            probs * self.component_distribution.variance, dim=-1 - self._event_ndims
+        )
+        var_cond_mean = torch.sum(
+            probs * (self.component_distribution.mean - self._pad(self.mean)).pow(2.0),
+            dim=-1 - self._event_ndims,
+        )
         return mean_cond_var + var_cond_mean
 
     def cdf(self, x):
@@ -148,8 +161,9 @@ class MixtureSameFamily(Distribution):
             self._validate_sample(x)
         x = self._pad(x)
         log_prob_x = self.component_distribution.log_prob(x)  # [S, B, k]
-        log_mix_prob = torch.log_softmax(self.mixture_distribution.logits,
-                                         dim=-1)  # [B, k]
+        log_mix_prob = torch.log_softmax(
+            self.mixture_distribution.logits, dim=-1
+        )  # [B, k]
         return torch.logsumexp(log_prob_x + log_mix_prob, dim=-1)  # [S, B]
 
     def sample(self, sample_shape=torch.Size()):
@@ -168,9 +182,11 @@ class MixtureSameFamily(Distribution):
 
             # Gather along the k dimension
             mix_sample_r = mix_sample.reshape(
-                mix_shape + torch.Size([1] * (len(es) + 1)))
+                mix_shape + torch.Size([1] * (len(es) + 1))
+            )
             mix_sample_r = mix_sample_r.repeat(
-                torch.Size([1] * len(mix_shape)) + torch.Size([1]) + es)
+                torch.Size([1] * len(mix_shape)) + torch.Size([1]) + es
+            )
 
             samples = torch.gather(comp_samples, gather_dim, mix_sample_r)
             return samples.squeeze(gather_dim)
@@ -181,14 +197,18 @@ class MixtureSameFamily(Distribution):
     def _pad_mixture_dimensions(self, x):
         dist_batch_ndims = self.batch_shape.numel()
         cat_batch_ndims = self.mixture_distribution.batch_shape.numel()
-        pad_ndims = 0 if cat_batch_ndims == 1 else \
-            dist_batch_ndims - cat_batch_ndims
+        pad_ndims = 0 if cat_batch_ndims == 1 else dist_batch_ndims - cat_batch_ndims
         xs = x.shape
-        x = x.reshape(xs[:-1] + torch.Size(pad_ndims * [1]) +
-                      xs[-1:] + torch.Size(self._event_ndims * [1]))
+        x = x.reshape(
+            xs[:-1]
+            + torch.Size(pad_ndims * [1])
+            + xs[-1:]
+            + torch.Size(self._event_ndims * [1])
+        )
         return x
 
     def __repr__(self):
-        args_string = '\n  {},\n  {}'.format(self.mixture_distribution,
-                                             self.component_distribution)
-        return 'MixtureSameFamily' + '(' + args_string + ')'
+        args_string = (
+            f"\n  {self.mixture_distribution},\n  {self.component_distribution}"
+        )
+        return "MixtureSameFamily" + "(" + args_string + ")"
