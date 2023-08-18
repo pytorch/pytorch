@@ -378,7 +378,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
     for (auto& e : events) {
-      if (e->parent_.expired()) {
+      if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
         event_tree_.push_back(e);
       }
 

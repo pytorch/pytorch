@@ -51,10 +51,11 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           echo "${WORKFLOW_URL}"
-          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
+          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}" --head-repository "${HEAD_REPOSITORY}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
       - name: Upload test artifacts
@@ -86,6 +87,7 @@ jobs:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
     continue-on-error: true
+    environment: pytorchbot-env
     steps:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
