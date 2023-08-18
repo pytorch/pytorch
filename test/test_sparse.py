@@ -5031,7 +5031,7 @@ class TestSparseAny(TestCase):
             for x in self.generate_simple_inputs(
                     layout,
                     dtype=torch.float64,
-                    # TODO: fix gh-107126 to enable batched samples:
+                    # TODO: fix gh-104868  to enable batched samples:
                     enable_batch=layout is not torch.sparse_csr,
                     enable_hybrid=not (
                         layout is torch.sparse_csr and (

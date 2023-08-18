@@ -578,21 +578,20 @@ def enable_sparse_support(gradcheck):
                         d.update(indices=full_indices)
                         return (STRIDED_REPRESENTATION, d, full_values.requires_grad_(True))
                 elif obj.layout is torch.sparse_csr:
-                    # TODO: eliminate requires_grad_(False) after gh-107083 is fixed
-                    obj.requires_grad_(False)
-                    compressed_indices = obj.crow_indices().requires_grad_(False)
-                    plain_indices = obj.col_indices().requires_grad_(False)
+                    compressed_indices = obj.crow_indices()
+                    plain_indices = obj.col_indices()
                     values = obj.values()
                     indices_dtype = compressed_indices.dtype
+                    batch_dim = compressed_indices.ndim - 1
                     if masked:
                         indices = torch._convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
                         d.update(
-                            indices=indices,  # TODO: eliminate after gh-107126
+                            indices=indices,  # TODO: eliminate after gh-107373
                             compressed_indices=compressed_indices,
                             plain_indices=plain_indices)
                         return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
                     else:
-                        batch_dim = compressed_indices.ndim - 1
+
                         batch_shape = obj.shape[:batch_dim]
                         dense_shape = values.shape[batch_dim + 1:]
                         full_nnz = obj.shape[batch_dim:batch_dim + 2].numel()
@@ -627,7 +626,7 @@ def enable_sparse_support(gradcheck):
                         full_indices = torch.ones(obj.shape[:batch_dim + 2],
                                                   device=device, dtype=torch.int8).nonzero().to(dtype=torch.int64).T
                         d.update(
-                            indices=full_indices,  # TODO: eliminate full_indices after gh-107126 is fixed
+                            indices=full_indices,  # TODO: eliminate full_indices after gh-107373 is fixed
                             compressed_indices=full_compressed_indices,
                             plain_indices=full_plain_indices)
                         return (STRIDED_REPRESENTATION, d, full_values.requires_grad_(True))
@@ -646,11 +645,16 @@ def enable_sparse_support(gradcheck):
                 # method call with `._coalesced_(True)`.
                 return torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).coalesce()
             elif d['layout'] in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-                # TODO: implement backward for sparse_compressed_tensor, see gh-107126
-                # return torch.sparse_compressed_tensor(d['compressed_indices'], d['plain_indices'], values,
-                #                                       size=d['shape'], layout=d['layout'])
-                # Workaround for non-batch cases:
-                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).to_sparse(layout=d['layout'])
+                dense_dim = d['original'].dense_dim()
+                batch_dim = d['compressed_indices'].ndim - 1
+                if batch_dim == 0 and dense_dim > 0:
+                    # TODO: remove this if-block after gh-107373 is fixed
+                    # TODO: use to_sparse(..., dense_dim=dense_dim) after gh-107451 is fixed.
+                    r = torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).to_sparse(layout=d['layout'])
+                    assert r.dense_dim() == dense_dim, (r.dense_dim(), dense_dim)  # TODO: remove after gh-107451 is fixed
+                    return r
+                return torch.sparse_compressed_tensor(d['compressed_indices'], d['plain_indices'], values,
+                                                      size=d['shape'], layout=d['layout'])
             else:
                 raise ValueError(f'unsupported sparse layout: {d["layout"]}')
 
