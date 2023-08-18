@@ -64,11 +64,11 @@ torch::Tensor custom_op_with_autograd(
 }
 
 torch::Tensor custom_sin(torch::Tensor x) {
-  return x.sin()
+  return x.sin();
 }
 
 TORCH_LIBRARY_FRAGMENT(custom, m) {
-    m.requires_pyimport("my_custom_ops")
+    m.require_pyimport("my_custom_ops");
     m.def("op", custom_op);
     m.def("op2", custom_op2);
     m.def("op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]", custom_op);
