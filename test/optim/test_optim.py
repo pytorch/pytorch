@@ -874,6 +874,8 @@ class TestOptim(TestCase):
             (optim.RAdam, dict(weight_decay=0)),
             (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
+            (optim.RAdam, dict(weight_decay=0, decoupled_weight_decay=True)),
+            (optim.RAdam, dict(weight_decay=1, decoupled_weight_decay=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
@@ -1443,6 +1445,23 @@ class TestOptim(TestCase):
         self._test_basic_cases(
             lambda weight, bias, foreach: optim.RAdam(
                 [weight, bias], lr=1e-3, foreach=foreach
+            ),
+            [
+                lambda opt: ExponentialLR(opt, gamma=0.9),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+            constructor_accepts_foreach=True,
+        )
+        # RAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach, decoupled_weight_decay=True
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach, decoupled_weight_decay=True
             ),
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
@@ -2306,6 +2325,17 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.RAdam,
                 {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.RAdam,
+                {"lr": 0.9, "weight_decay": 0.1, "differentiable": True, "decoupled_weight_decay": True},
                 *state.values(),
             ),
         )
