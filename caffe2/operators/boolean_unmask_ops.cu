@@ -3,8 +3,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/boolean_unmask_ops.h"
 
-#include <c10/cuda/CUDADeviceAssertion.h>
-
 namespace caffe2 {
 
 namespace {
@@ -13,8 +11,7 @@ __global__ void ComputeIndicesKernel(
     const int numMasks,
     const int maskSize,
     int* indices,
-    bool* const masks[],
-    TORCH_DSA_KERNEL_ARGS) {
+    bool* const masks[]) {
   CUDA_1D_KERNEL_LOOP(i, maskSize) {
     for (int j = 0; j < numMasks; ++j) {
       if (masks[j][i]) {
@@ -22,7 +19,7 @@ __global__ void ComputeIndicesKernel(
         return;
       }
     }
-    CUDA_KERNEL_ASSERT2(false);
+    CUDA_KERNEL_ASSERT(false);
   }
 }
 
@@ -33,8 +30,7 @@ __global__ void FillValuesKernel(
     const int* indices,
     char* const values[],
     int* valueSizes,
-    char* dest,
-    TORCH_DSA_KERNEL_ARGS) {
+    char* dest) {
   CUDA_1D_KERNEL_LOOP(j, numMasks) {
     int k = 0;
     for (int i = 0; i < maskSize; ++i) {
@@ -45,7 +41,7 @@ __global__ void FillValuesKernel(
         ++k;
       }
     }
-    CUDA_KERNEL_ASSERT2(valueSizes[j] == k);
+    CUDA_KERNEL_ASSERT(valueSizes[j] == k);
   }
 }
 
@@ -92,21 +88,20 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
     ReinitializeTensor(&indices_, {maskSize}, at::dtype<int>().device(CUDA));
     auto* indicesData = indices_.mutable_data<int>();
 
-    TORCH_DSA_KERNEL_LAUNCH(
-    ComputeIndicesKernel,
+    ComputeIndicesKernel<<<
         std::min(maskSize, CAFFE_MAXIMUM_NUM_BLOCKS),
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context_.stream(),
+        context_.cuda_stream()>>>(
         numMasks, maskSize, indicesData, masks_.data<bool*>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     auto* valueSizesData = valueSizes_.mutable_data<int>();
-    TORCH_DSA_KERNEL_LAUNCH(
-        FillValuesKernel,
+    FillValuesKernel<<<
         std::min(numMasks, CAFFE_MAXIMUM_NUM_BLOCKS),
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context_.stream(),
+        context_.cuda_stream()>>>(
         numMasks,
         maskSize,
         meta.itemsize(),
@@ -114,6 +109,7 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
         values_.data<char*>(),
         valueSizesData,
         dest);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     return true;
   }
