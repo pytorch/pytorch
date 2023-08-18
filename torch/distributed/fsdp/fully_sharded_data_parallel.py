@@ -408,6 +408,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         self,
         module: nn.Module,
         process_group: ProcessGroupType = None,
+        device_mesh: DeviceMesh = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
@@ -423,7 +424,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
-        _device_mesh: DeviceMesh = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -439,7 +439,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
         _init_process_group_state(
-            self, process_group, sharding_strategy, auto_wrap_policy, _device_mesh
+            self, process_group, device_mesh, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
@@ -765,6 +765,17 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
+
+            # If device_mesh is passed in, we automatically turn on the _use_dtensor flag to be
+            # true for ShardedStateDictConfig() and ShardedOptimStateDictConfig().
+            if self.device_mesh and isinstance(
+                state_dict_settings.state_dict_config, ShardedStateDictConfig
+            ):
+                state_dict_settings.state_dict_config._use_dtensor = True
+            if self.device_mesh and isinstance(
+                state_dict_settings.state_dict_config, ShardedOptimStateDictConfig
+            ):
+                state_dict_settings.optim_state_dict_config._use_dtensor = True
         return state_dict_settings
 
     @staticmethod

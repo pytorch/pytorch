@@ -97,9 +97,9 @@ NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
 def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
+    device_mesh: DeviceMesh,
     sharding_strategy: ShardingStrategy,
     policy: Optional[_Policy],
-    device_mesh: DeviceMesh = None,
 ) -> _FSDPState:
     if process_group is not None and device_mesh is not None:
         raise ValueError(
@@ -113,7 +113,8 @@ def _init_process_group_state(
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+                f"Manual wrapping with {sharding_strategy} requires explicit specification",
+                f"of process group or device_mesh."
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(
@@ -150,13 +151,13 @@ def _init_process_group_state_for_hybrid_shard(
     process_group: ProcessGroupType,
     device_mesh: DeviceMesh,
 ) -> _FSDPState:
-    if device_mesh is not None:
+    if device_mesh:
         if _is_valid_hybrid_shard_device_mesh(device_mesh):
             state._device_mesh = device_mesh
-            # TODO: We will make updates to get the mesh_dim instead of hardcoding it.
-            # Temporarily hardcoding it for intermediate HSDP DTensor state_dict devlopment.
-            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
+            # We currenlty only allow _inter_node_pg to be the outermost dimension, and the
+            # process_group(intra_node) to be the innermost dimension.
             state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
+            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
         else:
             raise ValueError(
                 "Expected device_mesh to be passed in has ndim=2 "

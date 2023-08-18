@@ -662,8 +662,7 @@ def _sharded_pre_load_state_dict_hook(
         else:
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
-            # We need to do a deep-copy here so we do not change the original placements associated with the DTensor.
-            placements = copy.deepcopy(param.placements)
+            placements = list(copy.deepcopy(param.placements))
             placements[-1] = Replicate()
             param = param.redistribute(
                 device_mesh=param.device_mesh,

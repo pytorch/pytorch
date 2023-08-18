@@ -79,8 +79,7 @@ def _gather_state_dict(
                 tensor = tensor.to(tensor.device_mesh.device_type)
             # FSDP all_gather: [Shard(0)] -> [Replicate()]
             # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
-            # We need to do a deep-copy here so we do not change the original placements associated with the DTensor.
-            placements = copy.deepcopy(tensor.placements)
+            placements = list(copy.deepcopy(tensor.placements))
             placements[-1] = Replicate()
             tensor = tensor.redistribute(
                 device_mesh=tensor.device_mesh,
@@ -176,5 +175,5 @@ def _create_chunk_dtensor(
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]
     placements = [Replicate() for _ in range(device_mesh.ndim)]
-    placements[-1] = shard_placement  # type: ignore[misc]
+    placements[-1] = shard_placement  # type: ignore[call-overload]
     return DTensor.from_local(local_tensor, device_mesh, placements)

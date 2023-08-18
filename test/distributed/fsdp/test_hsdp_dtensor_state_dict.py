@@ -46,6 +46,30 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(4, 8, device="cuda")
 
 
+class TestFSDPDeviceMeshInit(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdpdevice_mesh_init_1d(self):
+        mesh_tensor = torch.arange(self.world_size)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        model = FSDP(TestDummyModel().cuda(), device_mesh=device_mesh)
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdpdevice_mesh_init_2d(self):
+        mesh_tensor = torch.arange(self.world_size).view(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
+
+
 class TestDtensorShardedOptimStateDict(DTensorTestBase):
     @property
     def world_size(self):
