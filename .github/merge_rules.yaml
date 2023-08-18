@@ -10,6 +10,7 @@
   - scripts/onnx/**
   - test/onnx/**
   - tools/onnx/**
+  - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
   - torch/_C/_onnx.pyi
   - torch/csrc/jit/passes/onnx.*
