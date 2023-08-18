@@ -13,6 +13,18 @@
 namespace at {
 namespace functorch {
 
+// Returns the base unbatched value of a tensor, unwrapping as many
+// levels of BatchedTensor as needed.
+Tensor get_base_unbatched_value(const Tensor& maybe_batched_tensor) {
+  auto ret = maybe_batched_tensor;
+  auto* batched = maybeGetBatchedImpl(maybe_batched_tensor);
+  while(batched) {
+    ret = batched->value();
+    batched = maybeGetBatchedImpl(ret);
+  }
+  return ret;
+}
+
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
       key_set.add(
@@ -25,8 +37,12 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
   , bdim_(bdim)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
-  TORCH_CHECK(!value_.is_nested() || bdim_ == 0,
-      "Only bdim=0 is supported when vmapping over nested tensors");
+  if (get_base_unbatched_value(value_).is_nested()) {
+    TORCH_CHECK(bdim_ == 0,
+        "Nested tensors can only be vmapped over dim=0");
+    TORCH_CHECK(level_ == 1,
+        "Only one level of vmap is supported when vmapping over nested tensors");
+  }
   set_storage_access_should_throw();
   set_custom_sizes_strides(
       value_.is_nested() ? SizesStridesPolicy::CustomSizes : SizesStridesPolicy::CustomStrides);
