@@ -11,7 +11,9 @@ if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
             fd.write(str(target) + "\n")
 
 else:
-    pass
+
+    def _record_missing_op(target): # type: ignore[misc]
+        pass
 
 
 class OperatorIssue(RuntimeError):
