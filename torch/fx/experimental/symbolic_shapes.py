@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Sequence, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch.fx
@@ -162,7 +162,8 @@ def is_concrete_int(a: Union[int, SymInt]):
     if isinstance(a, int):
         return True
 
-    if isinstance(a.node.expr, sympy.core.numbers.Integer):
+    expr = a.node.simplified_expr()
+    if isinstance(expr, sympy.core.numbers.Integer):
         return True
 
     return False
@@ -706,7 +707,7 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
     def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None, fx_node=None):
-        self._expr = expr
+        self.expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         # What's the difference between hint and constant?
@@ -742,11 +743,6 @@ class SymNode:
         # the translation validation problem.
         self.fx_node = fx_node if _translation_validation_enabled() else None
 
-    @property
-    def expr(self):
-        self._update_expr()
-        return self._expr
-
     # Check if we have replacements hint_expr that would allow us to
     # simplify it into a hint
     def _update_hint(self):
@@ -780,13 +776,14 @@ class SymNode:
             return self._hint
 
     def maybe_as_int(self):
-        if self.expr.free_symbols:
+        expr = self.simplified_expr()
+        if expr.free_symbols:
             return None
         else:
-            return int(self.expr)
+            return int(expr)
 
-    def _update_expr(self):
-        self._expr = self.shape_env.replace(self._expr)
+    def simplified_expr(self):
+        return self.shape_env.replace(self.expr)
 
     def is_int(self):
         return self.pytype is int
@@ -1305,10 +1302,9 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
-        other_expr = other.expr
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
-        other_expr = self.shape_env.replace(other_expr)
+        expr = self.simplified_expr()
+        other_expr = other.simplified_expr()
         try:
             out = func(expr, other_expr)
         except Exception:
@@ -1342,7 +1338,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
+        expr = self.simplified_expr()
         if method == "floor" or method == "ceiling":
             expr = self.shape_env._simplify_floor_div(expr)
 
@@ -2649,9 +2645,10 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            if isinstance(val, SymInt):
-                s = val.node.expr
+            integer = val.node.maybe_as_int() if isinstance(val, SymInt) else val
 
+            if integer is None:
+                s = val.node.simplified_expr()
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
