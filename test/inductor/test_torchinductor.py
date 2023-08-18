@@ -6616,6 +6616,10 @@ class CommonTemplate:
                     elif node.target == "output":
                         self.assertEqual(get_data_type(node), torch.bfloat16)
 
+    # Calling div only torch.SymInt arguments is not yet supported.
+    # To support this behavior, we need to allow const-propping tensors that store symint data.
+    # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
+    @expectedFailureCodegenDynamic
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -6664,6 +6668,8 @@ class CommonTemplate:
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
+    # It's a view so it doens't generate a kernel
+    @expectedFailureCodegenDynamic
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
