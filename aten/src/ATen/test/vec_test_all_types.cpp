@@ -1532,7 +1532,7 @@ namespace {
               << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
       }
-      // Map
+      // Map - For float32 in, reduced floating points out
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
         at::vec::map<VT>([](auto x) { return x; }, y_b, x_f1, len);
