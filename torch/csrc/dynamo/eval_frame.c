@@ -305,9 +305,9 @@ typedef struct cache_entry {
   struct cache_entry* next;
 } CacheEntry;
 
+#define Py_NONE_CACHE_ENTRY (CacheEntry*)Py_None
 
 static void destroy_cache_entry(CacheEntry* e);
-
 
 #define DECLARE_CACHE_ENTRY_ATTR(name) \
 static PyObject* CacheEntry_##name(CacheEntry* self, PyObject* _noargs) { \
@@ -378,8 +378,9 @@ static CacheEntry* create_cache_entry(
 }
 
 static void destroy_cache_entry(CacheEntry* e) {
-  if (e == (CacheEntry*)Py_None) {
-    Py_XDECREF(e);
+  if (e == Py_NONE_CACHE_ENTRY) {
+    // Corresponding decref for Py_None in init_and_set_extra_state
+    Py_DECREF(e);
     return;
   }
   Py_XDECREF(e->check_fn);
@@ -499,8 +500,8 @@ inline static ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   CHECK(get_extra_state(code) == NULL);
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(extra_state);
-  // Last node in the linked list is Py_None. We incref the Py_None here, the
-  // corresponding decref is in destroy_cache_entry.
+  // We set the last node in the linked list to Py_None. We incref the Py_None
+  // here, the corresponding decref is in destroy_cache_entry.
   Py_INCREF(Py_None);
   extra_state->cache_entry = (CacheEntry*)Py_None;
   extra_state->frame_state = PyDict_New();
@@ -515,6 +516,8 @@ Debugger helper functions.
 */
 
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
+  // TODO(anijain2305) - CacheEntry being the first class Python object might
+  // obviate the need of this function. Revisit.
   PyObject* object;
   if (!PyArg_ParseTuple(args, "O", &object)) {
     return NULL;
@@ -532,7 +535,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   if (!outer_list) {
     return NULL;  // Return NULL if failed to create list
   }
-  while (current_node != NULL && current_node != (CacheEntry*)Py_None) {
+  while (current_node != NULL && current_node != Py_NONE_CACHE_ENTRY) {
     // Creating a new Python tuple for the check_fn and code of current CacheEntry
     PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
     int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
@@ -564,12 +567,6 @@ static inline PyObject* call_callback(
   PyObject* frame = Py_NewRef(_frame);
 #endif
 
-  // PyObject* prepared_cache_entry = (PyObject*)cache_entry;
-  // if (prepared_cache_entry == Py_None) {
-  //   Py_INCREF(Py_None);
-  //   prepared_cache_entry = Py_None;
-  // }
-
   PyObject* res = PyObject_CallFunction(
     callable,
     "OOO",
@@ -593,7 +590,7 @@ static PyObject* call_guard_fail_hook(
       e->code,
       f_locals,
       (Py_ssize_t)index,
-      (e->next == (CacheEntry*)Py_None ? Py_True : Py_False));
+      (e->next == Py_NONE_CACHE_ENTRY ? Py_True : Py_False));
 }
 
 static PyObject* call_profiler_start_hook(PyObject* name_str) {
@@ -615,7 +612,7 @@ static void call_profiler_end_hook(PyObject* record) {
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
-  if (e == (CacheEntry*)Py_None) {
+  if (e == Py_NONE_CACHE_ENTRY) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
   }
@@ -1157,7 +1154,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
   Py_INCREF(&CacheEntryType);
-  if (PyModule_AddObject(module, "_CacheEntryPyWrapper", (PyObject *) &CacheEntryType) < 0) {
+  if (PyModule_AddObject(module, "_CacheEntry", (PyObject *) &CacheEntryType) < 0) {
       Py_DECREF(&CacheEntryType);
       return NULL;
   }

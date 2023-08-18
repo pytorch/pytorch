@@ -224,13 +224,12 @@ def is_recompilation(cache_size):
 
 
 def compute_cache_size(cache_entry):
-    x = cache_entry
-    counter = 0
-    while x is not None:
-        print(x)
-        counter += 1
-        x = x.next
-    return counter
+    # Walk the linked list to calculate the cache size
+    running_cache_size = 0
+    while cache_entry:
+        running_cache_size += 1
+        cache_entry = cache_entry.next
+    return running_cache_size
 
 
 FRAME_COUNTER = 0
