@@ -735,10 +735,18 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+if(USE_ROCM)
+  set(CONFIG_FA ON)
+elseif(USE_CUDA AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6)
+  set(CONFIG_FA ON)
+else()
+  set(CONFIG_FA OFF)
+endif()
+
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_ROCM" OFF)
+  "CONFIG_FA" OFF)
 
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
