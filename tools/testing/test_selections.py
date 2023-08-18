@@ -6,17 +6,13 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from typing import Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 from warnings import warn
 
 from tools.shared.logging_utils import duration_to_str, pluralize
+from tools.stats.export_test_times import TEST_FILE_RATINGS_FILE
 
-from tools.stats.import_test_stats import (
-    get_disabled_tests,
-    get_slow_tests,
-    get_test_file_ratings,
-    TEST_FILE_RATINGS_FILE,
-)
+from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.stats.upload_metrics import emit_metric
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -284,7 +280,7 @@ def log_time_savings(
 
 
 def _get_file_rating_tests() -> List[str]:
-    path = REPO_ROOT / "test" / TEST_FILE_RATINGS_FILE
+    path = REPO_ROOT / TEST_FILE_RATINGS_FILE
     if not os.path.exists(path):
         print(f"could not find path {path}")
         return []
@@ -312,9 +308,7 @@ def get_reordered_tests(
     """
     prioritized_tests: List[str] = []
 
-    def add_tests(
-        tests_to_add: Union[List[str], Set[str]], test_group_description: str
-    ) -> None:
+    def add_tests(tests_to_add: List[str], test_group_description: str) -> None:
         if not tests_to_add:
             return
 
@@ -326,12 +320,12 @@ def get_reordered_tests(
                     prioritized_tests.append(test)
 
     add_tests(
-        _get_previously_failing_tests(),
+        sorted(_get_previously_failing_tests()),
         "If run, these tests will prioritized because they previously failed",
     )
 
     add_tests(
-        _get_modified_tests(),
+        sorted(_get_modified_tests()),
         "If run, these tests will be prioritized because they were modified",
     )
 
@@ -365,4 +359,3 @@ def get_reordered_tests(
 def get_test_case_configs(dirpath: str) -> None:
     get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)
-    get_test_file_ratings(dirpath=dirpath)

@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS)
+                                                  IS_MACOS, TEST_CUDA, IS_LINUX)
 
 
 try:
@@ -74,11 +74,6 @@ skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
-# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
-# as well during the execution of this test suite, and it will cause
-# CUDA OOM error on Windows.
-TEST_CUDA = torch.cuda.is_available()
 if TEST_CUDA:
     torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
@@ -1568,6 +1563,85 @@ except RuntimeError as e:
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
+    @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
+    def test_worker_generator_seed(self):
+        self._test_worker_generator_seed(pin_memory=False)
+        if TEST_CUDA:
+            self._test_worker_generator_seed(pin_memory=True)
+
+    def _test_worker_generator_seed(self, pin_memory):
+        # Tests for the RNG seeding behaviour within _worker_loop.
+        # See NOTE [RNG re-seeding in Dataloader workers]
+
+        class MyDataset(SynchronizedDataset):
+            def __getitem__(self, idx):
+                self.sync_once()
+                HIGH = 100_000
+                from_default = torch.randint(0, HIGH, size=(1,)).item()
+                from_g1 = torch.randint(0, HIGH, size=(1,), generator=g1).item()
+                from_g2 = torch.randint(0, HIGH, size=(1,), generator=g2).item()
+
+                return from_default, from_g1, from_g2
+
+
+        num_workers = 2
+        dataset_len = 10
+        dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
+        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=pin_memory, multiprocessing_context="fork")
+
+        # ALL DIFFERENT SEEDS
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(1)
+        g2 = torch.Generator().manual_seed(2)
+
+        # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
+        for from_default, from_g1, from_g2 in dl:
+            self.assertEqual(len({from_default, from_g1, from_g2}), 3)
+
+        # Make sure that the Generators' RNG is different across workers.
+        # We check that by making sure all the samples of a given Generator are different over the entire epoch.
+        # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
+        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
+        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
+            all_from_generator = {x.item() for x in all_from_generator}
+            self.assertEqual(len(all_from_generator), dataset_len)
+
+        # ALL EQUAL SEEDS
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(0)
+        g2 = torch.Generator().manual_seed(0)
+
+        # All seeds are equal so we expect the RNG of all Generators to be the same.
+        # Default RNG is different from the non-default ones, due to slightly different logic for the choice
+        # of the base seed: the non-default Generators are first consumed in the main process before generating
+        # their seed.
+        for from_default, from_g1, from_g2 in dl:
+            self.assertEqual(from_g1, from_g2)
+            self.assertNotEqual(from_default, from_g1)
+
+        # Same check as when seeds are different: even if they're equal we still want the RNG of a given Generator
+        # to be different across workers.
+        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
+        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
+            all_from_generator = {x.item() for x in all_from_generator}
+            self.assertEqual(len(all_from_generator), dataset_len)
+
+        # ASSERT DIFFERENT RNG ACROSS EPOCHS
+        default_state_before_epoch = torch.random.get_rng_state()
+        g1_state_before_epoch = g1.get_state()
+        g2_state_before_epoch = g2.get_state()
+
+        all_from_default_a, all_from_g1_a, all_from_g2_a = zip(*dl)
+        # All existing Generators should be consumed (in the main process) after an epoch
+        self.assertNotEqual(default_state_before_epoch, torch.random.get_rng_state())
+        self.assertNotEqual(g1_state_before_epoch, g1.get_state())
+        self.assertNotEqual(g2_state_before_epoch, g2.get_state())
+        # More importantly, the RNG of each Generator must be different across epochs
+        all_from_default_b, all_from_g1_b, all_from_g2_b = zip(*dl)
+        self.assertNotEqual(all_from_default_a, all_from_default_b)
+        self.assertNotEqual(all_from_g1_a, all_from_g1_b)
+        self.assertNotEqual(all_from_g2_a, all_from_g2_b)
+
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
         dataloader = self._get_data_loader(dataset, batch_size=2, num_workers=2,
@@ -1803,7 +1877,7 @@ except RuntimeError as e:
         self._test_sampler()
         self._test_sampler(num_workers=4)
         if not NO_MULTIPROCESSING_SPAWN:
-            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
+            self._test_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
         # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
