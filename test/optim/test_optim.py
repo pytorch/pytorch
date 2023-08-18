@@ -1455,13 +1455,13 @@ class TestOptim(TestCase):
         # RAdamW tests
         self._test_basic_cases(
             lambda weight, bias, foreach: optim.RAdam(
-                [weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach, decoupled_weight_decay=True
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
             ),
             constructor_accepts_foreach=True,
         )
         self._test_basic_cases(
             lambda weight, bias, foreach: optim.RAdam(
-                [weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach, decoupled_weight_decay=True
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
             ),
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
@@ -2335,7 +2335,7 @@ class TestDifferentiableOptimizer(TestCase):
                 grad,
                 state,
                 torch.optim.RAdam,
-                {"lr": 0.9, "weight_decay": 0.1, "differentiable": True, "decoupled_weight_decay": True},
+                {"lr": 0.9, "weight_decay": 0.1, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )
