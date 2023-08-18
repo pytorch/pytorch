@@ -191,7 +191,10 @@ class TestPaternMatcher(TestCase):
             ),
             (
                 torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda").t().contiguous().t(),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda")
+                .t()
+                .contiguous()
+                .t(),
             ),
             (
                 torch.randn(8, 8, device="cuda"),
