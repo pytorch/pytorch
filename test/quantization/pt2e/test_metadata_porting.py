@@ -1,12 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import operator
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List
 
 import torch
-import torch._dynamo as torchdynamo
 import torch._export as export
-from torch import Tensor
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import OperatorConfig, Quantizer
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -16,13 +13,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTA
 
 from torch.fx import Node
 
-from torch.fx.passes.utils.source_matcher_utils import SourcePartition
-
-from torch.testing._internal.common_quantization import (
-    NodeSpec as ns,
-    QuantizationTestCase,
-)
-from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_quantization import QuantizationTestCase
 
 
 class TestHelperModules:
@@ -53,17 +44,15 @@ def _tag_partitions(
             node.meta["quantization_tag"] = tag_name
 
 
-_QUANT_OPS = set(
-    [
-        torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-        torch.ops.quantized_decomposed.quantize_per_channel.default,
-        torch.ops.quantized_decomposed.dequantize_per_channel.default,
-        torch.ops.quantized_decomposed.choose_qparams.tensor,
-    ]
-)
+_QUANT_OPS = {
+    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.quantize_per_channel.default,
+    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+    torch.ops.quantized_decomposed.choose_qparams.tensor,
+}
 
 
 class TestMetaDataPorting(QuantizationTestCase):
@@ -143,17 +132,21 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        quantizer_per_tensor_tags = set(
-            ["BackendA_conv2d_0", "BackendA_adaptive_avg_pool2d_0", "BackendA_linear_0"]
-        )
-        dequantizer_per_tensor_tags = set(
-            ["BackendA_adaptive_avg_pool2d_0", "BackendA_conv2d_0", "BackendA_linear_0"]
-        )
-        dequantizer_per_channel_tags = set(["BackendA_conv2d_0", "BackendA_linear_0"])
+        quantize_per_tensor_tags = {
+            "BackendA_conv2d_0",
+            "BackendA_adaptive_avg_pool2d_0",
+            "BackendA_linear_0",
+        }
+        dequantize_per_tensor_tags = {
+            "BackendA_adaptive_avg_pool2d_0",
+            "BackendA_conv2d_0",
+            "BackendA_linear_0",
+        }
+        dequantize_per_channel_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         node_tags = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantizer_per_channel_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
         }
         self._test_metadata_porting(
             TestHelperModules.Conv2dWithObsSharingOps(),
@@ -193,13 +186,13 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        quantizer_per_tensor_tags = set(["BackendA_conv2d_0", "BackendA_linear_0"])
-        dequantizer_per_tensor_tags = set(["BackendA_conv2d_0", "BackendA_linear_0"])
-        dequantizer_per_channel_tags = set(["BackendA_conv2d_0", "BackendA_linear_0"])
+        quantize_per_tensor_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
+        dequantize_per_tensor_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
+        dequantize_per_channel_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         node_tags = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantizer_per_channel_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
         }
         self._test_metadata_porting(
             TestHelperModules.Conv2dWithObsSharingOps(),
@@ -252,24 +245,27 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        quantizer_per_tensor_tags = set(
-            ["BackendA_conv2d_0", "BackendA_adaptive_avg_pool2d_0"]
-        )
-        quantizer_per_tensor_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        choose_qparams_tensor_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        dequantizer_per_tensor_tags = set(
-            ["BackendA_adaptive_avg_pool2d_0", "BackendA_conv2d_0"]
-        )
-        dequantizer_per_tensor_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        dequantizer_per_channel_tags = set(
-            ["BackendA_conv2d_0", "BackendA_linear_dynamic_0"]
-        )
+        quantize_per_tensor_tags = {
+            "BackendA_conv2d_0",
+            "BackendA_adaptive_avg_pool2d_0",
+        }
+        quantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
+        choose_qparams_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
+        dequantize_per_tensor_tags = {
+            "BackendA_adaptive_avg_pool2d_0",
+            "BackendA_conv2d_0",
+        }
+        dequantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
+        dequantize_per_channel_tags = {
+            "BackendA_conv2d_0",
+            "BackendA_linear_dynamic_0",
+        }
         node_tags = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantizer_per_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantizer_per_channel_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
             torch.ops.quantized_decomposed.choose_qparams.tensor: choose_qparams_tensor_tensor_tags,
         }
         self._test_metadata_porting(
@@ -312,22 +308,26 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        choose_qparams_tensor_tags = set(
-            ["BackendA_conv2d_dynamic_0", "BackendA_linear_dynamic_0"]
-        )
-        quantizer_per_tensor_tensor_tags = set(
-            ["BackendA_conv2d_dynamic_0", "BackendA_linear_dynamic_0"]
-        )
-        dequantizer_per_tensor_tensor_tags = set(
-            ["BackendA_conv2d_dynamic_0", "BackendA_linear_dynamic_0"]
-        )
-        dequantizer_per_channel_tags = set(
-            ["BackendA_conv2d_dynamic_0", "BackendA_linear_dynamic_0"]
-        )
+        choose_qparams_tensor_tags = {
+            "BackendA_conv2d_dynamic_0",
+            "BackendA_linear_dynamic_0",
+        }
+        quantize_per_tensor_tensor_tags = {
+            "BackendA_conv2d_dynamic_0",
+            "BackendA_linear_dynamic_0",
+        }
+        dequantize_per_tensor_tensor_tags = {
+            "BackendA_conv2d_dynamic_0",
+            "BackendA_linear_dynamic_0",
+        }
+        dequantize_per_channel_tags = {
+            "BackendA_conv2d_dynamic_0",
+            "BackendA_linear_dynamic_0",
+        }
         node_tags = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantizer_per_channel_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
             torch.ops.quantized_decomposed.choose_qparams.tensor: choose_qparams_tensor_tags,
         }
         self._test_metadata_porting(
@@ -366,14 +366,14 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        choose_qparams_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        quantizer_per_tensor_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        dequantizer_per_tensor_tensor_tags = set(["BackendA_linear_dynamic_0"])
-        dequantizer_per_channel_tags = set(["BackendA_linear_dynamic_0"])
+        choose_qparams_tensor_tags = {"BackendA_linear_dynamic_0"}
+        quantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
+        dequantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
+        dequantize_per_channel_tags = {"BackendA_linear_dynamic_0"}
         node_tags = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantizer_per_tensor_tensor_tags,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantizer_per_channel_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
             torch.ops.quantized_decomposed.choose_qparams.tensor: choose_qparams_tensor_tags,
         }
         self._test_metadata_porting(

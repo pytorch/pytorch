@@ -1,10 +1,9 @@
 import logging
-from typing import Dict, List, Optional, Set
+from typing import List, Optional
 
 import torch
 from torch._export.error import InternalError
 from torch._export.pass_base import _ExportPassBase
-from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation, QuantizationSpecBase
 
@@ -52,7 +51,7 @@ def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
         return False
     if next_node == target:
         return True
-    for n, _ in next_node.users.items():
+    for n in next_node.users.keys():
         if _is_connected(n, target):
             return True
     return False
@@ -67,7 +66,7 @@ def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Optional[torch.fx.Node]:
     q_node = None
-    for n, _ in produer.users.items():
+    for n in produer.users.keys():
         if n.op == "call_function" and n.target in _QUANTIZE_OPS:
             if _is_connected(n, user):
                 q_node = n
@@ -102,7 +101,7 @@ def _find_choose_qparams_node(node: torch.fx.Node) -> Optional[torch.fx.Node]:
             and n.target == torch.ops.quantized_decomposed.choose_qparams.tensor
         ):
             return n
-        for k, _ in n.users.items():
+        for k in n.users.keys():
             queue.append(k)
     return None
 
@@ -150,7 +149,9 @@ def _port_metadata_for_output_quant_nodes(
         raise InternalError(f"Expecting {node} to have single user")
     q_node = node_users.pop()
     if q_node.op != "call_function" or q_node.target not in _QUANTIZE_OPS:
-        logger.warn(f"Expecting {node} user to be a quantized op but got {q_node}")
+        logger.warning(
+                f"Expecting {node} user to be a quantized op but got {q_node}"  # noqa: G004
+        )  # noqa: G004
         return
 
     _add_metadata(q_node, node)
@@ -188,18 +189,29 @@ class PortNodeMetaForQDQ(_ExportPassBase):
       - Statically quantized patterns:
         - Dequantize nodes on the inputs to be quantized inherit metadata of the consumer node.
         - Quantize nodes on the outputs inherit metadata of the producer node.
-        - For example:
+        - Example 1:
           - Original: [Conv -> AvgPool -> Linear]
           - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> Linear -> Q -> DQ]
           - Inner brackets specify which nodes Q/DQ inherit metdata from
           - [Q-> [DQ -> Conv -> Q] -> [DQ -> AvgPool -> Q] -> [DQ -> Linear -> Q] -> DQ]
           - Note first Q and last DQ do not inherit metadata from any nodes
+        - Example 2:
+          - Original: [Conv -> AvgPool -> Linear]
+          - AvgPool is not quantized
+          - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> Linear -> Q -> DQ]
+          - Inner brackets specify which nodes Q/DQ inherit metdata from
+          - [Q-> [DQ -> Conv -> Q] -> DQ -> [AvgPool] -> Q -> [DQ -> Linear -> Q] -> DQ]
+          - Note DQ and Q nodes around AvgPool do not inherit metadata from AvgPool because
+            AvgPool was not supposed to be quantized. Metadata porting relies on quantization_annotation
+            on the nodes (in this case AvgPool node) to conclude if the the node or patter was
+            supposed to be quantized. And subsequntly decide if the preceding Q, if any, should
+            inherit metadata from AvgPool.
       - Dynamically quantized patterns:
-        - Input that are dynamically quantized have chose_qparams, quantize and dequantize nodes
+        - Input that are dynamically quantized have choose_qparams, quantize and dequantize nodes
         - For example, below linear is dynamically quantized while rest statically:
           - Original: [Conv -> AvgPool -> Linear]
-          - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> chose_params -> Q -> DQ -> Linear]
-          - Quantized [Q-> [DQ -> Conv -> Q] -> [DQ -> AvgPool -> Q] -> DQ -> [chose_params -> Q -> DQ -> Linear]]
+          - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> choose_params -> Q -> DQ -> Linear]
+          - Quantized [Q-> [DQ -> Conv -> Q] -> [DQ -> AvgPool -> Q] -> DQ -> [choose_params -> Q -> DQ -> Linear]]
           - Note first Q does not inherit metadata from any nodes
     """
 

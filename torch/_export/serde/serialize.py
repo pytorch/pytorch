@@ -464,9 +464,10 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs
+        self, target: torch._ops.OpOverload, args, kwargs=None
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
+        kwargs = kwargs or {}
         serialized_args = []
         for i, schema_arg in enumerate(target._schema.arguments):
             if schema_arg.name in kwargs:
@@ -534,6 +535,8 @@ class GraphModuleSerializer:
                 return Argument.create(as_ints=list(arg))
             elif all(isinstance(a, float) for a in arg):
                 return Argument.create(as_floats=list(arg))
+            elif all(isinstance(a, str) for a in arg):
+                return Argument.create(as_strings=list(arg))
             elif all(self.is_sym_int_arg(a) for a in arg):
                 # list of sym_ints
                 values = []
@@ -803,7 +806,12 @@ class GraphModuleDeserializer:
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
                         symbolic_shapes._constrain_symbol_range(
-                            self.shape_env, sym, vr.lower, vr.upper  # type: ignore[arg-type]
+                            self.shape_env,
+                            sym,
+                            compiler_min=vr.lower,  # type: ignore[arg-type]
+                            compiler_max=vr.upper,  # type: ignore[arg-type]
+                            runtime_min=vr.lower,  # type: ignore[arg-type]
+                            runtime_max=vr.upper  # type: ignore[arg-type]
                         )
 
             return self.shape_env.create_symintnode(sym, hint=val.hint)
