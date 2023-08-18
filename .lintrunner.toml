@@ -193,10 +193,13 @@ include_patterns = [
     'torch/_inductor/codegen/wrapper.py',
     'torch/_inductor/cudagraph_trees.py',
     'torch/_inductor/compile_fx.py',
+    'torch/_inductor/kernel/conv.py',
     'torch/_inductor/lowering.py',
     'torch/_inductor/metrics.py',
     'torch/_inductor/select_algorithm.py',
     'torch/_inductor/wrapper_benchmark.py',
+    'torch/_inductor/kernel/mm_common.py',
+    'torch/_inductor/utils.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
@@ -210,6 +213,12 @@ command = [
     '--code=MYPYNOFOLLOW',
     '--',
     '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'types-colorama==0.4.6',
 ]
 
 [[linter]]
@@ -1125,7 +1134,8 @@ exclude_patterns = [
     'test/distributed/rpc/test_share_memory.py',
     'test/distributed/rpc/test_tensorpipe_agent.py',
     'test/distributed/tensor/parallel/__init__.py',
-    'test/distributed/tensor/parallel/test_2d_parallel.py',
+    'test/distributed/tensor/parallel/test_ddp_2d_parallel.py',
+    'test/distributed/tensor/parallel/test_fsdp_2d_parallel.py',
     'test/distributed/tensor/parallel/test_parallelize_api.py',
     'test/distributed/tensor/parallel/test_tp_examples.py',
     'test/distributed/tensor/parallel/test_tp_random_state.py',

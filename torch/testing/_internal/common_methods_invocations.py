@@ -44,7 +44,7 @@ import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
 
-from distutils.version import LooseVersion
+from packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -8832,6 +8832,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        has_no_out_of_place=True,
     ),
 
     ForeachFuncInfo(
@@ -8931,6 +8932,12 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
+    ForeachFuncInfo(
+        "copy",
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
+        has_no_out_of_place=True,
+    )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -17127,11 +17134,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
@@ -18469,8 +18476,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # Not implemented
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD'),
