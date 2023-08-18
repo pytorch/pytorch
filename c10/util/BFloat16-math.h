@@ -31,6 +31,12 @@ inline T acos(T a) {
 template <
     typename T,
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline T acosh(T a) {
+  return std::acosh(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T asin(T a) {
   return std::asin(float(a));
 }

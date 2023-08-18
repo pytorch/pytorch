@@ -310,6 +310,9 @@ class Vectorized<ComplexDbl> {
     // acos(x) = pi/2 - asin(x)
     return Vectorized(vd_pi_2) - asin();
   }
+  Vectorized<ComplexDbl> acosh() const {
+    return map(std::acosh);
+  }
 
   Vectorized<ComplexDbl> atan() const {
     // atan(x) = i/2 * ln((i + z)/(i - z))

@@ -455,6 +455,10 @@ class Vectorized<ComplexFlt> {
     return Vectorized(pi_2) - asin();
   }
 
+  Vectorized<ComplexFlt> acosh() const {
+    return map(std::acosh);
+  }
+
   Vectorized<ComplexFlt> inline operator*(const Vectorized<ComplexFlt>& b) const {
     //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
 

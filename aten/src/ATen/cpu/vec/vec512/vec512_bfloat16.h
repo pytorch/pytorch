@@ -390,6 +390,9 @@ public:
   Vectorized<T> acos() const {
     return map(Sleef_acosf16_u10);
   }
+  Vectorized<T> acosh() const {
+    return map(Sleef_acoshf16_u10);
+  }
   Vectorized<T> asin() const {
     return map(Sleef_asinf16_u10);
   }

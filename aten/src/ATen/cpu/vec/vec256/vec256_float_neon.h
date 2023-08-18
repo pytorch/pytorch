@@ -340,6 +340,12 @@ public:
       map(std::acos)
     );
   }
+  Vectorized<float> acosh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_acoshf4_u10(values.val[0]), Sleef_acoshf4_u10(values.val[1])),
+      map(std::acosh)
+    );
+  }
   Vectorized<float> asin() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_asinf4_u10(values.val[0]), Sleef_asinf4_u10(values.val[1])),

@@ -363,6 +363,9 @@ public:
   Vectorized<T> acos() const {
     return map(std::acos);
   }
+  Vectorized<T> acosh() const {
+    return map(std::acosh);
+  }
   Vectorized<T> asin() const {
     return map(std::asin);
   }

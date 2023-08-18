@@ -383,9 +383,10 @@ static void cosh_kernel(TensorIteratorBase& iter) {
 
 static void acosh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "acosh_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::acosh(a); });
+        [=](scalar_t a) -> scalar_t { return std::acosh(a); },
+        [=](Vectorized<scalar_t> self_vec){return self_vec.acosh();});
     });
 }
 

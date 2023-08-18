@@ -143,6 +143,9 @@ public:
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
   }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf8_u10(values));
+  }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
   }
