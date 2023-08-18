@@ -278,10 +278,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        # We don't add BACKEND_MATCH guard for export because export patches the backend to be None,
-        # and its optimized code is not cached anyway.
-        if not self.export:
-            self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
