@@ -471,47 +471,42 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     # TODO: From Config/Model
-    def test_fake_tensor_mode_huggingface_google_flan_t5_small(self):
-        model_name = "google/flan-t5-small"
+    def test_fake_tensor_mode_huggingface_google_t5(self):
+        config = transformers.T5Config()
         device = "cpu"
+        batch, seq = 4, 256
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
-            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-
-            decoder_input_ids = tokenizer(
-                "Studies show that", return_tensors="pt"
-            ).input_ids  # Batch size 1
-            # preprocess: Prepend decoder_input_ids with start token which is pad token for T5Model.
-            # This is not needed for torch's T5ForConditionalGeneration as it does this internally using labels arg.
-            decoder_input_ids = model._shift_right(decoder_input_ids)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
-            inputs["decoder_input_ids"] = decoder_input_ids
-
+            model = transformers.T5Model(config).to(device).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
-                model, **inputs, export_options=export_options
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=decoder_input_ids,
+                export_options=export_options,
             )
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
-    # TODO: From Config/Model
-    def test_fake_tensor_mode_huggingface_openai_whisper_tiny(self):
-        from datasets import load_dataset  # type: ignore[import]
-
-        model_name = "openai/whisper-tiny"
+    def test_fake_tensor_mode_huggingface_openai_whisper(self):
+        config = transformers.WhisperConfig()
+        feature_extractor = transformers.WhisperFeatureExtractor()
         device = "cpu"
+        batch = 4
         with torch.onnx.enable_fake_mode() as fake_context:
-            config = transformers.WhisperConfig.from_pretrained(model_name)
-            processor = transformers.WhisperProcessor.from_pretrained(model_name)
-            ds = load_dataset(
-                "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
             )
-            input_features = processor(
-                [ds[0]["audio"]["array"]], return_tensors="pt"
-            ).input_features
             decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
-
-            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+            model = transformers.AutoModel.from_config(config).to(device).eval()
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
                 model,
