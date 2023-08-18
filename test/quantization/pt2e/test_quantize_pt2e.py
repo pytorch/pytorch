@@ -505,7 +505,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        # model_copy = copy.deepcopy(model)
+        model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
         # Calibrate
@@ -515,30 +515,30 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
 
-        # # TODO: torchdynamo times out when we do this, we can enable numerical checking
-        # # after that is fixed
-        # model_copy = prepare_pt2e(model_copy, quantizer)
-        # # Calibrate
-        # model_copy(*example_inputs)
-        # model_copy = convert_pt2e(model_copy, use_reference_representation=False)
-        # self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
-        # pt2e_quant_output_copy = model_copy(*example_inputs)
+        # TODO: torchdynamo times out when we do this, we can enable numerical checking
+        # after that is fixed
+        model_copy = prepare_pt2e(model_copy, quantizer)
+        # Calibrate
+        model_copy(*example_inputs)
+        model_copy = convert_pt2e(model_copy, use_reference_representation=False)
+        self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
+        pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        # output_scale = None
-        # idx = 0
-        # for n in model_copy.graph.nodes:
-        #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-        #         idx += 1
-        #         if idx == 3:
-        #             output_scale = n.args[1]
-        # assert output_scale is not None
+        output_scale = None
+        idx = 0
+        for n in model_copy.graph.nodes:
+            if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+                idx += 1
+                if idx == 3:
+                    output_scale = n.args[1]
+        assert output_scale is not None
 
-        # print("diff:", torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
-        # print("scale:", output_scale)
-        # # make sure the result is off by one at most in the quantized integer representation
-        # self.assertTrue(
-        #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
-        # )
+        print("diff:", torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
+        print("scale:", output_scale)
+        # make sure the result is off by one at most in the quantized integer representation
+        self.assertTrue(
+            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
