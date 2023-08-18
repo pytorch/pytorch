@@ -1,7 +1,7 @@
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
 #include <ATen/Config.h>
 #include <torch/csrc/jit/codegen/onednn/python_bindings.h>
 
-#if AT_MKLDNN_ENABLED() && defined(__linux__)
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/codegen/onednn/python_bindings.h>
@@ -545,8 +545,4 @@ void initOnednnPythonBindings(PyObject* module) {
   bind_stream(llga);
 }
 
-#else
-
-void initOnednnPythonBindings(PyObject* module) {}
-
-#endif // AT_MKLDNN_ENABLED()
+#endif // oneDNN Graph is built
