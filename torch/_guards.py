@@ -619,6 +619,12 @@ def tracing(context: TracingContext):
             e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
+        if (
+            context is not None
+            and context.fake_mode is not None
+            and context.fake_mode.shape_env is not None
+        ):
+            context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
 
 

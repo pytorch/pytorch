@@ -10,7 +10,6 @@ import re
 import sys
 import threading
 import traceback
-import weakref
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -705,27 +704,9 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-
-    @property
-    def shape_env(self):
-        r = self._shape_env()
-        assert r is not None, "you must keep ShapeEnv live to continue using SymNode"
-        return r
-
-    @property
-    def fx_node(self):
-        if self._fx_node is None:
-            return None
-        r = self._fx_node()
-        assert r is not None, "you must keep ShapeEnv live to continue using SymNode"
-        return r
-
     def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None, fx_node=None):
-        # WARNING: SymNode never participates in garbage collection, so if you have
-        # a reference cycle that goes through SymNode it will NEVER get GC'ed.  This
-        # motivates some of the uses of weakref inside this class.
         self._expr = expr
-        self._shape_env = weakref.ref(shape_env)
+        self.shape_env = shape_env
         self.pytype = pytype
         # What's the difference between hint and constant?
         #
@@ -758,7 +739,7 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self._fx_node = weakref.ref(fx_node) if _translation_validation_enabled() else None
+        self.fx_node = fx_node if _translation_validation_enabled() else None
 
     @property
     def expr(self):
@@ -3507,6 +3488,17 @@ class ShapeEnv:
                 self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
+
+    def cleanup(self):
+        # Break reference cycles.
+        # This destroys the stacks. If you really want to keep them, we
+        # just need some way to break references on code objects.
+        for g in self.guards:
+            g.stack.cleanup()
+        for s in self.var_to_stack.values():
+            s.cleanup()
+        for ra in self.deferred_runtime_asserts:
+            ra.stack.cleanup()
 
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         expr = orig_expr

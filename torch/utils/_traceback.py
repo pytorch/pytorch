@@ -153,33 +153,31 @@ def format_traceback_short(tb):
     return format_frame(traceback.extract_tb(tb)[-1])
 
 class CapturedTraceback:
-    __slots__ = ['tb', 'skip', '_summary']
+    __slots__ = ['tb', 'skip']
 
     def __init__(self, tb, skip=0):
         self.tb = tb
         self.skip = skip
-        # Cached StackSummary; this mostly exists so CapturedTraceback
-        # can be reliably pickled and then printed later
-        self._summary = None
+
+    def cleanup(self):
+        self.tb = None
 
     def summary(self):
         import torch._C._profiler
 
-        if self._summary is None:
-            assert self.tb is not None
-            self._summary = _extract_symbolized_tb(
-                torch._C._profiler.symbolize_tracebacks([self.tb])[0],
-                self.skip
-            )
-        return self._summary
+        if self.tb is None:
+            # TODO: Maybe indicate that the traceback was elided?
+            return traceback.StackSummary()
+
+        return _extract_symbolized_tb(
+            torch._C._profiler.symbolize_tracebacks([self.tb])[0],
+            self.skip
+        )
 
     def __getstate__(self):
-        # Force populate summary
-        self.summary()
         return (None, {
             'tb': None,  # TB is not pickleable
             'skip': self.skip,
-            '_summary': self._summary
         })
 
     @staticmethod
@@ -227,17 +225,15 @@ class CapturedTraceback:
         rs: List[Optional[List[str]]] = []
         delayed_idxs = []
         for i, tb in enumerate(tbs):
-            if tb._summary is not None:
-                rs.append(traceback.format_list(tb._summary))
+            if tb.tb is None:
+                rs.append(traceback.StackSummary())
             else:
                 rs.append(None)
                 delayed_idxs.append(i)
 
         stbs = torch._C._profiler.symbolize_tracebacks([tbs[i].tb for i in delayed_idxs])
         for i, stb in zip(delayed_idxs, stbs):
-            tb = tbs[i]
-            tb._summary = _extract_symbolized_tb(stb, tb.skip)
-            rs[i] = traceback.format_list(tb._summary)
+            rs[i] = traceback.format_list(tbs[i].summary())
 
         return rs
 
