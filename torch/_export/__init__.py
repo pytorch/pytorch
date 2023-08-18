@@ -467,9 +467,5 @@ def aot_compile(
     )
     all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = compile_fx_aot(
-        ep.graph_module,
-        all_args,  # type: ignore[arg-type]
-        config_patches=options,
-    )
+    so_path = torch._inductor.aot_compile(ep.graph_module, list(all_args), options)
     return so_path, ep

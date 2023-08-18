@@ -916,7 +916,11 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        return cls.cache[key]
+        def wrapper_call(*args):
+            assert len(graph.graph_outputs) > 0
+            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
+
+        return wrapper_call
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
