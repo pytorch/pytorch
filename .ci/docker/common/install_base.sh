@@ -86,8 +86,9 @@ install_ubuntu() {
   if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
     apt autoremove -y gfortran
     apt-get update -y
-    apt-get install -y gfortran
+    apt-get install -y gfortran libopenblas-dev
   fi
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
