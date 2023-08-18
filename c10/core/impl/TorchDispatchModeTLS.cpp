@@ -14,12 +14,13 @@ thread_local TorchDispatchModeTLS torchDispatchModeState;
 bool TorchDispatchModeTLS::any_modes_set() {
   if (!torchDispatchModeState.stack_.empty())
     return true;
-  for (const auto i : c10::irange(
-           static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+  for (const auto i :
+       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
     if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
       return true;
     }
   }
+  return false;
 }
 
 void TorchDispatchModeTLS::push_onto_stack(

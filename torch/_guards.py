@@ -645,24 +645,6 @@ class ChainedSource(Source):
     base: Source
 
 
-# Represents a source tensor coming from a field on a wrapper tensor subclass.
-# For example, in torch.testing._internal.double_tensor.DoubleTensor,
-# fields DoubleTensor.a and DoubleTensor.b will get a WrapperSubclassFieldSource
-@dataclasses.dataclass(frozen=True)
-class WrapperSubclassFieldSource(Source):
-    inner_source: Source
-    field_name: str
-
-    def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.name(), False, add=False)]
-
-    def guard_source(self):
-        return self.inner_source.guard_source()
-
-    def name(self):
-        return f"{self.inner_source.name()}.{self.field_name}"
-
-
 def detect_fake_mode(inputs: Any = None):
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently

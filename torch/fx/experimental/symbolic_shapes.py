@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext, WrapperSubclassFieldSource
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
@@ -2732,10 +2732,9 @@ class ShapeEnv:
             if is_traceable_wrapper_subclass(t):
                 # If our placeholder is a tensor subclass, then the "true" symints
                 # come from the subclass's inner tensors.
-                source_to_inner_t, _ = t.__tensor_flatten__()
-                sources_and_tensors = [
-                    (WrapperSubclassFieldSource(source, inner_src), inner_t)
-                    for inner_src, inner_t in source_to_inner_t.items()]
+                attrs, _ = t.__tensor_flatten__()
+                from torch._dynamo.source import AttrSource
+                sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
             else:
                 sources_and_tensors = [(source, t)]
 
