@@ -344,7 +344,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(list(torch._dynamo.utils.counters['graph_break'].values()), [1])
+        self.assertEqual(
+            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        )
 
     @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
@@ -375,6 +377,191 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         compiled_model = torch._dynamo.optimize("eager")(mod)
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
+
+    # I pulled all of these test cases from test_autograd.py
+    # In the future, we should make the Dynamo test suite actually
+    # run on test_autograd.py (it's disabled right now) and delete these.
+    def test_smoke_from_test_autograd(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out0 = x.clone()
+                out1 = x.clone()
+                ctx.mark_non_differentiable(out1)
+                ctx._materialize_non_diff_grads = False
+                return out0, out1
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                assert g1 is None
+                return g0
+
+        def mult1(x):
+            return x.prod(dim=-1).prod(dim=-1)
+
+        class Mult(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = mult1(x)
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return (grad_output * y)[:, None, None] / x
+
+        mult2 = Mult.apply
+
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x**2
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, _ = ctx.saved_tensors
+                return grad_output * 2 * x
+
+        # this is equivalent, but uses the output of .forward() in .backward()
+        class Double2(Double):
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return grad_output * 2 * y / x
+
+        double = Double.apply
+        double2 = Double2.apply
+
+        class Identity(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                return a, a + b
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                return grad_a + grad_b, grad_b
+
+        class MyFunc2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                return torch.tensor(float("nan")).expand(10, 10)
+
+        def run_fn(a):
+            out = MyFunc2.apply(a)
+            return out.sum()
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.view_as(inp)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        class MyAdder(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        class InplaceMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                result = x.mul_(2)
+                ctx.mark_dirty(result)
+                return result
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, x_t):
+                if jvp_err:
+                    return x_t
+                else:
+                    return x_t.mul_(2)
+
+        class MyFn2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y, x
+
+            @staticmethod
+            def vjp(ctx, gO1, gO2):
+                return gO1 + gO2, gO1
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                return x_t + y_t, fn(x_t)
+
+        class MyFn3(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp, inplace):
+                view = inp.clone()[:3]
+                if inplace:
+                    view += 2
+                return view
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        def test():
+            a = torch.tensor(1.0, requires_grad=True)
+            out = Func.apply(a)[0]
+            out.backward()
+
+            x = torch.ones(2, 4, 4).requires_grad_()
+            mult2(x)
+
+            x = torch.tensor(2).double().requires_grad_()
+            double(x)
+            double2(x)
+
+            x = torch.randn(5, 5, requires_grad=True)
+            y = torch.randn(5, 5, requires_grad=True)
+            q, p = Identity.apply(x, y)
+
+            a = torch.rand(1, 2)
+            b = torch.rand(1, requires_grad=True)
+            view_a = MyFn.apply(a)
+
+            a = torch.ones(2, requires_grad=True)
+            b = torch.ones(2, requires_grad=True)
+            c = MyAdder.apply(a.clone(), b)
+            c.sum().backward()
+
+            z = torch.tensor(1.0, requires_grad=True)
+            x = z.clone()
+            y = InplaceMul.apply(x)
+
+            a = torch.tensor(1.0, dtype=torch.double, requires_grad=True)
+            b = torch.tensor(1.0, dtype=torch.double, requires_grad=True)
+            c = torch.tensor(1.0, dtype=torch.double)
+            d = torch.tensor(1.0, dtype=torch.double)
+            MyFn2.apply(a, b)
+            MyFn2.apply(c, d)
+
+            base = torch.rand(10, requires_grad=True)
+            foo = MyFn3.apply(base, False)
+
+        test()
+        opt_test = torch._dynamo.optimize("eager")(test)
+        opt_test()
 
 
 if __name__ == "__main__":
