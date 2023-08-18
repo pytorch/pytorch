@@ -96,6 +96,8 @@ std::vector<int64_t> compute_sizes(
   std::vector<int64_t> sizes;
   while (PySequence_Check(seq_or_set) || PyAnySet_Check(seq_or_set)) {
     THPObjectPtr wrapped(PySequence_Fast(seq_or_set, "not a sequence or set"));
+    if (!wrapped)
+      throw python_error();
     auto length = PySequence_Fast_GET_SIZE(wrapped.get());
     if (length < 0)
       throw python_error();
