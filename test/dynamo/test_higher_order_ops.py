@@ -967,6 +967,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             name_set.add(name)
         self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
 
+    def test_map_multi_return(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return control_flow.map(lambda x: (x.sin(), x.sin()), x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, (x.sin(), x.sin()))
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
