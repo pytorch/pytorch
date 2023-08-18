@@ -153,7 +153,7 @@ py::object torchDispatchFromTensorImpl(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   // TODO: there should be a shorter way to spell this
   // TODO: fix the constness of target
   at::Tensor self_t = at::Tensor(
@@ -280,7 +280,7 @@ void ConcretePyInterpreterVTable::dispatch(
 
   py::gil_scoped_acquire g;
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
