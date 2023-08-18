@@ -299,7 +299,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_static_shapes(
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
     ndim = len(kernel_shape)
@@ -308,8 +308,20 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
+    def channels_last_conv():
+        if V.graph.layout_opt and ndim == 2:
+            return True
+
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        return req_stride_order == ir.NHWC_STRIDE_ORDER
+
+    autotuning_gemm = config.max_autotune or config.max_autotune_gemm
+
     if (
-        config.conv_1x1_as_mm
+        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
@@ -364,7 +376,7 @@ def convolution(
         args = (x, weight, bias)
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.guard_static_shapes(bias.get_size())
+        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
 
     choices = [
         aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)

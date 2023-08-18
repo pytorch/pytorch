@@ -391,8 +391,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     devices_str = "_".join(devices)
     dtypes_str = "_".join(dtypes)
     compilers_str = "_".join(compilers)
-    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
-        mode, devices_str, dtypes_str, suites_str, compilers_str
+    generated_file = (
+        f"run_{mode}_{devices_str}_{dtypes_str}_{suites_str}_{compilers_str}.sh"
     )
     with open(generated_file, "w") as runfile:
         lines = []
@@ -608,7 +608,7 @@ class Parser:
 
     def has_header(self, output_filename):
         header_present = False
-        with open(output_filename, "r") as f:
+        with open(output_filename) as f:
             line = f.readline()
             if "dev" in line:
                 header_present = True
@@ -1026,7 +1026,7 @@ class SummaryStatDiffer:
         assert os.path.exists(self.lookup_file)
 
     def generate_diff(self, last2, filename, caption):
-        df_cur, df_prev = [pd.read_csv(os.path.join(path, filename)) for path in last2]
+        df_cur, df_prev = (pd.read_csv(os.path.join(path, filename)) for path in last2)
         df_merge = df_cur.merge(df_prev, on="Compiler", suffixes=("_cur", "_prev"))
         data = {col: [] for col in ("compiler", "suite", "prev_value", "cur_value")}
         for _, row in df_merge.iterrows():
@@ -1145,10 +1145,10 @@ class RegressionDetector:
                     if last2[compiler] is None:
                         continue
 
-                    df_cur, df_prev = [
+                    df_cur, df_prev = (
                         last2[compiler][i].untouched_parsed_frames[suite][metric]
                         for i in (0, 1)
-                    ]
+                    )
                     df_merge = df_cur.merge(
                         df_prev, on="name", suffixes=("_cur", "_prev")
                     )
@@ -1367,7 +1367,7 @@ class DashboardUpdater:
         all_lines = []
         for f in files:
             try:
-                with open(os.path.join(self.output_dir, f), "r") as fh:
+                with open(os.path.join(self.output_dir, f)) as fh:
                     all_lines.extend(fh.readlines())
             except FileNotFoundError:
                 pass

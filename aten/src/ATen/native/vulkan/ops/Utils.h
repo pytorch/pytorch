@@ -50,6 +50,10 @@ void pack_vtensor_to_staging(
     api::VulkanBuffer&,
     const VkFence fence_handle = VK_NULL_HANDLE);
 
+// Broadcasting Utils
+void is_broadcastable(const Tensor& input1, const Tensor& input2);
+std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2);
+
 } // namespace utils
 } // namespace ops
 } // namespace vulkan

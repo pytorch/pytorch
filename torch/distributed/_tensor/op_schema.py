@@ -28,7 +28,7 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
 
 
 @dataclass
-class PlacementStrategy(object):
+class PlacementStrategy:
     """
     A placement strategy describes an acceptable sharding placements of the output
     and the tensor arguments of an operation.
@@ -54,7 +54,7 @@ class PlacementStrategy(object):
         return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
 
-class StrategyType(object):
+class StrategyType:
     """
     Base class type for op strategy, We have two StrategyType:
         OpStrategy and TupleStrategy
@@ -179,7 +179,13 @@ class OpSchema:
     def __hash__(self) -> int:
         # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
         frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
-        return hash((self.func_schema, self.args_spec, frozen_set_kwargs_schema))
+        return hash(
+            (
+                self.func_schema,
+                tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
+                frozen_set_kwargs_schema,
+            )
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, OpSchema):
