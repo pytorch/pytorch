@@ -179,6 +179,9 @@ aten::_foreach_clamp_min.Scalar_out
 aten::_foreach_clamp_min_.List
 aten::_foreach_clamp_min_.Scalar
 aten::_foreach_clamp_min_.ScalarList
+aten::_foreach_copy
+aten::_foreach_copy.out
+aten::_foreach_copy_
 aten::_foreach_cos
 aten::_foreach_cos.out
 aten::_foreach_cos_
