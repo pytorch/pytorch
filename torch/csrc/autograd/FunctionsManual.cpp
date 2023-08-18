@@ -1562,8 +1562,9 @@ Tensor renorm_backward(
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
 
-  auto acc_type =
-      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto acc_type = self.is_mps()
+      ? self.scalar_type()
+      : at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
   auto norm = at::linalg_vector_norm(
       self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
