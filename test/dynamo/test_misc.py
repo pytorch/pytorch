@@ -6632,6 +6632,67 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
 
+    def test_yield_from(self):
+        def yield_from_fn(t_list, k):
+            def yield_from_gen(l):
+                l2 = [t * k for t in l]
+                yield from l2
+
+            return [t * k for t in yield_from_gen(t_list)]
+
+        t_list = [torch.randn([2, 3])] * 3
+        multiplier = torch.tensor([10])
+        eager = yield_from_fn(t_list, 2)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_gen_and_from(self):
+        def populate_and_multiply_sequence(n, multiplier):
+            # Inline generator
+            def tensor_generator():
+                for i in range(n):
+                    yield torch.tensor([i])
+
+            # Use 'yield from' to iterate over tensors and multiply
+            t_list = [tensor * multiplier for tensor in tensor_generator()]
+
+            def yield_from_gen():
+                yield from t_list
+
+            return [t for t in yield_from_gen()]
+
+        multiplier = torch.tensor([10])
+        eager = populate_and_multiply_sequence(5, multiplier)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(populate_and_multiply_sequence)(
+            5, multiplier
+        )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_send_to_subgenerator_graph_break(self):
+        def subgenerator(tensor):
+            multiplier = yield
+            yield tensor * multiplier
+
+        def main_generator(t_list):
+            for tensor in t_list:
+                subgen = subgenerator(tensor)
+                next(subgen)
+                yield from subgen.send(torch.tensor([10]))
+
+        t_list = [torch.tensor([i]) for i in range(5)]
+        eager = list(main_generator(t_list))
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(main_generator)
+        compiled = list(compiled_fn(t_list))
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

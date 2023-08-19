@@ -2444,3 +2444,50 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable(None))
+
+    def GET_YIELD_FROM_ITER(self, inst):
+        tos = self.stack[-1]
+        if not isinstance(tos, ListIteratorVariable):
+            self.pop()
+            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            self.push(res)
+        return self.YIELD_FROM(inst)
+
+    def YIELD_FROM(self, inst):
+        while True:
+            tos = self.stack[-1]
+            if isinstance(tos, ConstantVariable) and tos.value is None:
+                self.pop()
+                return
+            if isinstance(tos, ListIteratorVariable):
+                self.output.guards.update(tos.guards)
+                try:
+                    val, next_iter = tos.next_variables()
+                    self.replace_all(tos, next_iter)
+                    self.push(val)
+                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                    self.YIELD_VALUE(inst)
+                    self.pop()
+                    self.push(next_iter)
+                except StopIteration:
+                    return
+            else:
+                unimplemented(f"YIELD_FROM {typestr(tos)}")
+
+    def SEND(self, inst):
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if isinstance(tos, ListIteratorVariable):
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.push(val)
+                self.instruction_pointer = self.indexof[inst.target]
+            else:
+                # invoke send
+                # Unreachable code - if you hit this, you are implementing generator support and have
+                # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+                # subgenerator and lines up with this line in Python 3.11
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
+                unimplemented("Unreachable sub-generator code")
+        else:
+            unimplemented(f"SEND {typestr(tos)}")
