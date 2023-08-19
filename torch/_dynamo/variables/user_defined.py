@@ -12,15 +12,11 @@ from typing import Dict, List
 import torch._dynamo.config
 
 import torch.nn
-<<<<<<< HEAD
 from torch._guards import TracingContext
-=======
-from torch._dynamo.variables.base import VariableTracker
->>>>>>> 9796ba600ac ([FSDP][WIP] Trace FSDP)
 
 from .. import variables
 from ..allowed_functions import is_allowed
-from ..bytecode_transformation import create_call_function
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
@@ -655,7 +651,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(key, self)
 
 
-<<<<<<< HEAD
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
@@ -710,7 +705,7 @@ class RemovableHandleVariable(VariableTracker):
             # It is an invariant that at this point, a STORE_FAST was executed for this name.
             return [codegen.create_load(self.user_code_variable_name)]
         return super().reconstruct(codegen)
-=======
+
 class RemovableHandleVariableTracker(UserDefinedObjectVariable):
     def __init__(self, value, name, value_type=None, **kwargs):
         super().__init__(value, value_type, **kwargs)
@@ -738,7 +733,7 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
             handle = self.value.register_hook(pf)
             name = pf.func.__name__ + str(id(pf.func))
             pf.source = tx.store_hook(name, pf)
-            
+
             tx.output.side_effects.register_hook(self, pf)
             # print("Handle is?", handle, self.proxy)
             handle.remove()
@@ -785,4 +780,3 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
             result = outer_tuple_obj
             return result
         return super().var_getattr(tx, name)
->>>>>>> 9796ba600ac ([FSDP][WIP] Trace FSDP)

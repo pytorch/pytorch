@@ -431,10 +431,11 @@ class SideEffects:
             #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
-            cg(tensor)
-            cg.extend_output([cg.create_load_attr("register_hook")])
-            cg(hook)
-            cg.extend_output(create_call_function(1, True))
+            # - In the "side_effects" phase of codegen, we iterate over tensors with hooks to:
+            #   - Generate the tensor.
+            #   - Issue a register_hook call on the tensor, linking to the globally stored function.
+            #   - Incorporate a handle if one was established in the eager phase.
+            # The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
             # Let's go over how handles work.
             #
             # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any

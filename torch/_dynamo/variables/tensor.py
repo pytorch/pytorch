@@ -686,7 +686,7 @@ class TensorVariable(VariableTracker):
             # if self.source:
             print("Reg register hook", id(fn_var.fn.args[0]), self.source if self.source else "No source", id(self))
             fn_var.source = tx.store_hook(fn_var.fn.func.__name__, fn_var.fn)
-            
+
             tx.output.side_effects.register_hook(self, fn_var)
             # else:
                 # print("No source hook")
