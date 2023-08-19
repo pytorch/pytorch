@@ -71,6 +71,7 @@ def main(args):
                 # run benchmark
                 my_env = os.environ.copy()
                 my_env["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
+                my_env["TORCHINDUCTOR_DUMP_AUTOTUNER_DATA"] = "1"
                 my_env["TORCH_LOGS"] = "+inductor"
                 my_env["TORCHINDUCTOR_BENCHMARK_KERNEL"] = "1"
                 cmd = f"""python3 {BENCHMARK_PY} --{DTYPE} --performance --{MODE} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
