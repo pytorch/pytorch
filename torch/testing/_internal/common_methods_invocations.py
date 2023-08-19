@@ -20390,35 +20390,113 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: uint8 input returns uint8 instead of bool
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                dtypes=[torch.uint8]),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
         error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
         error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: uint8 input returns uint8 instead of bool
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                dtypes=[torch.uint8]),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.count_nonzero",
         torch_opinfo_name="count_nonzero",
+        skips=(
+            # FIXME: count_nonzero does not accept keepdim kwarg
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_dim_default_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_dim_multi_unsorted_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
         error_inputs_func=partial(error_inputs_mean, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
         torch_opinfo_name="std",
         supports_out=True,
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=(torch.float16,)),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_ref_duplicate_values',
+                dtypes=(torch.float16,)),
+        ),
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
@@ -20430,8 +20508,23 @@ python_ref_db = [
         torch_opinfo_name="sum",
         supports_out=True,
         skips=(
-            # doesn't test out behavior properly for this operator
+            # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # FIXME: mean reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=[torch.float16]),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_ref_duplicate_values',
+                dtypes=[torch.float16]),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+                dtypes=[torch.float32]),
         ),
     ),
     PythonRefInfo(
@@ -20461,15 +20554,35 @@ python_ref_db = [
         "_refs.prod",
         torch_opinfo_name="prod",
         supports_out=True,
+        supports_multiple_dims=True,
         skips=(
-            # doesn't test out behavior properly for this operator
+            # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=[torch.float16, torch.complex64]),
         ),
     ),
     ReductionPythonRefInfo(
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True,
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+        ),
     ),
     PythonRefInfo(
         "_refs.var_mean",
@@ -20780,7 +20893,7 @@ sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and 
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
 shape_funcs = [op for op in ops_and_refs if isinstance(op, ShapeFuncInfo)]
-reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
+reduction_ops = [op for op in ops_and_refs if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
