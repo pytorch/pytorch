@@ -269,6 +269,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "tag_activation_checkpoint",
         ):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "_export_tracepoint":
+            return ExportTracepointHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -884,14 +886,18 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
 
-        example_value = torch._functorch.vmap.vmap_impl(
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-            actual_in_dims,
-            out_dims.as_python_constant(),
-            randomness.value,
-            chunk_size.value,
-            *fake_batched_fn_args,
-        )
+        # NOTE: `body_graph` might have operators which
+        # will create new tensors. So it is required
+        # that we run `vmap` under FakeMode.
+        with tx.fake_mode:
+            example_value = torch._functorch.vmap.vmap_impl(
+                torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+                actual_in_dims,
+                out_dims.as_python_constant(),
+                randomness.value,
+                chunk_size.value,
+                *fake_batched_fn_args,
+            )
 
         # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
         proxy = vmap_proxy(*proxy_batched_fn_args)
@@ -1096,4 +1102,24 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 kwargs=checkpoint_kwargs,
             ),
             example_value=example_value,
+        )
+
+
+class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
         )
