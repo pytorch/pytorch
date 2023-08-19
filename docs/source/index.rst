@@ -12,21 +12,21 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 Features described in this documentation are classified by release status:
 
-  *Stable:*  These features will be maintained long-term and there should generally
-  be no major performance limitations or gaps in documentation.
-  We also expect to maintain backwards compatibility (although
-  breaking changes can happen and notice will be given one release ahead
-  of time).
+  *Stable:* These features will be maintained long-term and is recommended for production-grade 
+  applications. This time the focus is given on stability and we also expect to maintain 
+  backward compatibility (although breaking changes can happen and notice will be given one 
+  release ahead of time).
 
-  *Beta:*  These features are tagged as Beta because the API may change based on
-  user feedback, because the performance needs to improve, or because
-  coverage across operators is not yet complete. For Beta features, we are
-  committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
+  *Beta:* These features are tagged as Beta because this version of PyTorch is based on 
+  bug fixes and is tested extensively. It is recommended for developers who want to 
+  try out new features and give feedback on the API. For Beta features, we are committing 
+  to seeing the feature through to the Stable classification. We are not, 
+  however, committing to backwards compatibility.
 
-  *Prototype:*  These features are typically not available as part of
-  binary distributions like PyPI or Conda, except sometimes behind run-time
-  flags, and are at an early stage for feedback and testing.
+  *Prototype:* These features are typically not available as part of binary distributions 
+  like PyPI or Conda, has incomplete documentation and is not recommended for general use. 
+  Except sometimes behind run-time flags, and are at an early stage for feedback and testing.
+  It is ideal for developers who want to build the next big thing in the field of deep learning.
 
 .. toctree::
    :glob:
