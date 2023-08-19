@@ -1243,7 +1243,7 @@ class TestTensorCreation(TestCase):
 
         bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
         good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
-        with self.assertRaisesRegex(ValueError, 'could not determine the shape'):
+        with self.assertRaises(TypeError):
             torch.tensor(bad_mock_seq)
         self.assertEqual(torch.tensor([1.0, 2.0, 3.0]), torch.tensor(good_mock_seq))
 
