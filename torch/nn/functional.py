@@ -26,6 +26,8 @@ from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 
+import keras_core as ko
+
 Tensor = torch.Tensor
 
 conv1d = _add_docstr(
