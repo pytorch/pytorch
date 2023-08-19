@@ -163,6 +163,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
+    def test_module_not_callable(self):
+        def fn(x):
+            return torch.fft(x)
+
+        counter = CompileCounter()
+        a = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertRaisesRegex(
+            TypeError, "'module' object is not callable", lambda: opt_fn(a)
+        )
+
     def test_inplace(self):
         def inplace1(a, b):
             o = torch.empty((10, 10))
