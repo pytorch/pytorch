@@ -42,7 +42,12 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import (
+    BackendCompilerFailed,
+    exceptions_allowed_to_be_fallback,
+    unimplemented,
+    unimplemented_with_warning,
+)
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -65,6 +70,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_instruction_source_311,
+    get_static_address_type,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -326,6 +332,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # Tracks if the output graph has a user defined allowed function in the
+        # graph. This is used later to determine if we should fallback to eager
+        # for certain exceptions. THe idea is that if the user has applied
+        # allow_in_graph, they would like to see the error instead of falling
+        # back for backend errors.
+        self.has_user_defined_allowed_in_graph = False
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -632,9 +644,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
+            if get_static_address_type(target) == "guarded":
+                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
+
                 return wrap_fx_proxy(
                     self.root_tx,
                     tracer.create_proxy("get_attr", module_key, tuple(), {}),
@@ -1013,6 +1029,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except exceptions_allowed_to_be_fallback as e:
+            if self.has_user_defined_allowed_in_graph:
+                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                    e.__traceback__
+                ) from None
+            msg = (
+                "Backend compiler failed with a fake tensor exception at \n"
+                f"{self.root_tx.format_frame_summary()}"
+                "Adding a graph break."
+            )
+            unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__

@@ -417,9 +417,25 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, options, args, kwargs)
 
-        named_embed = functools.partial(_named_embed, tx=tx, key=key, source_cls=NNModuleSource, source=self.source, options=options)
-        wrap_values = functools.partial(_wrap_values, tx=tx, key=key, source_cls=FSDPNNModuleSource, source=self.source, options=options)
-        get_kwargs = functools.partial(_get_kwargs, mod=module, name=name, args=args, kwargs=kwargs)
+        named_embed = functools.partial(
+            _named_embed,
+            tx=tx,
+            key=key,
+            source_cls=NNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        wrap_values = functools.partial(
+            _wrap_values,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        get_kwargs = functools.partial(
+            _get_kwargs, mod=module, name=name, args=args, kwargs=kwargs
+        )
         if name == "named_children":
             assert not (args or kwargs)
             result = []
@@ -768,9 +784,25 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         key = self.module_key
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        named_embed = functools.partial(_named_embed, tx=tx, key=key, source_cls=FSDPNNModuleSource, source=self.source, options=options)
-        wrap_values = functools.partial(_wrap_values, tx=tx, key=key, source_cls=FSDPNNModuleSource, source=self.source, options=options)
-        get_kwargs = functools.partial(_get_kwargs, mod=self.value, name=name, args=args, kwargs=kwargs)
+        named_embed = functools.partial(
+            _named_embed,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        wrap_values = functools.partial(
+            _wrap_values,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        get_kwargs = functools.partial(
+            _get_kwargs, mod=self.value, name=name, args=args, kwargs=kwargs
+        )
 
         if name == "buffers":
             return wrap_values(self.value.named_buffers(**get_kwargs("recurse")))
@@ -799,6 +831,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     def as_python_constant(self):
         return self.value
 
+
 def _gen_source(source, name):
     name_split = name.split(".")
     if name_split[0] == "":
@@ -807,6 +840,7 @@ def _gen_source(source, name):
         x = name_split.pop(0)
         source = AttrSource(source, x)
     return source
+
 
 def _get_kwargs(*names, mod, name, args, kwargs):
     _assert_all_args_kwargs_const(args, kwargs)
@@ -822,6 +856,7 @@ def _get_kwargs(*names, mod, name, args, kwargs):
         if k in bound_args:
             res[k] = bound_args[k]
     return res
+
 
 # Breaks tx first convention because meant for functools partial usage, post * args should be
 # same for a given VT
@@ -841,6 +876,7 @@ def _wrap_values(items, *, tx, key, source_cls, source, options):
         result, mutable_local=MutableLocal(), **options
     )
 
+
 # Breaks tx first convention because meant for functools partial usage, post * args should be
 # same for a given VT
 def _named_embed(name, obj, *, tx, key, source_cls, source, options):
@@ -859,7 +895,5 @@ def _named_embed(name, obj, *, tx, key, source_cls, source, options):
 
 
 def _assert_all_args_kwargs_const(args, kwargs):
-    if not all(
-        x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-    ):
+    if not all(x.is_python_constant() for x in itertools.chain(args, kwargs.values())):
         raise unimplemented(f"non-const NNModule method {name}")
