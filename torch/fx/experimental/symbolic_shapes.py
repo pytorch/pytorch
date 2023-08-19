@@ -1328,7 +1328,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
@@ -1358,7 +1358,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_magic_methods:
@@ -2137,9 +2137,11 @@ class ShapeEnv:
             self,
             op: Callable,
             args: Tuple,
-    ) -> Optional[torch.fx.Node]:
+    ) -> Tuple[Optional[torch.fx.Node], bool]:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
+        # Flags whether the returned node was cached or not.
+        fresh = False
 
         if _translation_validation_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
@@ -2149,7 +2151,9 @@ class ShapeEnv:
                 # We check if we are not mixing SymNode that should not be ignored
                 # (fx_node is not None) with those that should (fx_node is None).
                 assert all(not isinstance(a, torch.fx.Node) for a in args)
-                return None
+                return None, fresh
+
+            fresh = True
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
@@ -2157,7 +2161,7 @@ class ShapeEnv:
             lifted_op = z3op(op, self.validator)
             self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
 
-        return self.fx_node_cache.get(node_key, None)
+        return self.fx_node_cache.get(node_key, None), fresh
 
     def create_fx_placeholder_and_z3var(
             self,
@@ -3385,19 +3389,20 @@ class ShapeEnv:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
+        fresh = False
         if (
                 _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
             if concrete_val is sympy.true:
-                node = self.create_fx_call_function(torch._assert, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
-                neg = self.create_fx_call_function(operator.not_, (fx_node,))
-                node = self.create_fx_call_function(torch._assert, (neg,))
+                neg, _ = self.create_fx_call_function(operator.not_, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (neg,))
             else:
-                eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-                node = self.create_fx_call_function(torch._assert, (eql,))
+                eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
+                node, fresh = self.create_fx_call_function(torch._assert, (eql,))
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
@@ -3469,7 +3474,8 @@ class ShapeEnv:
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
         except Exception:
-            self.remove_fx_node(node)
+            if fresh:
+                self.remove_fx_node(node)
             raise
         else:
             if not self._suppress_guards_tls():
