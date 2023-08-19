@@ -263,7 +263,11 @@ class GuardBuilder(GuardBuilderBase):
         obj = self.get(guard.name)
         # TODO - Attach a callback to automatically delete the corresponding
         # cache line when obj dies.
-        self.id_matched_objs[arg_ref] = weakref.ref(obj)
+
+        try:
+            self.id_matched_objs[arg_ref] = weakref.ref(obj)
+        except TypeError:
+            pass  # cannot weakref bool object
         code = f"___check_obj_id({arg_ref}, {self.id_ref(obj)})"
         self._produce_guard_code(guard, [code])
 
