@@ -101,7 +101,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
             call_backs = []
             messages = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                symbol = val.node.expr
+                symbol = val.node._expr
                 if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
@@ -193,7 +193,7 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
 
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions
-                    symbol = shape.node.expr
+                    symbol = shape.node._expr
                     if symbol in self.range_constraints:
                         self._insert_range_assert_inplace(
                             graph, input_dim, dim_node, self.range_constraints[symbol]
