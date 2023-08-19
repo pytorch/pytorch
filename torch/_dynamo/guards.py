@@ -265,7 +265,9 @@ class GuardBuilder(GuardBuilderBase):
         # cache line when obj dies.
 
         try:
-            self.id_matched_objs[arg_ref] = weakref.ref(obj)
+            if guard.is_local() and isinstance(obj, torch.nn.Module):
+                self.get(guard.name)
+                self.id_matched_objs[arg_ref] = weakref.ref(obj)
         except TypeError:
             pass  # cannot weakref bool object
         code = f"___check_obj_id({arg_ref}, {self.id_ref(obj)})"

@@ -10,6 +10,7 @@ from typing import DefaultDict, Dict, Tuple, Set
 from . import config
 from .exc import unimplemented
 from .utils import guard_failures, troubleshooting_url
+from .guards import CLOSURE_VARS
 
 log = logging.getLogger(__name__)
 """
@@ -60,8 +61,7 @@ def is_recompilation(frame, cache_size):
     # TODO(janimesh) - Consider code reorganization so that
     # CheckFnManager/GuardBuilder shares this code.
     def get(name):
-        print("--->", frame.f_locals, name)
-        return eval(name, None, {"L": frame.f_locals})
+        return eval(name, {"L": frame.f_locals}, CLOSURE_VARS)
 
     sources = cache_size.id_guarded_sources
 
@@ -78,8 +78,7 @@ def is_recompilation(frame, cache_size):
 
 def exceeds_cache_size(frame, cache_size) -> bool:
     def get(name):
-        print("--->", frame.f_locals, name)
-        return eval(name, {}, {"L": frame.f_locals})
+        return eval(name, {"L": frame.f_locals}, CLOSURE_VARS)
 
     sources = cache_size.id_guarded_sources
     per_id_guarded_obj = cache_size.per_id_guarded_obj
