@@ -57,6 +57,7 @@ enum class Backend {
   HPU,
   Lazy,
   MTIA,
+  AutoRT,
   PrivateUse1,
   NumOptions
 };
@@ -120,6 +121,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::HPU;
   } else if (t == DispatchKey::MTIA || t == DispatchKey::AutogradMTIA) {
     return Backend::MTIA;
+  } else if (t == DispatchKey::AutoRT || t == DispatchKey::AutogradAutoRT) {
+    return Backend::AutoRT;
   } else if (
       t == DispatchKey::PrivateUse1 || t == DispatchKey::AutogradPrivateUse1) {
     return Backend::PrivateUse1;
@@ -190,6 +193,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::HPU;
     case Backend::MTIA:
       return DispatchKey::MTIA;
+    case Backend::AutoRT:
+      return DispatchKey::AutoRT;
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
@@ -244,6 +249,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::HPU;
     case Backend::MTIA:
       return DeviceType::MTIA;
+    case Backend::AutoRT:
+      return DeviceType::AutoRT;
     case Backend::PrivateUse1:
     case Backend::SparsePrivateUse1:
     case Backend::QuantizedPrivateUse1:
@@ -316,6 +323,8 @@ static inline const char* toString(Backend b) {
       return "HPU";
     case Backend::MTIA:
       return "MTIA";
+    case Backend::AutoRT:
+      return "AutoRT";
     case Backend::PrivateUse1:
       return "PrivateUseOne";
     default:

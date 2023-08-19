@@ -56,6 +56,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.xla";
     case at::Backend::Meta:
       return "torch.meta";
+    case at::Backend::AutoRT:
+      return "torch.autort";
     default:
       AT_ERROR("Unimplemented backend ", backend);
   }
