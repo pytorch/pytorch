@@ -8833,6 +8833,15 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         has_no_out_of_place=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.skip("_foreach_zero is not implemented"),
+                'TestForeach',
+                'test_outplace_forward_mode_AD',
+            ),
+        ),
     ),
 
     ForeachFuncInfo(
@@ -18476,8 +18485,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # Not implemented
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD'),
@@ -19390,6 +19397,17 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+        ),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.complex64, torch.complex128)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -19484,7 +19502,17 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-        )
+            # Complex values error with: Greatest absolute difference: nan at index
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logaddexp",
@@ -19514,6 +19542,19 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,)),
+            # bfloat16 floor_divide compared with a float32 reference works inconsistently
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         dtypes=(torch.bfloat16,)),
+            # int8 floor divide has different results for -128 // -1 vs. NumPy
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.int8,)),
+            # The following tests fails on some jobs
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.float16,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                         'TestBinaryUfuncs', 'test_reference_numerics'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19536,11 +19577,29 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_contig_vs_every_other',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_non_contig',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gcd",
         torch_opinfo_name="gcd",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.int8,)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
@@ -19554,6 +19613,12 @@ python_ref_db = [
         "_refs.heaviside",
         torch_opinfo_name="heaviside",
         supports_rhs_python_scalar=False,
+        skips=(
+            # PyTorch's heaviside does not appear to propagate NaNs
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.hypot",
@@ -19574,6 +19639,9 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19656,6 +19724,15 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
+                                   torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
+                'TestBinaryUfuncs', 'test_scalar_support'),
+        ),
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -19675,6 +19752,25 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
+            # Skipping integers because they are being raised to negative powers causing an error
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=[torch.int8, torch.int16, torch.int32, torch.int64]),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=[torch.int16, torch.int32, torch.int64]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.complex32,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19685,6 +19781,12 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19708,6 +19810,32 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0),
+                                   torch.bfloat16: tol(atol=1e-5, rtol=5e-3),
+                                   torch.complex32: tol(atol=1e-5, rtol=1e-3)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                'TestCommon', 'test_complex_half_reference_testing', device_type='cpu'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                'TestDecomp', 'test_comprehensive', device_type='cpu'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                'TestDecomp', 'test_quick', device_type='cpu'),
+        ),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.uint8,)),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
@@ -20645,13 +20773,13 @@ python_ref_db += opinfo.definitions.python_ref_db
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
-binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
+binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
-shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
+shape_funcs = [op for op in ops_and_refs if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
