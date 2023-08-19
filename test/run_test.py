@@ -1640,6 +1640,7 @@ def main():
 
     class TestBatch:
         """Defines a set of tests with similar priority that should be run together on the current shard"""
+
         name: str
         sharded_tests: List[ShardedTest]
         failures: List[TestFailure]
