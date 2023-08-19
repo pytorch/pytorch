@@ -1267,14 +1267,20 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
-def skipIfRocm(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_WITH_ROCM:
-            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
+def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def runOnRocm(fn):
     @wraps(fn)
@@ -1547,9 +1553,8 @@ def slowTest(fn):
     return wrapper
 
 
-def slowAwareTest(fn):
-    fn.__dict__['slow_test'] = True
-    return fn
+def slowTestIf(condition):
+    return slowTest if condition else lambda fn: fn
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
