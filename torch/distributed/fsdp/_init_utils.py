@@ -78,10 +78,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -273,6 +273,10 @@ def _init_ignored_module_states(
         module,
         state._ignored_modules,
         ignored_parameters,
+    )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -633,6 +637,37 @@ def _get_ignored_params(
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
+
+
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """
+    Returns the cleaned buffer FQNs in ``ignored_modules``
+    """
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:

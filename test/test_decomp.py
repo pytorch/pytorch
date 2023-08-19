@@ -3,7 +3,7 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch._decomp import decomposition_table
+from torch._decomp import core_aten_decompositions, decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import DispatchKey
 
@@ -44,11 +44,18 @@ def overload_to_aten_name(overload):
 
 # All operators that can have decomp tests
 decomposition_names = {overload_to_aten_name(k) for k in decomposition_table}
+core_decomposition_names = {overload_to_aten_name(k) for k in core_aten_decompositions()}
 _decomp_test_ops = [
     op
     for op in op_db
     if op.aten_name in decomposition_names
     or op.aten_backward_name in decomposition_names
+]
+_decomp_test_ops_core_autograd = [
+    op
+    for op in op_db
+    if op.aten_name in core_decomposition_names
+    and op.supports_autograd
 ]
 
 
@@ -329,7 +336,12 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
+    # This decomp runs before autograd.
+    (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
+    # Decomposition registered as Autograd
+    (None, None, "nn.functional.hardshrink"),
+    (None, None, "nn.functional.softshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
@@ -398,6 +410,40 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
+core_backward_failures = {
+    skip('_softmax_backward_data'),  # slow: fails with --timeout=360 secs
+    xfail('addcdiv'),
+    skip('addcmul'),  # slow: fails with --timeout=360 secs
+    skip('deg2rad'),  # slow: fails with --timeout=360 secs
+    skip('diag_embed'),  # slow: fails with --timeout=360 secs
+    skip('frac'),  # slow: fails with --timeout=360 secs
+    skip('grid_sampler_2d'),  # slow: fails with --timeout=360 secs
+    xfail('lerp'),
+    skip('logaddexp'),  # slow: fails with --timeout=360 secs
+    skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
+    xfail('nn.functional.binary_cross_entropy_with_logits'),
+    xfail('nn.functional.hardshrink'),
+    xfail('nn.functional.softshrink'),
+    skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs
+    xfail('norm'),
+    xfail('norm', 'fro'),
+    xfail('norm', 'inf'),
+    xfail('norm', 'nuc'),
+    skip('rad2deg'),  # slow: fails with --timeout=360 secs
+    skip('renorm'),  # slow: fails with --timeout=360 secs
+    skip('rot90'),  # slow: fails with --timeout=360 secs
+    skip('rsub'),  # slow: fails with --timeout=360 secs
+    skip('sgn'),  # slow: fails with --timeout=360 secs
+    skip('special.xlog1py'),  # slow: fails with --timeout=360 secs
+    xfail('stack'),
+    skip('tril'),  # slow: fails with --timeout=360 secs
+    skip('triu'),  # slow: fails with --timeout=360 secs
+    skip('unfold_copy'),  # slow: fails with --timeout=360 secs
+    skip('xlogy'),  # slow: fails with --timeout=360 secs
+    xfail('zero_'),
+}
+
+
 class TestDecomp(TestCase):
     longMessage = True
 
@@ -411,6 +457,23 @@ class TestDecomp(TestCase):
     @ops(_decomp_test_ops)
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipOps('TestDecomp', 'test_quick_core_backward', core_backward_failures)
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
+    def test_quick_core_backward(self, device, dtype, op):
+        for sample_input in op.sample_inputs(device, dtype, requires_grad=True):
+            aten_name = op.decomp_aten_name or op.aten_name
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+            func = partial(op.get_op(), **kwargs)
+            with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all=False)\
+                 as mode, enable_python_dispatcher():
+                torch.autograd.gradcheck(func, args)
+            self.check_decomposed(aten_name, mode)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
@@ -432,6 +495,44 @@ class TestDecomp(TestCase):
         torch.manual_seed(123)
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
+
+    def test_rrelu_with_noise(self, device):
+        # rrelu_with_noise behavior depends on a) whether elements in the input
+        # are <= 0, and b) whether we're in training mode. Cover all cases:
+        dtype = torch.float64
+        x = torch.tensor(
+            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device,
+        )
+        lower = 1.0
+        upper = 4.0
+        training = False
+
+        torch.manual_seed(123)
+        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
+        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
+
+        torch.manual_seed(123)
+        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
+        res = torch._decomp.decompositions.rrelu_with_noise(
+            x, noise_res, lower, upper, training,
+        )
+        self.assertEqual(ref, res)
+        self.assertEqual(noise_ref, noise_res)
+
+        # Now with training=True:
+        training = True
+
+        torch.manual_seed(123)
+        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
+        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
+
+        torch.manual_seed(123)
+        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
+        res = torch._decomp.decompositions.rrelu_with_noise(
+            x, noise_res, lower, upper, training,
+        )
+        self.assertEqual(ref, res)
+        self.assertEqual(noise_ref, noise_res)
 
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -495,7 +596,7 @@ class TestDecomp(TestCase):
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
             in_place = func.name()[-1] == '_'
-            if func not in decomposition_table or func in [
+            ignored_ops = [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
                 torch.ops.aten.empty.memory_format,
@@ -505,7 +606,14 @@ class TestDecomp(TestCase):
                 torch.ops.aten.new_empty_strided.default,
                 torch.ops.aten.randn.default,
                 torch.ops.aten.native_dropout.default,
-            ] or any_unsupported(args, kwargs) or in_place:
+            ]
+            if (
+                    func not in decomposition_table or
+                    func in ignored_ops or
+                    torch.Tag.nondeterministic_seeded in func.tags or
+                    any_unsupported(args, kwargs) or
+                    in_place
+            ):
                 return func(*args, **kwargs)
 
             self.decomposed.add(func)
@@ -568,6 +676,14 @@ class TestDecomp(TestCase):
 
             return real_out_unflat
 
+    def check_decomposed(self, aten_name, mode):
+        self.assertTrue(
+            any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
+            msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
+                 f"{', '.join(map(str, list(mode.called)))}. If your op is  "
+                 f"CompositeImplicitAutograd you should skip this test "
+                 f"by updating CROSS_REF_EXCLUDE_SET.")
+        )
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
@@ -592,15 +708,6 @@ class TestDecomp(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        def check_decomposed(aten_name, mode):
-            self.assertTrue(
-                any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
-                msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
-                     f"{', '.join(map(str, list(mode.called)))}. If your op is  "
-                     f"CompositeImplicitAutograd you should skip this test "
-                     "by updating CROSS_REF_EXCLUDE_SET.")
-            )
-
         aten_name = op.decomp_aten_name or op.aten_name
 
         func = op.get_op()
@@ -619,7 +726,7 @@ class TestDecomp(TestCase):
                      as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
-                    check_decomposed(aten_name, mode)
+                    self.check_decomposed(aten_name, mode)
 
                 if not skip_decomp_vjp and (op.aten_backward_name in decomposition_names or run_all):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
@@ -628,7 +735,7 @@ class TestDecomp(TestCase):
                          as mode, enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
-                        check_decomposed(op.aten_backward_name, mode)
+                        self.check_decomposed(op.aten_backward_name, mode)
 
             elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
@@ -637,7 +744,7 @@ class TestDecomp(TestCase):
                      as mode, enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
-                    check_decomposed(aten_name, mode)
+                    self.check_decomposed(aten_name, mode)
             else:
                 assert op.supports_autograd
                 self.skipTest(
