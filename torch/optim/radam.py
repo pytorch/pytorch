@@ -172,9 +172,12 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
 
     For further details regarding the algorithm we refer to `On the variance of the adaptive learning rate and beyond`_.
 
-    This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
-    to the gradient) and not the one from AdamW (were weight_decay is applied to the update). This
-    is different from the `author's implementation`_.
+    This implementation provides an option to use either the original weight_decay implementation as in Adam
+    (where the weight_decay is applied to the gradient) or the one from AdamW (where weight_decay is applied
+    to the weight) through the `decoupled_weight_decay` option. When `decoupled_weight_decay` is set to `True`,
+    it uses the AdamW style weight decay, otherwise it uses the original Adam style. This flexibility allows
+    it to align with both the original implementation and the `author's implementation`_.
+
     """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
