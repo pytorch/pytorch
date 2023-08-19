@@ -5787,8 +5787,10 @@
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
-- func: tile(Tensor self, int[] dims) -> Tensor
+- func: tile(Tensor self, SymInt[] dims) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: tile_symint
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
@@ -6648,6 +6650,16 @@
 - func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor
   structured_delegate: _addmm_activation.out
   variants: function, method
+
+- func: _scaled_mm(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _scaled_mm_cuda
+
+- func: _scaled_mm.out(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!), Tensor(b!))
+  variants: function
+  dispatch:
+    CUDA: _scaled_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -10126,25 +10138,6 @@
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
   autogen: _foreach_div.ScalarList_out
 
-# TODO(crcrpar): Think of adding overloads for `TensorList`s and `ScalarList`s
-# ref: https://github.com/pytorch/pytorch/issues/106931
-- func: _foreach_clamp(Tensor[] self, Scalar? min=None, Scalar? max=None) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  cpp_no_default_args: ['min']
-  dispatch:
-    CPU: foreach_tensor_clamp_scalar_kernel_slow
-    CUDA: foreach_tensor_clamp_scalar_kernel_cuda
-
-- func: _foreach_clamp_(Tensor(a!)[] self, Scalar? min=None, Scalar? max=None) -> ()
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  cpp_no_default_args: ['min']
-  dispatch:
-    CPU: foreach_tensor_clamp_scalar_kernel_slow_
-    CUDA: foreach_tensor_clamp_scalar_kernel_cuda_
-  autogen: _foreach_clamp.out
-
 - func: _foreach_clamp_max.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -10952,6 +10945,14 @@
     CPU: foreach_tensor_zero_slow_
     CUDA: foreach_tensor_zero_cuda_
   autogen: _foreach_zero, _foreach_zero.out
+
+- func: _foreach_copy_(Tensor(a!)[] self, Tensor[] src, bool non_blocking=False) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_copy_list_kernel_slow_
+    CUDA: foreach_tensor_copy_list_kernel_cuda_
+  autogen: _foreach_copy, _foreach_copy.out
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:

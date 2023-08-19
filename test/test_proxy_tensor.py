@@ -1176,6 +1176,35 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
     return empty""")
 
+    def test_split_unbacked_sizes(self):
+        def f(lengths, values):
+            # tolist not directly supported atm
+            sizes = [lengths[i].item() for i in range(lengths.size(0))]
+            for s in sizes:
+                constrain_as_size(s)
+            return torch.split(values, sizes)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.tensor([2, 3, 4]),
+            torch.randn(9)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, lengths_1, values_1):
+    select = torch.ops.aten.select.int(lengths_1, 0, 0)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(select);  select = None
+    select_1 = torch.ops.aten.select.int(lengths_1, 0, 1)
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
+    select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
+    _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
+    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1, min = None, max = None)
+    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2, min = None, max = None)
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
+    getitem = split_with_sizes[0]
+    getitem_1 = split_with_sizes[1]
+    getitem_2 = split_with_sizes[2];  split_with_sizes = None
+    return (getitem, getitem_1, getitem_2)""")  # noqa: B950
+
     def test_invalidate_nonzero(self):
         ok = False
 
@@ -1546,20 +1575,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
-    xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
-    xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
-    xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
-    xfail('special.chebyshev_polynomial_t', ''),  # aten.special_chebyshev_polynomial_t.default - couldn't find symbolic me...
-    xfail('special.chebyshev_polynomial_u', ''),  # aten.special_chebyshev_polynomial_u.default - couldn't find symbolic me...
-    xfail('special.hermite_polynomial_h', ''),  # aten.special_hermite_polynomial_h.default - couldn't find symbolic meta f...
-    xfail('special.hermite_polynomial_he', ''),  # aten.special_hermite_polynomial_he.default - couldn't find symbolic meta...
-    xfail('special.laguerre_polynomial_l', ''),  # aten.special_laguerre_polynomial_l.default - couldn't find symbolic meta...
-    xfail('special.modified_bessel_i0', ''),  # aten.special_modified_bessel_i0.default - couldn't find symbolic meta funct...
-    xfail('special.modified_bessel_i1', ''),  # aten.special_modified_bessel_i1.default - couldn't find symbolic meta funct...
-    xfail('special.modified_bessel_k0', ''),  # aten.special_modified_bessel_k0.default - couldn't find symbolic meta funct...
-    xfail('special.modified_bessel_k1', ''),  # aten.special_modified_bessel_k1.default - couldn't find symbolic meta funct...
-    xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
-    xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
@@ -1591,7 +1606,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.rrelu', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
 }
 
 inplace_symbolic_tensor_failures = {

@@ -2361,7 +2361,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep(torch.tensor([30]))
 

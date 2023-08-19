@@ -29,7 +29,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._refs import _broadcast_shapes
+from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     constrain_range,
@@ -2974,27 +2974,9 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
-@register_meta([aten._foreach_clamp.default])
-def meta__foreach_clamp(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
-    )
-    return [torch.empty_like(t) for t in self]
-
-
-@register_meta([aten._foreach_clamp_.default])
-def meta__foreach_clamp_(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
-    )
+@register_meta([aten._foreach_copy_])
+def meta__foreach_copy_inplace(self, src, non_blocking=False):
+    _check_foreach_binop_tensor_lists(self, src)
 
 
 @register_meta([aten._fused_adam_.default])
@@ -5511,6 +5493,77 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
+
+
+def _create_unary_float_meta_func(func):
+    @register_meta(func)
+    @out_wrapper()
+    def _f(x):
+        return _elementwise_meta(
+            x, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    return _f
+
+
+def _create_binary_float_meta_func(func):
+    @register_meta(func)
+    @out_wrapper()
+    def _f(x, y):
+        x, y = _maybe_broadcast(x, y)
+        return _elementwise_meta(
+            x, y, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    return _f
+
+
+_create_unary_float_meta_func(aten.special_airy_ai)
+_create_unary_float_meta_func(aten.special_bessel_y0)
+_create_unary_float_meta_func(aten.special_bessel_y1)
+_create_unary_float_meta_func(aten.special_modified_bessel_i0)
+_create_unary_float_meta_func(aten.special_modified_bessel_i1)
+_create_unary_float_meta_func(aten.special_modified_bessel_k0)
+_create_unary_float_meta_func(aten.special_modified_bessel_k1)
+_create_unary_float_meta_func(aten.special_scaled_modified_bessel_k0)
+_create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
+
+
+_create_binary_float_meta_func(
+    [
+        aten.special_chebyshev_polynomial_t.default,
+        aten.special_chebyshev_polynomial_t.out,
+        aten.special_chebyshev_polynomial_t.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_chebyshev_polynomial_u.default,
+        aten.special_chebyshev_polynomial_u.out,
+        aten.special_chebyshev_polynomial_u.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_hermite_polynomial_h.default,
+        aten.special_hermite_polynomial_h.out,
+        aten.special_hermite_polynomial_h.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_hermite_polynomial_he.default,
+        aten.special_hermite_polynomial_he.out,
+        aten.special_hermite_polynomial_he.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_laguerre_polynomial_l.default,
+        aten.special_laguerre_polynomial_l.out,
+        aten.special_laguerre_polynomial_l.n_scalar_out,
+    ]
+)
 
 
 # We must also trigger meta registrations from PrimTorch ref
