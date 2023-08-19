@@ -2159,7 +2159,7 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale = get_scale_value(scale_factors, 0)
 
-    return upsample_nearest1d(input, osize, scale)
+    return aten.upsample_nearest1d.default(input, osize, scale)
 
 
 @register_decomposition(aten.upsample_nearest2d.vec)
@@ -2170,7 +2170,7 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    return upsample_nearest2d(input, osize, scale_h, scale_w)
+    return aten.upsample_nearest2d.default(input, osize, scale_h, scale_w)
 
 
 @register_decomposition(aten.upsample_nearest3d.vec)
@@ -2182,7 +2182,7 @@ def upsample_nearest3d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
 
-    return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
+    return aten.upsample_nearest3d.default(input, osize, scale_d, scale_h, scale_w)
 
 
 def _compute_upsample_nearest_indices(input, output_size, scales):
@@ -2936,7 +2936,9 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
+    return aten.upsample_bilinear2d.default(
+        input, osize, align_corners, scale_h, scale_w
+    )
 
 
 @register_decomposition(aten.upsample_bilinear2d.default)
@@ -3681,7 +3683,9 @@ def upsample_bicubic2d_vec(
             ),
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
-    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+    return aten.upsample_bicubic2d.default(
+        a, output_size, align_corners, scale_h, scale_w
+    )
 
 
 @register_decomposition(aten.aminmax)
