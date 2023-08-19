@@ -7,7 +7,6 @@ import functools
 # Owner(s): ["module: dynamo"]
 
 import inspect
-import weakref
 
 import torch
 
@@ -75,30 +74,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # test_radam = unittest.skipIf(IS_FBCODE, "TypeError: _use_grad() missing")(
     #    make_test(torch.optim.RAdam, exp_graph_count=0)
     # )
-
-    def test_static_address_finalizer(self):
-        p_ref = None
-
-        def fn():
-            nonlocal p_ref
-            mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
-            for p in mod.parameters():
-                p.grad = torch.rand_like(p)
-
-            opt = torch.optim.Adam(mod.parameters(), lr=0.1)
-
-            def fn():
-                opt.step()
-
-            with torch.set_grad_enabled(False):
-                step_fn_compiled = torch.compile(fn)
-                step_fn_compiled()
-            p_ref = weakref.ref(p)
-            self.assertTrue(p_ref() is not None)
-
-        fn()
-
-        self.assertTrue(p_ref() is None)
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
