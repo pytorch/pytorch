@@ -35,7 +35,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
 #define DECLARE_PYOBJ_ATTR(name) \
 static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObject* _noargs) { \
   PyObject* res = (PyObject*)self->frame->name; \
-  Py_INCREF(res); \
+  Py_XINCREF(res); \
   return res; \
 }
 
@@ -312,7 +312,7 @@ static void destroy_cache_entry(CacheEntry* e);
 #define DECLARE_CACHE_ENTRY_ATTR(name) \
 static PyObject* CacheEntry_##name(CacheEntry* self, PyObject* _noargs) { \
   PyObject* res = (PyObject*)self->name; \
-  Py_XINCREF(res); \
+  Py_INCREF(res); \
   return res; \
 }
 
@@ -351,28 +351,25 @@ static int init_cache_entry(CacheEntry* self, PyObject* args, PyObject* kwds) {
   static char *kwlist[] = {"check_fn", "code", "next", NULL};
 
   int ret = PyArg_ParseTupleAndKeywords(
-    args, kwds, "|OOO", kwlist,
+    args, kwds, "OOO", kwlist,
     &check_fn, &code, &next);
 
   if (!ret) return -1;
 
   if (check_fn) {
     PyObject* tmp = self->check_fn;
-    Py_INCREF(check_fn);
     self->check_fn = check_fn;
     Py_XDECREF(tmp);
   }
 
   if (code) {
     PyCodeObject* tmp = self->code;
-    Py_INCREF(code);
     self->code = code;
     Py_XDECREF(tmp);
   }
 
   if (next) {
     CacheEntry* tmp = self->next;
-    Py_INCREF(next);
     self->next = next;
     Py_XDECREF(tmp);
   }
@@ -425,8 +422,10 @@ static CacheEntry* create_cache_entry(
   PyCodeObject* code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code");
 
   // equivalent to CacheEntry(check_fn, code, next) in Python
-  PyObject* args = PyTuple_Pack(3, check_fn, code, next);
-  return (CacheEntry*)PyObject_CallObject((PyObject *) &CacheEntryType, args);
+  PyObject* args = Py_BuildValue("OOO", check_fn, code, next);
+  CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject*)&CacheEntryType, args);
+  Py_DECREF(args);
+  return e;
 }
 
 static void destroy_cache_entry(CacheEntry* e) {
