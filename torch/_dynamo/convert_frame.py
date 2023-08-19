@@ -1,6 +1,6 @@
 import functools
-import itertools
 import inspect
+import itertools
 import logging
 import os
 import random
@@ -17,7 +17,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
-from torch.utils._traceback import format_traceback_short, format_frame
+from torch.utils._traceback import format_frame, format_traceback_short
 
 from . import config, exc
 from .allowed_functions import is_allowed
@@ -77,6 +77,7 @@ recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 @functools.lru_cache(None)
 def uninteresting_files():
     import torch._dynamo.external_utils
+
     mods = [
         torch._dynamo.external_utils,
     ]
@@ -568,11 +569,13 @@ def _compile(
                 cat_code = " and ".join(guard.code_list)
                 maybe_user_stack = ""
                 if guard.user_stack:
-                    maybe_user_stack = f"\nUser stack:\n{''.join(guard.user_stack.format())}"
+                    maybe_user_stack = (
+                        f"\nUser stack:\n{''.join(guard.user_stack.format())}"
+                    )
                 verbose_guards_log.debug(
                     "GUARD: %s\nStack:\n%s%s",
                     cat_code,
-                    ''.join(guard.stack.format()),
+                    "".join(guard.stack.format()),
                     maybe_user_stack,
                 )
 

@@ -435,7 +435,7 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner = None):
+    def __init__(self, inner=None):
         if inner is None:
             inner = set()
         self.inner = inner
@@ -445,6 +445,14 @@ class GuardsSet:
 
     def __len__(self):
         return len(self.inner)
+
+    # Subtraction along with bool is typically used to determine the delta of
+    # added guards between checkpoints for higher order ops
+    def __sub__(self, other):
+        return GuardsSet(self.inner - other.inner)
+
+    def __bool__(self):
+        return bool(self.inner)
 
     def add(self, guard: Guard, *, skip=0):
         if guard in self.inner:
