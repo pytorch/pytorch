@@ -67,11 +67,6 @@ void cpu_flash_attention(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-
-  bool is_training =
-      (q.requires_grad() || k.requires_grad() ||
-      v.requires_grad());
-
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
   // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
@@ -89,6 +84,8 @@ void cpu_flash_attention(
       sdp::calculate_scale(query, scale).as_float_unchecked();
 
   // Sizes
+  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
+        "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(1);
   int64_t kvSize = value.size(1);
@@ -135,7 +132,7 @@ void cpu_flash_attention(
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = output.data_ptr<scalar_t>();
-  accum_t* lse_data = is_training ? logsumexp.data_ptr<accum_t>() : nullptr;
+  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
@@ -257,12 +254,10 @@ void cpu_flash_attention(
           headSize);
       }
       // Store logsumexp for backward
-      if (is_training) {
-        accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
-        for (const auto row : c10::irange(qBlockSize)) {
-          lse_ptr[row * lStrideM] = qk_max_data[row]
-              + std::log(qk_sum_data[row]);
-        }
+      accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
+      for (const auto row : c10::irange(qBlockSize)) {
+        lse_ptr[row * lStrideM] = qk_max_data[row]
+            + std::log(qk_sum_data[row]);
       }
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
@@ -291,7 +286,6 @@ void cpu_flash_attention_backward(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     c10::optional<double> scale) {
-
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
@@ -299,6 +293,8 @@ void cpu_flash_attention_backward(
       sdp::calculate_scale(query, scale).as_float_unchecked();
 
   // Sizes
+  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
+        "scaled_dot_product_attention_flash_attention_backward: Q/K/V should have the same head size");
   // Query (Batch x Q_seq_len  x Num_heads x Dim_per_head)
   // Key   (Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value (Batch x KV_seq_len x Num_heads x Dim_per_head)
