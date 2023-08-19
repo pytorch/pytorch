@@ -326,13 +326,67 @@ static struct PyGetSetDef CacheEntry_properties[] = {
     {"next", (getter)CacheEntry_next, NULL, NULL, NULL},
     {NULL}};
 
+
+static PyObject* new_cache_entry(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  CacheEntry *self;
+  self = (CacheEntry*) type->tp_alloc(type, 0);
+  if (self != NULL) {
+    // The corresponding decrefs for Py_None are in init_cache_entry.
+    Py_INCREF(Py_None);
+    self->check_fn = Py_None;
+    Py_INCREF(Py_None);
+    self->code = (PyCodeObject*)Py_None;
+    Py_INCREF(Py_None);
+    self->next = Py_NONE_CACHE_ENTRY;
+  }
+  return (PyObject*)self;
+}
+
+
+static int init_cache_entry(CacheEntry* self, PyObject* args, PyObject* kwds) {
+  PyObject* check_fn = NULL;
+  PyCodeObject* code = NULL;
+  CacheEntry* next = NULL;
+
+  static char *kwlist[] = {"check_fn", "code", "next", NULL};
+
+  int ret = PyArg_ParseTupleAndKeywords(
+    args, kwds, "|OOO", kwlist,
+    &check_fn, &code, &next);
+
+  if (!ret) return -1;
+
+  if (check_fn) {
+    PyObject* tmp = self->check_fn;
+    Py_INCREF(check_fn);
+    self->check_fn = check_fn;
+    Py_XDECREF(tmp);
+  }
+
+  if (code) {
+    PyCodeObject* tmp = self->code;
+    Py_INCREF(code);
+    self->code = code;
+    Py_XDECREF(tmp);
+  }
+
+  if (next) {
+    CacheEntry* tmp = self->next;
+    Py_INCREF(next);
+    self->next = next;
+    Py_XDECREF(tmp);
+  }
+  return 0;
+}
+
 static PyTypeObject CacheEntryType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   .tp_name = "torch._C.dynamo.eval_frame.CacheEntryWrapper",
   .tp_basicsize = sizeof(CacheEntry),
   .tp_itemsize = 0,
   .tp_flags = Py_TPFLAGS_DEFAULT,
-  .tp_new = PyType_GenericNew,
+  .tp_new = new_cache_entry,
+  .tp_init = (initproc)init_cache_entry,
   .tp_dealloc = (destructor)destroy_cache_entry,
   .tp_getset = CacheEntry_properties,
 };
@@ -367,14 +421,12 @@ static CacheEntry* create_cache_entry(
   //   - guarded_code: Borrowed
   //  return
   //   - CacheEntry*: new reference.
-  CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject *) &CacheEntryType, NULL);
-  NULL_CHECK(e);
-  e->check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
-  NULL_CHECK(e->check_fn);
-  e->code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code");
-  NULL_CHECK(e->code);
-  e->next = next;
-  return e;
+  PyObject* check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
+  PyCodeObject* code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code");
+
+  // equivalent to CacheEntry(check_fn, code, next) in Python
+  PyObject* args = PyTuple_Pack(3, check_fn, code, next);
+  return (CacheEntry*)PyObject_CallObject((PyObject *) &CacheEntryType, args);
 }
 
 static void destroy_cache_entry(CacheEntry* e) {
@@ -383,6 +435,7 @@ static void destroy_cache_entry(CacheEntry* e) {
   // This will recursively call destroy_cache_entry for the next items in the
   // linked list.
   Py_XDECREF(e->next);
+  Py_TYPE(e)->tp_free((PyObject*)e);
 }
 
 /* CacheEntry helper functions ends */
