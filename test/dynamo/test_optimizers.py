@@ -76,11 +76,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     #    make_test(torch.optim.RAdam, exp_graph_count=0)
     # )
 
-    def test_optimizer_weakref_recompile(self):
-        pass
-
     def test_static_address_finalizer(self):
-        torch._logging.set_logs(graph=True)
         p_ref = None
 
         def fn():
@@ -101,9 +97,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(p_ref() is not None)
 
         fn()
-        # import refcycle
-        # X = refcycle.snapshot()
-        # X.ancestors(p_ref(), generations=12).export_image("y.svg")
 
         self.assertTrue(p_ref() is None)
 
