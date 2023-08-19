@@ -130,21 +130,30 @@ def report_compile_source_on_error():
 
         raise exc.with_traceback(tb_next)
 
-def shorten_filename(fn):
+def shorten_filename(fn, *, base=None):
     """
     Shorten a source filepath, under the assumption that anything under torch/
     directory is "obvious" and doesn't need to be shown to user.
     """
+    if base is None:
+        base = os.path.dirname(os.path.dirname(__file__))
     # Truncate torch/foo.py to foo.py
-    prefix = os.path.commonprefix([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
-    return fn[len(prefix):]
+    try:
+        prefix = os.path.commonpath([fn, base])
+    except ValueError:
+        return fn
+    else:
+        return fn[len(prefix) + 1:]
 
-def format_frame(frame):
+def format_frame(frame, *, base=None, line=False):
     """
     Format a FrameSummary in a short way, without printing full absolute path
     or code.  The idea is the result fits on a single line.
     """
-    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
+    extra_line = ""
+    if line:
+        extra_line = f"{frame.line}  # "
+    return f"{extra_line}{shorten_filename(frame.filename, base=base)}:{frame.lineno} in {frame.name}"
 
 def format_traceback_short(tb):
     """
