@@ -1007,7 +1007,7 @@ class CheckFunctionManager:
         guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", guard_body)
+            print("GUARDS\n", guard_body)
 
         if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
