@@ -105,7 +105,11 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    RemovableHandleVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -784,7 +788,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        self.symbolic_locals[name] = loaded_vt
+        if isinstance(loaded_vt, RemovableHandleVariable):
+            loaded_vt.last_seen_name = name
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -1856,6 +1864,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
+
+    def store_hook(self, name, value):
+        name = name + str(id(value))
+
+        src = GlobalSource(name)
+        self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+        if name not in self.output.global_scope:
+            self.output.install_global(name, value)
+
+        return src
 
     @property
     def fake_mode(self):

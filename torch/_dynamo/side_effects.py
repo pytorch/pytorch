@@ -73,12 +73,14 @@ class SideEffects:
         store_attr_mutations=None,
         keepalive=None,
         save_for_backward=None,
+        tensor_hooks=None,
     ):
         super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
+        self.tensor_hooks = tensor_hooks or []
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -87,6 +89,7 @@ class SideEffects:
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
             and self.save_for_backward == other.save_for_backward
+            and self.tensor_hooks == other.tensor_hooks
         )
 
     def diff(self, other: "SideEffects") -> Optional[str]:
@@ -119,6 +122,7 @@ class SideEffects:
             ),
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
+            tensor_hooks=self.tensor_hooks,
         )
 
     def apply(self, fn, cache=None, skip_fn=lambda _: False):
@@ -136,6 +140,7 @@ class SideEffects:
         self.save_for_backward = VariableTracker.apply(
             fn, self.save_for_backward, cache, skip_fn
         )
+        self.tensor_hooks = VariableTracker.apply(fn, self.tensor_hooks, cache, skip_fn)
 
     def __contains__(self, item):
         return id(item) in self.id_to_variable
@@ -374,6 +379,27 @@ class SideEffects:
                     create_instruction("POP_TOP"),
                 ]
             )
+
+        for (
+            tensor,
+            hook,
+            handle,
+        ) in self.tensor_hooks:
+            cg(tensor)
+            cg.extend_output([cg.create_load_attr("register_hook")])
+            cg(hook)
+            cg.extend_output(create_call_function(1, True))
+            if hasattr(handle, "last_seen_name") and handle.last_seen_name:
+                # register_hook stored with variable name assigned to the handle
+                cg.extend_output(
+                    [create_instruction("STORE_NAME", argval=handle.last_seen_name)]
+                )
+            else:
+                # register_hook stored w/o a variable name assigned to the handle
+                cg.extend_output([create_instruction("POP_TOP")])
+
+    def register_hook(self, tensor, hook, handle):
+        self.tensor_hooks.append((tensor, hook, handle))
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []

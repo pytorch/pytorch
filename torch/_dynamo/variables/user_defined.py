@@ -563,3 +563,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
+
+
+class RemovableHandleVariable(UserDefinedObjectVariable):
+    def __init__(self, value, last_seen_name=None, value_type=None, **kwargs):
+        super().__init__(value, value_type, **kwargs)
+        # associated later
+        self.last_seen_name = last_seen_name
