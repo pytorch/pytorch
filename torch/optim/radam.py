@@ -26,7 +26,7 @@ class RAdam(Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
-        decoupled_weight_decay: bool=False,
+        decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
         differentiable: bool = False,
@@ -208,7 +208,7 @@ def radam(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    decoupled_weight_decay: bool=False,
+    decoupled_weight_decay: bool = False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     *,
