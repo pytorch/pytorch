@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
 
 import torch
 import torch.fx
@@ -162,8 +162,7 @@ def is_concrete_int(a: Union[int, SymInt]):
     if isinstance(a, int):
         return True
 
-    expr = a.node.simplified_expr()
-    if isinstance(expr, sympy.core.numbers.Integer):
+    if isinstance(a.node.expr, sympy.core.numbers.Integer):
         return True
 
     return False
@@ -707,7 +706,7 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
     def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None, fx_node=None):
-        self.expr = expr
+        self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         # What's the difference between hint and constant?
@@ -743,6 +742,10 @@ class SymNode:
         # the translation validation problem.
         self.fx_node = fx_node if _translation_validation_enabled() else None
 
+    @property
+    def expr(self):
+        return self.shape_env.replace(self._expr)
+
     # Check if we have replacements hint_expr that would allow us to
     # simplify it into a hint
     def _update_hint(self):
@@ -776,14 +779,10 @@ class SymNode:
             return self._hint
 
     def maybe_as_int(self):
-        expr = self.simplified_expr()
-        if expr.free_symbols:
+        if self.expr.free_symbols:
             return None
         else:
-            return int(expr)
-
-    def simplified_expr(self):
-        return self.shape_env.replace(self.expr)
+            return int(self.expr)
 
     def is_int(self):
         return self.pytype is int
@@ -1303,12 +1302,10 @@ def _make_node_magic(method, func):
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
         # TODO: consider constant prop here
-        expr = self.simplified_expr()
-        other_expr = other.simplified_expr()
         try:
-            out = func(expr, other_expr)
+            out = func(self.expr, other.expr)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, expr, other_expr)
+            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1330,7 +1327,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
@@ -1338,7 +1335,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
-        expr = self.simplified_expr()
+        expr = self.expr
         if method == "floor" or method == "ceiling":
             expr = self.shape_env._simplify_floor_div(expr)
 
@@ -1360,7 +1357,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_magic_methods:
@@ -2288,9 +2285,11 @@ class ShapeEnv:
             self,
             op: Callable,
             args: Tuple,
-    ) -> Optional[torch.fx.Node]:
+    ) -> Tuple[Optional[torch.fx.Node], bool]:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
+        # Flags whether the returned node was cached or not.
+        fresh = False
 
         if _translation_validation_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
@@ -2300,7 +2299,9 @@ class ShapeEnv:
                 # We check if we are not mixing SymNode that should not be ignored
                 # (fx_node is not None) with those that should (fx_node is None).
                 assert all(not isinstance(a, torch.fx.Node) for a in args)
-                return None
+                return None, fresh
+
+            fresh = True
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
@@ -2308,7 +2309,7 @@ class ShapeEnv:
             lifted_op = z3op(op, self.validator)
             self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
 
-        return self.fx_node_cache.get(node_key, None)
+        return self.fx_node_cache.get(node_key, None), fresh
 
     def create_fx_placeholder_and_z3var(
             self,
@@ -2821,10 +2822,11 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            integer = val.node.maybe_as_int() if isinstance(val, SymInt) else val
+            if isinstance(val, SymInt):
+                val = val.node.maybe_as_int() or val
 
-            if integer is None:
-                s = val.node.simplified_expr()
+            if isinstance(val, SymInt):
+                s = val.node.expr
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
@@ -3562,22 +3564,24 @@ class ShapeEnv:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
+        fresh = False
         if (
                 _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
             if concrete_val is sympy.true:
-                node = self.create_fx_call_function(torch._assert, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
-                neg = self.create_fx_call_function(operator.not_, (fx_node,))
-                node = self.create_fx_call_function(torch._assert, (neg,))
+                neg, _ = self.create_fx_call_function(operator.not_, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (neg,))
             else:
-                eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-                node = self.create_fx_call_function(torch._assert, (eql,))
+                eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
+                node, fresh = self.create_fx_call_function(torch._assert, (eql,))
 
             assert node is not None
-            node.meta["event"] = len(self.events) - 1
+            if fresh:
+                node.meta["event"] = len(self.events) - 1
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
@@ -3653,7 +3657,8 @@ class ShapeEnv:
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
         except Exception:
-            self.remove_fx_node(node)
+            if fresh:
+                self.remove_fx_node(node)
             raise
         else:
             if not self._suppress_guards_tls():
