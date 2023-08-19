@@ -66,6 +66,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 IMPLEMENT_VML(abs)
 IMPLEMENT_VML(acos)
 IMPLEMENT_VML(asin)
+IMPLEMENT_VML(asinh)
 IMPLEMENT_VML(atan)
 IMPLEMENT_VML(ceil)
 IMPLEMENT_VML(cos)

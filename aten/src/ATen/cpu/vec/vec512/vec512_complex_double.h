@@ -268,6 +268,9 @@ public:
     auto ln = Vectorized(_mm512_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
     return Vectorized(_mm512_permute_pd(ln.values, 0x55)).conj();         //-i*ln()
   }
+  Vectorized<c10::complex<double>> asinh() const {
+    return map(std::asinh);
+  }
   Vectorized<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
     constexpr auto pi_2d = c10::pi<double> / 2;

@@ -305,6 +305,9 @@ class Vectorized<ComplexDbl> {
     auto ln = (b_a + root).log();
     return ln.el_swapped().conj();
   }
+  Vectorized<ComplexDbl> asinh() const {
+    return map(std::asinh);
+  }
 
   Vectorized<ComplexDbl> acos() const {
     // acos(x) = pi/2 - asin(x)

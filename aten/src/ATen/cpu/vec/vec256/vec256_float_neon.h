@@ -346,6 +346,12 @@ public:
       map(std::asin)
     );
   }
+  Vectorized<float> asinh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_asinhf4_u10(values.val[0]), Sleef_asinhf4_u10(values.val[1])),
+      map(std::asinh)
+    );
+  }
   Vectorized<float> atan() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_atanf4_u10(values.val[0]), Sleef_atanf4_u10(values.val[1])),

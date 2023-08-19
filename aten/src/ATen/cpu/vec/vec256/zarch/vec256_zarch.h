@@ -1042,6 +1042,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> asin() const {
     return mapSleef(Sleef_asinf4_u10, Sleef_asind2_u10);
   }
+  Vectorized<T> asinh() const {
+    return mapSleef(Sleef_asinhf4_u10, Sleef_asinhd2_u10);
+  }
   Vectorized<T> atan() const {
     return mapSleef(Sleef_atanf4_u10, Sleef_atand2_u10);
   }

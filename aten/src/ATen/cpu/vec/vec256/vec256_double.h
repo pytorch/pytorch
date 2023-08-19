@@ -140,6 +140,9 @@ public:
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind4_u10(values));
   }
+  Vectorized<double> asinh() const {
+    return Vectorized<double>(Sleef_asinhd4_u10(values));
+  }
   Vectorized<double> atan() const {
     return Vectorized<double>(Sleef_atand4_u10(values));
   }

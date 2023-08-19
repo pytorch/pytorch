@@ -774,6 +774,9 @@ public:
     auto ln = Vectorized(_mm512_add_ps(b_a, root)).log();                 //ln(iz + sqrt())
     return Vectorized(_mm512_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
   }
+  Vectorized<c10::complex<float>> asinh() const {
+    return map(std::asinh);
+  }
   Vectorized<c10::complex<float>> acos() const {
     return map(std::acos);
   }

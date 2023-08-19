@@ -37,6 +37,12 @@ inline T asin(T a) {
 template <
     typename T,
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline T asinh(T a) {
+  return std::asinh(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T atan(T a) {
   return std::atan(float(a));
 }

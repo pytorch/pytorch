@@ -393,6 +393,9 @@ public:
   Vectorized<T> asin() const {
     return map(Sleef_asinf16_u10);
   }
+  Vectorized<T> asinh() const {
+    return map(Sleef_asinhf16_u10);
+  }
   Vectorized<T> atan() const {
     return map(Sleef_atanf16_u10);
   }

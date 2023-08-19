@@ -528,6 +528,9 @@ class Vectorized<ComplexFlt> {
     return map(std::asin);
 #endif
   }
+  Vectorized<ComplexFlt> asinh() const {
+    return map(std::asinh);
+  }
 
   Vectorized<ComplexFlt> exp() const {
     return map(std::exp);

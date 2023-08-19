@@ -366,6 +366,9 @@ public:
   Vectorized<T> asin() const {
     return map(std::asin);
   }
+  Vectorized<T> asinh() const {
+    return map([](T x) {return std::log(x + std::sqrt(1 + x*x)); });
+  }
   Vectorized<T> atan() const {
     return map(std::atan);
   }
