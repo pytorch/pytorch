@@ -1054,6 +1054,30 @@ class TestUnaryUfuncs(TestCase):
             rtol=rtol,
         )
 
+    @dtypes(torch.complex64, torch.complex128)
+    def test_silu_complex(self, device, dtype):
+        atol = 1e-6
+        rtol = 1e-6
+        inouts = [
+            (0.2 + 0.3j, 0.08775215595960617065 + 0.18024823069572448730j),
+            (1e-19 + 1e-18j, 4.99999984132761269448e-20 + 5.00000022906852482872e-19j),
+            (-1.0 + 2.0j, -0.78546208143234252930 + -0.44626939296722412109j),
+            (0.0 + 0.5j, -0.06383547931909561157 + 0.25000000000000000000j),
+            (2.0j, -1.55740761756896972656 + 0.99999988079071044922j)
+        ]
+
+        for inp, out in inouts:
+            res = torch.nn.functional.silu(torch.tensor(inp, dtype=dtype, device=device))
+            self.assertFalse(torch.any(torch.isnan(res)))
+            self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
+            self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
+
+        for inp, out in inouts:
+            res = torch.nn.functional.silu(torch.tensor(inp, dtype=dtype, device=device), inplace=True)
+            self.assertFalse(torch.any(torch.isnan(res)))
+            self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
+            self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
+
     # It is not obvious how to merge this into OpInfo becuase these inputs
     # succeed for gradcheck but are expected to fail for gradgradcheck
     @dtypes(torch.double)

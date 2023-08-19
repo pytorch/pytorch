@@ -6296,6 +6296,21 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_symint(self):
+        from torch._export.constraints import constrain_as_size
+
+        @torch.compile(backend="eager")
+        def f(lengths, values):
+            sizes = lengths.tolist()
+            for s in sizes:
+                constrain_as_size(s, min=2, max=100)
+            return torch.split(values, sizes)
+
+        f(torch.tensor([2, 3, 4]), torch.randn(9))
+
     def test_simple_set_usage(self):
         def foo(x, y):
             setty = {x, y}
@@ -6565,7 +6580,6 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
-
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
@@ -6606,7 +6620,6 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
-
 
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
