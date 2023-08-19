@@ -88,7 +88,7 @@ class detect_anomaly:
     def __enter__(self) -> None:
         torch.set_anomaly_enabled(True, self.check_nan)
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
 
 
@@ -117,5 +117,5 @@ class set_detect_anomaly:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
