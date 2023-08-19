@@ -6,7 +6,7 @@ import logging
 import operator
 import os
 from collections import defaultdict
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, List, Union, DefaultDict
 
 import torch
 import torch._inductor as inductor
@@ -77,7 +77,7 @@ class MatchContext:
 
     def __init__(self, outputs: List["PatternExpr"]):
         self.outputs = outputs
-        self.pattern_to_node = {}
+        self.pattern_to_node : dict = {}
 
     def match(self, pattern, node):
         """wrapper to check reused nodes in patterns"""
@@ -245,7 +245,7 @@ class ListOf(PatternExpr):
         return m.bundle()
 
 
-pass_patterns = [
+pass_patterns: List[DefaultDict[int, list]]= [
     defaultdict(list),
     defaultdict(list),
     defaultdict(list),
