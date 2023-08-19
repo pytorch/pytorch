@@ -299,6 +299,58 @@ TEST_F(VulkanAPITest, copy_to_texture) {
   }
 }
 
+void test_copy_to_texture_bool(const at::IntArrayRef input_shape) {
+  using namespace at::native::vulkan;
+  auto cpu = at::randint(0, 2, input_shape, at::TensorOptions(at::kCPU).dtype(at::kBool));
+  auto in_vulkan = cpu.vulkan();
+
+  auto out_vulkan = in_vulkan.cpu();
+  auto check = at::equal(cpu, out_vulkan.cpu());
+
+  if (!check) {
+    std::cout << "Copy texture to bool failed on input_shape " << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_hw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 != 0,  ch < 4
+  test_copy_to_texture_bool({5, 1, 2, 2});
+  test_copy_to_texture_bool({17, 2, 4, 2});
+  test_copy_to_texture_bool({9, 3, 3, 8});
+
+  // ch % 4 != 0, ch > 5
+  test_copy_to_texture_bool({7, 17, 4, 8});
+  test_copy_to_texture_bool({8, 6, 2, 4});
+  test_copy_to_texture_bool({13, 31, 4, 57});
+
+  // 3d, 2d, 1d
+  test_copy_to_texture_bool({17, 31, 4});
+  test_copy_to_texture_bool({64, 16});
+  test_copy_to_texture_bool({8});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_chw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 == 0
+  test_copy_to_texture_bool({5, 16, 2, 16});
+  test_copy_to_texture_bool({8, 8, 2, 2});
+  test_copy_to_texture_bool({16, 31, 4});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool) {
+  // Uses the shader: image_to_nchw_uint ((H * W) % 4 != 0)
+  test_copy_to_texture_bool({13, 1, 3, 5});
+  test_copy_to_texture_bool({13, 7, 1, 5});
+  test_copy_to_texture_bool({13, 8, 2, 5});
+  test_copy_to_texture_bool({13, 31, 2, 57});
+
+  test_copy_to_texture_bool({67, 19, 7});
+  test_copy_to_texture_bool({229, 213});
+  test_copy_to_texture_bool({1902});
+}
+
 TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   c10::InferenceMode mode;
 
