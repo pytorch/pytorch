@@ -1,6 +1,5 @@
 import warnings
 
-from typing import Any
 
 import torch
 
