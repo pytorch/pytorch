@@ -75,4 +75,3 @@ class Storage:
 
     def _new_with_file(self, f: Any, element_size: int) -> 'Storage':  # type: ignore[empty-body]
         ...
-
