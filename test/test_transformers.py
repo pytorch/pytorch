@@ -1542,9 +1542,6 @@ class TestSDPA(NNTestCase):
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
-            atol = 1e-2
-            rtol = 1e-2
-        if dtype is torch.bfloat16 and causal and train:
             atol = 2e-2
             rtol = 2e-2
 
