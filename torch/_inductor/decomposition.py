@@ -150,24 +150,6 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
-@register_decomposition(aten.slice_scatter)
-def slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    if start is None or end is None:
-        return NotImplemented
-    if start == 0 and end >= 2**63 - 1 and step == 1:
-        return src
-    return NotImplemented
-
-
-@register_decomposition(aten.slice)
-def slice(self, dim=0, start=None, end=None, step=1):
-    if start is None or end is None:
-        return NotImplemented
-    if start == 0 and end >= 2**63 - 1 and step == 1:
-        return self
-    return NotImplemented
-
-
 @register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))

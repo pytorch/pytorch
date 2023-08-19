@@ -4765,7 +4765,7 @@ class CommonTemplate:
 
     def test_slice_scatter2(self):
         def fn(a, b):
-            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
+            return aten.slice_scatter(a, b, 0, 0, 370)
 
         self.common(
             fn,

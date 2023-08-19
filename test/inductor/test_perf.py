@@ -478,6 +478,15 @@ class InplacingTests(TestCase):
         inp = (T(10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """26""")
 
+    def test_inplace_scatter_noop_view(self):
+        def f(a, b):
+            a[:, b] = 1
+            return a
+
+        inp = (T(10, 10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """42""")
+
+
 
 # Test cases where we don't do the right thing yet.
 class WouldBeNiceIfItWorked:

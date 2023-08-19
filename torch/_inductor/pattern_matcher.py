@@ -1141,20 +1141,34 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val1.stride() == val2.stride()
     )
 
+def remove_noop_ops(graph: torch.fx.Graph):
+    def true(*args, **kwargs):
+        return True
 
-def remove_extra_clones(graph: torch.fx.Graph):
-    seen = set()
-    for node in reversed(graph.nodes):
-        if node.target is aten.clone.default:
-            src = node.args[0]
-            if (
-                isinstance(src, torch.fx.Node)
-                and src.op == "call_function"
-                and isinstance(src.target, torch._ops.OpOverload)
-                and not src.target.is_view
-                and not any(u in seen for u in src.users)
-                and same_layout(src, node)
-            ):
+    def slice_scatter_cond(self, src, dim=0, start=None, end=None, step=1):
+        if start is None or end is None:
+            return False
+        if start == 0 and end >= 2**63 - 1 and step == 1:
+            return True
+        return False
+
+    def slice_cond(self, dim=0, start=None, end=None, step=1):
+        if start is None or end is None:
+            return False
+        if start == 0 and end >= 2**63 - 1 and step == 1:
+            return True
+        return False
+
+    noop_view_conditions = {
+        aten.slice.Tensor: (0, slice_cond),
+        aten.clone.default: (0, true),
+        aten.slice_scatter.default: (1, slice_scatter_cond)
+    }
+
+    for node in graph.nodes:
+        if node.target in noop_view_conditions:
+            cloned_arg_index, cond = noop_view_conditions[node.target]
+            src = node.args[cloned_arg_index]
+            if same_layout(node, src) and cond(*node.args, **node.kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
-        seen.add(node)

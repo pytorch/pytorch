@@ -2,6 +2,8 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
 
@@ -63,5 +65,5 @@ class TestReinplacingPassCorrectness(TestCase):
 
 
 if __name__ == "__main__":
-    if is_linux and has_cuda:
+    if IS_LINUX and HAS_CUDA:
         run_tests()
