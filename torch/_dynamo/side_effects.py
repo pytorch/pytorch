@@ -387,16 +387,22 @@ class SideEffects:
         ) in self.tensor_hooks:
             # On dynamo tensor_hooks
             #
-            # We do not record register_hook in the graph, as we do not have any mechanisms for storing the func
-            # associated into the graph. Instead, we track them and record them here, in residuals.
-            # register_hook does not graph break, but removing the handle does. First, any function passed to register
-            # is lifted into a global variable. At the end of codegen, here, in side_effects, we iterate over all the
-            # tensors with stored hooks, and we codegen
-            # (1) the tensor
-            # (2) a register_hook call on the tensor, registering the global function lifted and recorded above
-            # (3) a handle if one was created in eager
-            # Note - the handle bit is tricky, because we need to get the real user variable name it is referenced as.
-            # This real name is stored as last_seen_name, and associated where we handle STORE_FAST
+            # register_hook in the Graph: We bypass direct inclusion of register_hook calls in the graph.
+            # Instead, these are tracked and stashed as a global variable, enabling their association with tensors in
+            # the residuals. During dynamo's frame creation, these hooks are invoked seamlessly.
+            #
+            # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
+            # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
+            # bytecode retains this name. If no handle is defined, we simply pop the generated value to keep the
+            # stack intact.
+            #
+            # Dynamo Tensor Hooks Workflow:
+            # - Functions passed to register_hook are lifted globally.
+            # - In the "side_effects" phase of codegen, we iterate over tensors with hooks to:
+            #   - Generate the tensor.
+            #   - Issue a register_hook call on the tensor, linking to the globally stored function.
+            #   - Incorporate a handle if one was established in the eager phase.
+            # The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
             cg(tensor)
             cg.extend_output([cg.create_load_attr("register_hook")])
             cg(hook)
