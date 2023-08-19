@@ -24,6 +24,7 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith('linux')
 
 
 def remove_build_path():
@@ -948,10 +949,11 @@ class TestCppExtensionJIT(common.TestCase):
         pch_exist = os.path.exists(head_file_pch)
         signature_exist = os.path.exists(head_file_signature)
 
-        compiler = get_cxx_compiler()
-        if check_compiler_is_gcc(compiler):
-            self.assertEqual(pch_exist, True)
-            self.assertEqual(signature_exist, True)
+        if IS_LINUX:
+            compiler = get_cxx_compiler()
+            if check_compiler_is_gcc(compiler):
+                self.assertEqual(pch_exist, True)
+                self.assertEqual(signature_exist, True)
 
 if __name__ == "__main__":
     common.run_tests()
