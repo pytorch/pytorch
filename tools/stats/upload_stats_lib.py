@@ -23,7 +23,7 @@ S3_RESOURCE = boto3.resource("s3")
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
-# NB: Rockset has an upper limit of 5000 documents in one request
+# NB: Rockset has an upper limit of 5000 documents in one  request
 BATCH_SIZE = 5000
 
 
