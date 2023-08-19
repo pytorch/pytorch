@@ -919,6 +919,7 @@ def get_const_index(code_options, val):
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+
     if sys.version_info < (3, 11):
         assert varname_from_oparg is None
         varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
@@ -942,6 +943,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             name: allnames[name]
             for name in code_options["co_cellvars"] + code_options["co_freevars"]
         }
+
     for i in range(len(instructions)):
 
         def should_compute_arg():

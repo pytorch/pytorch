@@ -404,7 +404,7 @@ class SideEffects:
             if hasattr(handle, "last_seen_name") and handle.last_seen_name:
                 # register_hook stored with variable name assigned to the handle
                 cg.extend_output(
-                    [create_instruction("STORE_NAME", argval=handle.last_seen_name)]
+                    [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
                 )
             else:
                 # register_hook stored w/o a variable name assigned to the handle

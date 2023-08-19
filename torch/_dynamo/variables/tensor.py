@@ -656,7 +656,10 @@ class TensorVariable(VariableTracker):
             handle = self.as_proxy().node.meta["example_value"].register_hook(fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
-                handle, last_seen_name=None, **options
+                handle,
+                last_seen_name=None,
+                mutable_local=variables.base.MutableLocal(),
+                **options,
             )
             fn_var.source = tx.store_hook(name, fn)
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)

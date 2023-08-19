@@ -13,6 +13,7 @@ import torch.nn
 
 from .. import variables
 from ..allowed_functions import is_allowed
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
@@ -585,7 +586,16 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 
 class RemovableHandleVariable(UserDefinedObjectVariable):
-    def __init__(self, value, last_seen_name=None, value_type=None, **kwargs):
+    def __init__(
+        self, value, last_seen_name=None, value_type=None, mutable_local=None, **kwargs
+    ):
         super().__init__(value, value_type, **kwargs)
         # associated later, see code symbolic_convert and On dynamo tensor_hooks
         self.last_seen_name = last_seen_name
+        self.mutable_local = mutable_local
+
+    def reconstruct(self, codegen):
+        if self.last_seen_name:
+            # It is an invariant that at this point, a STORE_FAST was executed for this name.
+            return [create_instruction("LOAD_FAST", argval=self.last_seen_name)]
+        return super().reconstruct(codegen)
