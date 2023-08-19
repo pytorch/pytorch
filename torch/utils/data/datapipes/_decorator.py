@@ -106,10 +106,10 @@ class non_deterministic:
                             f"to return a boolean value, but {type(res)} is found")
         global _determinism
         if _determinism and res:
-            raise TypeError(f"{self.cls.__name__} is non-deterministic with the inputs, but you set "
+            raise TypeError(f"{self.cls.__name__} is non-deterministic with the inputs, but you set "  # type: ignore[union-attr]
                             "'guaranteed_datapipes_determinism'. You can turn off determinism "
                             "for this DataPipe if that is acceptable for your application"
-                            )  # type: ignore[union-attr]
+                            )
         return self.cls(*args, **kwargs)  # type: ignore[call-arg, misc]
 
 
