@@ -1,5 +1,6 @@
 import collections
-from typing import Any, Dict, List, Optional, Protocol, Tuple, TypeAlias, Union, overload
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Union, overload
+from typing_extensions import TypeAlias
 
 import numpy as np
 import google.protobuf.message

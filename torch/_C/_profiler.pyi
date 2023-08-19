@@ -1,7 +1,8 @@
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Tuple, TypeAlias, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
+from typing_extensions import TypeAlias
 
 # defined in torch/csrc/profiler/python/init.cpp
 
