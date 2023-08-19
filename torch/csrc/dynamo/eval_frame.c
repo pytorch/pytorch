@@ -35,7 +35,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
 #define DECLARE_PYOBJ_ATTR(name) \
 static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObject* _noargs) { \
   PyObject* res = (PyObject*)self->frame->name; \
-  Py_XINCREF(res); \
+  Py_INCREF(res); \
   return res; \
 }
 
@@ -378,11 +378,6 @@ static CacheEntry* create_cache_entry(
 }
 
 static void destroy_cache_entry(CacheEntry* e) {
-  if (e == Py_NONE_CACHE_ENTRY) {
-    // Corresponding decref for Py_None in init_and_set_extra_state
-    Py_DECREF(e);
-    return;
-  }
   Py_XDECREF(e->check_fn);
   Py_XDECREF(e->code);
   // This will recursively call destroy_cache_entry for the next items in the
