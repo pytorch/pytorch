@@ -423,28 +423,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args
             )
 
-        def has_type_promotion(*args):
-            if len(args) < 2:
-                return False
-            else:
-                dtype = None
-                for t in args:
-                    if isinstance(t, TensorBox):
-                        if dtype is None:
-                            dtype = t.data.get_dtype()  # type: ignore[attr-defined]
-                        elif dtype != t.data.get_dtype():
-                            return True
-                return False
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
-        # Note: we'll fallback on type promotion until
-        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
-        # is in the pytorch triton version
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                use_foreach = not is_dynamic(*args)
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -3743,7 +3727,7 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    assert not divisor_override
+    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
     if not stride:
         stride = kernel_size
     if not padding:
@@ -3850,7 +3834,9 @@ def avg_pool2d_backward(
                 ph = ops.add(phstart, ops.constant(ph_, torch.int32))
                 pw = ops.add(pwstart, ops.constant(pw_, torch.int32))
 
-                if count_include_pad or not had_padding:
+                if divisor_override is not None:
+                    scale = divisor_override
+                elif count_include_pad or not had_padding:
                     scale = kernel_size[0] * kernel_size[1]
                 else:
                     scale = compute_pool_size_without_padding(ph, pw)
@@ -4029,35 +4015,41 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim):
-    # triton-rocm currently doesn't support tl.reduce
-    device = x.get_device()
-    if device.type == "cuda" and torch.version.hip is not None:
-        return True
-
-    # Single pass variance cannot be split, so use sum based var-mean if it
-    # would be split
+    # Instead of unrolling welford, just unroll the simpler two-step var
+    axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
-        x,
-        axis=axis,
-        keepdims=keepdim,
-        dtype=x.get_dtype(),
-        override_return_dtype=None,
+        x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
     )
-    _, split = ir.Reduction.num_splits(
-        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
-        reduction_type="sum",
-        **kwargs,
+
+    ranges = kwargs["ranges"]
+    reduction_numel = sympy_product(kwargs["reduction_ranges"])
+    return (
+        isinstance(reduction_numel, sympy.Integer)
+        and int(reduction_numel) < config.unroll_reductions_threshold
+        and sympy_product(ranges) != 1
     )
-    return split > 1
 
 
-def var_welford_(x, axis, *, correction, keepdim):
+def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if correction is None:
         correction = 1
 
-    sum_dx2 = make_reduction("var_unnormalized")(x, axis=axis, keepdims=keepdim)
+    kwargs = _make_reduction_inner(
+        x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
+    )
+    loader = kwargs.pop("inner_fn")
+    kwargs.pop("dst_dtype")
+    kwargs.pop("src_dtype")
 
-    dtype = sum_dx2.get_dtype()
+    mean, m2, _ = ir.WelfordReduction.create(
+        inner_fns=(loader,),
+        reduction_type="welford_reduce",
+        dtype=x.get_dtype(),
+        **kwargs,
+    )
+    m2.realize()
+
+    dtype = x.get_dtype()
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     rnumel = sympy_product(size[i] for i in axis)
@@ -4072,7 +4064,12 @@ def var_welford_(x, axis, *, correction, keepdim):
         N = get_constant_or_index_expr(rnumel, dtype)
         return data / (N - c)
 
-    return make_pointwise(scale_fn)(sum_dx2)
+    var = make_pointwise(scale_fn)(m2)
+
+    if return_mean:
+        mean.realize()
+        return var, mean
+    return var
 
 
 @register_lowering([aten.var, prims.var])
@@ -4082,7 +4079,9 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
             x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
         )
 
-    return var_welford_(x, axis=axis, correction=correction, keepdim=keepdim)
+    return var_mean_welford_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+    )
 
 
 @register_lowering(aten.var_mean)
@@ -4092,9 +4091,8 @@ def var_mean(x, axis=None, *, correction=None, keepdim=False):
             x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
         )
 
-    return (
-        var_welford_(x, axis=axis, correction=correction, keepdim=keepdim),
-        mean(x, axis=axis, keepdim=keepdim),
+    return var_mean_welford_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
 
@@ -4476,6 +4474,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
+register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 def register_inplace(aten_op, outplace_op):

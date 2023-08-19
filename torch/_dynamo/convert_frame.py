@@ -67,6 +67,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
@@ -400,6 +401,11 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
+    from torch.fx.experimental.validator import (
+        translation_validation_enabled,
+        ValidationException,
+    )
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
@@ -421,8 +427,21 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
         )
-        with tracing(tracer.output.tracing_context):
-            tracer.run()
+
+        try:
+            with tracing(tracer.output.tracing_context):
+                tracer.run()
+        except (exc.RestartAnalysis, exc.SkipFrame):
+            raise
+        except Exception:
+            if translation_validation_enabled():
+                fakes = tracer.output.tracked_fakes
+                tracer.output.shape_env.produce_guards(
+                    [a.fake for a in fakes],
+                    [a.source for a in fakes],
+                )
+            raise
+
         output = tracer.output
         assert output is not None
         assert output.output_instructions
@@ -519,7 +538,19 @@ def _compile(
                     for code in guard.code_list
                 ]
             )
-            guards_log.debug(guard_str)
+            guards_log.debug("%s", guard_str)
+
+        if verbose_guards_log.isEnabledFor(logging.DEBUG):
+            for guard in sorted(output.guards):
+                if guard.code_list is None:
+                    continue
+                cat_code = " and ".join(guard.code_list)
+                verbose_guards_log.debug(
+                    "GUARD: %s\nStack:\n%sUser Stack:\n%s",
+                    cat_code,
+                    "".join(guard.stack.format()),
+                    "".join(guard.user_stack.format()),
+                )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -542,6 +573,7 @@ def _compile(
         AssertionError,
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
+        ValidationException,
     ) as e:
         fail_reason = str(e)
         exception_handler(e, code, frame, export=export)
