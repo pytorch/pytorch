@@ -648,7 +648,7 @@ class TorchVariable(VariableTracker):
 
             return torch.utils._pytree.tree_map(map_fn, tree)
         elif isinstance(self.value, types.ModuleType):
-            raise TypeError("'module' object is not callable")
+            unimplemented("TypeError(\"'module' object is not callable\")")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
