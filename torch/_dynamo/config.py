@@ -284,7 +284,7 @@ _save_config_ignore = {
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = False
+capture_func_transforms = True
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
