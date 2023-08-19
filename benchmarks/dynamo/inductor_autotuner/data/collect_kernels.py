@@ -30,7 +30,7 @@ parser.add_argument(
 
 def main(args):
     LOG_DIR = args.log_dir
-    DATA_DIR = args.cache_dir
+    DATA_DIR = args.data_dir
     DTYPE_LIST = args.dtype.split(",")
     MODE_LIST = args.mode.split(",")
     BENCHMARK_PY = args.benchmark
