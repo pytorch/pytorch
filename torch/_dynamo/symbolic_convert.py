@@ -791,6 +791,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         loaded_vt = self.pop()
         name = inst.argval
         self.symbolic_locals[name] = loaded_vt
+        # If the last top VT in the stack (just popped) is a handle (see On dynamo tensor_hooks), we associate
+        # the stored name.
         if isinstance(loaded_vt, RemovableHandleVariable):
             loaded_vt.last_seen_name = name
 

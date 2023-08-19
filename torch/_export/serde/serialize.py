@@ -806,7 +806,12 @@ class GraphModuleDeserializer:
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
                         symbolic_shapes._constrain_symbol_range(
-                            self.shape_env, sym, vr.lower, vr.upper  # type: ignore[arg-type]
+                            self.shape_env,
+                            sym,
+                            compiler_min=vr.lower,  # type: ignore[arg-type]
+                            compiler_max=vr.upper,  # type: ignore[arg-type]
+                            runtime_min=vr.lower,  # type: ignore[arg-type]
+                            runtime_max=vr.upper  # type: ignore[arg-type]
                         )
 
             return self.shape_env.create_symintnode(sym, hint=val.hint)

@@ -638,6 +638,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "register_hook":
+            # see On dynamo tensor_hooks
             assert len(args) == 1
             fn_var = args[0]
 

@@ -565,8 +565,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(key, self)
 
 
+class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def is_matching_object(obj):
+        try:
+            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+        except ImportError:
+            return False
+        else:
+            return type(obj) is KeyedJaggedTensor
+
+    def __init__(self, value, **kwargs):
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert type(value) is KeyedJaggedTensor
+        super().__init__(value, **kwargs)
+
+    # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+
+
 class RemovableHandleVariable(UserDefinedObjectVariable):
     def __init__(self, value, last_seen_name=None, value_type=None, **kwargs):
         super().__init__(value, value_type, **kwargs)
-        # associated later
+        # associated later, see code symbolic_convert and On dynamo tensor_hooks
         self.last_seen_name = last_seen_name
