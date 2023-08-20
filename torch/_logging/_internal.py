@@ -571,7 +571,7 @@ class TorchLogsFormatter(logging.Formatter):
 
         record.compileid = ""
         if (
-            compile_id := torch._guards.TracingContext.current_compile_id()
+            compile_id := torch._guards.CompileContext.current_compile_id()
         ) is not None:
             record.compileid = f" [{compile_id}]"
 

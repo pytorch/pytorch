@@ -45,6 +45,7 @@ class CompileId(NamedTuple):
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
     frame_compile_id: int
+    # TODO: consider also tracking the recompilation count
 
     def __str__(self):
         return f"{self.frame_id}/{self.frame_compile_id}"
@@ -502,10 +503,6 @@ TracingContext is the source of truth for all currently accumulated information
 needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
 are open to managing their own TracingContext with that in mind.
 
-Currently, only guards live on the TracingContext, in the form of a GuardsContext.
-However, future implementations will move FakeTensorMode (and its owned ShapeEnv), as well
-as other structures into it.
-
 The purpose of TracingContext is not to be a dumping ground, or god object, but rather to avoid
 having to plumb complex subsystems across multiple verticals.
 
@@ -513,7 +510,28 @@ Ex: A common example is guard accumulation between dynamo, shape_env, aot_autogr
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
 to plumb objects back up to where frame interpretation happened.
+
+Note that you can end up with multiple TracingContext for a single compilation
+of a frame, as we reset the TracingContext whenever we restart analysis.
+CompileContext is a more overarching context that encompasses multiple restarts.
 """
+
+
+class CompileContext:
+    @staticmethod
+    def get() -> Optional["CompileContext"]:
+        return getattr(_TLS, "compile_context", None)
+
+    def __init__(self, compile_id):
+        assert compile_id is None or isinstance(compile_id, CompileId)
+        self.compile_id = compile_id
+
+    @staticmethod
+    def current_compile_id():
+        self = CompileContext.get()
+        if self is None:
+            return None
+        return self.compile_id
 
 
 class TracingContext:
@@ -528,17 +546,11 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return getattr(_TLS, "tracing_context", None)
 
-    def __init__(self, compile_id):
-        assert compile_id is None or isinstance(compile_id, CompileId)
-
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
+    def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
-        # Due to ordering reasons, the fake mode is lazily populated
-        self.fake_mode: FakeTensorMode = None  # type: ignore[assignment]
-        self.compile_id = compile_id
+        self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -560,13 +572,6 @@ class TracingContext:
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
         self.output_strides: Optional[List[Optional[List[int]]]] = None
-
-    @staticmethod
-    def current_compile_id():
-        self = TracingContext.get()
-        if self is None:
-            return None
-        return self.compile_id
 
     @staticmethod
     def extract_stack():
@@ -661,15 +666,25 @@ class TracingContext:
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
 
 
-"""
-This function installs the passed in tracing context as a dynamic scoped global variable.
-
-Calls to TracingContext.get() while not under a `with tracing()` context will return None.
-"""
+@contextmanager
+def compile_context(context: CompileContext):
+    old_context = getattr(_TLS, "compile_context", None)
+    _TLS.compile_context = context
+    try:
+        yield context
+    finally:
+        _TLS.compile_context = old_context
 
 
 @contextmanager
 def tracing(context: TracingContext):
+    """
+    This function installs the passed in tracing context as a dynamic scoped
+    global variable.
+
+    Calls to TracingContext.get() while not under a `with tracing()` context
+    will return None.
+    """
     old_context = getattr(_TLS, "tracing_context", None)
     _TLS.tracing_context = context
     try:
