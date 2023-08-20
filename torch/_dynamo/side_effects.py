@@ -458,7 +458,6 @@ class SideEffects:
                 # register_hook stored w/o a variable name assigned to the handle
                 cg.extend_output([create_instruction("POP_TOP")])
 
-
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
@@ -515,7 +514,6 @@ class SideEffects:
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
                     else:
-                        print("Handling Store Attr!", id(var.mutable_local), name, value, var.mutable_local.source)
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         cg(var.mutable_local.source)
