@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import functools
-from typing import List
+import logging
+from typing import List, TypedDict
 
 import torch
 from .. import config, ir
@@ -26,6 +29,8 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
@@ -180,15 +185,6 @@ conv2d_template = TritonTemplate(
 aten_convolution = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
-    (
-        "bias",
-        "stride",
-        "padding",
-        "dilation",
-        "transposed",
-        "output_padding",
-        "groups",
-    ),
     has_out_variant=False,
 )
 
@@ -203,15 +199,24 @@ def conv1x1_via_mm(x, w, *, out):
 aten_conv1x1_via_mm = ExternKernelChoice(conv1x1_via_mm, None)
 
 
+class ConvLayoutParams(TypedDict):
+    stride: tuple[int, ...]
+    padding: tuple[int, ...]
+    dilation: tuple[int, ...]
+    transposed: bool
+    output_padding: tuple[int, ...]
+    groups: int
+
+
 def conv_layout(
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    stride: tuple[int, ...],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
@@ -289,7 +294,7 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     assert isinstance(groups, int)
-    kwargs = {
+    kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
         "dilation": dilation,
@@ -305,7 +310,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_static_shapes(
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
     ndim = len(kernel_shape)
@@ -314,8 +319,20 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
+    def channels_last_conv():
+        if V.graph.layout_opt and ndim == 2:
+            return True
+
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        return req_stride_order == ir.NHWC_STRIDE_ORDER
+
+    autotuning_gemm = config.max_autotune or config.max_autotune_gemm
+
     if (
-        config.conv_1x1_as_mm
+        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
@@ -335,21 +352,46 @@ def convolution(
 
     x.realize()
     weight.realize()
-    layout = conv_layout(x, weight, None, **kwargs)
-    req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
-    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-    weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
-    if bias is None:
-        args = (x, weight)
-        kwargs["bias"] = None
+    # ndim can be 1 for convolution in models such as demucs
+    # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
+    # apply channels last.
+    if V.graph.layout_opt and ndim == 2:
+        V.graph.num_channels_last_conv += 1
+        x = ir.ExternKernel.require_channels_last(x)
+        # TODO maybe we can convert weights to channels last just once before
+        # running the model.
+        weight = ir.ExternKernel.require_channels_last(weight)
+        layout = conv_layout(x, weight, None, **kwargs)
     else:
-        args = (x, weight, bias)
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+
+    ordered_kwargs_for_cpp_kernel = [
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ]
+    if bias is None:
+        args = [x, weight]
+        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
+        ordered_kwargs_for_cpp_kernel.insert(0, "bias")
+    else:
+        args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.guard_static_shapes(bias.get_size())
+        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
 
-    choices = [aten_convolution.bind(args, layout, **kwargs)]
+    choices = [
+        aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)
+    ]
     if (
         use_triton_template(layout)
         # templates only support these:
@@ -417,4 +459,12 @@ def _convolution(
     )
 
 
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
+def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
+    assert fx_node.target == torch.ops.aten.convolution.default
+    if V.graph.layout_opt:
+        return args, kwargs
+    else:
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
+add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)

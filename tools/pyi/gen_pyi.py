@@ -8,7 +8,7 @@ from torchgen.api.python import (
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from torchgen.gen import parse_native_yaml
+from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
 from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
@@ -93,14 +93,6 @@ blocklist = [
     "range",
     # defined in functional
     "einsum",
-    # reduction argument; these bindings don't make sense
-    "binary_cross_entropy_with_logits",
-    "ctc_loss",
-    "cosine_embedding_loss",
-    "hinge_embedding_loss",
-    "kl_div",
-    "margin_ranking_loss",
-    "triplet_margin_loss",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
     # Manually define named tensor type stubs in __init__.pyi.in
@@ -193,21 +185,19 @@ def sig_for_ops(opname: str) -> List[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), "Unexpected op {}".format(
-        opname
-    )
+    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
     if name in binary_ops:
-        return ["def {}(self, other: Any) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     elif name in comparison_ops:
-        sig = "def {}(self, other: Any) -> Tensor: ...".format(opname)
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
         if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
             sig += "  # type: ignore[override]"
         return [sig]
     elif name in unary_ops:
-        return ["def {}(self) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
@@ -217,7 +207,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
             tname = "builtins." + tname
-        return ["def {}(self) -> {}: ...".format(opname, tname)]
+        return [f"def {opname}(self) -> {tname}: ..."]
     else:
         raise Exception("unknown op", opname)
 
@@ -253,10 +243,201 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     return type_hints
 
 
+def get_max_pool_dispatch(name: str, arg_list: List[str]) -> Dict[str, List[str]]:
+    flag_pos = arg_list.index("{return_indices}")
+    # If return_indices is positional arg, everything before should have no default
+    arg_list_positional = (
+        [
+            ", ".join(single_arg.split(" = ")[0] for single_arg in arg.split(", "))
+            for arg in arg_list[: flag_pos + 1]
+        ]
+        + ["/"]
+        + arg_list[flag_pos + 1 :]
+    )
+    # Otherwise force return_indices to be kwarg
+    arg_list_keyword = arg_list.copy()
+    arg_list_keyword.insert(flag_pos, "*")
+    tmpl = "def {name}({args}) -> {{return_type}}: ..."
+    return {
+        name: [
+            tmpl.format(name=name, args=", ".join(arg_list)).format(
+                return_indices="return_indices: Literal[False] = False",
+                return_type="Tensor",
+            ),
+            tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
+                return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
+            ),
+            tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
+                return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
+            ),
+        ]
+    }
+
+
 def gen_nn_functional(fm: FileManager) -> None:
+    INPUT = "input: Tensor"
+    KERNEL_SIZE = "kernel_size: Union[_int, _size]"
+    STRIDE_PADDING = ", ".join(
+        [
+            "stride: Optional[Union[_int, _size]] = None",
+            "padding: Union[_int, _size] = 0",
+        ]
+    )
+
+    # TODO the list for `torch._C._nn` is nonexhaustive
+    unsorted_c_nn_function_hints: Dict[str, List[str]] = {}
+
+    for d in (2, 3):
+        unsorted_c_nn_function_hints.update(
+            {
+                f"avg_pool{d}d": [
+                    f"def avg_pool{d}d({{}}) -> Tensor: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                f"{STRIDE_PADDING}",
+                                "ceil_mode: bool = False",
+                                "count_include_pad: bool = True",
+                                "divisor_override: Optional[int] = None",
+                            ]
+                        )
+                    )
+                ],
+                f"fractional_max_pool{d}d": [
+                    f"def fractional_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                "output_size: Union[_int, _size]",
+                                "_random_samples: Tensor",
+                            ]
+                        ),
+                        "Tuple[Tensor, Tensor]",
+                    )
+                ],
+                f"adaptive_max_pool{d}d": [
+                    f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
+                        "Tuple[Tensor, Tensor]",
+                    )
+                ],
+            }
+        )
+
+    unsorted_c_nn_function_hints.update(
+        {
+            "hardtanh": [
+                "def hardtanh({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "hardtanh_": [
+                "def hardtanh_({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                        ]
+                    )
+                )
+            ],
+            "elu_": ["def elu_(input: Tensor, alpha: float = ...) -> Tensor: ..."],
+            "leaky_relu": [
+                "def leaky_relu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "negative_slope: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "leaky_relu_": [
+                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
+            ],
+            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
+            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
+            "softplus": [
+                "def softplus({}) -> Tensor: ...".format(
+                    ", ".join(
+                        ["input: Tensor", "beta: int = ...", "threshold: int = ..."]
+                    )
+                )
+            ],
+            "softshrink": [
+                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
+            ],
+            "hardsigmoid": [
+                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
+            ],
+            "linear": [
+                "def linear({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "weight: Tensor",
+                            "bias: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "pad": [
+                "def pad({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "pad: Sequence[int]",
+                            "mode: str = ...",
+                            "value: Optional[float] = None",
+                        ]
+                    )
+                )
+            ],
+            "one_hot": [
+                "def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ..."
+            ],
+            "scaled_dot_product_attention": [
+                "def scaled_dot_product_attention({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "query: Tensor",
+                            "key: Tensor",
+                            "value: Tensor",
+                            "attn_mask: Optional[Tensor] = None",
+                            "dropout_p: float = 0.0",
+                            "is_causal: bool = False",
+                            "scale: Optional[float] = None",
+                        ]
+                    )
+                )
+            ],
+        }
+    )
+
+    c_nn_function_hints: List[str] = []
+    for _, hints in sorted(unsorted_c_nn_function_hints.items()):
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        c_nn_function_hints += hints
+
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
-    imports = [
+    torch_imports = [
         "conv1d",
         "conv2d",
         "conv3d",
@@ -265,63 +446,98 @@ def gen_nn_functional(fm: FileManager) -> None:
         "conv_transpose3d",
         "conv_tbc",
         "avg_pool1d",
+        "adaptive_avg_pool1d",
         "relu_",
         "selu_",
         "celu_",
+        "prelu",
         "rrelu_",
+        "hardshrink",
+        "bilinear",
         "pixel_shuffle",
         "pixel_unshuffle",
         "channel_shuffle",
         "native_channel_shuffle",
+        "pairwise_distance",
         "pdist",
         "cosine_similarity",
     ]
-    # Functions generated by `torch._jit_internal.boolean_dispatch`
-    dispatches = [
-        "fractional_max_pool2d",
-        "fractional_max_pool3d",
-        "max_pool1d",
-        "max_pool2d",
-        "max_pool3d",
-        "adaptive_max_pool1d",
-        "adaptive_max_pool2d",
-        "adaptive_max_pool3d",
-    ]
-    # Functions directly imported from `torch._C`
-    from_c = [
+    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
+
+    # Functions imported into `torch.nn.functional` from `torch._C._nn`
+    c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
         "hardtanh_",
         "elu_",
         "leaky_relu_",
-        "logsigmoid",
+        "gelu",
         "softplus",
         "softshrink",
+        "linear",
+        "pad",
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
-    # TODO make these types more precise
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
+    # This is from `torch._C._nn` but renamed
+    imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
+
+    # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
+    unsorted_dispatched_hints: Dict[str, List[str]] = {}
+
+    for d in (1, 2, 3):
+        unsorted_dispatched_hints.update(
+            **get_max_pool_dispatch(
+                f"max_pool{d}d",
+                [
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    f"{STRIDE_PADDING}",
+                    "dilation: Union[_int, _size] = 1",
+                    "ceil_mode: bool = False",
+                    "{return_indices}",
+                ],
+            ),
+            **get_max_pool_dispatch(
+                f"fractional_max_pool{d}d",
+                [
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    "output_size: Optional[Union[_int, _size]] = None",
+                    "output_ratio: Optional[_ratio_any_t] = None",
+                    "{return_indices}",
+                    "_random_samples: Optional[Tensor] = None",
+                ],
+            ),
+            **get_max_pool_dispatch(
+                f"adaptive_max_pool{d}d",
+                [f"{INPUT}", "output_size: Union[_int, _size]", "{return_indices}"],
+            ),
+        )
+
+    # There's no fractional_max_pool1d
+    del unsorted_dispatched_hints["fractional_max_pool1d"]
+
+    dispatched_hints: List[str] = []
+    for _, hints in sorted(unsorted_dispatched_hints.items()):
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        dispatched_hints += hints
+
     fm.write_with_template(
         "torch/nn/functional.pyi",
         "torch/nn/functional.pyi.in",
         lambda: {
-            "imported_hints": import_code,
-            "dispatched_hints": dispatch_code,
+            "imported_hints": imported_hints,
+            "dispatched_hints": dispatched_hints,
         },
     )
-
-    # functional.pyi already contains the definitions for those functions
-    # so, we don't export then to it
-    from_c.extend(["hardtanh", "leaky_relu", "hardsigmoid"])
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
     fm.write_with_template(
         "torch/_C/_nn.pyi",
         "torch/_C/_nn.pyi.in",
         lambda: {
-            "imported_hints": import_code,
-            "dispatched_hints": dispatch_code,
+            "c_nn_function_hints": c_nn_function_hints,
         },
     )
 
@@ -372,7 +588,7 @@ def gen_pyi(
                                 "dtype: Optional[_dtype] = None",
                                 "device: Union[_device, str, None] = None",
                                 "requires_grad: _bool = False",
-                                "check_invariants: _bool = None",
+                                "check_invariants: Optional[_bool] = None",
                             ]
                         ),
                     )
@@ -448,7 +664,7 @@ def gen_pyi(
                             "dtype: Optional[_dtype] = None",
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
-                            "check_invariants: _bool = None",
+                            "check_invariants: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -466,7 +682,7 @@ def gen_pyi(
                             "layout: Optional[_layout] = None",
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
-                            "check_invariants: _bool = None",
+                            "check_invariants: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -622,112 +838,6 @@ def gen_pyi(
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
                 "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
-            "binary_cross_entropy_with_logits": [
-                "def binary_cross_entropy_with_logits({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "weight: Optional[Tensor] = None",
-                            "size_average: Optional[bool] = None",
-                            "reduce: Optional[bool] = None",
-                            "reduction: str = ...",
-                            "pos_weight: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "cosine_embedding_loss": [
-                "def cosine_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "ctc_loss": [
-                "def ctc_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "log_probs: Tensor",
-                            "targets: Tensor",
-                            "input_lengths: Tensor",
-                            "target_lengths: Tensor",
-                            "blank: int = ...",
-                            "reduction: str = ...",
-                            "zero_infinity: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "hinge_embedding_loss": [
-                "def hinge_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "kl_div": [
-                "def kl_div({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                            "log_target: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "margin_ranking_loss": [
-                "def margin_ranking_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "triplet_margin_loss": [
-                "def triplet_margin_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "anchor: Tensor",
-                            "positive: Tensor",
-                            "negative: Tensor",
-                            "margin: float = ...",
-                            "p: float = ...",
-                            "eps: float = ...",
-                            "swap: bool = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
@@ -763,15 +873,13 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
-                binop
-            )
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -796,8 +904,22 @@ def gen_pyi(
             else:
                 namedtuples[tuple_name] = tuple_def
 
+    def replace_special_case(hint: str) -> str:
+        # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
+        hint = hint.replace("at::Reduction::Mean", "1")
+        hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
+        # Match both:
+        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
+        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
+        hint = hint.replace(
+            "Tuple[Tensor, ...], List[Tensor]] = None",
+            "Tuple[Tensor, ...], List[Tensor], None] = None",
+        )
+        return hint
+
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
+        hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         function_hints += hints
@@ -903,6 +1025,7 @@ def gen_pyi(
                 "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
             ],
             "_is_view": ["def _is_view(self) -> _bool: ..."],
+            "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
@@ -959,8 +1082,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
@@ -969,9 +1092,9 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                "*, alpha: Optional[Number] = 1{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
@@ -987,9 +1110,7 @@ def gen_pyi(
         "bfloat16",
     ]
     for name in simple_conversions:
-        unsorted_tensor_method_hints[name].append(
-            "def {}(self) -> Tensor: ...".format(name)
-        )
+        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
@@ -1018,7 +1139,7 @@ def gen_pyi(
                 namedtuples[tuple_name] = tuple_def
 
     for op in all_ops:
-        name = "__{}__".format(op)
+        name = f"__{op}__"
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
@@ -1032,7 +1153,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
+    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1051,7 +1172,7 @@ def gen_pyi(
         "ByteTensor",
         "BoolTensor",
     ):
-        legacy_class_hints.append("class {}(Tensor): ...".format(c))
+        legacy_class_hints.append(f"class {c}(Tensor): ...")
 
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1059,7 +1180,7 @@ def gen_pyi(
     # TODO: don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
-        "{}: dtype = ...".format(n)
+        f"{n}: dtype = ..."
         for n in [
             "float32",
             "float",
@@ -1100,11 +1221,19 @@ def gen_pyi(
     ]
     all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
-    all_directive[0] = "__all__ = {}".format(all_directive[0])
+    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+
+    # Tags Enum type hints
+    # ~~~~~~~~~~~~~~~~~~~~
+
+    tag_names = sorted(parse_tags_yaml(tags_yaml_path))
+    tag_attributes = "\n".join(
+        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+    )
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -1118,6 +1247,7 @@ def gen_pyi(
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
         "all_directive": all_directive,
+        "tag_attributes": tag_attributes,
     }
     fm.write_with_template(
         "torch/_C/__init__.pyi",

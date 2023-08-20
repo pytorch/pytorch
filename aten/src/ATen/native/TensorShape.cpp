@@ -48,6 +48,7 @@
 #include <ATen/ops/_neg_view_copy_native.h>
 #include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
+#include <ATen/ops/_reshape_copy_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
@@ -548,6 +549,21 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
+static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  auto outBytes = out.nbytes();
+  char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
+  size_t totalBytes = 0;
+  for (const Tensor& input : inputs) {
+    TORCH_CHECK(outBytes >= totalBytes);
+    if (input.nbytes() > 0) {
+      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    }
+    totalBytes += input.nbytes();
+  }
+  TORCH_CHECK(outBytes == totalBytes);
+}
+
+
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -563,10 +579,20 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   auto materialized = tensors.materialize();
 
-  // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = at::isFloatingType(dtype);
+  // fast path for single thread when both inputs and result are contiguous and
+  // not empty, and concat dim is 0
+  if (use_serial_kernel && all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format)) {
+    if (dim == 0) {
+      fastCatOutDim0(result, materialized);
+      return;
+    }
+    // TODO: Add fast cat for higher dimensions and support multi-threaded fast cat
+  }
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
@@ -1129,7 +1155,7 @@ Tensor sum_to_size_symint(const Tensor& self, SymIntArrayRef size) {
 
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
-Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
+static Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
   auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, self.storage_offset());
@@ -1145,7 +1171,7 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   return result;
 }
 
-Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+static Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -1194,7 +1220,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
 // and is currently not available through the dispatcher. The additional
 // input, quantizer, is called by the select & slice methods.
 // TODO: Make this function compatible with the dispatcher
-Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
+static Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
   QuantizerPtr quantizer) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   TORCH_CHECK(
@@ -1213,7 +1239,7 @@ const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymInt
   return self;
 }
 
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+static Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
@@ -1282,9 +1308,12 @@ Tensor& narrow_copy_dense_cpu_out(
 
   // wrap start and do bound check
   const auto cur_size = self_sizes[dim];
-  if (start != cur_size && start < 0) { // start being the end is valid, but
-                                        // not a valid dim specification.
-    start = at::maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(
       length >= 0 && start <= cur_size - length,
@@ -1348,8 +1377,12 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
@@ -1358,12 +1391,16 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
+  TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
-  TORCH_CHECK(start <= cur_size - length,
+  TORCH_SYM_CHECK(start.sym_le(cur_size - length),
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice_symint(self, dim, start, start + length, 1);
 }
@@ -1378,7 +1415,7 @@ Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
-_permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
+static _permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
   const auto ndim = self.dim();
   TORCH_CHECK(ndim == static_cast<int64_t>(dims.size()),
       "permute(sparse_coo): number of dimensions in the tensor input ",
@@ -1520,21 +1557,21 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-Tensor tile(const Tensor& self, IntArrayRef reps){
+Tensor tile_symint(const Tensor& self, SymIntArrayRef reps){
   // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0){
-    std::vector<int64_t> new_reps(size_diff, 1);
+    std::vector<c10::SymInt> new_reps(size_diff, 1);
     for (const auto i : c10::irange(reps.size())) {
       new_reps.emplace_back(reps[i]);
     }
-    return self.repeat(IntArrayRef(new_reps));
+    return self.repeat_symint(SymIntArrayRef(new_reps));
   }
   // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
-  return self.repeat(reps);
+  return self.repeat_symint(reps);
 }
 
 //
@@ -1724,7 +1761,7 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 // this is an auxiliary function, called by the select&slice methods, that
 // creates a new quantizer from the given input
 // is_select is true if calling function is select()
-QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int64_t start,
+static QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int64_t start,
   int64_t end, int64_t dim, int64_t step) {
   auto quantizer_prev = get_qtensorimpl(self)->quantizer();
   if (quantizer_prev->qscheme() == QScheme::PER_TENSOR_AFFINE) {
@@ -2651,7 +2688,7 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
-void check_stack_inputs(TensorList tensors, int64_t dim) {
+static void check_stack_inputs(TensorList tensors, int64_t dim) {
   at::IntArrayRef entry_shape = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
@@ -3075,7 +3112,7 @@ Tensor & t_(Tensor & self) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-inferSqueezeGeometry(const Tensor &tensor) {
+static inferSqueezeGeometry(const Tensor &tensor) {
   SymDimVector sizes;
   SymDimVector strides;
 
@@ -3090,7 +3127,7 @@ inferSqueezeGeometry(const Tensor &tensor) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
+static inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   SymDimVector sizes;
   SymDimVector strides;
 
@@ -3104,7 +3141,7 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
+static inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
   const auto ndim = tensor.dim();
   const auto sym_sizes = tensor.sym_sizes();
   const auto sym_strides = tensor.sym_strides();
@@ -3129,7 +3166,6 @@ struct InferUnsqueezeGeometryResult {
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-}
 InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
@@ -3174,6 +3210,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
 }
 
 Tensor squeeze(const Tensor& self) {
@@ -3417,7 +3454,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
+static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3468,7 +3505,7 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view_symint(other.sym_sizes());
 }
 
-int64_t numel(const Tensor& self) {
+static int64_t numel(const Tensor& self) {
   return self.unsafeGetTensorImpl()->numel();
 }
 

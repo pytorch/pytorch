@@ -751,6 +751,16 @@ public:
   static Vectorized<T> loadu(const void* ptr) {
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
+  static Vectorized<T> loadu_one_fourth(const void* ptr) {
+      // Fast path if only load element number of 16.
+      // Note: We didn't merge it as fast path of loadu(const void* ptr, T count),
+      // Because loadu(const void* ptr, T count) requires zero initialization for upper 384 bits.
+      // However, by using _mm512_castsi128_si512, the upper 384 bits of the result are undefined.
+      // TODO<leslie> We can use _mm512_zextsi128_si512 in the furture,
+      // since gcc 9.3 doesn't support it now.
+      __m128i input_128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
+      return _mm512_castsi128_si512(input_128);
+  }
   static Vectorized<T> loadu(const void* ptr, T count) {
     __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
@@ -768,9 +778,16 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ T tmp_values[size()];
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(T));
+      if (count == 16) {
+        // Fast path if only store element number of 16
+        _mm_storeu_si128(
+          reinterpret_cast<__m128i*>(ptr),
+          _mm512_castsi512_si128(values));
+      } else {
+        __at_align__ T tmp_values[size()];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
+        std::memcpy(ptr, tmp_values, count * sizeof(T));
+      }
     }
   }
   const T& operator[](int idx) const  = delete;

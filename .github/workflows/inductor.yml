@@ -13,12 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-build:
-    name: cuda11.8-py3.10-gcc7-sm86
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
+    name: cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
@@ -33,57 +33,73 @@ jobs:
           { config: "inductor_torchbench_dynamic", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
-    name: cuda11.8-py3.10-gcc7-sm86
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
+    name: cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp:
-    name: cuda11.8-py3.10-gcc7-sm80
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp:
+    name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-gcp:
-    name: cuda11.8-py3.10-gcc7-sm80
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-gcp:
+    name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cpu-py3_8-gcc7-inductor-build:
-    name: linux-focal-cpu-py3.8-gcc7-inductor
+  linux-jammy-cpu-py3_8-gcc11-inductor-build:
+    name: linux-jammy-cpu-py3.8-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3_8-gcc7-build
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      build-environment: linux-jammy-py3_8-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
           { config: "inductor_timm_cpu_accuracy", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
           { config: "inductor_timm_cpu_accuracy", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
           { config: "inductor_torchbench_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "inductor_huggingface_dynamic_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "inductor_timm_dynamic_cpu_accuracy", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "inductor_timm_dynamic_cpu_accuracy", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "inductor_torchbench_dynamic_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cpu-py3_8-gcc7-inductor-test:
-    name: linux-focal-cpu-py3.8-gcc7-inductor
+  linux-jammy-cpu-py3_8-gcc11-inductor-test:
+    name: linux-jammy-cpu-py3.8-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cpu-py3_8-gcc7-inductor-build
+    needs: linux-jammy-cpu-py3_8-gcc11-inductor-build
     with:
-      build-environment: linux-focal-py3_8-gcc7-build
-      docker-image: ${{ needs.linux-focal-cpu-py3_8-gcc7-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cpu-py3_8-gcc7-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3_8-gcc11-build
+      docker-image: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.test-matrix }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

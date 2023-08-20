@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -31,6 +32,7 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -114,6 +116,14 @@ FILENAME_ALLOWLIST = {
     comptime.__file__,  # Want to inline these helpers
 }
 
+if torch.distributed.is_available():
+    # Inline the checkpoint code from distributed
+    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+    FILENAME_ALLOWLIST |= {
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+    }
+
 # Include optimizer code for tracing
 FILENAME_ALLOWLIST |= {
     inspect.getfile(obj)
@@ -129,10 +139,35 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 # TODO: find a better way to express this path without having to import
 # `torch.ao.quantization._pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
+    _module_dir(torch) + "ao/quantization/pt2e/utils.py",
 }
 
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_export/constraints.py",
+}
+
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+) | {
+    _module_dir(torch) + "_export/wrappers.py",
+}
+
+# torch.func: need to allow this file to be able to look at functorch transforms
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_functorch/apis.py",
+    _module_dir(torch) + "_functorch/deprecated.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
+    _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/_tensor/api.py",
+    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
+}
 
 SKIP_DIRS_RE = None
 

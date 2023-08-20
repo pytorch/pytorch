@@ -136,6 +136,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const std::vector<int64_t> broadcasted_shape,
     const c10::optional<Tensor>& x_hash_opt_ = c10::nullopt,
     const c10::optional<Tensor>& y_hash_opt_ = c10::nullopt,
+    const bool accumulate_matches = true,
     const bool distributive_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
@@ -275,7 +276,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
-          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
+          const auto* RESTRICT ptr_indices_dim = ptr_indices ? ptr_indices + nnz_idx * indices_nnz_stride : nullptr;
           int64_t hash = 0;
           for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
@@ -298,8 +299,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       // NOTE: argsort.dtype == nnz_arange.dtype
       const auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
       return std::make_tuple(probably_coalesced_indices_hash, argsort);
-    }
-    else {
+    } else {
       // NOTE: we want argsort.dtype == nnz_arange.dtype,
       // but sort() produces indices of type int64_t,
       // so we convert to nnz_arange.dtype to avoid issues
@@ -359,12 +359,12 @@ void _sparse_binary_op_intersection_kernel_impl(
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> index_t {
-          // Compute hash value
-          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           int64_t hash = 0;
           if (hash_ptr) {
             hash = hash_ptr[nnz_idx];
-          } else {
+          } else if (sparse_dim) {
+            // Compute hash value
+            const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
             for (int64_t dim = 0; dim < sparse_dim; ++dim) {
               const auto dim_hash_coeff = hash_coeffs[dim];
               const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
@@ -403,7 +403,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       probably_coalesced._values().to(binary_op_res_dtype),
       intersection_first_idx.to(nnz_arange.scalar_type()),
       intersection_count,
-      argsort_hash).to(res.scalar_type());
+      argsort_hash,
+      accumulate_matches).to(res.scalar_type());
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = source.dense_dim();
   const auto& res_shape = broadcasted_shape;

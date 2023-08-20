@@ -70,7 +70,7 @@ C10_DECLARE_REGISTRY(ConverterRegistry, Converter);
         const OperatorDef& op) override {                                     \
       return std::make_unique<nom::repr::opName>();                     \
     }                                                                         \
-    virtual ~opName##Converter() {}                                           \
+    ~opName##Converter() override {}                                           \
   };
 
 } // namespace caffe2

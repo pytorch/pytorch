@@ -47,7 +47,7 @@ def parse_backend_yaml(
         )
     }
 
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -253,9 +253,9 @@ def error_on_missing_kernels(
     full_codegen: Optional[List[OperatorName]] = None,
 ) -> None:
     try:
-        with open(kernel_defn_file_path, "r") as f:
+        with open(kernel_defn_file_path) as f:
             backend_defns = f.read()
-    except IOError as e:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified impl_path file: {kernel_defn_file_path}"
         ) from e
@@ -467,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     else:
         deferred_template = CodeTemplate(
             """\
+TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions();
 TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
     static auto m = MAKE_TORCH_LIBRARY_IMPL(aten, $dispatch_key);
     $dispatch_registrations_body

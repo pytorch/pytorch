@@ -11,7 +11,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import List
+from typing import List, Set
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -53,6 +53,54 @@ class HeuristicType(Enum):
     TEMPLATE = auto()
 
 
+class AutotuneHint(Enum):
+    ELEMENTS_PER_WARP_32 = 0
+
+    # Triton codegen tries to codegen set of AutotuneHints.
+    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
+    # which isn't valid python.
+    # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
+    __repr__ = Enum.__str__
+
+
+def autotune_hints_to_configs(
+    hints: Set[AutotuneHint], size_hints, block_size
+) -> List[Config]:
+    """
+    AutotuneHints can be attached to the metadata of triton kernels for providing
+    suggestions about what to try for autotuning. One reason to do this is if there are
+    some configs that are only useful in specific scenarios, in which case we can avoid
+    wasting compile time on autotuning unless we know we are in one of those scenarios.
+
+    Based on those hints, this function will generate a list of additional autotuning
+    configs to try.
+    """
+    configs = []
+
+    for hint in hints:
+        if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
+            if len(size_hints) == 1:
+                xyz_options = ((block_size // 4,),)
+            elif len(size_hints) == 2:
+                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+            elif len(size_hints) == 3:
+                xyz_options = (
+                    (block_size // 4, 1, 1),
+                    (1, block_size // 4, 1),
+                    (1, 1, block_size // 4),
+                )
+            for xyz in xyz_options:
+                configs.append(
+                    triton_config(
+                        size_hints,
+                        *xyz,
+                        num_elements_per_warp=32,
+                    )
+                )
+
+    return configs
+
+
 def disable_pointwise_autotuning():
     # Autotuning can give different benchmarking results from run to run, and
     # therefore we disable autotuning when use_deterministic flag is on.
@@ -70,7 +118,14 @@ class CachingAutotuner(KernelInterface):
     """
 
     def __init__(
-        self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type
+        self,
+        fn,
+        meta,
+        configs,
+        save_cache_hook,
+        mutated_arg_names,
+        heuristic_type,
+        size_hints=None,
     ):
         super().__init__()
         self.fn = fn
@@ -94,7 +149,9 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
-        self.coordesc_tuner = CoordescTuner(is_mm=False, name=self.fn.__name__)
+        self.coordesc_tuner = CoordescTuner(
+            is_mm=False, name=self.fn.__name__, size_hints=size_hints
+        )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -196,8 +253,10 @@ class CachingAutotuner(KernelInterface):
                 launcher.config.pre_hook(
                     {**zip(self.arg_names, args), **launcher.config.kwargs}
                 )
+
+            cloned_args = self.clone_args(*args)
             launcher(
-                *args,
+                *cloned_args,
                 grid=grid,
                 stream=stream,
             )
@@ -222,9 +281,8 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        cloned_args = self.clone_args(*args)
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *args, **kwargs)
             for launcher in self.launchers
         }
 
@@ -258,7 +316,7 @@ class CachingAutotuner(KernelInterface):
         else:
             grid_x, grid_y, grid_z = grid
 
-        key = launcher.fn.module.split(".")[-1]
+        key = launcher.fn.fn.__qualname__  # unique kernel name
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -334,7 +392,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, self.launchers[0])
+            self.save_cuda_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
@@ -424,9 +482,7 @@ def hash_configs(configs: List[Config]):
     hasher = hashlib.sha256()
     for cfg in configs:
         hasher.update(
-            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode(
-                "utf-8"
-            )
+            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
     return hasher.hexdigest()
 
@@ -440,7 +496,7 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    with open(cache_filename, "r") as fd:
+    with open(cache_filename) as fd:
         best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
@@ -466,6 +522,7 @@ def load_cached_autotuning(
 
 
 def cached_autotune(
+    size_hints: List[int],
     configs: List[Config],
     meta,
     heuristic_type,
@@ -509,6 +566,18 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        # Remove XBLOCK from config if it's not a function argument.
+        # This way, coordinate descent tuning will not try to tune it.
+        #
+        # Context: When TritonKernel.no_x_dim is True, we hardcode XBLOCK to 1.
+        import inspect
+
+        if "XBLOCK" not in inspect.signature(fn.fn).parameters:
+            for tconfig in configs:
+                if "XBLOCK" in tconfig.kwargs:
+                    assert tconfig.kwargs["XBLOCK"] == 1
+                    tconfig.kwargs.pop("XBLOCK")
+
         if config.profile_bandwidth:
             return DebugAutotuner(
                 fn,
@@ -518,6 +587,7 @@ def cached_autotune(
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
                 heuristic_type=heuristic_type,
+                size_hints=size_hints,
             )
         return CachingAutotuner(
             fn,
@@ -526,6 +596,7 @@ def cached_autotune(
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
+            size_hints=size_hints,
         )
 
     return decorator
@@ -562,13 +633,26 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
+def triton_config(
+    size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256
+) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
+
+    num_elements_per_warp is a suggestion for controlling how many warps
+    the triton config should contain. e.g.: if x=16, y=8, z=4 then
+    num_elements = 16*8*4 = 512. Then if we set num_elements_per_warp=128,
+    we'll launch 512 (elem) / 128 (elem/warp) = 4 warps. Note that it's
+    just a suggestion, and sometimes other adjustment heuristics will
+    override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
+
+    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
+    size_hints = list(reversed(size_hints))
+
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -610,7 +694,9 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    num_warps = next_power_of_2(
+        min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8)
+    )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
     # want at least 4 warps if there's enough elements per thread
@@ -625,7 +711,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -647,7 +733,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    if num_warps is None:
+        num_warps = conditional_product(x, r) // 128
+    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -689,24 +777,46 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
 
+    hinted_configs = autotune_hints_to_configs(
+        meta.get("autotune_hints", set()), size_hints, bs
+    )
+
     if len(size_hints) == 1:
-        return cached_autotune(
-            [triton_config(size_hints, bs)],
-            meta=meta,
-            heuristic_type=HeuristicType.POINTWISE,
-            filename=filename,
-        )
+        if disable_pointwise_autotuning() and not (
+            config.max_autotune or config.max_autotune_pointwise
+        ):
+            return cached_autotune(
+                size_hints,
+                [triton_config(size_hints, bs)],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
+        else:
+            return cached_autotune(
+                size_hints,
+                [
+                    triton_config(size_hints, bs, num_elements_per_warp=256),
+                    triton_config(size_hints, bs // 2, num_elements_per_warp=64),
+                    *hinted_configs,
+                ],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
     if len(size_hints) == 2:
         if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
             config.max_autotune or config.max_autotune_pointwise
         ):
             return cached_autotune(
+                size_hints,
                 [triton_config(size_hints, 32, 32)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 triton_config(size_hints, 32, 32),
                 triton_config(size_hints, 64, 64),  # ~8% better for fp16
@@ -714,6 +824,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, 16, 256),
                 triton_config(size_hints, bs, 1),
                 triton_config(size_hints, 1, bs),
+                *hinted_configs,
             ],
             meta=meta,
             filename=filename,
@@ -722,12 +833,14 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 3:
         if disable_pointwise_autotuning():
             return cached_autotune(
+                size_hints,
                 [triton_config(size_hints, 16, 16, 16)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 triton_config(size_hints, 16, 16, 16),
                 triton_config(size_hints, 64, 8, 8),
@@ -736,6 +849,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, bs, 1, 1),
                 triton_config(size_hints, 1, bs, 1),
                 triton_config(size_hints, 1, 1, bs),
+                *hinted_configs,
             ],
             meta=meta,
             filename=filename,
@@ -760,6 +874,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune(
+                size_hints,
                 [contiguous_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -767,6 +882,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         elif reduction_hint == ReductionHint.OUTER:
             return cached_autotune(
+                size_hints,
                 [outer_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -774,6 +890,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return cached_autotune(
+                size_hints,
                 [tiny_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -781,18 +898,24 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         if disable_pointwise_autotuning():
             return cached_autotune(
+                size_hints,
                 [triton_config_reduction(size_hints, 32, 128)],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 contiguous_config,
                 outer_config,
                 tiny_config,
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
+                # halve the XBLOCK/RBLOCK compared to outer_config
+                # TODO: this may only be beneficial when each iteration of the reduciton
+                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+                triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],
             meta=meta,
             filename=filename,
@@ -829,6 +952,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         configs = configs[:1]
 
     return cached_autotune(
+        size_hints,
         configs,
         meta=meta,
         filename=filename,
@@ -841,6 +965,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
+        None,
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -853,6 +978,7 @@ def foreach(meta, num_warps, filename=None):
     Compile a triton foreach kernel
     """
     return cached_autotune(
+        None,
         [triton.Config({}, num_stages=1, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -860,8 +986,17 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(xnumel, ynumel=None, znumel=None):
+def grid(*numels):
     """Helper function to compute triton grids"""
+
+    if len(numels) == 1:
+        xnumel, ynumel, znumel = numels[0], None, None
+    elif len(numels) == 2:
+        xnumel, ynumel, znumel = numels[1], numels[0], None
+    elif len(numels) == 3:
+        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
+    else:
+        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:
@@ -870,7 +1005,7 @@ def grid(xnumel, ynumel=None, znumel=None):
 
     def grid_fn(meta):
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", None)),
+            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
             get_grid_dim(ynumel, meta.get("YBLOCK", None)),
             get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )

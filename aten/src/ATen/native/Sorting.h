@@ -7,8 +7,7 @@ namespace at {
 class TensorBase;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 enum class QUANTILE_INTERPOLATION_MODE : uint8_t {
   LINEAR,
@@ -26,5 +25,4 @@ DECLARE_DISPATCH(topk_fn, topk_stub);
 
 void _fill_indices(const TensorBase &indices, int64_t dim);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

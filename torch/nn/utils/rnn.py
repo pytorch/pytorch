@@ -61,7 +61,7 @@ class PackedSequence(PackedSequence_):
 
     """
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-        return super(PackedSequence, cls).__new__(
+        return super().__new__(
             cls,
             *_packed_sequence_init_args(data, batch_sizes, sorted_indices,
                                         unsorted_indices))
@@ -248,7 +248,7 @@ def pack_padded_sequence(
                           'values, and it will treat them as constants, likely rendering '
                           'the trace incorrect for any other combination of lengths.',
                           stacklevel=2)
-        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64, device='cpu')
     else:
         lengths = lengths.to(dtype=torch.int64)
 
@@ -327,8 +327,8 @@ def pad_packed_sequence(
         if total_length < max_seq_length:
             raise ValueError("Expected total_length to be at least the length "
                              "of the longest sequence in input, but got "
-                             "total_length={} and max sequence length being {}"
-                             .format(total_length, max_seq_length))
+                             f"total_length={total_length} and max sequence length being {max_seq_length}"
+                             )
         max_seq_length = total_length
     padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)

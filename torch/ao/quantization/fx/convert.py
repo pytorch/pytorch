@@ -51,6 +51,7 @@ from .utils import (
     _get_module,
     _is_custom_module_lstm,
     _is_custom_module_mha,
+    assert_and_get_unique_device,
     get_custom_module_class_keys,
     create_getattr_from_value,
     collect_producer_nodes,
@@ -143,8 +144,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_channel
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_channel.default
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel.default
             quant_min = activation_post_process.quant_min
             quant_max = activation_post_process.quant_max
             dtype_ = to_underlying_dtype(dtype)
@@ -157,8 +158,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 "_dtype_": dtype_
             }
         else:
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.default
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.default
             scale = float(scale)
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
@@ -179,8 +180,14 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             for key, value_or_node in qparams.items():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
-                if key in ['_scale_', '_zero_point_']:
+                if key in ['_scale_', '_zero_point_'] and (not isinstance(value_or_node, (float, int))):
                     # For scale and zero_point values we register them as buffers in the root module.
+                    # However, note that when the values are not tensors, as in the case of
+                    # per_tensor quantization, they will be treated as literals.
+                    # However, registering them as a node seems to cause issue with dynamo
+                    # tracing where it may consider tensor overload as opposed to default.
+                    # With extra check of scale and zero_point being scalar, it makes
+                    # sure that the default overload can be used.
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
                         model, graph, module_path + prefix + key, value_or_node)
@@ -566,7 +573,7 @@ def _maybe_get_observer_for_node(
     If the node is observed, return the observer
     instance. Otherwise, return None.
     """
-    for maybe_obs_node, _ in node.users.items():
+    for maybe_obs_node in node.users.keys():
         if maybe_obs_node.op == 'call_module':
             maybe_obs = modules[str(maybe_obs_node.target)]
             if _is_activation_post_process(maybe_obs):
@@ -641,7 +648,9 @@ def convert_weighted_module(
         observed_node_names: Set[str],
         node_name_to_qconfig: Dict[str, QConfigAny],
         backend_config: BackendConfig,
-        is_decomposed: bool = False) -> None:
+        is_decomposed: bool = False,
+        is_reference: bool = False,
+) -> None:
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -722,13 +731,35 @@ def convert_weighted_module(
     else:
         # weight_post_process is None means the original module is not a QAT module
         # we need to get weight_post_process from qconfig in this case
-        if weight_post_process is None:
+        is_ptq = weight_post_process is None
+        if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-        # run weight observer
-        # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
-        # In the future, we should require the user to calibrate the model after calling prepare
-        # Issue: https://github.com/pytorch/pytorch/issues/73941
-        weight_post_process(float_module.weight)  # type: ignore[operator]
+            device = assert_and_get_unique_device(float_module)
+            if device:
+                weight_post_process.to(device)
+
+        # Call weight observer/fake_quant at least once to ensure the scales and zero points
+        # have the right shapes. Note: there are two cases where we don't have to do this:
+        #
+        # (1) QAT: The model's forward method already calls the weight observer/fake_quant,
+        #     and this typically happens during training, so we don't need to do it here.
+        #
+        # (2) Non-reference (lowered) case: The quantized module's from_float method already
+        #     calls the weight observer/fake_quant, so we don't have to do it here.
+        #
+        # Currently we ignore both cases and call the weight observer/fake_quant here
+        # regardless, which is technically incorrect. For (1), this is mainly to preserve BC
+        # in test code, which may not always train before convert. In the future, we should
+        # break BC for these two cases. See https://github.com/pytorch/pytorch/issues/73941.
+        #
+        # For PT2, however, we don't need to preserve BC here, so we can skip this hack
+        # for QAT. We identify this case as (is_decomposed + is_reference + is_qat).
+        # Note that we still need it for PTQ in the PT2 flow since the model's forward
+        # method doesn't call the weight observer.
+        is_qat = not is_ptq
+        if not (is_decomposed and is_reference and is_qat):
+            weight_post_process(float_module.weight)  # type: ignore[operator]
+
         wq_or_wq_dict.update(get_qparam_dict(weight_post_process))
 
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
@@ -943,11 +974,11 @@ def convert(
         # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
-            assert k in convert_node_name_to_qconfig, 'Expected key {} in convert node_name_to_qconfig'.format(k)
+            assert k in convert_node_name_to_qconfig, f'Expected key {k} in convert node_name_to_qconfig'
             if convert_node_name_to_qconfig[k] is not None:
                 assert qconfig_equals(v, convert_node_name_to_qconfig[k]), \
-                    "Expected k {} to have the same value in prepare and convert QConfigMappings, " \
-                    "but {} was updated to {}".format(k, v, convert_node_name_to_qconfig[k])
+                    f"Expected k {k} to have the same value in prepare and convert QConfigMappings, " \
+                    f"but {v} was updated to {convert_node_name_to_qconfig[k]}"
         node_name_to_qconfig = convert_node_name_to_qconfig
 
     custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)
@@ -1044,7 +1075,8 @@ def convert(
                    type_before_parametrizations(mod[0]) not in root_module_classes:  # type: ignore[index]
                     continue
                 convert_weighted_module(
-                    node, modules, observed_node_names, node_name_to_qconfig, backend_config, is_decomposed)
+                    node, modules, observed_node_names, node_name_to_qconfig, backend_config,
+                    is_decomposed, is_reference)
             elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

@@ -1,13 +1,15 @@
 import os
 import textwrap
 from enum import auto, Enum
-from traceback import extract_stack, format_exc, format_list, FrameSummary
-from typing import cast, List
+from traceback import extract_stack, format_exc, format_list, StackSummary
+from typing import cast, Optional
+
+import torch._guards
 
 from . import config
 from .config import is_fbcode
 
-from .utils import counters, format_bytecode
+from .utils import counters
 
 if is_fbcode():
     from torch.fb.exportdb.logging import exportdb_error_message
@@ -15,6 +17,12 @@ else:
 
     def exportdb_error_message(case_name):
         return ""
+
+
+import logging
+
+log = logging.getLogger(__name__)
+graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
@@ -67,7 +75,7 @@ class BackendCompilerFailed(TorchDynamoException):
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super().__init__(msg)
-        self.real_stack = []
+        self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category = None
         self.add_to_stats()
@@ -91,6 +99,11 @@ class ArgsMismatchError(Unsupported):
         super().__init__(msg)
 
 
+class AttributeMutationError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -105,6 +118,8 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    DYNAMIC_DIM = auto()
+    INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):
@@ -127,6 +142,29 @@ class UserError(Unsupported):
 
 class IncorrectUsage(Exception):
     pass
+
+
+# These exceptions are ok to fallback to eager/graph_break.
+exceptions_allowed_to_be_fallback = (
+    torch._subclasses.fake_tensor.DataDependentOutputException,
+    torch._subclasses.fake_tensor.DynamicOutputShapeException,
+    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+    torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+)
+
+
+def unimplemented_with_warning(e, code, msg):
+    # This function calls unimplemented internally and eventually graph breaks
+    # or falls to eager. unimplemented itself does not print any user warnings,
+    # i.e., its very silent. This helper function is intended when an error is
+    # encountered in the torch.compile stack which is worth showing as warning
+    # to the user. For example, if AOT Autograd backend fails with a fake tensor
+    # exception, its ok to fallback to eager but not silently. Here, we can use
+    # this function to log the message and the stack trace.
+    graph_break_msg = format_error_msg_verbose(e, code)
+    graph_breaks_log.debug("%s", graph_break_msg)
+    log.warning(msg)
+    raise unimplemented(msg) from e
 
 
 def unimplemented(msg: str):
@@ -152,22 +190,21 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, msg="\n"):
+def augment_exc_message(exc, msg="\n", export=False):
     import traceback
 
-    if (
-        hasattr(exc, "real_stack")
-        and len(exc.real_stack) > 0
-        and not (config.verbose and config.suppress_errors)
-    ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
+    real_stack = get_real_stack(exc)
+    if real_stack is not None:
+        msg += (
+            f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
+        )
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
+        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -184,7 +221,7 @@ def augment_exc_message(exc, msg="\n"):
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
 
-    if not config.suppress_errors:
+    if not config.suppress_errors and not export:
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
@@ -201,9 +238,33 @@ def augment_exc_message(exc, msg="\n"):
         exc.args = (new_msg,) + exc.args[1:]
 
 
-def get_real_stack(exc) -> List[FrameSummary]:
-    assert hasattr(exc, "real_stack")
-    return cast(List[FrameSummary], exc.real_stack)
+def get_real_stack(exc, frame=None) -> Optional[StackSummary]:
+    real_stack = getattr(exc, "real_stack", None)
+    if real_stack is None:
+        return None
+
+    # NB: it's possible for real_stack to be []; we still attempt to
+    # report a stack anyway because the stack_above_dynamo may still
+    # be useful for debugging
+
+    stack_above_dynamo = []
+    if frame is not None:
+        # NB: frame is PyInterpreterFrame on Python 3.11 and later,
+        # not a TRUE frame object.  You can't actually feed it
+        # to traceback because it doesn't have enough information.
+        # To solve this problem, we technically should just materialize
+        # the frame, the same way _PyFrame_GetFrameObject would do
+        # (but we cannot actually do this, because this populates
+        # frame_obj field, which default eval frame doesn't like).
+        #
+        # Fortunately, in this case, we can hack it: there's no need
+        # to actually use the truly top frame, we can just extract
+        # from where we are right now and rely on filter_stack to
+        # get rid of all the dynamo frames.  For ease of testing
+        # we apply this behavior to ALL Python versions
+        stack_above_dynamo = filter_stack(extract_stack())
+
+    return cast(StackSummary, stack_above_dynamo + real_stack)
 
 
 # filter out all frames after entering dynamo
@@ -219,39 +280,33 @@ def filter_stack(stack):
     return user_stack
 
 
+def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
+    msg = (
+        f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
+    )
+    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg += format_exc()
+    real_stack = get_real_stack(exc, frame)
+    if real_stack is not None:
+        msg += (
+            "\n"
+            + "=" * 10
+            + " The above exception occurred while processing the following code "
+            + "=" * 10
+            + "\n\n"
+        )
+        msg += "".join(format_list(real_stack))
+        msg += "\n"
+        msg += "=" * 10
+
+    return msg
+
+
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = str(
-            format_bytecode(
-                "WON'T CONVERT",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            )
-        )
-        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-        msg += format_exc()
-        if hasattr(exc, "real_stack"):
-            msg += (
-                "\n"
-                + "=" * 10
-                + " The above exception occurred while processing the following code "
-                + "=" * 10
-                + "\n\n"
-            )
-            stack_above_dynamo = []
-            if frame is not None:
-                stack_above_dynamo = filter_stack(extract_stack(frame))
-
-            msg += "".join(
-                format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
-            )
-            msg += "\n"
-            msg += "=" * 10
-
+        msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"

@@ -519,6 +519,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_sparse_metadata",
+          &::c10d::Reducer::setSparseMetadata,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_mixed_precision_param_dtype",
           [](::c10d::Reducer& reducer, py::object data_type_obj) {
             auto scalar_type =
@@ -1276,7 +1280,8 @@ Arguments:
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
-
+    multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
+    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -1295,14 +1300,23 @@ Example::
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
-                      bool multiTenant) {
+                      bool multiTenant,
+                      c10::optional<int> masterListenFd,
+                      bool useLibUV) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
             ::c10d::TCPStoreOptions opts{
-                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+                port,
+                isServer,
+                numWorkers,
+                waitWorkers,
+                timeout,
+                multiTenant,
+                masterListenFd,
+                useLibUV};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -1316,6 +1330,8 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
+          py::arg("master_listen_fd") = py::none(),
+          py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
@@ -1362,6 +1378,11 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
+          .def("_id", &::c10d::ProcessGroup::getID)
+          .def(
+              "_backend_id",
+              &::c10d::ProcessGroup::getBackendID,
+              py::arg("backend_type"))
           .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
@@ -1563,6 +1584,13 @@ Arguments:
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "reduce_scatter_tensor_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "alltoall_base",
               &::c10d::ProcessGroup::alltoall_base,
               py::arg("output"),
@@ -1664,7 +1692,63 @@ Arguments:
                 return self->getBackend(device.type());
               },
               py::arg("device"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_register_on_completion_hook",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 py::object hook) {
+                // We need to wrap a py::object hook with a wrapper to hold
+                // GIL before dereferencing the py::object.
+                // This needs to happen here instead of in ProcessGroup
+                // backend implementations and the latter cannot depend on
+                // python-related libs.
+                self->registerOnCompletionHook(
+                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
+                         hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
+                      hookWrapper(workInfo);
+                    });
+              },
+              py::arg("hook"),
+              // Intentionally holding GIL as we move hook py::object. This
+              // should be OK as register a hook is cheap.
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+Register a hook function which is fired on every ``ProcessGroup::Work`` completion.
+The hook must have the following signature:
+
+>>> def hook(work_info: torch._C._distributed_c10d.WorkInfo) -> None:
+>>>     # custom code
+>>>     # work_info.op_type: type of collective of this work
+>>>     # work_info.time_started: system time when user code called this collective
+>>>     # work_info.time_finished: system time when the watchdog thread detected
+>>>     #     completion of this work. Note that, there can be delays between the
+>>>     #     actual completion time and the detection time.
+>>>     # work_info.active_duration: duration of this collective measured by CUDAEvents
+>>>     #     which can accurately represent the duration between when the collective
+>>>     #     is launched and when the collective completes.
+
+.. warning ::
+    This only works for NCCL backend for now. All hooks are fired on the cpp watch dog
+    thread. Firing the Python hook and acquiring GIL requires Python interpreter to be
+    alive. Therefore, users need to make sure calling ``destroy_process_group(pg)`` on
+    every active ProcessGroup ``pg`` before exiting.
+
+.. warning ::
+    Note that ``Work`` object passed to the hook is a partially copied version without
+    the output objects. So accessing the output tensors from ``Work`` will not work.
+
+
+Arguments:
+    hook (Callable): hook function.
+              )")
+          .def(
+              "_wait_for_pending_works",
+              &::c10d::ProcessGroup::waitForPendingWorks,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_has_hooks",
+              &::c10d::ProcessGroup::hasHooks,
+              py::call_guard<py::gil_scoped_acquire>());
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -2159,7 +2243,15 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-      .def_readwrite("net_name", &ncclConfig_t::netName);
+      .def_property(
+          "net_name",
+          [](const ncclConfig_t& self) { return self.netName; },
+          // Note: NCCL calls free on the netName pointer
+          // when destroying the communicator. So memory
+          // shouldn't leak because of allocation in strdup.
+          [](ncclConfig_t& self, const char* tmp) {
+            self.netName = strdup(tmp);
+          });
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
@@ -2242,6 +2334,35 @@ Example::
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>());
 #endif
+
+  py::enum_<::c10d::OpType>(module, "OpType")
+      .value("BROADCAST", ::c10d::OpType::BROADCAST)
+      .value("ALLREDUCE", ::c10d::OpType::ALLREDUCE)
+      .value("ALLREDUCE_COALESCED", ::c10d::OpType::ALLREDUCE_COALESCED)
+      .value("REDUCE", ::c10d::OpType::REDUCE)
+      .value("ALLGATHER", ::c10d::OpType::ALLGATHER)
+      .value("_ALLGATHER_BASE", ::c10d::OpType::_ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::OpType::ALLGATHER_COALESCED)
+      .value("GATHER", ::c10d::OpType::GATHER)
+      .value("SCATTER", ::c10d::OpType::SCATTER)
+      .value("REDUCE_SCATTER", ::c10d::OpType::REDUCE_SCATTER)
+      .value("ALLTOALL_BASE", ::c10d::OpType::ALLTOALL_BASE)
+      .value("ALLTOALL", ::c10d::OpType::ALLTOALL)
+      .value("SEND", ::c10d::OpType::SEND)
+      .value("RECV", ::c10d::OpType::RECV)
+      .value("RECVANYSOURCE", ::c10d::OpType::RECVANYSOURCE)
+      .value("BARRIER", ::c10d::OpType::BARRIER)
+      .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
+      .value("COALESCED", ::c10d::OpType::COALESCED)
+      .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
+      .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
+
+  py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
+      module, "WorkInfo")
+      .def_readonly("op_type", &::c10d::WorkInfo::opType)
+      .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
+      .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
+      .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
 
   py::class_<
       ::c10d::Work,
@@ -2331,7 +2452,24 @@ Example::
                     3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
                        true when tensors have arrived on respective nodes, but not yet necessarily synched on
                        respective GPUs (similarly to GPU work).
-           )");
+           )")
+      .def(
+          "_get_op_type",
+          [](::c10d::Work& work) -> int {
+            return static_cast<int>(work.retrieveOpType());
+          })
+      .def(
+          "_get_duration",
+          &::c10d::Work::getDuration,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+              Returns:
+                  Duration of the corresponding collective communication.
+
+              .. warning ::
+                  This API only works for NCCL backend for now and must set
+                  NCCL_ENABLE_TIMING environment variable.
+            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())

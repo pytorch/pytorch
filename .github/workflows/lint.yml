@@ -14,18 +14,12 @@ on:
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
-  docker-image:
-    name: docker-image
-    uses: ./.github/workflows/_calculate-docker-image.yml
-    with:
-      docker-image-name: pytorch-linux-focal-linter
-
   lintrunner:
-    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -55,7 +49,7 @@ jobs:
         # Run lintrunner on all files
         if ! lintrunner --force-color --all-files --tee-json=lint.json 2> /dev/null; then
           echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
           RC=1
         fi
@@ -68,11 +62,11 @@ jobs:
         exit $RC
 
   quick-checks:
-    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -122,11 +116,11 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -157,11 +151,11 @@ jobs:
         exit $RC
 
   toc:
-    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -195,11 +189,10 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -210,6 +203,31 @@ jobs:
         # Test tools
         python3 -m unittest discover -vs tools/test -p 'test_*.py'
         python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+
+  test_run_test:
+    name: Test `run_test.py` is usable without boto3/rockset
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: linux.20_04.4x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install pytest-rerunfailures==11.1.* pytest-shard==0.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
+          pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
+      - name: Run run_test.py (nonretryable)
+        run: |
+          # Run test_weak, which is very fast
+          python3 test/run_test.py --include test_weak --verbose
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}

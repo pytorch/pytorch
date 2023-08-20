@@ -283,6 +283,7 @@ class TestExpandedWeightFunctional(TestCase):
         is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
         return (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
 
+    @tf32_off()
     def test_cnn_model_sum(self, device):
         def convnet(num_classes, num_dim):
             return nn.Sequential(

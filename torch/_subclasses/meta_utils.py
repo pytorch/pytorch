@@ -4,9 +4,21 @@ import weakref
 from typing import ContextManager, List, Optional
 
 import torch
+from torch._C._functorch import (
+    _unwrap_functional_tensor,
+    _wrap_functional_tensor,
+    current_level,
+    peek_interpreter_stack,
+    TransformType,
+)
 from torch._guards import Source
+
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    transform_subclass,
+)
 from torch.utils.weak import WeakIdRef
 
 DimList = List
@@ -239,10 +251,6 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    # TODO: Delete this assert, and just attempt making the
-                    # sparse tensor anyway; even if there is a shape_env, this
-                    # tensor might be all static
-                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
@@ -381,6 +389,12 @@ class MetaConverter:
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
                                     r = mid.as_strided(sizes, strides, storage_offset)
+                        # The CreationMeta influences whether or not inplace
+                        # mutation is an error or not.  So we need to make
+                        # sure we properly propagate this as well.
+                        torch._C._autograd._set_creation_meta(
+                            r, torch._C._autograd._get_creation_meta(t)
+                        )
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
@@ -404,6 +418,10 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
+
+                    # Graph-Break for wrapped tensors
+                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                        return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
@@ -513,6 +531,50 @@ class MetaConverter:
                 # instrumentation will see the meta conversions and the
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
+
+                if torch._is_functional_tensor(t) and t.device.type != "lazy":
+                    if t._is_view():
+                        raise RuntimeError(
+                            "Cannot safely fakify a view because this process drops the view information right now."
+                        )
+
+                    st = peek_interpreter_stack()
+                    assert (
+                        st is None or st.key() == TransformType.Functionalize
+                    ), "Expect st to be either None or have Functionalize transform key."
+                    if st is None:
+                        # the case of AOTAutograd
+                        torch._sync(t)
+                        unwrap_t = torch._from_functional_tensor(t)
+                        with torch._dispatch.python.suspend_functionalization():
+                            fake_t = self.meta_tensor(
+                                unwrap_t,
+                                shape_env=shape_env,
+                                callback=callback,
+                                source=source,
+                                dynamic_dims=dynamic_dims,
+                                constraint_dims=constraint_dims,
+                            )
+                        return torch._to_functional_tensor(
+                            fake_t, mirror_autograd_meta=True
+                        )
+                    else:
+                        # torch.func.functionalize
+                        reapply_views = torch._C._functionalization_reapply_views_tls()
+                        unwrap_t = _unwrap_functional_tensor(t, reapply_views)
+                        pop_st_ctx = (
+                            torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
+                        )
+                        with pop_st_ctx:
+                            fake_t = self.meta_tensor(
+                                unwrap_t,
+                                shape_env=shape_env,
+                                callback=callback,
+                                source=source,
+                                dynamic_dims=dynamic_dims,
+                                constraint_dims=constraint_dims,
+                            )
+                        return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
                 return NotImplemented
             else:
@@ -540,13 +602,24 @@ class MetaConverter:
                     r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
-            # Blindly converting tensor subclasses to meta can cause
-            # unpredictable problems; e.g., FX tests will trace meta
-            # tensors into their trace / some subclasses don't correctly
-            # support meta.  Trying to YOLO this is more trouble than it's
-            # worth.
-            self.miss += 1
-            return NotImplemented
+            if is_traceable_wrapper_subclass(t):
+                # convert traceable wrapper subclasses to meta by converting
+                # the underlying tensor to meta
+                out = transform_subclass(
+                    t,
+                    lambda t: self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, source=source
+                    ),
+                )
+                return out
+            else:
+                # Blindly converting tensor subclasses to meta can cause
+                # unpredictable problems; e.g., FX tests will trace meta
+                # tensors into their trace / some subclasses don't correctly
+                # support meta.  Trying to YOLO this is more trouble than it's
+                # worth.
+                self.miss += 1
+                return NotImplemented
         else:
             # non-Tensor types don't count as hit or miss
             return t

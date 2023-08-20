@@ -9,7 +9,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
@@ -346,6 +345,7 @@ size_t PyTorchStreamReader::getRecord(
     void* dst,
     size_t n,
     size_t chunk_size,
+    void* buf,
     const std::function<void(void*, const void*, size_t)>& memcpy_func) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
@@ -368,17 +368,17 @@ size_t PyTorchStreamReader::getRecord(
       iter != nullptr,
       "Failed to create zip reader iter: ",
       mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
-  std::vector<uint8_t> buf(chunk_size);
+
   for (size_t offset = 0; offset < stat.m_uncomp_size; offset += chunk_size) {
     size_t want_size =
         std::min(chunk_size, (size_t)stat.m_uncomp_size - offset);
     size_t read_size =
-        mz_zip_reader_extract_iter_read(iter, buf.data(), want_size);
+        mz_zip_reader_extract_iter_read(iter, buf, want_size);
     TORCH_CHECK(
         read_size == want_size,
         "Failed to advance zip reader iter: ",
         mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
-    memcpy_func((char*)dst + offset, buf.data(), read_size);
+    memcpy_func((char*)dst + offset, buf, read_size);
   }
   valid("reading file ", name.c_str());
   mz_zip_reader_extract_iter_free(iter);
@@ -556,6 +556,19 @@ void PyTorchStreamWriter::writeEndOfFile() {
       writeRecord("version", version.c_str(), version.size());
     }
   }
+
+  // If no "byteorder" record in the output model, rewrites byteorder info
+  if(allRecords.find("byteorder") == allRecords.end()) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    std::string byteorder = "little";
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    std::string byteorder = "big";
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+    writeRecord("byteorder", byteorder.c_str(), byteorder.size());
+  }
+
   writeSerializationId();
 
   AT_ASSERT(!finalized_);

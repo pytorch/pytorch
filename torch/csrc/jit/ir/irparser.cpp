@@ -184,7 +184,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         throw ErrorReport(token.range)
             << "Expected a number after '-' but got:" << token.text();
       }
-      // Fallthrough
+      [[fallthrough]];
     case TK_NUMBER:
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {

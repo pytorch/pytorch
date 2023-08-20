@@ -20,7 +20,7 @@
 
 namespace at { namespace native {
 
-void checkLongTensor(const Tensor& tensor) {
+static void checkLongTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor, but got ",
             tensor.dim(), "D ", tensor.device().str(), " ", tensor.scalar_type(), " tensor");

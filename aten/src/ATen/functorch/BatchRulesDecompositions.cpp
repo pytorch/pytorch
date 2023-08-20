@@ -169,7 +169,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
   OP_DECOMPOSE(linalg_tensorinv);
-  OP_DECOMPOSE(linalg_vander);
+  m.impl("linalg_vander", native::linalg_vander_symint);
   OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(linalg_matrix_power);
   OP_DECOMPOSE(linalg_vecdot);
@@ -271,7 +271,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
   OP_DECOMPOSE(_test_check_tensor);
-  OP_DECOMPOSE(tile);
+  m.impl("tile", native::tile_symint);
   OP_DECOMPOSE2(trapezoid, x);
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);

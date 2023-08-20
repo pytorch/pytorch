@@ -165,7 +165,11 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  static py::exception<JITException> exc(m, "JITException");
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+  static py::handle exc =
+      py::exception<JITException>(m, "JITException").release();
 
   py::register_exception_translator([](std::exception_ptr p) {
     try {
@@ -179,7 +183,11 @@ void initJITBindings(PyObject* module) {
       const auto& originalMsg = e.getOriginalMsg();
       JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
       JITException::setCaughtPythonClassName(className.value_or(""));
-      exc(e.what());
+      // If we still had the py::exception<JITException> object, we could
+      // just call it. But we must get a handle to leak it and there is no
+      // way I can find to re-create it from the handle. So setting the
+      // exception manually
+      PyErr_SetString(exc.ptr(), e.what());
     }
   });
 
@@ -1202,22 +1210,25 @@ void initJITBindings(PyObject* module) {
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
       SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
-      // Intentionally don't set file line, as the
-      // Python backtrace matters more here
       .def(
           "guard_int",
-          [](c10::SymNode a) {
-            return a->guard_int(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_int(file, line);
           })
       .def(
           "guard_bool",
-          [](c10::SymNode a) {
-            return a->guard_bool(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_bool(file, line);
           })
       .def(
           "guard_float",
-          [](c10::SymNode a) {
-            return a->guard_float(nullptr, 0);
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_float(file, line);
+          })
+      .def(
+          "expect_true",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_true(file, line);
           })
       .def(
           "has_hint",
@@ -1475,9 +1486,14 @@ void initJITBindings(PyObject* module) {
             return at::Tensor(std::move(ptr));
           })
       .def("serialization_id", &PyTorchStreamReader::serializationId)
-      .def("get_all_records", [](PyTorchStreamReader& self) {
-        return self.getAllRecords();
-      });
+      .def(
+          "get_all_records",
+          [](PyTorchStreamReader& self) { return self.getAllRecords(); })
+      .def(
+          "get_record_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordOffset(key);
+          });
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
@@ -1577,18 +1593,41 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
+          const auto& unsortedOps = getAllOperatorsFor(symbol);
+          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+
+          // Depending on the order of registration, aten or jit ops may be
+          // registered first. This sorting is helpful in cases where
+          // deterministic (i.e. not dependent on build config) behavior is
+          // desired; e.g. torch.ops.aten.* uses this function, and tries to
+          // find the "first" op that matches input args. Without the sorting,
+          // the "first" op may change depending on registration order.
+          std::vector<std::shared_ptr<Operator>> sortedOps;
+          sortedOps.reserve(unsortedOps.size());
+          std::copy_if(
+              unsortedOps.begin(),
+              unsortedOps.end(),
+              std::back_inserter(sortedOps),
+              [](const std::shared_ptr<Operator>& op) {
+                return op->isC10Op();
+              });
+          std::copy_if(
+              unsortedOps.begin(),
+              unsortedOps.end(),
+              std::back_inserter(sortedOps),
+              [](const std::shared_ptr<Operator>& op) {
+                return !op->isC10Op();
+              });
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
 
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             docstring << "  " << op->schema() << "\n";
           }
 
           py::list overload_names;
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
@@ -1598,11 +1637,11 @@ void initJITBindings(PyObject* module) {
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 
           auto func = py::cpp_function(
-              [operations, symbol, allow_numbers_as_tensors](
+              [sortedOps, symbol, allow_numbers_as_tensors](
                   py::args args, py::kwargs kwargs) {
                 ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
-                    operations, symbol, args, kwargs, false);
+                    sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));

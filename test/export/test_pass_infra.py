@@ -1,16 +1,12 @@
 # Owner(s): ["module: dynamo"]
-from typing import List, Type
+from typing import List
 import unittest
 
 import torch
-from torch.fx.passes.infra.pass_base import PassResult
-from torch.fx import subgraph_rewriter
-from torch.library import impl, Library
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
-from torch._export.pass_base import ExportPassBase, ExportPassBaseError
+from torch._export.pass_base import _ExportPassBase
 from torch._export.constraints import constrain_as_value
 from functorch.experimental import control_flow
 
@@ -22,7 +18,7 @@ class TestPassInfra(TestCase):
             y = torch.cat([x, x])
             return torch.ops.aten.tensor_split.sections(y, 2)
 
-        class NullPass(ExportPassBase):
+        class NullPass(_ExportPassBase):
             pass
 
         ep = export(f, (torch.ones(3, 2),))
@@ -41,90 +37,6 @@ class TestPassInfra(TestCase):
         for new_node, old_node in zip(new_nodes, old_nodes):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
-
-    def test_dialects(self) -> None:
-        """
-        Test if the dialects are maintained
-        """
-
-        lib = Library("DO_NOT_USE_TEST_ONLY", "DEF")
-        lib.define("add_relu(Tensor self, Tensor other) -> Tensor")
-
-        @impl(lib, "add_relu", "CompositeExplicitAutograd")
-        def add_relu(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
-            x = torch.ops.aten.add.Tensor(self, other)
-            y = torch.ops.aten.relu.default(x)
-            return y
-
-        class BackendOp:
-            def __init__(self, op):
-                self._op = op
-                self.__name__ = f"backend.{self._op.__name__}"
-
-            def __call__(self, *args, **kwargs):
-                return self._op(*args, **kwargs)
-
-        backend_op = BackendOp(torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default)
-
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            z = x + y
-            return torch.ops.aten.relu.default(z)
-
-        ep = export(f, (torch.randn(2, 2), torch.randn(2, 2)))
-        FileCheck().check("torch.ops.aten.add.Tensor").check(
-            "torch.ops.aten.relu.default"
-        ).run(ep.graph_module.code)
-
-        class AddReluFusionPass(ExportPassBase):
-            def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-                def pattern(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                    z = torch.ops.aten.add.Tensor(x, y)
-                    z = torch.ops.aten.relu.default(z)
-                    return z
-
-                def replacement(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                    return backend_op(x, y)
-
-                subgraph_rewriter.replace_pattern(graph_module, pattern, replacement)
-                return PassResult(graph_module, True)
-
-        class BackendNullPass(ExportPassBase):
-            def get_valid_dialects(self) -> List[Type]:
-                return [torch.ops.DO_NOT_USE_TEST_ONLY]
-
-        class BackendViolatePass(ExportPassBase):
-            """
-            Violates the dialect by inserting torch.ops.aten ops rather than
-            torch.ops.DO_NOT_USE_TEST_ONLY ops.
-            """
-            def get_valid_dialects(self) -> List[Type]:
-                return [torch.ops.DO_NOT_USE_TEST_ONLY]
-
-            def call_operator(self, op, args, kwargs, meta):
-                if op == torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default:
-                    add_res = super().call_operator(
-                        torch.ops.aten.add.default,
-                        args,
-                        kwargs,
-                        meta,
-                    )
-                    return super().call_operator(
-                        torch.ops.aten.relu.default,
-                        (add_res,),
-                        (),
-                        meta,
-                    )
-                return super().call_operator(op, args, kwargs, meta)
-
-        ep = ep.transform(AddReluFusionPass())
-        FileCheck().check(
-            "torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default"
-        ).run(ep.graph_module.code)
-
-        ep = ep.transform(BackendNullPass())
-
-        with self.assertRaisesRegex(ExportPassBaseError, "Expecting op of dialects:"):
-            ep.transform(BackendViolatePass())
 
     def test_cond(self) -> None:
         class M(torch.nn.Module):
@@ -148,7 +60,41 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y)).transform(ExportPassBase())
+        _ = export(mod, (torch.tensor(True), x, y)).transform(_ExportPassBase())
+
+    def test_node_name_stability(self) -> None:
+        # Tests that graph nodes stay the same for nodes that are not touched
+        # during transformation
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                # Define a parameter
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                # Define two buffers
+                self.register_buffer('my_buffer1', torch.tensor(3.0))
+                self.register_buffer('my_buffer2', torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+
+                # Mutate one of the buffers (e.g., increment it by 1)
+                self.my_buffer2.add_(1.0)
+
+                return output
+
+        inps = (torch.rand(1), torch.rand(1))
+        m = CustomModule()
+
+        ep_before = export(m, inps)
+
+        # No op transformation that doesn't perform any meaningful changes to node
+        ep_after = ep_before.transform(_ExportPassBase())
+
+        for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
+            self.assertEqual(before_node.name, after_node.name)
 
 
 if __name__ == '__main__':

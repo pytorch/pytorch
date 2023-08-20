@@ -4,21 +4,13 @@ import datetime
 import json
 import os
 import pathlib
-import re
 from typing import Any, Callable, cast, Dict, List, Optional
 from urllib.request import urlopen
 
 
 def get_disabled_issues() -> List[str]:
-    pr_body = os.getenv("PR_BODY", "")
-    commit_messages = os.getenv("COMMIT_MESSAGES", "")
-    # The below regex is meant to match all *case-insensitive* keywords that
-    # GitHub has delineated would link PRs to issues, more details here:
-    # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.
-    # E.g., "Close #62851", "fixES #62851" and "RESOLVED #62851" would all match, but not
-    # "closes  #62851" --> extra space, "fixing #62851" --> not a keyword, nor "fix 62851" --> no #
-    regex = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
-    issue_numbers = [x[5] for x in re.findall(regex, pr_body + commit_messages)]
+    reenabled_issues = os.getenv("REENABLED_ISSUES", "")
+    issue_numbers = reenabled_issues.split(",")
     print("Ignoring disabled issues: ", issue_numbers)
     return issue_numbers
 
@@ -27,6 +19,7 @@ IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
+
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -54,7 +47,7 @@ def fetch_and_cache(
 
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already download the file, so don't re-do it
-        with open(path, "r") as f:
+        with open(path) as f:
             return cast(Dict[str, Any], json.load(f))
 
     for _ in range(3):
@@ -123,4 +116,13 @@ def get_disabled_tests(
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
+        return {}
+
+
+def get_test_file_ratings(dirpath: str, filename: str) -> Optional[Dict[str, Any]]:
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_rating.json"
+    try:
+        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+    except Exception:
+        print("Couldn't download test file ratings file, not reordering...")
         return {}

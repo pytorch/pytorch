@@ -22,9 +22,8 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(modernize-redundant-void-arg)
-std::function<string(void)>* GetFetchStackTrace() {
-  static std::function<string(void)> func = []() {
+std::function<string()>* GetFetchStackTrace() {
+  static std::function<string()> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
   };
   return &func;

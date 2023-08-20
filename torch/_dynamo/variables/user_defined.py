@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import threading
 import types
 from typing import Dict, List
 
@@ -17,15 +18,18 @@ from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
+    build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
     is_namedtuple_cls,
+    is_utils_checkpoint,
     istype,
     namedtuple_fields,
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
+from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -102,6 +106,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
+        from .builder import SourcelessBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -120,11 +125,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
+            field_defaults = self.value._field_defaults
+
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
-            for name, value in kwargs.items():
+
+            var_tracker_kwargs = {}
+            for field_name, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field_name in kwargs:
+                        field_var = kwargs[field_name]
+                    else:
+                        assert field_name in field_defaults
+                        field_var = SourcelessBuilder()(
+                            tx, field_defaults[field_name]
+                        ).add_options(options)
+                    var_tracker_kwargs[field_name] = field_var
+
+            for name, value in var_tracker_kwargs.items():
                 assert name in fields
                 items[fields.index(name)] = value
+
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
@@ -207,7 +228,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable, UserMethodVariable
+        from . import (
+            BuiltinVariable,
+            ConstantVariable,
+            TupleVariable,
+            UserMethodVariable,
+        )
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -229,11 +255,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
-                method is collections.OrderedDict.__contains__
+                method in (collections.OrderedDict.__contains__, dict.__contains__)
                 and len(args) == 1
-                and isinstance(args[0], ConstantVariable)
+                and isinstance(args[0], (ConstantVariable, BuiltinVariable))
                 and inspect.getattr_static(type(self.value), "keys")
-                is collections.OrderedDict.keys
+                in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
                 return ConstantVariable(
@@ -344,6 +370,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+            if is_utils_checkpoint(self.value.func):
+                options["source"] = self.source
+                return build_checkpoint_variable(**options).call_function(
+                    tx, partial_args, partial_kwargs
+                )
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
@@ -364,6 +395,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
+            or type(self.value) == threading.local
         ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
@@ -396,6 +428,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, torch.distributions.utils.lazy_property):
+            subobj_var = UserDefinedObjectVariable(subobj, source=source, **options)
+            return variables.UserMethodVariable(
+                subobj.__get__.__func__, subobj_var, source=source, **options
+            ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
                 subobj.__get__(self.value), source=source, **options
@@ -404,17 +441,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self, source=source, **options
             )
-        elif isinstance(subobj, types.FunctionType):
+        elif isinstance(subobj, types.FunctionType) or (
+            isinstance(subobj, types.MethodType)
+            and isinstance(self.value, torch.nn.Module)
+        ):
+            if isinstance(subobj, types.MethodType):
+                func = subobj.__func__
+                source = AttrSource(source, "__func__") if source else None
+            else:
+                assert isinstance(subobj, types.FunctionType)
+                func = subobj
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
             dynamic_subobj = getattr(self.value, name)
             if inspect.ismethod(dynamic_subobj):
                 return variables.UserMethodVariable(
-                    subobj, self, source=source, **options
+                    func, self, source=source, **options
                 )
             elif inspect.isfunction(dynamic_subobj):
-                return variables.UserFunctionVariable(subobj, source=source, **options)
+                if is_utils_checkpoint(func):
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
+                elif is_allowed(func):
+                    return variables.TorchVariable(func, source=source, **options)
+                return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -500,69 +551,34 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
-        return VariableBuilder(
-            tx,
-            ODictGetItemSource(self.source, key.as_python_constant()),
-        )(
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(
-            key, self
+        index = (
+            key.source
+            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            else key.as_python_constant()
         )
 
+        return VariableBuilder(
+            tx,
+            ODictGetItemSource(self.source, index),
+        )(
+            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
+        ).add_options(key, self)
 
-class ProcessGroupVariable(UserDefinedObjectVariable):
-    """
-    We don't want a ProcessGroup object to end up in our output graph.
 
-    But it's common for dynamo to intercept a PG that is then used to get info like
-    rank() or world_size(), as well as passed to utility functions in distributed_c10d
-    which desugar it into plain types like a ranklist and tag.
-
-    For convenience and proper guarding, we construct a variable type.
-
-    TODO: make it possible to use ProcessGroupVariable as input to simple functions
-          like _expand_group without dynamo complaining about making a proxy for it.
-          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
-          torch library functions are dealing with tensor-like types and would have proxies
-          for their args.
-    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
-          or just graph-break whenever one of our special cases is not hit?
-    """
+class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def is_matching_object(obj):
+        try:
+            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+        except ImportError:
+            return False
+        else:
+            return type(obj) is KeyedJaggedTensor
 
     def __init__(self, value, **kwargs):
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    def as_python_constant(self):
-        return self.value
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "rank":
-            return variables.ConstantVariable(self.value.rank())
-        if name == "size":
-            return variables.ConstantVariable(self.value.size())
-
-        # TODO should this just raise unimplemented?
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx, name):
-        if name in ["rank", "size"]:
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
-        # TODO should this just raise unimplemented?
-        return super().var_getattr(tx, name)
-
-    @staticmethod
-    def is_process_group(value):
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if torch.distributed.is_available():
-            from torch._C._distributed_c10d import ProcessGroup
-
-            return istype(value, ProcessGroup)
-        return False
+    # TODO Handle getattr for _length_per_key and _offset_per_key properly.

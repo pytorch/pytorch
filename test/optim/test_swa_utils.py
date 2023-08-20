@@ -7,7 +7,6 @@ import torch
 from torch.optim.swa_utils import AveragedModel, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
 from torch.testing._internal.common_utils import (
     TestCase,
-    run_tests,
     load_tests,
     parametrize,
     instantiate_parametrized_tests,
@@ -312,4 +311,4 @@ instantiate_parametrized_tests(TestSWAUtils)
 
 
 if __name__ == "__main__":
-    run_tests()
+    print("These tests should be run through test/test_optim.py instead")

@@ -174,6 +174,8 @@ class SocketImpl {
     return hnd_;
   }
 
+  bool waitForInput(std::chrono::milliseconds timeout);
+
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
@@ -206,13 +208,13 @@ struct formatter<::addrinfo> {
         NI_MAXSERV,
         NI_NUMERICSERV);
     if (r != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}", host, port);
+      return fmt::format_to(ctx.out(), "{}:{}", host, port);
     } else {
-      return format_to(ctx.out(), "[{}]:{}", host, port);
+      return fmt::format_to(ctx.out(), "[{}]:{}", host, port);
     }
   }
 };
@@ -234,14 +236,14 @@ struct formatter<c10d::detail::SocketImpl> {
     ::socklen_t addr_len = sizeof(addr_s);
 
     if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     ::addrinfo addr{};
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    return format_to(ctx.out(), "{}", addr);
+    return fmt::format_to(ctx.out(), "{}", addr);
   }
 };
 
@@ -396,6 +398,14 @@ bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
   auto buf = value ? 1 : 0;
 #endif
   return setSocketOption(hnd_, level, optname, &buf, sizeof(buf)) == 0;
+}
+
+bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
+  ::pollfd pfd{};
+  pfd.fd = hnd_;
+  pfd.events = POLLIN;
+
+  return pollFd(&pfd, 1, static_cast<int>(timeout.count())) > 0;
 }
 
 namespace {
@@ -566,6 +576,58 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   C10D_INFO("The server socket has started to listen on {}.", addr);
 
   return true;
+}
+
+class SocketListenFromFdOp {
+ public:
+  SocketListenFromFdOp(int fd, std::uint16_t expected_port);
+
+  std::unique_ptr<SocketImpl> run() const;
+
+ private:
+  const int fd_;
+  const std::uint16_t expected_port_;
+};
+
+SocketListenFromFdOp::SocketListenFromFdOp(int fd, std::uint16_t expected_port)
+    : fd_(fd), expected_port_(expected_port) {}
+
+std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
+  C10D_DEBUG("listenFromFd: fd {}, expected port {}", fd_, expected_port_);
+
+  ::sockaddr_storage addr_storage;
+  ::socklen_t addr_len = sizeof(addr_storage);
+  if (::getsockname(
+          fd_, reinterpret_cast<::sockaddr*>(&addr_storage), &addr_len) < 0) {
+    throw SocketError{
+        fmt::format("getsockname failed for fd {}: {}", fd_, getSocketError())};
+  }
+
+  auto socket = std::make_unique<SocketImpl>(fd_);
+  const auto port = socket->getPort();
+
+  if (port != expected_port_) {
+    throw SocketError{fmt::format(
+        "listen fd {} is bound to port {}, expected to be bound to port {}",
+        fd_,
+        port,
+        expected_port_)};
+  }
+
+  if (::listen(socket->handle(), 2048 /* backlog */) != 0) {
+    throw SocketError{fmt::format(
+        "Failed to listen on socket initialized from fd {}: {}.",
+        socket->handle(),
+        getSocketError())};
+  }
+
+  socket->closeOnExec();
+
+  C10D_INFO(
+      "The server has taken over the listening socket with fd {}, address {}",
+      fd_,
+      *socket);
+  return socket;
 }
 
 class SocketConnectOp {
@@ -885,6 +947,12 @@ Socket Socket::listen(std::uint16_t port, const SocketOptions& opts) {
   return Socket{op.run()};
 }
 
+Socket Socket::listenFromFd(int fd, std::uint16_t expected_port) {
+  SocketListenFromFdOp op{fd, expected_port};
+
+  return Socket{op.run()};
+}
+
 Socket Socket::connect(
     const std::string& host,
     std::uint16_t port,
@@ -924,6 +992,10 @@ std::uint16_t Socket::port() const {
 
 Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
     : impl_{std::move(impl)} {}
+
+bool Socket::waitForInput(std::chrono::milliseconds timeout) {
+  return impl_->waitForInput(timeout);
+}
 
 } // namespace detail
 

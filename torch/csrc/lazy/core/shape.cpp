@@ -60,7 +60,7 @@ bool symbolicShapeEnabled() {
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
-c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
+static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   auto ltc_tensor = TryGetLtcTensor(tensor);
   if (!ltc_tensor) {
     // Set Concrete sizes for Concrete tensors

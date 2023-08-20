@@ -1359,7 +1359,7 @@ class MultiMarginLoss(_WeightedLoss):
     The loss function then becomes:
 
     .. math::
-        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
+        \text{loss}(x, y) = \frac{\sum_i w[y] * \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
     Args:
         p (int, optional): Has a default value of :math:`1`. :math:`1` and :math:`2`
@@ -1407,7 +1407,10 @@ class MultiMarginLoss(_WeightedLoss):
         super().__init__(weight, size_average, reduce, reduction)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
-        assert weight is None or weight.dim() == 1
+        if weight is not None and weight.dim() != 1 :
+            raise ValueError(
+                f"MultiMarginLoss: expected weight to be None or 1D tensor, got {weight.dim()}D instead"
+            )
         self.p = p
         self.margin = margin
 
@@ -1439,12 +1442,16 @@ class TripletMarginLoss(_Loss):
     .. math::
         d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
+    The norm is calculated using the specified p value and a small constant :math:`\varepsilon` is
+    added for numerical stability.
+
     See also :class:`~torch.nn.TripletMarginWithDistanceLoss`, which computes the
     triplet margin loss for input tensors using a custom distance function.
 
     Args:
         margin (float, optional): Default: :math:`1`.
         p (int, optional): The norm degree for pairwise distance. Default: :math:`2`.
+        eps (float, optional): Small constant for numerical stability. Default: :math:`1e-6`.
         swap (bool, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
@@ -1471,7 +1478,7 @@ class TripletMarginLoss(_Loss):
 
     Examples::
 
-    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
+    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
     >>> positive = torch.randn(100, 128, requires_grad=True)
     >>> negative = torch.randn(100, 128, requires_grad=True)
@@ -1629,7 +1636,8 @@ class CTCLoss(_Loss):
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: ``'mean'``
+            then the mean over the batch is taken, ``'sum'``: the output losses will be summed.
+            Default: ``'mean'``
         zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
@@ -1668,8 +1676,9 @@ class CTCLoss(_Loss):
           each target in a batch. Lengths must each be :math:`\leq S`
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
+        - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
+          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)` if input is batched or
+          :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 

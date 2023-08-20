@@ -39,6 +39,7 @@ jobs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ matrix.runner }}
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'pytorchbot-env' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -83,10 +84,9 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -185,3 +185,7 @@ jobs:
           if-no-files-found: error
           path: functorch_ghpages/nightly/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
