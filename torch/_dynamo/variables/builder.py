@@ -29,7 +29,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
-from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
+from ..allowed_functions import (
+    is_allowed,
+    is_builtin_callable,
+    is_numpy,
+    is_user_defined_allowed,
+)
 from ..exc import unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -122,7 +127,11 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    KeyedJaggedTensorVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -448,6 +457,8 @@ class VariableBuilder:
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(
                 value,
                 source=self.source,
@@ -609,6 +620,16 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif KeyedJaggedTensorVariable.is_matching_object(value):
+            result = KeyedJaggedTensorVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+            # TODO: this doing it manually is bad
+            return self.tx.output.side_effects.track_object_existing(
+                self.source, value, result
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
@@ -1221,8 +1242,8 @@ def wrap_fx_proxy_cls(
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            # tensor subclasses that are not fakified need to be cloned
+            if not is_fake(value):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -1584,6 +1605,8 @@ class SourcelessBuilder:
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
         elif is_allowed(value):
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
