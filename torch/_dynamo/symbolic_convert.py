@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, TracingContext
+from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
     allowed_functions,
@@ -2001,37 +2001,38 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
-        self.one_graph: bool = one_graph
-        self.export = export
-        self.mutated_closure_cell_contents = mutated_closure_cell_contents
-        if self.export:
-            assert (
-                self.one_graph
-            ), "Export without one graph - something has gone wrong."
+        with tracing(self.output.tracing_context):
+            self.one_graph: bool = one_graph
+            self.export = export
+            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            if self.export:
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
-        vars = list(code_options["co_varnames"])
-        cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
-        vars.extend(cells_and_freevars)
-        cells_and_freevars_set = set(cells_and_freevars)
+            vars = list(code_options["co_varnames"])
+            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
+            vars.extend(cells_and_freevars)
+            cells_and_freevars_set = set(cells_and_freevars)
 
-        self.symbolic_locals = collections.OrderedDict(
-            (
-                k,
-                VariableBuilder(
-                    self,
-                    LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                )(f_locals[k]),
+            self.symbolic_locals = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(
+                        self,
+                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    )(f_locals[k]),
+                )
+                for k in vars
+                if k in f_locals
             )
-            for k in vars
-            if k in f_locals
-        )
 
-        self.init_local_index_guards_hack()
+            self.init_local_index_guards_hack()
 
-        self._freevars_ids = dict()
-        for name in self.code_options["co_freevars"]:
-            if name in f_locals:
-                self._freevars_ids[name] = id(f_locals[name])
+            self._freevars_ids = dict()
+            for name in self.code_options["co_freevars"]:
+                if name in f_locals:
+                    self._freevars_ids[name] = id(f_locals[name])
 
     def init_local_index_guards_hack(self):
         # symbolic_locals contains the mapping from original f_locals to the
