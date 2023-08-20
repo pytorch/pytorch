@@ -163,13 +163,15 @@ class InitDeviceMeshTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_init_device_mesh_with_mesh_dim_names(self):
+    def test_init_device_mesh(self):
         mesh_shape = (2, 4)
         ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
 
         # test init_device_mesh with mesh_dim_names
         mesh_dim_names = ("DP", "TP")
-        two_d_mesh = init_device_mesh(self.device_type, mesh_shape, mesh_dim_names)
+        two_d_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         self.assertEqual(two_d_mesh, ref_mesh)
         self.assertEqual(two_d_mesh.mesh_dim_names, mesh_dim_names)
 

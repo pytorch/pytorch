@@ -103,7 +103,7 @@ class DeviceMesh:
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
-        mesh_dim_names: Optional[Tuple[str]] = None,
+        mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -276,9 +276,9 @@ class DeviceMesh:
 
 def init_device_mesh(
     device_type: str,
-    mesh_shape: Tuple[int],
+    mesh_shape: Tuple[int, ...],
     *,
-    mesh_dim_names: Optional[Tuple[str]] = None,
+    mesh_dim_names: Optional[Tuple[str, ...]] = None,
 ) -> DeviceMesh:
     """
     Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
