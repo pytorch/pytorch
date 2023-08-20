@@ -1193,7 +1193,7 @@ class DeviceCachingAllocator {
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
-      std::deque<std::pair<EventPool::Event, Block*>>>f
+      std::deque<std::pair<EventPool::Event, Block*>>>
       cuda_events;
 
   // record used memory.
