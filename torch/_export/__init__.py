@@ -19,6 +19,7 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
@@ -351,9 +352,21 @@ def export(
                 backward_signature=export_backward_signature
             )
 
-            # TODO unfortunately preserving meta at graph level is not
+            # NOTE: aot_export adds symint metadata for placeholders with int values;
+            # since these become specialized, we replace such metadata with the original values
+            # TODO: we should add runtime assertions for them
+            for node in gm.graph.nodes:
+                if node.op == "placeholder" and "val" in node.meta:
+                    s = node.meta['val']
+                    if (
+                        isinstance(s, torch.SymInt) and
+                        isinstance(fake_mode.shape_env.var_to_sources[s.node.expr][0], ConstantSource)
+                    ):
+                        node.meta['val'] = s.node.hint
+
+            # TODO unfortunately preserving graph-level metadata is not
             # working well with aot_export. So we manually copy it.
-            # The node level meta is preserved.
+            # (The node-level meta is addressed above.)
             for key, val in gm_torch_level.meta.items():
                 gm.meta[key] = val
 
