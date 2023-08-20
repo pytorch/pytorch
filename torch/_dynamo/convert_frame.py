@@ -453,8 +453,7 @@ def _compile(
         )
 
         try:
-            with tracing(tracer.output.tracing_context):
-                tracer.run()
+            tracer.run()
         except (exc.RestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
