@@ -2715,16 +2715,17 @@ class ShapeEnv:
         self.log.info("produce_guards")
 
         assert len(placeholders) == len(sources)
+        Tensorlike = (torch.Tensor, FakeTensorMeta)
 
         # Expand optional inputs, or verify invariants are upheld
         if constraint_inputs is None:
             constraint_inputs = [
-                [None] * t.dim() if isinstance(t, torch.Tensor) else None for t in placeholders
+                [None] * t.dim() if isinstance(t, Tensorlike) else None for t in placeholders
             ]
         else:
             assert len(constraint_inputs) == len(placeholders)
             for i, (t, constraint) in enumerate(zip(placeholders, constraint_inputs)):
-                if isinstance(t, torch.Tensor):
+                if isinstance(t, Tensorlike):
                     if constraint is None:
                         constraint_inputs[i] = [None] * t.dim()
                     else:
@@ -2902,7 +2903,7 @@ class ShapeEnv:
             if isinstance(t, (SymInt, int)):
                 track_symint(source, t)
                 continue
-            assert isinstance(t, torch.Tensor)
+            assert isinstance(t, Tensorlike)
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss, constraint[i])
@@ -3794,6 +3795,31 @@ def _is_int(expr):
 def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
 
+# FakeTensor metadata.
+# This is to be used in place of FakeTensor placeholders when calling
+# ShapeEnv.produce_guards.
+@dataclass
+class FakeTensorMeta:
+    tensor_size: Tuple[Union[int, SymInt], ...]
+    tensor_stride: Tuple[Union[int, SymInt], ...]
+    tensor_storage_offset: Union[int, SymInt]
+
+    def size(self) -> Tuple[Union[int, SymInt], ...]:
+        return self.tensor_size
+
+    def stride(self) -> Tuple[Union[int, SymInt], ...]:
+        return self.tensor_stride
+
+    def storage_offset(self) -> Union[int, SymInt]:
+        return self.tensor_storage_offset
+
+    def dim(self) -> int:
+        return len(self.tensor_size)
+
+    @staticmethod
+    def from_fake(fake) -> "FakeTensorMeta":
+        return FakeTensorMeta(fake.size(), fake.stride(), fake.storage_offset())
+
 # Replays the ShapeEnvEvents list.
 # It assumes the first event is the constructor call.
 #
@@ -3834,6 +3860,7 @@ def replay_shape_env_events(
 # point things went wrong from a validation perspective.
 def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
     from torch.fx.experimental.validator import ValidationException
+    from torch._dynamo.variables.builder import TrackedFake, FakeTensor
 
     events = shape_env.events
 
@@ -3846,6 +3873,24 @@ def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
         assert "event" in node.meta
         return events[node.meta["event"]]
 
+    # Creates a new instance of fake, but updating every symbolic value's ShapeEnv
+    # reference to the one given as argument.
+    #
+    # This is needed so as not to simplify a symbolic expression using a ShapeEnv
+    # "from the future", where it may have a different set of replacements.
+    def new_with_shape_env(shape_env: ShapeEnv, fake: Union[int, SymInt, FakeTensor]) -> Union[int, SymInt, FakeTensorMeta]:
+        if isinstance(fake, int):
+            return fake
+        if isinstance(fake, SymInt):
+            node = fake.node
+            return SymInt(SymNode(node._expr, shape_env, node.pytype, node._hint, node.constant, node.fx_node))
+        assert isinstance(fake, FakeTensor)
+        return FakeTensorMeta(
+            tuple(new_with_shape_env(shape_env, s) for s in fake.size()),  # type: ignore
+            tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),  # type: ignore
+            new_with_shape_env(shape_env, fake.storage_offset()),  # type: ignore
+        )
+
     # Checks whether the given shape_env fails when produce_guards is called.
     def check_shapeenv_fails(shape_env: ShapeEnv, tracked_fakes_length: Optional[int] = None) -> Optional[ValidationException]:
         # Slice the list of tracked_fakes so as to "go back" to the state it
@@ -3854,7 +3899,7 @@ def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
 
         try:
             shape_env.produce_guards(
-                [a.fake for a in sliced_tracked_fakes],
+                [new_with_shape_env(shape_env, a.fake) for a in sliced_tracked_fakes],
                 [a.source for a in sliced_tracked_fakes],
                 constraint_inputs=[a.constraint_dims for a in sliced_tracked_fakes],
             )
