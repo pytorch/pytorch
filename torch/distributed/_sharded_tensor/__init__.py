@@ -7,6 +7,6 @@ import warnings
 from torch.distributed._shard.sharded_tensor import *  # noqa: F403
 warnings.warn(
     "torch.distributed._sharded_tensor will be deprecated, use torch.distributed._shard.sharded_tensor instead",
-    DeprecationWarning, stacklevel=2
+    DeprecationWarning, stacklevel=TO_BE_DETERMINED
 )
 sys.modules['torch.distributed._sharded_tensor'] = torch.distributed._shard.sharded_tensor

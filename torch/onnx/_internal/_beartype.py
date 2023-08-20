@@ -26,7 +26,7 @@ except ImportError:
     _beartype_lib = None  # type: ignore[assignment]
 except Exception as e:
     # Warn errors that are not import errors (unexpected).
-    warnings.warn(f"{e}", stacklevel=2)
+    warnings.warn(f"{e}", stacklevel=TO_BE_DETERMINED)
     _beartype_lib = None  # type: ignore[assignment]
 
 

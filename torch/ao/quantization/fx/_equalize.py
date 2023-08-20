@@ -100,7 +100,7 @@ class _InputEqualizationObserver(nn.Module):
         if self.equalization_scale.nelement() == 1 and self.equalization_scale == torch.tensor(1):
             warnings.warn(
                 "Must call calculate_equalization_scale before calling calculate_scaled_minmax. " +
-                "Will not scale the next quantization observer.", stacklevel=2
+                "Will not scale the next quantization observer.", stacklevel=TO_BE_DETERMINED
             )
             return None, None
 
@@ -188,7 +188,7 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
     if not (check_min_max_valid(min_inputs, max_inputs) and check_min_max_valid(min_weights, max_weights)):
         warnings.warn(
             "Must run observer before calling calculate_equalization_scale. " +
-            "Returning default equalization scale torch.tensor(1).", stacklevel=2
+            "Returning default equalization scale torch.tensor(1).", stacklevel=TO_BE_DETERMINED
         )
         return torch.tensor(1)
 

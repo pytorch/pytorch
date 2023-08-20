@@ -455,7 +455,7 @@ class TestCommon(TestCase):
         # Reports numerical accuracy discrepancies
         if ex is not None:
             msg = "Test passed because the reference was more accurate than the torch operator."
-            warnings.warn(msg, stacklevel=2)
+            warnings.warn(msg, stacklevel=TO_BE_DETERMINED)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch

@@ -54,7 +54,7 @@ class Distribution:
                     f"{self.__class__} does not define `arg_constraints`. "
                     + "Please set `arg_constraints = {}` or initialize the distribution "
                     + "with `validate_args=False` to turn off validation.",
-                    stacklevel=2,
+                    stacklevel=TO_BE_DETERMINED,
                 )
             for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
@@ -180,7 +180,7 @@ class Distribution:
         warnings.warn(
             "sample_n will be deprecated. Use .sample((n,)) instead",
             UserWarning,
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         return self.sample(torch.Size((n,)))
 
@@ -307,7 +307,7 @@ class Distribution:
                 f"{self.__class__} does not define `support` to enable "
                 + "sample validation. Please initialize the distribution with "
                 + "`validate_args=False` to turn off validation.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             return
         assert support is not None

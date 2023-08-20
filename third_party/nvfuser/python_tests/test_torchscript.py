@@ -2261,7 +2261,7 @@ class TestCudaFuser(JitTestCase):
             warnings.warn(
                 "permutation propagation is broken, proper support should "
                 "come after nvfuser permutation scheduler update",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
                 )
         self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
 

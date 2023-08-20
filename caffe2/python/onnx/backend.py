@@ -654,7 +654,7 @@ class Caffe2Backend(Backend):
         try:
             out = onnx.optimizer.optimize(input, passes)
         except AttributeError:
-            warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__), stacklevel=2)
+            warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__), stacklevel=TO_BE_DETERMINED)
             # ONNX does no ship onnx.optimizer since version 1.9+
             import onnxoptimizer
             out = onnxoptimizer.optimize(input, passes)
@@ -690,9 +690,9 @@ class Caffe2Backend(Backend):
             if not imp.HasField("domain") or imp.domain == "":
                 opset_version = imp.version
                 if imp.version > cls._known_opset_version:
-                    warnings.warn("This version of onnx-caffe2 targets ONNX operator set version {}, but the model we are trying to import uses version {}.  We will try to import it anyway, but if the model uses operators which had BC-breaking changes in the intervening versions, import will fail.".format(cls._known_opset_version, imp.version), stacklevel=2)
+                    warnings.warn("This version of onnx-caffe2 targets ONNX operator set version {}, but the model we are trying to import uses version {}.  We will try to import it anyway, but if the model uses operators which had BC-breaking changes in the intervening versions, import will fail.".format(cls._known_opset_version, imp.version), stacklevel=TO_BE_DETERMINED)
             else:
-                warnings.warn("Unrecognized operator set {}".format(imp.domain), stacklevel=2)
+                warnings.warn("Unrecognized operator set {}".format(imp.domain), stacklevel=TO_BE_DETERMINED)
         if opset_version is None:
             if model.ir_version >= 0x00000003:
                 raise RuntimeError("Model with IR version >= 3 did not specify ONNX operator set version (onnx-caffe2 requires it)")
@@ -705,7 +705,7 @@ class Caffe2Backend(Backend):
         try:
             model = onnx.shape_inference.infer_shapes(model)
         except RuntimeError:
-            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank", stacklevel=2)
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank", stacklevel=TO_BE_DETERMINED)
 
         ws = Workspace()
         device_option = get_device_option(Device(device))
@@ -879,9 +879,9 @@ class Caffe2Backend(Backend):
         try:
             onnx_model = onnx.utils.polish_model(onnx_model)
         except RuntimeError:
-            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank", stacklevel=2)
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank", stacklevel=TO_BE_DETERMINED)
         except AttributeError:
-            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__), stacklevel=2)
+            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__), stacklevel=TO_BE_DETERMINED)
 
         # Optimizer module has been removed in ONNX-1.9 or later, warn caller if that is the case
         try:
@@ -889,7 +889,7 @@ class Caffe2Backend(Backend):
             pred_model = cls.optimize_onnx(onnx_model, predict=True)
         except ModuleNotFoundError:
             warnings.warn("OptimizerWarning: onnxoptimizer module not installed. "
-                          "init_model and pred_model models will not be splitted, which can cause a runtime error", stacklevel=2)
+                          "init_model and pred_model models will not be splitted, which can cause a runtime error", stacklevel=TO_BE_DETERMINED)
             init_model = onnx_model
             pred_model = onnx_model
 

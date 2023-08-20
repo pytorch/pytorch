@@ -333,7 +333,7 @@ class Optimizer:
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
                     "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
-                    "instance, capturable=True can impair performance, and you should set capturable=False.", stacklevel=2
+                    "instance, capturable=True can impair performance, and you should set capturable=False.", stacklevel=TO_BE_DETERMINED
                 )
                 self._warned_capturable_if_run_uncaptured = True
 

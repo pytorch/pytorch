@@ -242,7 +242,7 @@ class TestHub(TestCase):
             warnings.simplefilter("always")
             torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=None)
             assert len(w) == 1
-            assert issubclass(w[-1].category, UserWarning, stacklevel=2)
+            assert issubclass(w[-1].category, UserWarning, stacklevel=TO_BE_DETERMINED)
             assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
 
         self._assert_trusted_list_is_empty()

@@ -108,7 +108,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
                     f"version {GLOBALS.export_onnx_opset_version}. "
                     "Opset versions lower than opset 12 will not be able to export "
                     "nodes such as Dropout and BatchNorm correctly.",
-                    stacklevel=2,
+                    stacklevel=TO_BE_DETERMINED,
                 )
         else:
             GLOBALS.export_training = False
@@ -735,14 +735,14 @@ def warn_on_static_input_change(input_states):
                     "for configuration use. "
                     "Also note that the order and values of the keys must remain the same. "
                 )
-                warnings.warn(warning, stacklevel=2)
+                warnings.warn(warning, stacklevel=TO_BE_DETERMINED)
         elif isinstance(input, str):
             if input != traced_input:
                 warning = (
                     "The model seems to have string inputs/outputs. "
                     "Note that strings will not appear as inputs/outputs of the ONNX graph. "
                 )
-                warnings.warn(warning, stacklevel=2)
+                warnings.warn(warning, stacklevel=TO_BE_DETERMINED)
 
 
 @_beartype.beartype
@@ -757,7 +757,7 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
                 f"'{arg_name}' can be set to True only when 'operator_export_type' is "
                 "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
                 f"'{arg_name}' argument will be ignored.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
         arg_value = False
     return arg_value
@@ -794,7 +794,7 @@ def _decide_keep_init_as_input(
                 "'keep_initializers_as_inputs=False' is ignored during export."
                 "Exported model will have initializers as graph inputs (compliant "
                 " to ONNX IR v3).",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
         return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
     val_keep_init_as_ip = (
@@ -830,7 +830,7 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
             "learnable model parameters may not translate correctly in the exported ONNX model "
             "because constant folding mutates model parameters. Please consider "
             "turning off constant folding or setting the training=TrainingMode.EVAL.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
     return do_constant_folding
 
@@ -848,7 +848,7 @@ def _decide_input_format(model, args):
     try:
         sig = _signature(model)
     except ValueError as e:
-        warnings.warn(f"{e}, skipping _decide_input_format", stacklevel=2)
+        warnings.warn(f"{e}, skipping _decide_input_format", stacklevel=TO_BE_DETERMINED)
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
@@ -876,9 +876,9 @@ def _decide_input_format(model, args):
         args = args_list if isinstance(args, list) else tuple(args_list)
     # Cases of models with no input args
     except IndexError:
-        warnings.warn("No input args, skipping _decide_input_format", stacklevel=2)
+        warnings.warn("No input args, skipping _decide_input_format", stacklevel=TO_BE_DETERMINED)
     except Exception as e:
-        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}", stacklevel=2)
+        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}", stacklevel=TO_BE_DETERMINED)
 
     return args
 
@@ -1828,7 +1828,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
             "removed in the future. Please annotate treat the first argument (g) as GraphContext "
             "and use context information from the object instead.",
             category=FutureWarning,
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
         def wrapper(graph_context: jit_utils.GraphContext, *args, **kwargs):
@@ -2068,13 +2068,13 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn(
                 f"Provided key {key} for dynamic axes is not a valid input/output name",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
         if isinstance(value, list):
             warnings.warn(
                 "No names were found for specified dynamic axes of provided input."
                 f"Automatically generated names will be applied to each dynamic axes of input {key}",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
 
             value_dict = {}
@@ -2086,7 +2086,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 if x in value_dict:
                     warnings.warn(
                         f"Duplicate dynamic axis index {x} was provided for input {key}.",
-                        stacklevel=2,
+                        stacklevel=TO_BE_DETERMINED,
                     )
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)

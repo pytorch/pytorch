@@ -755,7 +755,7 @@ class DistributedDataParallel(Module, Joinable):
             warnings.warn(
                 "The `check_reduction` argument in `DistributedDataParallel` "
                 "module is deprecated. Please avoid using it.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
 
         # Check that a module does not have Uninitialized parameters
@@ -2204,7 +2204,7 @@ class DistributedDataParallel(Module, Joinable):
         if self.static_graph:
             warnings.warn(
                 "You've set static_graph to be True, no need to set it again.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             return
         self.static_graph = True
@@ -2219,7 +2219,7 @@ class DistributedDataParallel(Module, Joinable):
                 "you do not need to set find_unused_parameters=true, just be sure these "
                 "unused parameters will not change during training loop while calling "
                 "`_set_static_graph`.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
 
     def _remove_autograd_hooks(self):

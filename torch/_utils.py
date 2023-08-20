@@ -131,7 +131,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
         message = "{}() got an unexpected keyword argument '{}'"
         argument = list(kwargs.keys()).pop()
         raise TypeError(message.format(function_name, argument))
-    warnings.warn("'async' is deprecated; use 'non_blocking'", stacklevel=2)
+    warnings.warn("'async' is deprecated; use 'non_blocking'", stacklevel=TO_BE_DETERMINED)
     return kwargs["async"]
 
 

@@ -873,7 +873,7 @@ class Graph:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
         if to_erase._erased:
-            warnings.warn(f"erase_node({to_erase}) on an already erased node", stacklevel=2)
+            warnings.warn(f"erase_node({to_erase}) on an already erased node", stacklevel=TO_BE_DETERMINED)
             return
 
         to_erase._remove_from_list()
@@ -997,7 +997,7 @@ class Graph:
             try:
                 submod: torch.nn.Module = mod.get_submodule(module_path)
             except AttributeError:
-                warnings.warn(f"Failed to fetch module {module_path}!", stacklevel=2)
+                warnings.warn(f"Failed to fetch module {module_path}!", stacklevel=TO_BE_DETERMINED)
                 return False
 
             if not hasattr(submod, name):
@@ -1067,7 +1067,7 @@ class Graph:
                           "no underlying reference in the owning "
                           "GraphModule! Call "
                           "GraphModule.add_submodule to add the "
-                          "necessary submodule", stacklevel=2)
+                          "necessary submodule", stacklevel=TO_BE_DETERMINED)
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
@@ -1374,7 +1374,7 @@ class Graph:
                               and atom not in m_itr._buffers):
                             warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
                                           'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target', stacklevel=2)
+                                          'what \'get_attr\' Nodes typically target', stacklevel=TO_BE_DETERMINED)
                         else:
                             m_itr = new_m_itr
 

@@ -285,7 +285,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
         except Exception as e:
-            warnings.warn(f"TestIterableDatasetBasic was not able to cleanup temp dir due to {str(e)}", stacklevel=2)
+            warnings.warn(f"TestIterableDatasetBasic was not able to cleanup temp dir due to {str(e)}", stacklevel=TO_BE_DETERMINED)
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name

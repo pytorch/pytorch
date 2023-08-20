@@ -264,7 +264,7 @@ def benchmark_in_sub_process(
             warnings.warn(
                 f"Fail to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
 
             tuning_process.clear()

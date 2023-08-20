@@ -228,11 +228,11 @@ class profile:
             self.use_cuda = True
 
         if self.use_device and self.use_device != _get_privateuse1_backend_name():
-            warn(f"{self.use_device} doesn't support profile.", stacklevel=2)
+            warn(f"{self.use_device} doesn't support profile.", stacklevel=TO_BE_DETERMINED)
             self.use_device = None
 
         if self.use_cuda and not torch.cuda.is_available():
-            warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
+            warn("CUDA is not available, disabling CUDA profiling", stacklevel=TO_BE_DETERMINED)
             self.use_cuda = False
 
         self.kineto_activities = set()
@@ -1017,7 +1017,7 @@ class KinetoStepTracker:
                 warn(
                     "Profiler step count has increased more than 1 - "
                     f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
-                    stacklevel=2,
+                    stacklevel=TO_BE_DETERMINED,
                 )
             for _ in range(0, delta):
                 _kineto_step()

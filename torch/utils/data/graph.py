@@ -120,7 +120,7 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
           "Please use `traverse_dps` instead."
     if not only_datapipe:
         msg += " And, the behavior will be changed to the equivalent of `only_datapipe=True`."
-    warnings.warn(msg, FutureWarning, stacklevel=2)
+    warnings.warn(msg, FutureWarning, stacklevel=TO_BE_DETERMINED)
     if only_datapipe is None:
         only_datapipe = False
     cache: Set[int] = set()

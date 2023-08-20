@@ -48,7 +48,7 @@ except ImportError:
     if IS_CI:
         raise ImportError(err_msg) from None
     else:
-        warnings.warn(err_msg, stacklevel=2)
+        warnings.warn(err_msg, stacklevel=TO_BE_DETERMINED)
 
 try:
     import dill

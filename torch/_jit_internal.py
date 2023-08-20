@@ -723,7 +723,7 @@ def ignore(drop=False, **kwargs):
             "ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
             category=FutureWarning,
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
         drop = drop_on_export
@@ -732,7 +732,7 @@ def ignore(drop=False, **kwargs):
             "ignore(True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
             category=FutureWarning,
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
     def decorator(fn):
@@ -858,7 +858,7 @@ def _check_overload_body(func):
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
             f"Unable to retrieve source for @torch.jit._overload function: {func}.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         return
 
@@ -1361,7 +1361,7 @@ def check_empty_containers(obj) -> None:
             "example, List[int] would become list and "
             "therefore falsely return True for List[float] or"
             " List[str].",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
 

@@ -7,7 +7,7 @@ __all__ = ['scatter', 'scatter_kwargs', 'gather']
 
 def is_namedtuple(obj: Any) -> bool:
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.
-    warnings.warn("is_namedtuple is deprecated, please use the python checks instead", stacklevel=2)
+    warnings.warn("is_namedtuple is deprecated, please use the python checks instead", stacklevel=TO_BE_DETERMINED)
     return _is_namedtuple(obj)
 
 def _is_namedtuple(obj: Any) -> bool:

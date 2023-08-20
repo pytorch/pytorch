@@ -32,7 +32,7 @@ try:
 except ImportError:
     import warnings
 
-    warnings.warn('unable to load "torchvision" package', stacklevel=2)
+    warnings.warn('unable to load "torchvision" package', stacklevel=TO_BE_DETERMINED)
 
 RELEASE = os.environ.get("RELEASE", False)
 

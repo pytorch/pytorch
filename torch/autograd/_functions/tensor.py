@@ -12,7 +12,7 @@ class Type(Function):
         warnings.warn(
             "torch.autograd._functions.Type is deprecated as of PyTorch 2.1, please use "
             "torch.tensor.to(dtype=dtype) instead.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         ctx.input_type = type(i)
         ctx.input_device = -1 if not i.is_cuda else i.get_device()
