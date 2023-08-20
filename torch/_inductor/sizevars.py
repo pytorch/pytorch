@@ -49,7 +49,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache = dict()
+        cache : dict = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges):
@@ -71,7 +71,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache = dict()
+        cache : dict = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -254,7 +254,7 @@ class SizeVarAllocator:
 
     def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
         if expr in (True, False):
-            return expr
+            return bool(expr)
 
         try:
             simplified = self.shape_env._maybe_evaluate_static(expr)
@@ -475,7 +475,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(abs, self.stride_hints(index, vars))
+            map(int, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
