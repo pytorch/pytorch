@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch._logging
-from torch._guards import CompileId, tracing, TracingContext
+from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -453,7 +453,8 @@ def _compile(
         )
 
         try:
-            tracer.run()
+            with tracing(tracer.output.tracing_context):
+                tracer.run()
         except (exc.RestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
@@ -494,8 +495,6 @@ def _compile(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
                 )
-                # Fake mode will get reallocated on the restart!
-                TracingContext.get().fake_mode = None
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -603,7 +602,7 @@ def _compile(
         output.local_scope.clear()
         return guarded_code
 
-    with tracing(TracingContext(compile_id)):
+    with compile_context(CompileContext(compile_id)):
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
