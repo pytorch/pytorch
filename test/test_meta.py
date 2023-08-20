@@ -501,11 +501,7 @@ def run_meta_crossref(
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
-        # A lot of OpInfo for inplace are actually broken because
-        # they're not tested outside of gradcheck which only checks
-        # torch.float64 and torch.complex128 (which this second one
-        # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken") from e
+        raise RuntimeError("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
