@@ -295,7 +295,7 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
   // For Mac, the new implementation yielded a high relative error. Falling back
   // to the old version for now.
   // See https://github.com/numpy/numpy/pull/22611#issuecomment-1667945354
-  // For CUDA we also use this one, as thrust::log takes *forever* to compile
+  // For CUDA we also use this one, as thrust::log(thrust::complex) takes *forever* to compile
 
   // log1p(z) = log(1 + z)
   // Let's define 1 + z = r * e ^ (i * a), then we have
