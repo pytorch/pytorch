@@ -4035,7 +4035,7 @@ class CommonTemplate:
         def fn(x):
             return aten.upsample_bicubic2d(x, (256, 256), False)
 
-        x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device="cuda")
+        x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device=self.device)
         _, source_codes = run_and_get_code(fn, x)
 
         pattern = r"0\.50*\*[ix][\d]"

@@ -3662,7 +3662,6 @@ def upsample_bicubic2d_default(
 @aten.upsample_bicubic2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bicubic2d.vec.py_impl(DispatchKey.Autograd)
 @out_wrapper()
-@pw_cast_for_opmath
 def upsample_bicubic2d_vec(
     a: Tensor,
     output_size: Optional[Tuple[int, int]],
