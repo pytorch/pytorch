@@ -341,6 +341,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._unsafe_index,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
+            aten.view_as_complex,
             aten.xlogy,
             aten.xlogy_,
             aten.zero,
