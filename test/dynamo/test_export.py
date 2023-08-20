@@ -3166,7 +3166,6 @@ G['macademia'], accessed at:
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
             ),
         )
         # Fakefy input+model before exporting it
