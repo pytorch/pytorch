@@ -1702,9 +1702,11 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
-    def add(self, expr):
+    def add(self, expr) -> bool:
+        # Add an expression to the set of constraints.
+        # Return whether the expression is a trivial constraint (i.e., an obvious tautology).
         if expr == sympy.true:
-            return
+            return True
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
@@ -1724,17 +1726,19 @@ class DimConstraints:
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
             expr = self.rewrite_with_congruences(s, expr)
-            if expr != sympy.true:
-                reduced = expr.subs(self._var_to_val)
-                if reduced == sympy.false:
-                    self._inconsistencies.append(
-                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
-                        "is inconsistent!"
-                    )
-                if isinstance(expr, sympy.Eq):
-                    # special status for symbols that have equalities (see `solve` below)
-                    self._symbols_with_equalities.add(s)
-                self._univariate_inequalities[s].add(expr)
+            if expr == sympy.true:
+                return True
+            reduced = expr.subs(self._var_to_val)
+            if reduced == sympy.false:
+                self._inconsistencies.append(
+                    f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                    "is inconsistent!"
+                )
+            if isinstance(expr, sympy.Eq):
+                # special status for symbols that have equalities (see `solve` below)
+                self._symbols_with_equalities.add(s)
+            self._univariate_inequalities[s].add(expr)
+        return False
 
     def add_equality(self, source, expr):
         if expr.free_symbols:
@@ -2808,14 +2812,15 @@ class ShapeEnv:
             issued.add(expr)
 
             try:
+                is_trivial = False
                 if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(expr)
+                    is_trivial = self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
-                if len(expr.free_symbols) == 1:
+                if len(expr.free_symbols) == 1 and not is_trivial:
                     symbol = list(expr.free_symbols)[0]
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
