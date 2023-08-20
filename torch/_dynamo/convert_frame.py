@@ -1,3 +1,4 @@
+import collections
 import functools
 import inspect
 import itertools
@@ -5,12 +6,13 @@ import logging
 import os
 import random
 import types
+import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch._logging
-from torch._guards import tracing
+from torch._guards import CompileId, tracing, TracingContext
 from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -237,6 +239,7 @@ def is_recompilation(cache_size):
 
 
 FRAME_COUNTER = 0
+FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
 
 def convert_frame_assert(
@@ -252,10 +255,6 @@ def convert_frame_assert(
         frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
     ):
         increment_frame()
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
 
         code = frame.f_code
 
@@ -369,6 +368,17 @@ def convert_frame_assert(
         global initial_torch_function_state
         initial_torch_function_state = torch._C._is_torch_function_enabled()
 
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+        frame_id = frame_state["_id"]
+
+        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+        FRAME_COMPILE_COUNTER[frame_id] += 1
+
+        compile_id = CompileId(frame_id, frame_compile_id)
+
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",
@@ -393,6 +403,7 @@ def convert_frame_assert(
             cache_size,
             frame,
             frame_state=frame_state,
+            compile_id=compile_id,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -412,6 +423,7 @@ def _compile(
     cache_size: int,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
+    compile_id=None,
 ) -> Optional[GuardedCode]:
     from torch.fx.experimental.validator import (
         translation_validation_enabled,
@@ -590,66 +602,69 @@ def _compile(
         output.local_scope.clear()
         return guarded_code
 
-    try:
-        guarded_code = compile_inner(code, one_graph, hooks, transform)
-        return guarded_code
-    except (
-        Unsupported,
-        TorchRuntimeError,
-        BackendCompilerFailed,
-        AssertionError,
-        ConstraintViolationError,
-        GuardOnDataDependentSymNode,
-        ValidationException,
-    ) as e:
-        fail_reason = str(e)
-        exception_handler(e, code, frame, export=export)
-        raise
-    except Exception as e:
-        fail_reason = str(e)
-        exception_handler(e, code, frame, export=export)
-        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
-    finally:
-        from .utils import curr_frame
+    with tracing(TracingContext(compile_id)):
+        try:
+            guarded_code = compile_inner(code, one_graph, hooks, transform)
+            return guarded_code
+        except (
+            Unsupported,
+            TorchRuntimeError,
+            BackendCompilerFailed,
+            AssertionError,
+            ConstraintViolationError,
+            GuardOnDataDependentSymNode,
+            ValidationException,
+        ) as e:
+            fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            raise
+        except Exception as e:
+            fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            raise InternalTorchDynamoError(str(e)).with_traceback(
+                e.__traceback__
+            ) from None
+        finally:
+            from .utils import curr_frame
 
-        frame_key = str(curr_frame)
-        if (
-            fail_reason is None
-            and output is not None
-            and frame_key in frame_phase_timing
-        ):
-            guard_count = len(output.guards)
-            graph_op_count = output.count_calls()
-            graph_node_count = len(output.graph.nodes)
-            graph_input_count = len(output.placeholders)
-            entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                "entire_frame_compile", None
+            frame_key = str(curr_frame)
+            if (
+                fail_reason is None
+                and output is not None
+                and frame_key in frame_phase_timing
+            ):
+                guard_count = len(output.guards)
+                graph_op_count = output.count_calls()
+                graph_node_count = len(output.graph.nodes)
+                graph_input_count = len(output.placeholders)
+                entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                    "entire_frame_compile", None
+                )
+                backend_compile_time = frame_phase_timing[frame_key].get(
+                    "backend_compile", None
+                )
+            else:
+                guard_count = None
+                graph_op_count = None
+                graph_node_count = None
+                graph_input_count = None
+                entire_frame_compile_time = None
+                backend_compile_time = None
+            metrics = CompilationMetrics(
+                frame_key,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                cache_size,
+                guard_count,
+                graph_op_count,
+                graph_node_count,
+                graph_input_count,
+                entire_frame_compile_time,
+                backend_compile_time,
+                fail_reason,
             )
-            backend_compile_time = frame_phase_timing[frame_key].get(
-                "backend_compile", None
-            )
-        else:
-            guard_count = None
-            graph_op_count = None
-            graph_node_count = None
-            graph_input_count = None
-            entire_frame_compile_time = None
-            backend_compile_time = None
-        metrics = CompilationMetrics(
-            frame_key,
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            cache_size,
-            guard_count,
-            graph_op_count,
-            graph_node_count,
-            graph_input_count,
-            entire_frame_compile_time,
-            backend_compile_time,
-            fail_reason,
-        )
-        log_compilation_event(metrics)
+            log_compilation_event(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

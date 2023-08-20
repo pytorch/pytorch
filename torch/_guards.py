@@ -38,6 +38,18 @@ and no guard installation notions here.
 """
 
 
+class CompileId(NamedTuple):
+    frame_id: int
+    # This id is per-frame, and counts how many times we've compiled this
+    # frame.  This could have been a global id but having this be per-frame
+    # gives you a better intuitive sense for how many recompiles have occurred
+    # so far.
+    frame_compile_id: int
+
+    def __str__(self):
+        return f"{self.frame_id}/{self.frame_compile_id}"
+
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -516,11 +528,13 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return getattr(_TLS, "tracing_context", None)
 
-    def __init__(self, fake_mode):
+    def __init__(self, compile_id):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
-        self.fake_mode = fake_mode
+        # Due to ordering reasons, the fake mode is lazily populated
+        self.fake_mode = None
+        self.compile_id = compile_id
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -542,6 +556,13 @@ class TracingContext:
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
         self.output_strides: Optional[List[Optional[List[int]]]] = None
+
+    @staticmethod
+    def current_compile_id():
+        self = TracingContext.get()
+        if self is None:
+            return None
+        return self.compile_id
 
     @staticmethod
     def extract_stack():

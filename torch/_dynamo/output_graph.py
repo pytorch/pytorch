@@ -261,13 +261,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
                 co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context: TracingContext = TracingContext.get()
+        assert self.tracing_context.fake_mode is None
+        self.tracing_context.fake_mode = fake_mode
         self.init_ambient_guards()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
