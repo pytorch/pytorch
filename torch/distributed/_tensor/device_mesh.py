@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, TYPE_CHECKING, Tuple, Union
+from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -277,6 +277,7 @@ class DeviceMesh:
 def init_device_mesh(
     device_type: str,
     mesh_shape: Tuple[int],
+    *,
     mesh_dim_names: Optional[Tuple[str]] = None,
 ) -> DeviceMesh:
     """
@@ -288,10 +289,10 @@ def init_device_mesh(
 
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
-        mesh_shape: Tuple[int]: A sequence describes the dimension of the multi-dimesnion array
+        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
         that describes the layout of devices.
     Kwargs:
-        mesh_dim_names: Optional[Tuple[str]]: A sequence of mesh dim names to be assigned to each dimension
+        mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
         of the multi-dimensional array that describes the layout of devices. Its length must match the length
         of `mesh_shape`.
 
@@ -303,8 +304,8 @@ def init_device_mesh(
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> two_d_mesh = init_device_mesh("cuda", mesh_dims=[2, 8], mesh_dim_names=["dp", "tp"])
-        >>> two_d_mesh = init_device_mesh("cuda", mesh_dims=[2, -1], mesh_dim_names=["dp", "tp"])
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, -1), mesh_dim_names=("dp", "tp"))
     """
     if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
         raise RuntimeError(
