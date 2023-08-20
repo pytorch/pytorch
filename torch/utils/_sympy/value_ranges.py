@@ -82,12 +82,12 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other):
+    def tighten(self, other) -> "ValueRanges":
         """Given two ValueRanges, returns their intersection"""
         return self & other
 
     # Intersection
-    def __and__(self, other):
+    def __and__(self, other) -> "ValueRanges":
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
@@ -100,9 +100,9 @@ class ValueRanges:
         return range
 
     # Union
-    def __or__(self, other):
+    def __or__(self, other) -> "ValueRanges":
         if ValueRanges.unknown() in (self, other):
-            return ValueRanges.unknown
+            return ValueRanges.unknown()
         assert self.is_bool == other.is_bool, (self, other)
         if self.is_bool:
             range = ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper))
