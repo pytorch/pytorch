@@ -18,7 +18,6 @@ import time
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Pattern, Tuple
@@ -104,6 +103,14 @@ fragment PRReviews on PullRequestReviewConnection {
     author {
       login
     }
+    bodyText
+    createdAt
+    authorAssociation
+    editor {
+      login
+    }
+    databaseId
+    url
     state
   }
   pageInfo {
@@ -219,7 +226,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 targetUrl
               }
             }
-            pushedDate
             oid
           }
         }
@@ -710,12 +716,6 @@ class GitHubPR:
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
-    def last_pushed_at(self) -> Optional[datetime]:
-        pushed_date = self.last_commit()["pushedDate"]
-        if pushed_date is None:
-            return None
-        return datetime.fromisoformat(pushed_date[:-1])
-
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
@@ -1013,6 +1013,16 @@ class GitHubPR:
         for comment in self.get_comments():
             if comment.database_id == database_id:
                 return comment
+
+        # The comment could have actually been a review left on the PR (the message written alongside the review).
+        # (This is generally done to trigger the merge right when a comment is left)
+        # Check those review comments to see if one of those was the comment in question.
+        for node in self.info["reviews"]["nodes"]:
+            # These review comments contain all the fields regular comments need
+            comment = self._comment_from_node(node)
+            if comment.database_id == database_id:
+                return comment
+
         raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
@@ -1955,18 +1965,6 @@ def merge(
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
     )
-
-    if pr.last_pushed_at() is None:
-        print(
-            f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?"
-        )
-    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
-        raise RuntimeError(
-            f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
-            "`@pytorchbot merge -r`\n"
-            "Or just rebase by leaving `@pytorchbot rebase` comment"
-        )
 
     start_time = time.time()
     last_exception = ""

@@ -127,7 +127,11 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    KeyedJaggedTensorVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -616,6 +620,16 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif KeyedJaggedTensorVariable.is_matching_object(value):
+            result = KeyedJaggedTensorVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+            # TODO: this doing it manually is bad
+            return self.tx.output.side_effects.track_object_existing(
+                self.source, value, result
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
@@ -1228,8 +1242,8 @@ def wrap_fx_proxy_cls(
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            # tensor subclasses that are not fakified need to be cloned
+            if not is_fake(value):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
