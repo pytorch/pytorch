@@ -1,15 +1,11 @@
-
 import logging
 import weakref
-from weakref import ReferenceType
-import types
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import DefaultDict, Dict, Tuple, Set
+from typing import DefaultDict, Set
+from weakref import ReferenceType
 
 from . import config
-from .exc import unimplemented
-from .utils import guard_failures, troubleshooting_url
 from .guards import CLOSURE_VARS
 
 log = logging.getLogger(__name__)
@@ -30,14 +26,15 @@ class CacheSize:
     total: int = 0
 
     # Number of CacheEntry objects for an object with ID_MATCH guard.
-    per_id_guarded_obj: DefaultDict[ReferenceType, int] = field(default_factory=defaultdict(int))
+    per_id_guarded_obj: DefaultDict[ReferenceType, int] = field(
+        default_factory=defaultdict(int)
+    )
 
     # Sources of objects with ID_MATCH guards
     id_guarded_sources: Set[ReferenceType] = field(default_factory=set)
 
     def __str__(self):
         return f"CacheSize(total={self.total}, per_guarded_obj={tuple(self.per_id_guarded_obj.values())})"
-
 
 
 def compute_cache_size(frame, cache_entry):
