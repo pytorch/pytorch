@@ -7,12 +7,11 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
-    ShardingStrategy,
     StateDictType,
 )
 from torch.testing._internal.common_utils import (
@@ -64,23 +63,25 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(),
             optim_state_dict_config=ShardedOptimStateDictConfig(),
         )
         state_dict_type = model.get_state_dict_type(model)
         # If device_mesh is used when initializing FSDP, the field _use_dtensor will
         # automatically be set to True.
-        self.assertEqual(getattr(state_dict_type.state_dict_config, "_use_dtensor"), True)
-        self.assertEqual(getattr(state_dict_type.optim_state_dict_config, "_use_dtensor"), True)
+        self.assertEqual(state_dict_type.state_dict_config._use_dtensor, True)
+        self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
 
-        for k, v in model.state_dict().items():
-            self.assertEqual(v.placements, (Shard(0)))
+        for v in model.state_dict().values():
+            self.assertEqual(len(v.placements), 1)
+            self.assertEqual(v.placements[0], (Shard(dim=0)))
             self.assertEqual(v.device_mesh, device_mesh)
 
-        for k, v in optim.state_dict()["state"].items():
+        for v in optim.state_dict()["state"].values():
             if isinstance(v, DTensor):
-                self.assertEqual(v.placements, (Shard(0)))
+                self.assertEqual(len(v.placements), 1)
+                self.assertEqual(v.placements[0], (Shard(dim=0)))
                 self.assertEqual(v.device_mesh, device_mesh)
-
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -93,6 +94,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 offload_to_cpu=offload_to_cpu
             ),
@@ -155,7 +157,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             model,
             StateDictType.SHARDED_STATE_DICT,
             optim_state_dict_config=ShardedOptimStateDictConfig(
-                offload_to_cpu=offload_to_cpu,
+                offload_to_cpu=offload_to_cpu
             ),
         )
 
@@ -205,9 +207,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            optim_state_dict_config=ShardedOptimStateDictConfig(
-                offload_to_cpu=offload_to_cpu,
-            ),
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
         )
         state_dict_type = model.get_state_dict_type(model)
 

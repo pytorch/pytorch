@@ -77,24 +77,25 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def test_hsdp_init_with_device_mesh(self):
         mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model, optim = self._create_model(device_mesh)
+        model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(),
             optim_state_dict_config=ShardedOptimStateDictConfig(),
         )
         state_dict_type = model.get_state_dict_type(model)
         # If device_mesh is used when initializing FSDP, the field _use_dtensor will
         # automatically be set to True.
-        self.assertEqual(getattr(state_dict_type.state_dict_config, "_use_dtensor"), True)
-        self.assertEqual(getattr(state_dict_type.optim_state_dict_config, "_use_dtensor"), True)
+        self.assertEqual(state_dict_type.state_dict_config._use_dtensor, True)
+        self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
 
-        for k, v in model.state_dict().items():
+        for v in model.state_dict().values():
             self.assertEqual(v.placements, (Replicate(), Shard(0)))
             self.assertEqual(v.device_mesh, device_mesh)
 
-        for k, v in optim.state_dict()["state"].items():
+        for v in optim.state_dict()["state"].values():
             if isinstance(v, DTensor):
                 self.assertEqual(v.placements, (Replicate(), Shard(0)))
                 self.assertEqual(v.device_mesh, device_mesh)
@@ -103,13 +104,12 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size).view(2, -1)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
         model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 offload_to_cpu=offload_to_cpu
             ),
@@ -164,15 +164,13 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
         model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
             optim_state_dict_config=ShardedOptimStateDictConfig(
-                offload_to_cpu=offload_to_cpu,
+                offload_to_cpu=offload_to_cpu
             ),
         )
 
@@ -215,16 +213,12 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
         model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            optim_state_dict_config=ShardedOptimStateDictConfig(
-                offload_to_cpu=offload_to_cpu,
-            ),
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
         )
         state_dict_type = model.get_state_dict_type(model)
 

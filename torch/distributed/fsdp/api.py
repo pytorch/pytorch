@@ -342,9 +342,10 @@ class ShardedStateDictConfig(StateDictConfig):
             ``ShardedTensor``. (Default: ``False``)
 
     .. warning:: `_use_dtensor` is a private field of ShardedStateDictConfig and
-    it is used by FSDP to determine the type of state dict values. Users should not
-    manually modify `_use_dtensor`.
+      it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify `_use_dtensor`.
     """
+
     _use_dtensor: bool = False
 
 
@@ -395,10 +396,11 @@ class ShardedOptimStateDictConfig(OptimStateDictConfig):
             as ``DTensor``, and if ``False``, then FSDP saves them as
             ``ShardedTensor``. (Default: ``False``)
 
-    .. warning:: `_use_dtensor` is a private field of ShardedStateDictConfig and
-    it is used by FSDP to determine the type of state dict values. Users should not
-    manually modify `_use_dtensor`.
+    .. warning:: `_use_dtensor` is a private field of ShardedOptimStateDictConfig and
+      it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify `_use_dtensor`.
     """
+
     _use_dtensor: bool = False
 
 

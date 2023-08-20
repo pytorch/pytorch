@@ -97,9 +97,9 @@ NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
 def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
-    device_mesh: DeviceMesh,
     sharding_strategy: ShardingStrategy,
     policy: Optional[_Policy],
+    device_mesh: Optional[DeviceMesh] = None,
 ) -> _FSDPState:
     if process_group is not None and device_mesh is not None:
         raise ValueError(
@@ -114,7 +114,7 @@ def _init_process_group_state(
             # process groups.
             raise ValueError(
                 f"Manual wrapping with {sharding_strategy} requires explicit specification",
-                f"of process group or device_mesh."
+                "of process group or device_mesh.",
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(

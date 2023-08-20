@@ -249,12 +249,11 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
-        device_mesh = root_state._device_mesh
-        if device_mesh:
-            fsdp_state._device_mesh = device_mesh
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+        if hasattr(root_state, "_device_mesh"):
+            fsdp_state._device_mesh = root_state._device_mesh
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(

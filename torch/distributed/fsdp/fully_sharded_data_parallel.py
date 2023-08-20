@@ -440,7 +440,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # the same process group state as the root FSDP module.
         self.device_mesh = device_mesh
         _init_process_group_state(
-            self, process_group, device_mesh, sharding_strategy, auto_wrap_policy
+            self,
+            process_group,
+            sharding_strategy,
+            auto_wrap_policy,
+            device_mesh,
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
@@ -769,14 +773,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             # If device_mesh is passed in when initalizing FSDP, we automatically turn the
             # _use_dtensor flag to be true for ShardedStateDictConfig() and ShardedOptimStateDictConfig().
-            if getattr(module, "device_mesh") and isinstance(
+            if module.device_mesh and isinstance(
                 state_dict_settings.state_dict_config, ShardedStateDictConfig
             ):
-                setattr(state_dict_settings.state_dict_config, "_use_dtensor", True)
-            if getattr(module, "device_mesh") and isinstance(
+                state_dict_settings.state_dict_config._use_dtensor = True
+            if module.device_mesh and isinstance(
                 state_dict_settings.optim_state_dict_config, ShardedOptimStateDictConfig
             ):
-                setattr(state_dict_settings.optim_state_dict_config,  "_use_dtensor", True)
+                state_dict_settings.optim_state_dict_config._use_dtensor = True
         return state_dict_settings
 
     @staticmethod
