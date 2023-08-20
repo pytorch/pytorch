@@ -727,18 +727,32 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         options = VariableTracker.propagate(self)
         if name == "register_hook":
-            # print("REGISTERING?", args)
-            pf = args[0].fn
-            print("AGV register hook", id(pf.args[0]), pf.args[0].training_state)
-            handle = self.value.register_hook(pf)
-            name = pf.func.__name__ + str(id(pf.func))
-            pf.source = tx.store_hook(name, pf)
+           # see On dynamo tensor_hooks
+            assert len(args) == 1
+            fn_var = args[0]
 
-            tx.output.side_effects.register_hook(self, pf)
-            # print("Handle is?", handle, self.proxy)
-            handle.remove()
-            tx.store_hook_handle(name, handle)
-            return RemovableHandleVariableTracker(handle, name, **options)
+            if isinstance(fn_var, variables.NestedUserFunctionVariable):
+                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+                # This should not be onerous to support when needed.
+                unimplemented("NYI - lambda variables as hooks")
+            elif isinstance(fn_var.fn, functools.partial):
+                fn = fn_var.fn
+                name = fn_var.fn.func.__name__
+            else:
+                fn = fn_var.fn
+                name = fn_var.fn.__name__
+
+            handle = self.value.register_hook(fn)
+
+            handle_variable = variables.user_defined.RemovableHandleVariable(
+                handle,
+                last_seen_name=None,
+                mutable_local=variables.base.MutableLocal(),
+                **options,
+            )
+            fn_var.source = tx.store_hook(name, fn)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            return handle_variable
         return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):

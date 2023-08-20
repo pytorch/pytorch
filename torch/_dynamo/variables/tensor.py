@@ -679,19 +679,6 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
-        elif name == "register_hook":
-            assert len(args) == 1
-            fn_var = args[0]
-            # handle = self.as_proxy().node.meta["example_value"].register_hook(fn_var.fn)
-            # if self.source:
-            print("Reg register hook", id(fn_var.fn.args[0]), self.source if self.source else "No source", id(self))
-            fn_var.source = tx.store_hook(fn_var.fn.func.__name__, fn_var.fn)
-
-            tx.output.side_effects.register_hook(self, fn_var)
-            # else:
-                # print("No source hook")
-            # handle.remove()
-            return ConstantVariable(None)
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function

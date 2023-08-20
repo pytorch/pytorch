@@ -1500,10 +1500,10 @@ def _register_post_backward_reshard_only_hook(
             if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
-    hook_handle = register_multi_grad_hook(
+    hands = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    handle.flat_param._post_backward_hook_state = (hands,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check
