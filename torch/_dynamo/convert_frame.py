@@ -494,6 +494,8 @@ def _compile(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
                 )
+                # Fake mode will get reallocated on the restart!
+                TracingContext.get().fake_mode = None
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:

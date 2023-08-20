@@ -529,11 +529,15 @@ class TracingContext:
         return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, compile_id):
+        assert compile_id is None or isinstance(compile_id, CompileId)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         # Due to ordering reasons, the fake mode is lazily populated
-        self.fake_mode = None
+        self.fake_mode: FakeTensorMode = None  # type: ignore[assignment]
         self.compile_id = compile_id
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate

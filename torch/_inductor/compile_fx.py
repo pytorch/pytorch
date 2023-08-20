@@ -1139,9 +1139,10 @@ def compile_fx(
     fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
         allow_non_fake_inputs=True
     )
-    tracing_context = (
-        torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
-    )
+    tracing_context = torch._guards.TracingContext.get()
+    if tracing_context is None:
+        tracing_context = torch._guards.TracingContext(None)
+        tracing_context.fake_mode = fake_mode
     if _in_aot_compilation:
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return fw_compiler(model_, example_inputs_)
