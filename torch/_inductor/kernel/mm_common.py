@@ -119,7 +119,7 @@ def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
+def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
@@ -127,6 +127,8 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     *b1, m, k1 = mat1.get_size()
     *b2, k2, n = mat2.get_size()
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
+    if use_4x2_dim:
+        k2 = k2 * 2
     k = V.graph.sizevars.guard_equals(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -151,9 +153,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
-        return V.ops.add(acc, bias)
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
+        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
 
     return epilogue
