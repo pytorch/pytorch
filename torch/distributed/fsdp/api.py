@@ -284,8 +284,8 @@ class StateDictConfig:
             values to CPU, and if ``False``, then FSDP keeps them on GPU.
             (Default: ``False``)
         use_dtensor (bool): If ``True``, then FSDP saves the state dict values
-            as ``DTensor``, and if ``False``, then FSDP saves them as
-            ``ShardedTensor``. (Default: ``False``)
+            as ``DTensor`` if the value is sharded, and if ``False``, then FSDP
+            saves them as ``ShardedTensor``. (Default: ``False``)
     """
 
     offload_to_cpu: bool = False
@@ -353,8 +353,8 @@ class OptimStateDictConfig:
             original device (which is GPU unless parameter CPU offloading is
             enabled). (Default: ``True``)
         use_dtensor (bool): If ``True``, then FSDP saves the state dict values
-            as ``DTensor``, and if ``False``, then FSDP saves them as
-            ``ShardedTensor``. (Default: ``False``)
+            as ``DTensor`` if the value is sharded, and if ``False``, then FSDP
+            saves them as ``ShardedTensor``. (Default: ``False``)
     """
 
     # TODO: actually use this flag in the _optim_utils.py
