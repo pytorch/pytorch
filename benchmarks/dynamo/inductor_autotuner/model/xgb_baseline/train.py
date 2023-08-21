@@ -26,11 +26,11 @@ def main(args):
             return pickle.load(f)
 
     X_train = load("X_train.pkl")
-    y_train = load("y_train.pkl")
+    y_train = load("y_normalized_train.pkl")
     qid_train = load("qid_train.pkl")
 
     X_test = load("X_test.pkl")
-    y_test = load("y_test.pkl")
+    y_test = load("y_normalized_test.pkl")
     qid_test = load("qid_test.pkl")
 
     qid_train_unique = np.unique(qid_train)
