@@ -34,6 +34,8 @@ __all__ = [
     "DefaultDeviceType",
 ]
 
+_DEFAULT_DETERMINISM_MODE = "default"
+
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -311,17 +313,18 @@ def checkpoint(
     *args,
     use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = "default",
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model
 
-    Checkpointing is a technique that trades compute for memory. Instead of
-    storing all intermediate activations of the entire computation graph for
-    the backward pass, the checkpointed part omits saving intermediate
-    activations and recomputes them during the backward pass. This can be
-    applied to any part of a model.
+    Activation checkpointing is a technique that trades compute for memory.
+    Instead of keeping tensors needed for backward alive until they are used in
+    gradient computation during backward, forward computation in checkpointed
+    regions omits saving tensors for backward and recomputes them during the
+    backward pass. Activation checkpointing can be applied to any part of a
+    model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use
@@ -983,7 +986,7 @@ def _default_meta_extractor(x: torch.Tensor) -> Dict[str, Any]:
     }
 
 _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
-    "default": _default_meta_extractor,
+    _DEFAULT_DETERMINISM_MODE: _default_meta_extractor,
     "none": lambda _: None,
 }
 
@@ -1102,7 +1105,7 @@ def _checkpoint_without_reentrant_generator(
     fn,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = "default",
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     *args,
     **kwargs

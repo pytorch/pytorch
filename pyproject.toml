@@ -71,7 +71,10 @@ select = [
     "UP",
     "PERF",
     "PGH004",
+    "PIE807",
+    "PIE810",
     "PLE",
+    "RUF017",
     "TRY302",
 ]
 

@@ -622,6 +622,7 @@ Tensor class reference
     Tensor.asinh_
     Tensor.arcsinh
     Tensor.arcsinh_
+    Tensor.shape
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter

@@ -67,15 +67,6 @@ class AdamW(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Suppor AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
-            if not all(
-                p.is_cuda and torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
-            ):
-                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -381,8 +372,8 @@ def _single_tensor_adamw(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (
-                param.is_cuda and step_t.is_cuda
-            ), "If capturable=True, params and state_steps must be CUDA tensors."
+                (param.is_cuda and step_t.is_cuda) or (param.is_xla and step_t.is_xla)
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)

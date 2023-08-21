@@ -228,7 +228,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable, UserMethodVariable
+        from . import (
+            BuiltinVariable,
+            ConstantVariable,
+            TupleVariable,
+            UserMethodVariable,
+        )
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -250,11 +255,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
-                method is collections.OrderedDict.__contains__
+                method in (collections.OrderedDict.__contains__, dict.__contains__)
                 and len(args) == 1
-                and isinstance(args[0], ConstantVariable)
+                and isinstance(args[0], (ConstantVariable, BuiltinVariable))
                 and inspect.getattr_static(type(self.value), "keys")
-                is collections.OrderedDict.keys
+                in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
                 return ConstantVariable(
@@ -560,59 +565,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(key, self)
 
 
-class ProcessGroupVariable(UserDefinedObjectVariable):
-    """
-    We don't want a ProcessGroup object to end up in our output graph.
-
-    But it's common for dynamo to intercept a PG that is then used to get info like
-    rank() or world_size(), as well as passed to utility functions in distributed_c10d
-    which desugar it into plain types like a ranklist and tag.
-
-    For convenience and proper guarding, we construct a variable type.
-
-    TODO: make it possible to use ProcessGroupVariable as input to simple functions
-          like _expand_group without dynamo complaining about making a proxy for it.
-          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
-          torch library functions are dealing with tensor-like types and would have proxies
-          for their args.
-    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
-          or just graph-break whenever one of our special cases is not hit?
-    """
+class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def is_matching_object(obj):
+        try:
+            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+        except ImportError:
+            return False
+        else:
+            return type(obj) is KeyedJaggedTensor
 
     def __init__(self, value, **kwargs):
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    def as_python_constant(self):
-        return self.value
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "rank":
-            return variables.ConstantVariable(self.value.rank())
-        if name == "size":
-            return variables.ConstantVariable(self.value.size())
-
-        # TODO should this just raise unimplemented?
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx, name):
-        if name in ["rank", "size"]:
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
-        # TODO should this just raise unimplemented?
-        return super().var_getattr(tx, name)
-
-    @staticmethod
-    def is_process_group(value):
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if torch.distributed.is_available():
-            from torch._C._distributed_c10d import ProcessGroup
-
-            return istype(value, ProcessGroup)
-        return False
+    # TODO Handle getattr for _length_per_key and _offset_per_key properly.

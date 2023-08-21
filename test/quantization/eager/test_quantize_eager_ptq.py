@@ -327,6 +327,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             self.assertEqual(type(model.myadd), torch.ao.nn.quantized.QFunctional)
             self.assertEqual(type(model.mycat), torch.ao.nn.quantized.QFunctional)
             self.assertEqual(type(model.myadd_relu), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mymatmul), torch.ao.nn.quantized.QFunctional)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -1474,7 +1475,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
             checkHooksIsPresent(model)
 
     @skipIfNoFBGEMM
-    def test_embedding_ops_dynamic(self):
+    def test_embedding_bag_dynamic(self):
         class EmbeddingBagWithLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1495,9 +1496,29 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         q_model = quantize_dynamic(model, qconfig_dict)
 
         q_model(indices, offsets, torch.randn(5, 5))
-        self.assertTrue('QuantizedEmbedding' in str(q_model))
-        self.assertTrue('DynamicQuantizedLinear' in str(q_model))
+        self.assertTrue('QuantizedEmbeddingBag' in str(q_model.emb))
+        self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
 
+    @skipIfNoFBGEMM
+    def test_embedding_op_dynamic(self):
+        class EmbeddingWithLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12,
+                                                scale_grad_by_freq=False)
+                self.fc = torch.nn.Linear(5, 5)
+            def forward(self, indices,linear_in):
+                return self.emb(indices), self.fc(linear_in)
+        model = EmbeddingWithLinear().eval()
+        qconfig_dict = {
+            torch.nn.Embedding : float_qparams_weight_only_qconfig,
+            torch.nn.Linear: default_dynamic_qconfig
+        }
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        q_model = quantize_dynamic(model, qconfig_dict)
+        self.assertTrue('QuantizedEmbedding' in str(q_model.emb))
+        self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
+        q_model(indices, torch.randn(5, 5))
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

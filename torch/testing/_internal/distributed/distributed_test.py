@@ -849,9 +849,9 @@ class DistributedTest:
                 return
 
             if new_backend == "gloo":
-                self.assertTrue(isinstance(group_id, dist.ProcessGroupGloo))
+                self.assertTrue(group_id._get_backend_name(), "gloo")
             if new_backend == "nccl":
-                self.assertTrue(isinstance(group_id, dist.ProcessGroupNCCL))
+                self.assertTrue(group_id._get_backend_name(), "nccl")
 
             self.assertEqual(rank, group[dist.get_rank(group_id)])
             self.assertEqual(len(group), dist.get_world_size(group_id))
@@ -872,7 +872,7 @@ class DistributedTest:
             self._test_group_override_backend(self._init_group_test)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(3)
+        @skip_if_lt_x_gpu(2)
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
@@ -4993,6 +4993,7 @@ class DistributedTest:
             self,
             optim_cls,
             optim_kwargs,
+            init_before,
             gradient_as_bucket_view=True,
         ):
             # Need to seed to ensure inputs are unique across rank. Otherwise,
@@ -5016,17 +5017,23 @@ class DistributedTest:
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
                 optim = optim_cls(model.parameters(), **optim_kwargs)
-                # Note: have to apply_optimizer_in_backward before wrapping with DDP.
-                _apply_optimizer_in_backward(
-                    optimizer_class=optim_cls,
-                    params=model_optim_in_bwd.parameters(),
-                    optimizer_kwargs=optim_kwargs,
-                )
+                if init_before:
+                    _apply_optimizer_in_backward(
+                        optimizer_class=optim_cls,
+                        params=model_optim_in_bwd.parameters(),
+                        optimizer_kwargs=optim_kwargs,
+                    )
                 model_optim_in_bwd = nn.parallel.DistributedDataParallel(
                     model_optim_in_bwd,
                     device_ids=[self.rank],
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
+                if not init_before:
+                    _apply_optimizer_in_backward(
+                        optimizer_class=optim_cls,
+                        params=model_optim_in_bwd.parameters(),
+                        optimizer_kwargs=optim_kwargs,
+                    )
 
                 for p1, p2 in zip(model.parameters(), model_optim_in_bwd.parameters()):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
@@ -5062,56 +5069,70 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
-            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+            for optim_cls, init_before in itertools.product(
+                [torch.optim.SGD, torch.optim.Adam], [True, False]
+            ):
                 with self.subTest(optim_cls=optim_cls):
                     self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls, optim_kwargs={"lr": 0.03}
+                        optim_cls=optim_cls,
+                        optim_kwargs={"lr": 0.03},
+                        init_before=init_before,
                     )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
-            self._test_ddp_apply_optim_in_backward(
-                optim_cls=torch.optim.SGD,
-                optim_kwargs={"lr": 0.03},
-                gradient_as_bucket_view=False,
-            )
+            for init_before in [True, False]:
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=torch.optim.SGD,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=init_before,
+                    gradient_as_bucket_view=False,
+                )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
-            torch.manual_seed(self.rank)
-            torch.cuda.manual_seed(self.rank)
-            model = TwoLinLayerNet()
-            model_clone = copy.deepcopy(model)
-            # Parameters to ignore are in the format {module_name}.{param_name}
-            params_to_ignore = ["a.weight"]
-            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                model, params_to_ignore
-            )
-            _apply_optimizer_in_backward(
-                optimizer_class=torch.optim.SGD,
-                params=model.parameters(),
-                optimizer_kwargs={"lr": 0.03},
-            )
-            net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank),
-                device_ids=[self.rank],
-            )
-            inp = torch.randn(1, 10)
-            a, b = net(inp)
-            (a.transpose(0, 1) @ b).sum().backward()
-            # a.weight did not go through allreduce, so optimizer acted on local
-            # gradient, which should be different across ranks. Remaining params
-            # should be equal.
-            models = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(models, model)
-            rank0_model, remainder = models[0], models[1:]
-            for m in remainder:
-                self.assertNotEqual(rank0_model.a.weight, m.a.weight)
-                self.assertEqual(
-                    list(rank0_model.b.parameters()), list(m.b.parameters())
-                )
-                self.assertEqual(rank0_model.a.bias, m.a.bias)
+            for init_before in [True, False]:
+                with self.subTest(init_before=init_before):
+                    torch.manual_seed(self.rank)
+                    torch.cuda.manual_seed(self.rank)
+                    model = TwoLinLayerNet()
+                    # Parameters to ignore are in the format {module_name}.{param_name}
+                    params_to_ignore = ["a.weight"]
+                    torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                        model, params_to_ignore
+                    )
+                    if init_before:
+                        _apply_optimizer_in_backward(
+                            optimizer_class=torch.optim.SGD,
+                            params=model.parameters(),
+                            optimizer_kwargs={"lr": 0.03},
+                        )
+                    net = torch.nn.parallel.DistributedDataParallel(
+                        model.cuda(self.rank),
+                        device_ids=[self.rank],
+                    )
+                    if not init_before:
+                        _apply_optimizer_in_backward(
+                            optimizer_class=torch.optim.SGD,
+                            params=model.parameters(),
+                            optimizer_kwargs={"lr": 0.03},
+                        )
+                    inp = torch.randn(1, 10)
+                    a, b = net(inp)
+                    (a.transpose(0, 1) @ b).sum().backward()
+                    # a.weight did not go through allreduce, so optimizer acted on local
+                    # gradient, which should be different across ranks. Remaining params
+                    # should be equal.
+                    models = [None for _ in range(dist.get_world_size())]
+                    dist.all_gather_object(models, model)
+                    rank0_model, remainder = models[0], models[1:]
+                    for m in remainder:
+                        self.assertNotEqual(rank0_model.a.weight, m.a.weight)
+                        self.assertEqual(
+                            list(rank0_model.b.parameters()), list(m.b.parameters())
+                        )
+                        self.assertEqual(rank0_model.a.bias, m.a.bias)
 
         def _get_fp16_config(self) -> _MixedPrecision:
             return _MixedPrecision(

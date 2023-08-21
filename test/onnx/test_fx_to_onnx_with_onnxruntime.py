@@ -36,8 +36,6 @@ except RuntimeError:
     HAS_TORCHVISION = False
 skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-ONNX_OPSET_VERSION_TO_TEST = 18
-
 
 def _parameterized_class_attrs_and_values():
     input_values = []
@@ -75,14 +73,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
         self.ort_version = onnxruntime.__version__
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_simple_function(self):
         def func(x):
             # TODO(justinchuby): Replicate torch's type casting policy
@@ -98,11 +90,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail(
         "AssertionError: Dynamo input/output is not consistent with traced input/output. "
         "Ref: https://github.com/pytorch/pytorch/issues/96379"
-    )
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
     )
     def test_func_with_args_and_tensor_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
@@ -139,17 +126,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), {"b": torch.tensor(5.0)}
+            func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
     @pytorch_test_common.xfail(
         "https://github.com/pytorch/pytorch/issues/99534"
         "Non-tensor input is not traceable in dynamo."
-    )
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
     )
     def test_xfail_func_with_non_tensor_args(self):
         def func(x, b=1.0):
@@ -164,11 +146,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             tensor_x,
             8.0,
             export_options=torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
                 op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+        onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
         onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
         ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
         ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
@@ -182,11 +164,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_func_with_nested_input_structure(self):
         def func(
             x_dict: Dict[str, torch.Tensor],
@@ -218,11 +195,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (x_dict, y_tuple, z_list)
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_func_with_nested_output_structure(self):
         def func(x, y, z):
             x = x + y
@@ -238,11 +210,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(3)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x, y, z))
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -270,11 +237,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MNISTModel(), (tensor_x,)
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_log_sigmoid(self):
         # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
         # conventional `torch.ops.aten.log_sigmoid`.
@@ -289,11 +251,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(2)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     @skip_if_no_torchvision
     def test_resnet18(self):
         # TODO(bowbao): Note [training vs eval in dynamo_export]
@@ -315,11 +272,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail(
         "RuntimeError: Unknown call_function target: aten.mean.dim"
     )
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         # TODO(bowbao): see Note [training vs eval in dynamo_export]
@@ -335,11 +287,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_add(self):
         class DynamicAdd(torch.nn.Module):
             def forward(self, x, y):
@@ -356,11 +303,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((another_x, another_y),)],
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_sigmoid_add(self):
         class DynamicAdd(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -382,11 +324,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[((input_x, input_y),)]
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -454,11 +391,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             Squeeze(), (d3, d4), additional_test_inputs=[((d1, d3),)]
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -475,13 +407,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    # TODO(titaiwang): This is also detected flaky in static shape:
-    # https://github.com/pytorch/pytorch/issues/98622
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=False,
-    )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
@@ -492,11 +417,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=False,
-    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -566,11 +486,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
+    # NOTE:The test was meant to test the empty bounding box case, but it is not
+    # supported. When we have vision model examples, we will have a better test case
+    # to demonstrate in FX and FX exporter.
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
@@ -578,16 +496,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return input.view(1, -1)
 
         x = torch.ones(2)
+        # y = torch.empty(0)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
+            # additional_test_inputs=[((y,),)],  # TODO: Without `additional_test_inputs` arg, dynamic shape cannot be verified
+            skip_dynamic_shapes_check=True,  # Has static shape for dynamic_shapes=True due to 0/1 specialization
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -601,11 +517,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model, (x,), additional_test_inputs=[((y,),)]
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_none_input(self):
         class NoneInputModel(torch.nn.Module):
             def forward(
@@ -619,11 +530,31 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             NoneInputModel(), (torch.randn(1, 2), None, torch.randn(1, 2))
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
+    def test_operator_with_data_dependent_output(self):
+        def func(x):
+            # Repro from llama. Emits `torch.ops.aten._local_scalar_dense`.
+            return x + torch.full(x.shape, torch.tensor(torch.finfo(x.dtype).min))
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.randn(3, 4),)
+        )
+
+    def test_operator_with_scalar_output(self):
+        def func(x, y):
+            return x.item() + y
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.tensor([1]), torch.randn(3, 4))
+        )
+
+    def test_operator_with_dynamic_output_shape(self):
+        def func(x):
+            return x.nonzero()
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.randn(3, 4),)
+        )
+
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
@@ -635,14 +566,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, [], inputs, additional_test_inputs=[((), another_inputs)]
+            model,
+            [],
+            input_kwargs=inputs,
+            additional_test_inputs=[((), another_inputs)],
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_prims_device_put(self):
         class CustomModule(nn.Module):
             def forward(self, x):
@@ -714,7 +643,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # all files that contains real initializers.
 
                 options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
@@ -729,8 +657,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     export_options=export_options,
                 )
-
                 onnx_model = export_output.model_proto
+
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -876,7 +805,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
         self.ort_version = onnxruntime.__version__
 
     @_beartype.beartype
@@ -932,7 +860,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
                 # Export the model with fake inputs and parameters
                 export_options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                     fake_context=fake_context,
@@ -950,6 +877,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_output = torch.onnx.dynamo_export(
                     fake_model, *fake_args, **fake_kwargs, export_options=export_options
                 )
+
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 export_output.save(
@@ -978,9 +907,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 for ref_output, ort_output in zip(ref_outputs, ort_outputs):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
-    @pytorch_test_common.skip_op_level_debug_test(
-        "https://github.com/pytorch/pytorch/issues/105490"
-    )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
             class Model(torch.nn.Module):
@@ -1009,9 +935,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
-    @pytorch_test_common.skip_op_level_debug_test(
-        "https://github.com/pytorch/pytorch/issues/105490"
-    )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 
@@ -1037,9 +960,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
-    @pytorch_test_common.skip_op_level_debug_test(
-        "https://github.com/pytorch/pytorch/issues/105490"
-    )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
@@ -1070,6 +990,40 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.xfail(
+        "ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB"
+        "[ONNXRuntimeError] : Status Message: Indices vs updates dimensions differs at position=1 0 vs 3"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
+    )
+    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
+        "HF Bloom model does not need `model.load_state_dict` to work."
+    )
+    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
+        model_name = "bigscience/bloom-560m"
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs(model_name=model_name):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            return tokenizer("Hello world!", return_tensors="pt")
+
+        def create_model():
+            return AutoModel.from_pretrained(model_name)
+
+        self._test_fake_tensor_mode_exporter(
+            model_name.replace("/", "_"),
             create_model,
             create_args,
             create_kwargs,

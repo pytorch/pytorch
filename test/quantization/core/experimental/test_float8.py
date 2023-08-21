@@ -1,12 +1,8 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 # Masks for float8 simulation
 
@@ -96,9 +92,9 @@ class TestFloat8Dtype(TestCase):
     """
 
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
-    def test_creation_with_zeros(self, dtype):
-        x = torch.zeros(8, dtype=torch.float)
-        x8 = torch.zeros(8, dtype=dtype)
+    def test_creation_with_zeros(self, dtype, device):
+        x = torch.zeros(8, dtype=torch.float, device=device)
+        x8 = torch.zeros(8, dtype=dtype, device=device)
         self.assertEqual(x, x8.float())
 
     """
@@ -106,15 +102,46 @@ class TestFloat8Dtype(TestCase):
     """
 
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
-    def test_cast_to_float8(self, dtype):
-        x = torch.rand((100, 100)) * FP8_MAX[dtype]
+    def test_cast_to_float8(self, dtype, device):
+        x = torch.rand((100, 100), device=device) * FP8_MAX[dtype]
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         x8_simulated = simulateFp8Precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
     """
-        Test of mul implementation
+        Test special numbers
+    """
+
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    def test_special_numbers(self, dtype, device):
+        def compare_binary_with_decimal(binary, decimal, number_name, dtype, device):
+            bits_int = int(binary, 2)
+            tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
+            tensor_fp8 = tensor_int.view(dtype)
+            if number_name == "nan":
+                assert tensor_fp8.isnan()
+            else:
+                tensor_fp32 = tensor_fp8.float()
+                ref_tensor_fp32 = torch.tensor(
+                    [decimal], dtype=torch.float, device=device
+                )
+                self.assertEqual(tensor_fp32, ref_tensor_fp32)
+
+        for number in SPECIAL_NUMBERS[dtype]:
+            compare_binary_with_decimal(*number, dtype, device)
+
+
+instantiate_device_type_tests(TestFloat8Dtype, globals())
+
+
+class TestFloat8DtypeCPUOnly(TestCase):
+
+    """
+    Test of mul implementation
+    # Note: this is cpu-only for now because adding it to CUDA requires
+    adding yet c++ dtype macro, and there is no use case yet for unscaled
+    float8 multiplication - doesn't seem worth it.
     """
 
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
@@ -130,29 +157,8 @@ class TestFloat8Dtype(TestCase):
         mul8_simulated = (a8_simulated * b8_simulated).to(dtype)
         self.assertEqual(mul8, mul8_simulated)
 
-    """
-        Test special numbers
-    """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
-    def test_special_numbers(self, dtype):
-        def compare_binary_with_decimal(binary, decimal, number_name, dtype):
-            bits_int = int(binary, 2)
-            tensor_int = torch.tensor([bits_int], dtype=torch.uint8)
-            tensor_fp8 = tensor_int.view(dtype)
-            if number_name == "nan":
-                assert tensor_fp8.isnan()
-            else:
-                tensor_fp32 = tensor_fp8.float()
-                ref_tensor_fp32 = torch.tensor([decimal], dtype=torch.float)
-                self.assertEqual(tensor_fp32, ref_tensor_fp32)
-
-        for number in SPECIAL_NUMBERS[dtype]:
-            compare_binary_with_decimal(*number, dtype)
-
-
-instantiate_parametrized_tests(TestFloat8Dtype)
-
+instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

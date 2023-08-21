@@ -323,10 +323,6 @@ class SizeVarAllocator:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        expr = self.simplify(right - left)
-        assert self.size_hint(expr) > 0
-        if len(expr.free_symbols) == 0:
-            return
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     # The evaluate functions evaluate some symbolic sympy expression
@@ -362,7 +358,8 @@ class SizeVarAllocator:
     def evaluate_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
-    def size_hint(self, expr: Expr) -> int:
+    def symbolic_hint(self, expr: Expr) -> Expr:
+        # Substitute all hints into expr, but leave unbacked symints alone
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -372,7 +369,10 @@ class SizeVarAllocator:
         while any(s.name.startswith("ps") for s in free_symbols):
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
-        out = sympy_subs(expr, self.var_to_val)
+        return sympy_subs(expr, self.var_to_val)
+
+    def size_hint(self, expr: Expr) -> int:
+        out = self.symbolic_hint(expr)
         try:
             return int(out)
         except Exception:
