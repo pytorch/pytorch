@@ -35,7 +35,7 @@ class PackageInfo:
     def from_python_class(cls, python_class: type) -> PackageInfo:
         package_name = python_class.__module__.split(".")[0]
         package = __import__(package_name)
-        version = package.__version__
+        version = getattr(package, "__version__", "unknown_version")
         # TODO: Figure out how to retrieve commit hash.
         commit_hash = None
         return cls(package_name, version, commit_hash)
