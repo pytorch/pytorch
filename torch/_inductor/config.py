@@ -174,9 +174,9 @@ if torch.version.hip:
         gpu_name = None
 
     if "MI2" in gpu_name:
-        conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "0") == "1"
-    else:
         conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
+    else:
+        conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "0") == "1"
 else:
     conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
 
