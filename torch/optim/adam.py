@@ -123,7 +123,7 @@ class Adam(Optimizer):
 
                 # Foreach without capturable does not support a tensor lr
                 if group['foreach'] and torch.is_tensor(group['lr']) and not group['capturable']:
-                    raise RuntimeError('`foreach` with a Tensor lr requires `capturable` to be `True`')
+                    raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True')
 
                 state_steps.append(state['step'])
 
