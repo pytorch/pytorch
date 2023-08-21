@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import re
 from collections import namedtuple
 from itertools import chain
@@ -195,6 +196,9 @@ class DataTypePropagation:
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
+
+        if node.target == operator.getitem:
+            return self.deduce_node_dtype(node.args[0])
 
         assert isinstance(node.target, str)
 
@@ -478,6 +482,9 @@ class KernelArgs:
             )
         )
 
+    def _buffer_is_marked_removed(self, name):
+        return isinstance(name, str) and name.startswith("REMOVED")
+
     def input(self, name):
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
@@ -557,7 +564,7 @@ class KernelArgs:
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
@@ -575,7 +582,7 @@ class KernelArgs:
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
@@ -593,7 +600,7 @@ class KernelArgs:
         call_args = []
         precompile_args: List[Union[TensorArg, SizeArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
@@ -607,7 +614,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -621,7 +628,7 @@ class KernelArgs:
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             for other in inplaced.other_names:
                 if other in V.graph.inplaced_to_remove:
@@ -633,7 +640,7 @@ class KernelArgs:
 
     def is_removed(self, name):
         def _is_removed(name, buffers):
-            return name not in buffers or buffers[name] == "REMOVED"
+            return name not in buffers or self._buffer_is_marked_removed(buffers[name])
 
         return _is_removed(name, self.output_buffers) and _is_removed(
             name, self.inplace_buffers
@@ -645,11 +652,11 @@ class KernelArgs:
     def live_output_buffers(self):
         live_outs = set()
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             live_outs.add(outer)
         return live_outs
