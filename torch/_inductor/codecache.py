@@ -916,8 +916,7 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-            return cls.cache[key]
-        return None
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -1153,6 +1152,7 @@ class CppWrapperCodeCache:
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
                         extra_include_paths=[extra_include_paths],
+                        use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
                 else:
