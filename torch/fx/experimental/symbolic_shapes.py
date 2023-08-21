@@ -2508,6 +2508,23 @@ class ShapeEnv:
 
         return r
 
+    def render_range_for_constraint_violation(self, source, c):
+        lower, upper = c.vr.lower, c.vr.upper
+        default = self._default_value_range()
+        if lower <= default.lower:
+            lower = None
+        if upper >= default.upper:
+            upper = None
+        c_render = f"{source.name()} in the specified range"
+        if lower is not None and upper is not None:
+            c_render += f" {lower} <= {source.name()} <= {upper}"
+        elif lower is None and upper is not None:
+            c_render += f" {source.name()} <= {upper}"
+        elif lower is not None and upper is None:
+            c_render += f" {lower} <= {source.name()}"
+        return c_render
+
+
     # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
@@ -2710,10 +2727,11 @@ class ShapeEnv:
                     if val not in (0, 1):
                         constraint_violated = True
                 if constraint_violated:
+                    var_with_range = self.render_range_for_constraint_violation(source, constraint)
                     msg = (
-                        f"Could not validate constraint {constraint.render(source)} as "
-                        f"{source.name()} was inferred to be constant ({val}).  For more information "
-                        "about why it is constant, run with TORCH_LOGS=dynamic"
+                        f"{var_with_range} can only take one value ({val}) because "
+                        f"{source.name()} was inferred to be a constant. For more information "
+                        "about why it is constant, run with TORCH_LOGS=dynamic."
                     )
                     record_constraint_violation(constraint.warn_only, msg)
 
@@ -2821,9 +2839,12 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
+                            var_with_range = self.render_range_for_constraint_violation(source, c)
                             msg = (
-                                f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}."
+                                f"Not all values of {var_with_range} "
+                                f"satisfy the generated guard {guard_expr}. "
+                                "For more information about why this guard was generated, "
+                                "run with TORCH_LOGS=dynamic."
                             )
                             record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
