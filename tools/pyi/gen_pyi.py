@@ -660,6 +660,7 @@ def gen_pyi(
                             "indices: Tensor",
                             "values: Union[Tensor, List]",
                             "size: Optional[_size] = None",
+                            "is_coalesced: Optional[_bool] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "device: Union[_device, str, None] = None",
