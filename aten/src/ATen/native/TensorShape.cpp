@@ -1602,6 +1602,7 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+// overload for symbolic shapes and strides.
 template <>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
@@ -1610,13 +1611,15 @@ Tensor alias_with_sizes_and_strides(
   //caller should make sure that sizes and strides are valid for self
   //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
-  TORCH_INTERNAL_ASSERT(
-      !self.is_quantized(),
-      "alias_with_sizes_and_strides: called with quantized tensor which is not supported for this overload");
-  self_ = at::detail::make_tensor<TensorImpl>(
-  c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  auto* self_tmp_ = self_.unsafeGetTensorImpl();
-  self_tmp_->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  if (self.is_quantized()) {
+    self_ = at::detail::make_tensor<QTensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  } else {
+    self_ = at::detail::make_tensor<TensorImpl>(
+    c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  }
   namedinference::propagate_names(self_, self);
   return self_;
 }
