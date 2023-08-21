@@ -889,17 +889,16 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(ValueError, "Expected allow_unused to be True or not passed when"):
             torch.autograd.grad(y, x, allow_unused=False, materialize_grads=True)
 
-    def test_post_accumulate_grad_hook_on_non_leaf_is_no_op(self):
+    def test_post_accumulate_grad_hook_on_non_leaf(self):
         def hook(tensor):
             tensor.sub_(1.)
         leaf = torch.rand(3, requires_grad=True)
         non_leaf = 2. * leaf
-        non_leaf.register_post_accumulate_grad_hook(hook)
-        sum = non_leaf.sum()
-        sum.backward(retain_graph=True)
-        # The grad does not accumulate for non-leaf Tensors, even if
-        # retain_grad, so the hook should never be called.
-        self.assertEqual(non_leaf, leaf * 2.)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "post accumulate grad hooks cannot be registered on non-leaf tensors"):
+            non_leaf.register_post_accumulate_grad_hook(hook)
 
     def test_post_accumulate_grad_hook_multiple_hooks(self):
         def hook1(tensor):
@@ -997,23 +996,28 @@ class TestAutograd(TestCase):
             self.assertNotEqual(p_reference, p)
 
     def test_post_accumulate_grad_hook_gets_cleaned_up(self):
+
         def fun_stuff_with_hook():
             thing_to_put_in_hook = torch.rand(3)
 
             def hook(tensor):
                 tensor.sub_(tensor.grad)
                 tensor.add_(thing_to_put_in_hook)
+
             tensor = torch.rand(3, requires_grad=True)
             tensor.register_post_accumulate_grad_hook(hook)
             tensor.sum().backward()
             ref = weakref.ref(thing_to_put_in_hook)
             gc.collect()
-            self.assertIsNotNone(ref())  # thing_to_put_in_hook should still be alive
-            return ref
+            return tensor, ref
 
         with disable_gc():
-            ref = fun_stuff_with_hook()
-            self.assertIsNone(ref())  # thing_to_put_in_hook should have been cleaned
+            tensor, ref = fun_stuff_with_hook()
+            self.assertIsNotNone(ref())  # thing_to_put_in_hook should be kept alive by tensor
+
+            del tensor
+            gc.collect()
+            self.assertIsNone(ref())  # thing_to_put_in_hook should be cleaned
 
     def test_post_accumulate_grad_hook_ordering(self):
         tensor = torch.rand(3, requires_grad=True)
@@ -2128,24 +2132,37 @@ class TestAutograd(TestCase):
         with torch.no_grad():
             w = x + y
 
-        @torch.no_grad()
         def adder(x, y):
             return x + y
 
-        z = adder(x, y)
+        adders = [torch.no_grad()(adder), torch.no_grad(adder)]
 
-        self.assertFalse(w.requires_grad)
-        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
-        self.assertIsNone(w.grad_fn)
-        self.assertFalse(z.requires_grad)
-        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
-        self.assertIsNone(z.grad_fn)
+        for adder in adders:
+            z = adder(x, y)
+
+            self.assertFalse(w.requires_grad)
+            self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+            self.assertIsNone(w.grad_fn)
+            self.assertFalse(z.requires_grad)
+            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertIsNone(z.grad_fn)
 
         # test nested decorator and with-statement on no_grad
         with torch.no_grad():
             self.assertFalse(torch.is_grad_enabled())
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
+
+    def test_enable_grad_decorator_no_paren(self):
+        x = torch.ones(1, requires_grad=True)
+
+        @torch.enable_grad
+        def doubler(x):
+            return x * 2
+
+        with torch.no_grad():
+            z = doubler(x)
+        self.assertTrue(z.requires_grad)
 
     def test_set_grad_generator_functions(self):
         @torch.no_grad()
@@ -10316,15 +10333,25 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        for mode in (True, False):
-            @torch.inference_mode(mode)
-            def func(x):
-                self.assertEqual(torch.is_inference_mode_enabled(), mode)
-                return x * x
+        def func(x):
+            self.assertEqual(torch.is_inference_mode_enabled(), mode)
+            return x * x
+        for mode, use_kwarg in product((True, False, None), (True, False)):
+            if mode is None:
+                if use_kwarg:
+                    decorated = torch.inference_mode(mode=func)
+                else:
+                    decorated = torch.inference_mode(func)
+                mode = True
+            else:
+                if use_kwarg:
+                    decorated = torch.inference_mode(mode=mode)(func)
+                else:
+                    decorated = torch.inference_mode(mode)(func)
 
             for requires_grad in (True, False):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-                d = func(c)
+                d = decorated(c)
                 self.assertTrue(not mode or torch.is_inference(d))
                 self.assertEqual(d.requires_grad, requires_grad and not mode)
 

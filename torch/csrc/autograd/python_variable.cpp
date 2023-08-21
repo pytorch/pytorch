@@ -428,7 +428,7 @@ static int THPVariable_clear(THPVariable* self) {
     return 0;
   }
   Py_CLEAR(self->backward_hooks);
-  Py_CLEAR(self->post_accumulate_grad_hooks);
+  Py_XDECREF(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
     // Two situations to consider:
@@ -1197,10 +1197,9 @@ int THPVariable_set_post_accumulate_grad_hooks(
   Py_XDECREF(self->post_accumulate_grad_hooks);
   self->post_accumulate_grad_hooks = obj;
   const auto& tensor = THPVariable_Unpack(self);
-  torch::autograd::impl::clear_post_acc_grad_hooks(tensor);
   if (obj) {
-    torch::autograd::impl::add_post_acc_grad_hook(
-        tensor, std::make_unique<PyFunctionTensorPostAccGradHook>(obj));
+    torch::autograd::impl::set_post_acc_grad_hooks(
+        tensor, std::make_unique<PyFunctionTensorPostAccGradHooks>(obj));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

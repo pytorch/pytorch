@@ -523,9 +523,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return tensor_pre_hooks_;
   }
 
-  virtual std::vector<std::unique_ptr<PostAccumulateGradHook>>&
+  virtual std::unique_ptr<PostAccumulateGradHook>&
   tensor_post_acc_grad_hooks() noexcept {
-    static std::vector<std::unique_ptr<PostAccumulateGradHook>> empty;
+    static std::unique_ptr<PostAccumulateGradHook> empty = nullptr;
     return empty;
   }
 
