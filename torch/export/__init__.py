@@ -4,8 +4,80 @@ import torch
 
 
 __all__ = [
+    "dynamic_dim",
     "export",
 ]
+
+
+def dynamic_dim(t: torch.Tensor, index: int):
+    """
+    `dynamic_dim` constructs a `Constraint` object that describes the dynamism of
+    a dimension `index` of tensor `t`. `Constraint` objects should be passed to
+    `constraints` argument of `export()`.
+
+    Specifically `dynamic_dim` can be used to express following types of dynamism.
+
+    - Size of a dimension is dynamic and unbounded::
+
+        t0 = torch.rand(2, 3)
+        t1 = torch.rand(3, 4)
+
+        # First dimension of t0 can be dynamic size rather than always being static size 2
+        constraints = [dynamic_dim(t0, 0)]
+        ep = export(fn, (t0, t1), constraints=constraints)
+
+    - Size of a dimension is dynamic with a lower bound::
+
+        t0 = torch.rand(10, 3)
+        t1 = torch.rand(3, 4)
+
+        # First dimension of t0 can be dynamic size with a lower bound of 5 (inclusive)
+        # Second dimension of t1 can be dynamic size with a lower bound of 2 (exclusive)
+        constraints = [
+            dynamic_dim(t0, 0) >= 5,
+            dynamic_dim(t1, 1) > 2,
+        ]
+        ep = export(fn, (t0, t1), constraints=constraints)
+
+    - Size of a dimension is dynamic with an upper bound::
+
+        t0 = torch.rand(10, 3)
+        t1 = torch.rand(3, 4)
+
+        # First dimension of t0 can be dynamic size with a upper bound of 16 (inclusive)
+        # Second dimension of t1 can be dynamic size with a upper bound of 8 (exclusive)
+        constraints = [
+            dynamic_dim(t0, 0) <= 16,
+            dynamic_dim(t1, 1) < 8,
+        ]
+        ep = export(fn, (t0, t1), constraints=constraints)
+
+    - Size of a dimension is dynamic and it is always equal to size of another dynamic dimension::
+
+        t0 = torch.rand(10, 3)
+        t1 = torch.rand(3, 4)
+
+        # Sizes of second dimension of t0 and first dimension are always equal
+        constraints = [
+            dynamic_dim(t0, 1) == dynamic_dim(t1, 0),
+        ]
+        ep = export(fn, (t0, t1), constraints=constraints)
+
+    - Mix and match all types above as long as they do not express conflicting requirements
+
+    Args:
+        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
+        index (int): Index of dynamic dimension
+
+    Returns:
+        A `Constraint` object that describes shape dynamism. It can be passed to `export()` so
+        that `export()` does not assume static size of specified tensor, i.e. keeping it dynamic
+        as a symbolic size rather than specializing according to size of example tracing input.
+
+    """
+    from torch._export import dynamic_dim
+
+    return dynamic_dim(t, index)
 
 
 def export(
@@ -97,7 +169,7 @@ def export(
     Note:
     If you want to preserve dynamic branching behavior based on value or
     shape of torch.Tensor in the generated graph, you will need to use
-    `torch._export.dynamic_dim` to make a dimension of input tensor to be dynamic
+    `torch.export.dynamic_dim` to make a dimension of input tensor to be dynamic
     and rewrite the source code using control flow operations like
     `torch.ops.higher_order.cond`.
 
@@ -114,7 +186,7 @@ def export(
     Because static shape use cases are more dominant, `export()` chooses to
     assume shapes are all static by default unless there are explicit user
     instructions that say otherwise. Specifically, users can use
-    `torch._export.dynamic_dim` to give a hint to `export()` about dynamism
+    `torch.export.dynamic_dim` to give a hint to `export()` about dynamism
     and range of an input tensor dimension.
 
     2. Dynamic Control Flow
@@ -142,7 +214,7 @@ def export(
 
     - Assumptions on static shapes of input tensors are automatically validated without additional effort.
     - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with `torch._export.dynamic_dim` APIs
+      constructed with `torch.export.dynamic_dim` APIs
     - Assumptions on range of intermediate values require explicit `Inline Constraint`,
       constructed use `constrain_as_size` and `constraint_as_value` APIs.
 
@@ -194,9 +266,9 @@ def export(
         constraints: An optional list of constraints on the dynamic arguments
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use `torch._export.dynamic_dim()`
+         is expected to have dynamic shapes, please use `torch.export.dynamic_dim()`
          to define `Constraint` objects that specify the dynamics and the possible
-         range of shapes. See torch._export.dynamic_dim() docstring for examples on
+         range of shapes. See torch.export.dynamic_dim() docstring for examples on
          how to use it.
 
     Returns:
