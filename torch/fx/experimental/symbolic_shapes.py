@@ -3468,7 +3468,9 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 tb = traceback.extract_stack()[:-1]
                 stack = ''.join(traceback.format_list(tb))
-                guard = ShapeGuard(g, stack)
+                user_tb = TracingContext.extract_stack()
+                user_frame = format_frame(user_tb[-1]) if user_tb else ""
+                guard = ShapeGuard(g, stack, user_frame)
                 self.guards.append(guard)
         except Exception:
             self.remove_fx_node(node)
