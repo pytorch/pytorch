@@ -44,7 +44,7 @@ torch.set_default_dtype(torch.double)
 
 from torch import inf, nan
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
+    (TestCase, run_tests, set_rng_seed, load_tests,
      gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
@@ -912,8 +912,7 @@ class TestDistributions(DistributionsTestCase):
                 dist = Dist(**param)
                 sample = dist.sample()
                 self.assertFalse(sample.requires_grad,
-                                 msg='{} example {}/{}, .sample() is not detached'.format(
-                                     Dist.__name__, i + 1, len(params)))
+                                 msg=f'{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached')
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_rsample_requires_grad(self):
@@ -926,8 +925,7 @@ class TestDistributions(DistributionsTestCase):
                     continue
                 sample = dist.rsample()
                 self.assertTrue(sample.requires_grad,
-                                msg='{} example {}/{}, .rsample() does not require grad'.format(
-                                    Dist.__name__, i + 1, len(params)))
+                                msg=f'{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad')
 
     def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
@@ -1900,8 +1898,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_sampler_sampler(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
             ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
-            '''MixtureSameFamily(Categorical(probs={}),
-            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
+            f'''MixtureSameFamily(Categorical(probs={probs}),
+            Normal(loc={loc}, scale={scale}))''')
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -4377,8 +4375,7 @@ class TestConstraints(DistributionsTestCase):
                     if is_dependent(constraint):
                         continue
 
-                    message = '{} example {}/{} parameter {} = {}'.format(
-                        Dist.__name__, i + 1, len(params), name, value)
+                    message = f'{Dist.__name__} example {i + 1}/{len(params)} parameter {name} = {value}'
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
     def test_support_constraints(self):
@@ -4388,8 +4385,7 @@ class TestConstraints(DistributionsTestCase):
                 dist = Dist(**param)
                 value = dist.sample()
                 constraint = dist.support
-                message = '{} example {}/{} sample = {}'.format(
-                    Dist.__name__, i + 1, len(params), value)
+                message = f'{Dist.__name__} example {i + 1}/{len(params)} sample = {value}'
                 self.assertEqual(constraint.event_dim, len(dist.event_shape), msg=message)
                 ok = constraint.check(value)
                 self.assertEqual(ok.shape, dist.batch_shape, msg=message)
@@ -4661,6 +4657,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+@skipIfTorchDynamo("FIXME: Tries to trace through SciPy and fails")
 class TestAgainstScipy(DistributionsTestCase):
     def setUp(self):
         super().setUp()
@@ -5007,7 +5004,6 @@ class TestValidation(DistributionsTestCase):
                         fail_string.format(Dist.__name__, i + 1, len(params))
                     ) from e
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):

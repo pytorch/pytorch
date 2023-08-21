@@ -159,7 +159,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
     This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
     to the gradient) and not the one from AdamW (were weight_decay is applied to the update). This
     is different from the `author's implementation`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -169,15 +169,15 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {differentiable}
+        {_foreach_doc}
+        {_differentiable_doc}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
     .. _author's implementation:
         https://github.com/LiyuanLucasLiu/RAdam
 
-    """.format(foreach=_foreach_doc, differentiable=_differentiable_doc)
+    """
 
 
 def radam(

@@ -148,7 +148,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-7/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-12/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -182,7 +182,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # have, and it applies to child processes.
 
     # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=/usr/lib/llvm-12/lib/clang/12.0.1/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
     # Increase stack size, because ASAN red zones use more stack
@@ -267,7 +267,7 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
-      test_custom_op_testing \
+      test_custom_ops \
       test_content_store \
       export/test_db \
       functorch/test_dims \
@@ -377,6 +377,11 @@ test_perf_for_dashboard() {
         python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
         python "benchmarks/dynamo/$suite.py" \
@@ -500,40 +505,38 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Running ATen tests with pytorch lib"
+  echo "Running ATen tests with pytorch lib"
 
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Running test with the install folder"
-      # Rename the build folder when running test to ensure it
-      # is not depended on the folder
-      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_TEST_DIR"
-    else
-      echo "Running test with the build folder"
-      TEST_BASE_DIR="$BUILD_BIN_DIR"
-    fi
-
-    # NB: the ATen test binaries don't have RPATH set, so it's necessary to
-    # put the dynamic libraries somewhere were the dynamic linker can find them.
-    # This is a bit of a hack.
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
-
-    ls "$TEST_BASE_DIR"
-    aten/tools/run_tests.sh "$TEST_BASE_DIR"
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      # Restore the build folder to avoid any impact on other tests
-      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
-    fi
-
-    assert_git_not_dirty
+  if [[ -n "$IN_WHEEL_TEST" ]]; then
+    echo "Running test with the install folder"
+    # Rename the build folder when running test to ensure it
+    # is not depended on the folder
+    mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+    TEST_BASE_DIR="$TORCH_TEST_DIR"
+  else
+    echo "Running test with the build folder"
+    TEST_BASE_DIR="$BUILD_BIN_DIR"
   fi
+
+  # NB: the ATen test binaries don't have RPATH set, so it's necessary to
+  # put the dynamic libraries somewhere were the dynamic linker can find them.
+  # This is a bit of a hack.
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
+
+  ls "$TEST_BASE_DIR"
+  aten/tools/run_tests.sh "$TEST_BASE_DIR"
+
+  if [[ -n "$IN_WHEEL_TEST" ]]; then
+    # Restore the build folder to avoid any impact on other tests
+    mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+  fi
+
+  assert_git_not_dirty
 }
 
 test_without_numpy() {
@@ -564,10 +567,11 @@ test_libtorch() {
 
   # The slow test config corresponds to a default test config that should run
   # the libtorch tests instead.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
+  if [[ "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libcaffe2_nvrtc.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -580,7 +584,8 @@ test_libtorch() {
       test_libtorch_api
     fi
 
-    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
+    # still disable rocm
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* && (-z "${SHARD}" || "${SHARD}" == "2") ]]; then
       test_libtorch_jit
     fi
 
@@ -661,7 +666,7 @@ test_distributed() {
   time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$SHARD_NUMBER" == 1 ]]; then
+  if [[ ("$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm*) && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
@@ -673,30 +678,30 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
 
-    MPIEXEC=$(command -v mpiexec)
-    if [[ -n "$MPIEXEC" ]]; then
-      # NB: mpiexec only works directly with the C++ test binary here
-      MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
-      eval "$MPICMD"
-    fi
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      MPIEXEC=$(command -v mpiexec)
+      if [[ -n "$MPIEXEC" ]]; then
+        # NB: mpiexec only works directly with the C++ test binary here
+        MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
+        eval "$MPICMD"
+      fi
 
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+    fi
   fi
 }
 
 test_rpc() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing RPC C++ tests"
-    # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process to function as expected.
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+  echo "Testing RPC C++ tests"
+  # NB: the ending test_rpc must match the current function name for the current
+  # test reporting process to function as expected.
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
-    CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
-  fi
+  CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
 }
 
 test_custom_backend() {
@@ -1018,11 +1023,18 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchtext
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # https://github.com/opencv/opencv-python/issues/885
+  pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
+    # Do this after checkout_install_torchbench to ensure we clobber any
+    # nightlies that torchbench may pull in
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+      install_torchrec_and_fbgemm
+    fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then

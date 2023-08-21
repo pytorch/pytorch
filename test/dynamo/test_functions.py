@@ -10,12 +10,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import expectedFailureDynamic, requires_numpy_pytorch_interop
+from torch._dynamo.testing import expectedFailureDynamic
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -639,6 +641,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return l3[0] + l3[1]
 
     @make_test
+    def test_list_index_with_constant_tensor(a, b):
+        l1 = [a, b, a + 1, b + 1]
+        return l1[torch.as_tensor(2)]
+
+    @make_test
     def test_startswith(a, b):
         x = a + b
         if "foobar".startswith("foo") and "test" in constant3.__module__:
@@ -1034,15 +1041,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #         case {"b": param}:
     #             return x / param
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_meshgrid(x, y):
-        import numpy as np
-
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())
         return torch.from_numpy(r1), torch.from_numpy(r2)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_torch_from_numpy(x):
         a = x.numpy()
@@ -1052,13 +1055,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return torch.tensor(False)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_size(x):
         a = x.numpy()
         return a.size
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_attributes(x):
         a = x.numpy()
@@ -1073,84 +1074,62 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             torch.from_numpy(a.imag),
         )
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_mean_sum_np(x: torch.Tensor):
-        import numpy as np
-
         x_mean = np.mean(x.numpy(), 1)
         x_sum = np.sum(x_mean)
         x_sum_array = np.asarray(x_sum)
         return torch.from_numpy(x_sum_array)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_return_numpy_ndarray(x):
         a = x.numpy()
         return a.T
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_return_multiple_numpy_ndarray(x):
         a = x.numpy()
         return a.T, a.imag, a.real
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_ndarray_method(x):
         a = x.numpy()
         return a.copy()
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_ndarray_transpose(x):
         a = x.numpy()
         return a.transpose(0, 1)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_ndarray_reshape(x):
         a = x.numpy()
         return a.reshape([1, a.size])
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_ndarray_methods_returning_scalar(x):
         a = x.numpy()
         return a.max(axis=0), a.all(axis=0)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_ndarray_builtin_functions(x):
         a = x.numpy()
         return a + a, a - a
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_dtype_argument_to_function(x):
-        import numpy as np
-
         return np.ones_like(x, dtype=np.float64)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_linalg(x):
-        import numpy as np
-
         return np.linalg.norm(x.numpy(), axis=0)
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_fft(x):
-        import numpy as np
-
         return np.fft.fftshift(x.numpy())
 
-    @requires_numpy_pytorch_interop
     @make_test
     def test_numpy_random():
-        import numpy as np
-
         x = np.random.randn(2, 2)
         return x - x
 

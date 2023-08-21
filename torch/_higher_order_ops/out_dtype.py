@@ -18,12 +18,14 @@ from torch._functorch.eager_transforms import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
-
+from torch._higher_order_ops.utils import autograd_not_implemented
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
     torch.ops.aten.mm.default,
     torch.ops.aten.conv2d.default,
+    torch.ops.aten.convolution.default,
+    torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
 ]
 
@@ -117,21 +119,7 @@ def out_dtype_dense(
     return res
 
 
-@out_dtype.py_impl(DispatchKey.Autograd)
-def out_dtype_autograd(
-    op: torch._ops.OpOverload,
-    output_dtype: torch.dtype,
-    *args
-):
-    # TODO: maybe support autograd
-    flat_operands, _ = pytree.tree_flatten(args)
-    if torch.is_grad_enabled() and any(
-        f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
-    ):
-        raise RuntimeError("Autograd is not supported for out_dtype")
-
-    with torch._C._AutoDispatchBelowAutograd():
-        return out_dtype(op, output_dtype, *args)
+out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, deferred_error=True))
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)

@@ -92,8 +92,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         msg='Name inference for {} on device {} failed'.format(
-                             op.__name__, device))
+                         msg=f'Name inference for {op.__name__} on device {device} failed')
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
     # Right now I don't know what it should look like.

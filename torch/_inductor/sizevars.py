@@ -15,6 +15,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+# This class is a little awkward, because ShapeEnv is doing most of the heavy
+# lifting and in some cases we should be directly passing through to ShapeEnv,
+# but there is some extra inductor logic that needs to be handled here
 class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
@@ -23,7 +26,16 @@ class SizeVarAllocator:
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
-        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
+        # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
+        # The basic idea is if we have some complicated sympy expression
+        # f(s0), we may choose to precompute it on the host and then replace
+        # all occurrences of that sympy expression with ps0, so that when we
+        # codegen we simply reference ps0 directly without repeating
+        # f(s0).  Unlike regular size variables, ps variables cannot be
+        # guarded upon; so if we are asked to guard on a Sympy expression
+        # which potentially could have already had a precomputed replacement
+        # on it, we are obligated to invert the precomputed replacements
+        # (inv_precomputed_replacements).
         self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
         self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
         self.stride_vars = self.make_stride_vars_cache()
@@ -214,14 +226,6 @@ class SizeVarAllocator:
 
         return [x for x in sizes if x is not None], reindex, prune
 
-    def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)
-        if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
-        return left
-
     # Note - [On Statically Known]
     #
     # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
@@ -302,17 +306,38 @@ class SizeVarAllocator:
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)
 
+    # The guard functions require you to ALREADY KNOW that a particular
+    # condition holds.  If you don't know (you want to guard on an expression
+    # being a particular value, and then get access to that value), use
+    # the evaluate functions.
+
+    def guard_equals(self, left: Expr, right: Expr) -> Expr:
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        return left
+
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        expr = self.simplify(right - left)
-        assert self.size_hint(expr) > 0
-        if len(expr.free_symbols) == 0:
-            return
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
-    def guard_min(self, left: Expr, right: Expr) -> Expr:
+    # The evaluate functions evaluate some symbolic sympy expression
+    # (NB: not necessarily an Expr) and return what the concrete result
+    # is, guarding on the expression being that result
+
+    # NB: write evaluate_expr(sympy.Lt(a, b)) rather than evaluate_expr(a < b)
+    # as this will ensure that you actually have a sympy'ified expression,
+    # and will prevent you from incorrectly writing evaluate_expr(a == b)
+    # which does the wrong thing if a or b is a sympy expression
+    def evaluate_expr(self, left: Union[Expr, sympy.logic.boolalg.Boolean]) -> bool:
+        assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
+        return self.shape_env.evaluate_expr(sympy.sympify(left))
+
+    def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
@@ -325,19 +350,16 @@ class SizeVarAllocator:
             self.guard_lt(right, left)
             return right
 
-    def guard_max(self, left: Expr, right: Expr) -> Expr:
-        """return the larger of left and right, and guard on that choice"""
-        return -self.guard_min(-left, -right)
-
-    def guard_static_shape(self, left: Expr) -> int:
+    def evaluate_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
-    def guard_static_shapes(self, left: List[Expr]) -> List[int]:
-        return [self.guard_static_shape(x) for x in left]
+    def evaluate_static_shapes(self, left: List[Expr]) -> List[int]:
+        return [self.evaluate_static_shape(x) for x in left]
 
-    def size_hint(self, expr: Expr) -> int:
+    def symbolic_hint(self, expr: Expr) -> Expr:
+        # Substitute all hints into expr, but leave unbacked symints alone
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -347,7 +369,10 @@ class SizeVarAllocator:
         while any(s.name.startswith("ps") for s in free_symbols):
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
-        out = sympy_subs(expr, self.var_to_val)
+        return sympy_subs(expr, self.var_to_val)
+
+    def size_hint(self, expr: Expr) -> int:
+        out = self.symbolic_hint(expr)
         try:
             return int(out)
         except Exception:

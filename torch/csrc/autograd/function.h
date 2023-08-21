@@ -41,6 +41,8 @@ using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
+using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
@@ -555,6 +557,27 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// NOTE: this value matters only if is_traceable() returns false.
   virtual bool passes_state_transparently() {
     return false;
+  }
+
+  // see [Note: Compiled Autograd]
+  // Used by compiled autograd to
+  //   1) Extract tensors/symint args
+  //   2) Collect node information for specialization and caching
+  // Implementations in subclasses should call args.collect() with all node
+  // attrs. These functions are only called durring backward.
+  virtual void compiled_args(CompiledNodeArgs& args) {
+    throw std::runtime_error(
+        std::string("compiled_args not implemented: ") + name());
+  }
+
+  // Used by compiled autograd to call apply() with different saved tensors
+  // Implementations should call saved.before() on all attrs, then apply(), then
+  // saved.after() on all attrs in the same order.
+  virtual variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) {
+    throw std::runtime_error(
+        std::string("apply_with_saved not implemented: ") + name());
   }
 
  protected:

@@ -171,7 +171,7 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.set_current_meta(node.meta):
+        with fx_traceback.set_current_meta(node):
             yield
 
     @compatibility(is_backward_compatible=True)

@@ -14,7 +14,6 @@
 
 #include <array>
 #include <cmath>
-#include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
 //

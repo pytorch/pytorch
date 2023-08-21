@@ -11,6 +11,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -364,6 +365,8 @@ class CompiledFxGraph:
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
+    mutated_input_idxs: Set[int] = field(default_factory=list)
+
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
@@ -533,21 +536,22 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_path = input_path[:-3] + "so"
-            build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
+            build_cmd = shlex.split(
+                cpp_compile_command(
+                    input_path, output_path, warning_all=False, vec_isa=self
+                )
+            )
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
-                # TODO: get vectorization working in fbcode.
-                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
-                        "python",
+                        sys.executable,
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
                 return False
@@ -560,7 +564,7 @@ class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
-    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
+    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
         return "avx512"
@@ -573,7 +577,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "avx2"
@@ -676,7 +680,15 @@ def use_custom_generated_macros():
 
 def use_fb_internal_macros():
     if config.is_fbcode():
-        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        openmp_lib = build_paths.openmp_lib()
+        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+    else:
+        return ""
+
+
+def use_standard_sys_dir_headers():
+    if config.is_fbcode():
+        return "-nostdinc"
     else:
         return ""
 
@@ -684,7 +696,17 @@ def use_fb_internal_macros():
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
+    if (
+        config.is_fbcode()
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
+
+    if aot_mode and config.is_fbcode():
+        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
+        cuda = True
 
     macros = ""
     if sys.platform == "linux" and (
@@ -710,9 +732,22 @@ def get_include_and_linking_paths(
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
+            if aot_mode:
+                ipaths += [os.path.dirname(cpp_prefix_path())]
         macros = vec_isa.build_macro()
         if macros:
-            macros = f"-D{macros}"
+            if config.is_fbcode() and vec_isa != invalid_vec_isa:
+                cap = str(vec_isa).upper()
+                macros = " ".join(
+                    [
+                        vec_isa.build_arch_flags(),
+                        f"-D CPU_CAPABILITY={cap}",
+                        f"-D CPU_CAPABILITY_{cap}",
+                        f"-D HAVE_{cap}_CPU_DEFINITION",
+                    ]
+                )
+            else:
+                macros = f"-D{macros}"
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]
@@ -752,6 +787,13 @@ def get_include_and_linking_paths(
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
+        ipaths.append(build_paths.gcc_include())
+        ipaths.append(build_paths.libgcc())
+        ipaths.append(build_paths.libgcc_arch())
+        ipaths.append(build_paths.libgcc_backward())
+        ipaths.append(build_paths.glibc())
+        ipaths.append(build_paths.linux_kernel())
+        ipaths.append(build_paths.gcc_install_tools_include())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -783,21 +825,23 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = os.path.basename(input)
             out_name = os.path.basename(output)
-        linker_path = f"-B{os.path.dirname(build_paths.ld())}"
+        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
+        linker_paths = " ".join(["-B" + p for p in linker_paths])
     else:
         inp_name = input
         out_name = output
-        linker_path = ""  # let the compiler pick
+        linker_paths = ""  # let the compiler pick
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_path}
+            {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
+            {use_standard_sys_dir_headers()}
             -o {out_name}
         """,
     ).strip()
@@ -851,26 +895,28 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path,
+                            output=output_so,
+                            vec_isa=picked_vec_isa,
+                            cuda=cuda,
+                            aot_mode=graph.aot_mode,
+                        )
+                    )
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
+                else:
+                    log.debug(
+                        "aot_inductor dynamic library already exist: %s", output_so
+                    )
 
                 cls.cache[key] = output_so
 
-        def wrapper_call(*args):
-            assert len(graph.graph_outputs) > 0
-            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
-
-        return wrapper_call
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -934,7 +980,13 @@ def compile_file(input_path, output_path, cmd) -> None:
         else:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+        output = e.output.decode("utf-8")
+        if "'omp.h' file not found" in output and sys.platform == "darwin":
+            output = (
+                output
+                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+            )
+        raise exc.CppCompileError(cmd, output) from e
 
 
 class CppCodeCache:
@@ -973,9 +1025,11 @@ class CppCodeCache:
             with lock:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
-                    cmd = cpp_compile_command(
-                        input=input_path, output=output_path, vec_isa=picked_vec_isa
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                        )
+                    )
                     compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -984,7 +1038,7 @@ class CppCodeCache:
 
 
 class PyCodeCache:
-    cache = dict()
+    cache: Dict[Any, types.ModuleType] = dict()
     linemaps = dict()
     clear = staticmethod(cache.clear)
 

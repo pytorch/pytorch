@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import numbers
+import typing
 
 import torch
 import torch._decomp as decomp
@@ -19,6 +20,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
+        aten._adaptive_avg_pool2d_backward,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
@@ -26,8 +28,21 @@ inductor_decompositions = get_decompositions(
         aten.dist,
         aten.empty_like,
         aten.flip,
+        aten.gelu,
+        aten.hardtanh,
+        aten.index_select,
         aten.lcm,
+        aten.leaky_relu,
         aten.linalg_vector_norm,
+        aten._log_softmax,
+        aten.max_pool2d_with_indices_backward,
+        aten._native_batch_norm_legit,
+        aten._native_batch_norm_legit_functional,
+        aten._native_batch_norm_legit_no_training,
+        aten.native_batch_norm,
+        aten.native_group_norm,
+        aten.native_layer_norm,
+        aten._softmax,
         aten.sin_,
         aten.sqrt_,
         aten.std,
@@ -36,6 +51,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -64,6 +80,11 @@ def assert_async_msg_decomp(tensor, msg):
 # Following `assert_async_msg_decomp` and implement as non-op.
 @register_decomposition([aten._functional_assert_async.msg])
 def functional_assert_async_msg_decomp(tensor, msg):
+    return
+
+
+@register_decomposition([aten.sym_constrain_range_for_size.default])
+def sym_constrain_range_for_size(symbol, *, min=None, max=None):
     return
 
 
@@ -162,11 +183,65 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+@register_decomposition([aten.bmm])
+def bmm(self, batch2):
+    if self.device == "cpu":
+        if self.size(1) == 1 and batch2.size(-1) == 1:
+            return torch.sum(
+                self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
+            ).unsqueeze(1)
+    return NotImplemented
+
+
+@register_decomposition([aten.mm])
+def mm(self, input2):
+    if self.device == "cpu":
+        if (
+            self.size(-1) == 1
+            and input2.size(0) == 1
+            and (self.dtype == input2.dtype)
+            and ((torch.numel(self) + torch.numel(input2)) <= 32)
+        ):
+            return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
+        if self.size(0) == 1 and input2.size(-1) == 1:
+            return torch.sum(
+                self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
+            ).unsqueeze(0)
+    return NotImplemented
+
+
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
-    if len(tensors) == 1:
+    def non_empty_tensor(x):
+        # special case for cat'ing with an empty tensor -
+        # just drop the 'empty' inputs so they don't confuse the logic below.
+        return len(x.shape) > 1 or x.shape[0] > 0
+
+    filtered_tensors = list(filter(non_empty_tensor, tensors))
+
+    if len(filtered_tensors) == 1:
         return tensors[0].clone()
+    elif 1 < len(filtered_tensors) < len(tensors):
+        # on the first call, when we remove empty tensors, we redispatch recursively
+        return aten.cat.default(filtered_tensors, dim)
+    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
+
+
+@register_decomposition([aten.angle])
+def angle(x):
+    if x.is_complex():
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
+    else:
+        # when x is real number
+        #   if x >= 0, return 0
+        #   if x < 0, return pi
+        #   if x is nan, return nan
+        ret = torch.where(x < 0, math.pi, 0.0)
+        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
+        return ret + nan
 
 
 @register_decomposition([aten.conj_physical])
@@ -366,6 +441,38 @@ def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
         aten._foreach_mul.Scalar(
             aten._foreach_sub.List(end_tensors, start_tensors), weight
         ),
+    )
+
+
+@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: typing.Optional[torch.Tensor],
+    running_mean: typing.Optional[torch.Tensor],
+    running_var: typing.Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
     )
 
 

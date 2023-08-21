@@ -11,7 +11,7 @@ import subprocess
 import glob
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_cuda import TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -20,8 +20,8 @@ from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
 
 
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 
@@ -149,17 +149,14 @@ class TestCppExtensionJIT(common.TestCase):
             err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
-                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
-                                     "Output: {} ".format(flags, p.returncode,
-                                                          err, output))
+                raise AssertionError(f"Flags: {flags}\nReturncode: {p.returncode}\nStderr: {err}\n"
+                                     f"Output: {output} ")
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = sorted(['sm_' + xx for xx in expected_values])
             self.assertEqual(actual_arches, expected_arches,
-                             msg="Flags: {},  Actual: {},  Expected: {}\n"
-                                 "Stderr: {}\nOutput: {}".format(
-                                     flags, actual_arches, expected_arches,
-                                     err, output))
+                             msg=f"Flags: {flags},  Actual: {actual_arches},  Expected: {expected_arches}\n"
+                                 f"Stderr: {err}\nOutput: {output}")
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -241,6 +238,7 @@ class TestCppExtensionJIT(common.TestCase):
             self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if IS_WINDOWS:

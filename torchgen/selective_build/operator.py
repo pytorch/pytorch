@@ -133,10 +133,7 @@ def combine_operators(
 ) -> "SelectiveBuildOperator":
     if str(lhs.name) != str(rhs.name):
         raise Exception(
-            "Expected both arguments to have the same name, but got '{}' and '{}' instead".format(
-                str(lhs.name),
-                str(rhs.name),
-            )
+            f"Expected both arguments to have the same name, but got '{str(lhs.name)}' and '{str(rhs.name)}' instead"
         )
 
     return SelectiveBuildOperator(

@@ -32,6 +32,7 @@
 #include <intrin.h>
 #endif
 
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <iosfwd>
@@ -102,7 +103,9 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
   _BitScanReverse(&nonsign_bsr, (unsigned long)nonsign);
   uint32_t renorm_shift = (uint32_t)nonsign_bsr ^ 31;
 #else
-  uint32_t renorm_shift = __builtin_clz(nonsign);
+  // Note: zero is not a supported input into `__builtin_clz`
+  uint32_t renorm_shift =
+      nonsign != 0 ? __builtin_clz(nonsign) : sizeof(uint32_t) * CHAR_BIT;
 #endif
   renorm_shift = renorm_shift > 4 ? renorm_shift - 4 : 0;
   /*

@@ -9,18 +9,13 @@ from .pt2e.qat_utils import (
 from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
-    _rearrange_weight_observer_for_decomposed_linear,
     _replace_dropout_for_eval,
 )
 from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
-# TODO: move quantizer to torch.ao.quantization
-from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
-    OperatorConfig,
-    OperatorPatternType,
-    QuantizationConfig,
+from torch.ao.quantization.quantizer import (  # noqa: F401
     Quantizer,
     QuantizationSpecBase,
     QuantizationSpec,
@@ -28,18 +23,6 @@ from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
     QuantizationAnnotation,
-    XNNPACKQuantizer,
-    EmbeddingQuantizer,
-    ComposableQuantizer,
-)
-from torch.ao.quantization.pt2e.quantizer.utils import (  # noqa: F401
-    get_bias_qspec,
-    get_input_act_qspec,
-    get_output_act_qspec,
-    get_weight_qspec,
-)
-from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (  # noqa: F401
-    get_symmetric_quantization_config,
 )
 from torch.ao.quantization.backend_config import BackendConfig
 
@@ -71,10 +54,6 @@ def _prepare_pt2e_deprecated(
         example_inputs,
         backend_config=backend_config
     )
-
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def prepare_pt2e(
@@ -105,9 +84,6 @@ def prepare_qat_pt2e(
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
     model = prepare(model, node_name_to_scope, is_qat=True)
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def convert_pt2e(
