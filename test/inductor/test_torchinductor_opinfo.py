@@ -425,6 +425,8 @@ inductor_nopython_error = {
     "nn.functional.dropout3d",
     "nn.functional.alpha_dropout",
     "nn.functional.feature_alpha_dropout",
+    "nn.functional.feature_alpha_dropout.with_train",
+    "nn.functional.feature_alpha_dropout.without_train",
     "nn.functional.multi_head_attention_forward",
 }
 
