@@ -90,6 +90,7 @@ SKIP_FOR_CPU = {
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
+    "torchrec_dlrm",  # requires FBGEMM, CUDA only
 }
 
 SKIP_FOR_CUDA = {
@@ -226,6 +227,11 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "doctr_reco_predictor",
     "Super_SloMo",
     "tts_angular",
+}
+
+# models in canary_models that we should run anyway
+CANARY_MODELS = {
+    "torchrec_dlrm",
 }
 
 
@@ -394,9 +400,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
-        from torchbenchmark import _list_model_paths
+        from torchbenchmark import _list_canary_model_paths, _list_model_paths
 
         models = _list_model_paths()
+        models += [
+            f
+            for f in _list_canary_model_paths()
+            if os.path.basename(f) in CANARY_MODELS
+        ]
+        models.sort()
+
         start, end = self.get_benchmark_indices(len(models))
         for index, model_path in enumerate(models):
             if index < start or index >= end:
