@@ -1,3 +1,4 @@
+#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
@@ -63,17 +64,17 @@ void atan2_kernel(TensorIteratorBase& iter) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...)                         \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                                  \
             kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_ALL_TYPES_NO_BOOL(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(                           \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(                           \
             kComplexHalf, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_MUL_TYPES(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                   \
             kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
-            TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...)  \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(           \

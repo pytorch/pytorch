@@ -8,6 +8,8 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
 
@@ -74,7 +76,23 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 
 template <
     typename T,
+    typename std::enable_if<std::is_same<T, at::Float8_e5m2fnuz>::value, int>::
+        type = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return val.isnan();
+}
+
+template <
+    typename T,
     typename std::enable_if<std::is_same<T, at::Float8_e4m3fn>::value, int>::
+        type = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return val.isnan();
+}
+
+template <
+    typename T,
+    typename std::enable_if<std::is_same<T, at::Float8_e4m3fnuz>::value, int>::
         type = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
   return val.isnan();
@@ -114,7 +132,15 @@ inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2 val) {
   return val.isinf();
 }
 
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val) {
+  return false;
+}
+
 inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fn val) {
+  return false;
+}
+
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fnuz val) {
   return false;
 }
 

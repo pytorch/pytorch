@@ -73,7 +73,9 @@ struct is_floating_point:
       std::is_same<T, at::Half>::value ||
       std::is_same<T, at::BFloat16>::value ||
       std::is_same<T, at::Float8_e5m2>::value ||
-      std::is_same<T, at::Float8_e4m3fn>::value> {
+      std::is_same<T, at::Float8_e5m2fnuz>::value ||
+      std::is_same<T, at::Float8_e4m3fn>::value ||
+      std::is_same<T, at::Float8_e4m3fnuz>::value> {
 };
 
 template<typename T>

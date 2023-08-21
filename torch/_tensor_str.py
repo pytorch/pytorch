@@ -324,7 +324,9 @@ def _tensor_str(self, indent):
         torch.float16,
         torch.bfloat16,
         torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
         torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
     ]:
         self = self.float()
 

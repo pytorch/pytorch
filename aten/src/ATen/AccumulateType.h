@@ -73,7 +73,15 @@ struct AccumulateType<Float8_e5m2, true> {
   using type = float;
 };
 template <>
+struct AccumulateType<Float8_e5m2fnuz, true> {
+  using type = float;
+};
+template <>
 struct AccumulateType<Float8_e4m3fn, true> {
+  using type = float;
+};
+template <>
+struct AccumulateType<Float8_e4m3fnuz, true> {
   using type = float;
 };
 template <>
@@ -125,7 +133,15 @@ struct AccumulateType<Float8_e5m2, false> {
   using type = float;
 };
 template <>
+struct AccumulateType<Float8_e5m2fnuz, false> {
+  using type = float;
+};
+template <>
 struct AccumulateType<Float8_e4m3fn, false> {
+  using type = float;
+};
+template <>
+struct AccumulateType<Float8_e4m3fnuz, false> {
   using type = float;
 };
 template <>

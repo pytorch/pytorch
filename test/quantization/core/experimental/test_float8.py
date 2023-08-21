@@ -19,7 +19,9 @@ MASK_152 = torch.tensor(2145386496, dtype=torch.int)
 MASK_143 = torch.tensor(2146435072, dtype=torch.int)
 MASK = {
     torch.float8_e5m2: MASK_152,
+    torch.float8_e5m2fnuz: MASK_152,
     torch.float8_e4m3fn: MASK_143,
+    torch.float8_e4m3fnuz: MASK_143,
 }
 
 # 0 00000000 00011111111111111111111b
@@ -28,12 +30,16 @@ MASK_ROUND_152 = torch.tensor(1048575, dtype=torch.int)
 MASK_ROUND_143 = torch.tensor(524287, dtype=torch.int)
 MASK_ROUND = {
     torch.float8_e5m2: MASK_ROUND_152,
+    torch.float8_e5m2fnuz: MASK_ROUND_152,
     torch.float8_e4m3fn: MASK_ROUND_143,
+    torch.float8_e4m3fnuz: MASK_ROUND_143,
 }
 
 FP8_MAX_152 = torch.tensor(57344, dtype=torch.float)
+FP8_MAX_152FNUZ = torch.tensor(57344, dtype=torch.float)
 FP8_MAX_143 = torch.tensor(448, dtype=torch.float)
-FP8_MAX = {torch.float8_e5m2: FP8_MAX_152, torch.float8_e4m3fn: FP8_MAX_143}
+FP8_MAX_143FNUZ = torch.tensor(240, dtype=torch.float)
+FP8_MAX = {torch.float8_e5m2: FP8_MAX_152, torch.float8_e5m2fnuz: FP8_MAX_152FNUZ, torch.float8_e4m3fn: FP8_MAX_143, torch.float8_e4m3fnuz: FP8_MAX_143FNUZ}
 
 SPECIAL_NUMBERS = {
     torch.float8_e5m2: [
@@ -56,6 +62,19 @@ SPECIAL_NUMBERS = {
         ("00000001", 2**-16, "min_subnorm"),
         ("10000001", -1 * (2**-16), "neg_min_subnorm"),
     ],
+    torch.float8_e5m2fnuz: [
+        ("10000000", float("nan"), "nan"),
+        ("00000000", 0.0, "zero"),
+        ("00000000", -0.0, "neg_zero"),
+        ("01111111", 57344.0, "max_normal"),
+        ("11111111", -57344.0, "neg_max_normal"),
+        ("00000100", 2**-15, "min_normal"),
+        ("10000100", -1 * (2**-15), "neg_min_normal"),
+        ("00000011", 0.75 * (2**-15), "max_subnorm"),
+        ("10000011", -0.75 * (2**-15), "neg_max_subnorm"),
+        ("00000001", 0.25 * (2**-15), "min_subnorm"),
+        ("10000001", -0.25 * (2**-15), "neg_min_subnorm"),
+    ],
     torch.float8_e4m3fn: [
         ("01111111", float("nan"), "nan"),
         ("11111111", float("nan"), "nan"),
@@ -69,6 +88,19 @@ SPECIAL_NUMBERS = {
         ("10000111", -0.875 * (2**-6), "neg_max_subnorm"),
         ("00000001", 2**-9, "min_subnorm"),
         ("10000001", -1 * (2**-9), "neg_min_subnorm"),
+    ],
+    torch.float8_e4m3fnuz: [
+        ("10000000", float("nan"), "nan"),
+        ("00000000", 0.0, "zero"),
+        ("00000000", -0.0, "neg_zero"),
+        ("01111111", 240.0, "max_normal"),
+        ("11111111", -240.0, "neg_max_normal"),
+        ("00001000", 2**-7, "min_normal"),
+        ("10001000", -1 * (2**-7), "neg_min_normal"),
+        ("00000111", 0.875 * (2**-7), "max_subnorm"),
+        ("10000111", -0.875 * (2**-7), "neg_max_subnorm"),
+        ("00000001", 0.125 * (2**-7), "min_subnorm"),
+        ("10000001", -0.125 * (2**-7), "neg_min_subnorm"),
     ],
 }
 
@@ -98,7 +130,7 @@ class TestFloat8Dtype(TestCase):
     Sanity test for zeros comparison
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
     def test_creation_with_zeros(self, dtype, device):
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
@@ -107,8 +139,7 @@ class TestFloat8Dtype(TestCase):
     """
         Numerical test of float8 conversion
     """
-
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
     def test_cast_to_float8(self, dtype, device):
         x = torch.rand((100, 100), device=device) * FP8_MAX[dtype]
         x = torch.cat((x, -x))
@@ -120,7 +151,7 @@ class TestFloat8Dtype(TestCase):
         Test special numbers
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
     def test_special_numbers(self, dtype, device):
         def compare_binary_with_decimal(binary, decimal, number_name, dtype, device):
             bits_int = int(binary, 2)
@@ -146,12 +177,13 @@ class TestFloat8DtypeCPUOnly(TestCase):
 
     """
     Test of mul implementation
-    # Note: this is cpu-only for now because adding it to CUDA requires
-    adding yet c++ dtype macro, and there is no use case yet for unscaled
-    float8 multiplication - doesn't seem worth it.
+
+    NOTE: this is CPU-only for now because adding it to CUDA requires adding yet
+    another C++ dtype macro, and there is no use case yet for unscaled float8
+    multiplication - doesn't seem worth it.
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
     def test_mul(self, dtype):
         shape = (10, 10)
         a = torch.randn(shape)
