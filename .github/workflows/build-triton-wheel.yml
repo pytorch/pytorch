@@ -96,7 +96,7 @@ jobs:
 
           BUILD_ROCM=""
           if [[ "$BUILD_DEVICE" == "rocm" ]]; then
-            BUILD_ROCM="--build-rocm --rocm_version {rocm_version}"
+            BUILD_ROCM="--build-rocm --rocm_version {nightly_rocm_version}"
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
