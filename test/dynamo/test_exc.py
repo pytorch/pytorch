@@ -195,6 +195,7 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         assume_static_by_default=False,
         translation_validation=True,
+        translation_validation_no_bisect=True,
         suppress_errors=False,
     )
     def test_trigger_on_error(self):
@@ -236,6 +237,69 @@ Target Expressions:
 
 Failed Source Expressions:
   ==> (!= 4 L['x'].size()[0])""",
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
+    @torch._dynamo.config.patch(
+        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
+        assume_static_by_default=False,
+        translation_validation=True,
+        suppress_errors=False,
+    )
+    def test_trigger_bisect_on_error(self):
+        from torch.fx.experimental.validator import ValidationException
+
+        @torch.compile
+        def fn(x, shape):
+            return x.split(shape)
+
+        self.assertExpectedInlineMunged(
+            ValidationException,
+            lambda: fn(torch.randn(20), (5, 10, 5)),
+            """\
+translation validation failed.
+
+Model:
+  ==> s3: -9223372036854775807
+  ==> s1: -9223372036854775807
+  ==> s0: 3
+  ==> s2: -9223372036854775807
+  ==> L['x'].size()[0]: 3
+  ==> L['shape'][1]: -9223372036854775807
+  ==> L['shape'][2]: -9223372036854775807
+  ==> L['x'].stride()[0]: 1
+  ==> L['shape'][0]: -9223372036854775807
+  ==> L['x'].storage_offset(): 0
+
+Assertions:
+  ==> (== L['x'].size()[0] s0)
+  ==> (> s0 1)
+  ==> (== L['shape'][2] s3)
+  ==> (== 0 L['x'].storage_offset())
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== 1 L['x'].stride()[0])
+
+Target Expressions:
+  ==> (== L['x'].size()[0] s0)
+  ==> (!= (+ s1 s2 s3) s0)
+  ==> (<= -9223372036854775808 s1)
+  ==> (>= 9223372036854775807 s1)
+  ==> (== L['shape'][2] s3)
+  ==> (== 0 L['x'].storage_offset())
+  ==> (>= 9223372036854775807 s2)
+  ==> (== L['shape'][0] s1)
+  ==> (> s0 0)
+  ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][1] s2)
+  ==> (<= 2 s0)
+  ==> (>= 9223372036854775807 s3)
+  ==> (>= 9223372036854775806 s0)
+  ==> (<= -9223372036854775808 s3)
+  ==> (<= -9223372036854775808 s2)
+
+Failed Source Expressions:
+  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
 
 

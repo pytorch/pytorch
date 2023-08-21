@@ -3860,7 +3860,7 @@ def replay_shape_env_events(
 # point things went wrong from a validation perspective.
 def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
     from torch.fx.experimental.validator import ValidationException
-    from torch._dynamo.variables.builder import TrackedFake, FakeTensor
+    from torch._dynamo.variables.builder import FakeTensor
 
     events = shape_env.events
 
@@ -3886,9 +3886,9 @@ def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
             return SymInt(SymNode(node._expr, shape_env, node.pytype, node._hint, node.constant, node.fx_node))
         assert isinstance(fake, FakeTensor)
         return FakeTensorMeta(
-            tuple(new_with_shape_env(shape_env, s) for s in fake.size()),  # type: ignore
-            tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),  # type: ignore
-            new_with_shape_env(shape_env, fake.storage_offset()),  # type: ignore
+            tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
+            tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
+            new_with_shape_env(shape_env, fake.storage_offset()),
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.
@@ -3933,6 +3933,9 @@ def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
 
     if not exception[right]:
         return
+
+    if torch._dynamo.config.translation_validation_no_bisect:
+        raise exception[right]
 
     while left < right:
         mid = (left + right) // 2
