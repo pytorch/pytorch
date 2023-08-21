@@ -44,6 +44,7 @@ def conv_grid(n, c, h, w, meta):
         meta["GROUPS"],
     )
 
+
 if torch.version.hip is None:
     conv_configs = functools.partial(
         filtered_configs,
@@ -68,7 +69,7 @@ else:
             (64, 64, 32, 1, 4),
             (64, 256, 16, 2, 4),
             (256, 64, 16, 2, 4),
-            (64, 64, 32, 2, 4)
+            (64, 64, 32, 2, 4),
         ),
     )
 

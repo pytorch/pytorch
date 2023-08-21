@@ -12,11 +12,11 @@ from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 import sympy
 
 import torch
+import torch._inductor.config as inductor_config
 import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-import torch._inductor.config as inductor_config
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
