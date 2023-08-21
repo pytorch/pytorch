@@ -41,7 +41,7 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
             _print_tests("Unranked relevance", new_rankings.unranked_relevance)
 
         print("Aggregated results across all heuristics:")
-        rankings.print_info()
+        rankings.print_info(tests)
 
     num_tests_analyzed = (
         len(rankings.highly_relevant)

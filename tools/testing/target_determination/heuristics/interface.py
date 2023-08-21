@@ -70,7 +70,14 @@ class TestPrioritizations:
         tests = self.highly_relevant + self.probably_relevant + self.unranked_relevance
         return [test for test in tests if tests.count(test) > 1]
 
-    def print_info(self) -> None:
+    def get_unexpected_tests(self, expected: List[str]) -> List[str]:
+        """
+        Returns a list of tests which are not in the expected list.
+        """
+        tests = self.highly_relevant + self.probably_relevant + self.unranked_relevance
+        return [test for test in tests if test not in expected]
+
+    def print_info(self, expected: List[str]) -> None:
         def _print_tests(label: str, tests: List[str]) -> None:
             if not tests:
                 return
@@ -93,6 +100,16 @@ class TestPrioritizations:
                     if test in getattr(self, list_name):
                         lists.append(list_name)
                 print(f"  {test} is in {' ,'.join(lists)}")
+        else:
+            print("No conflicts found")
+
+        unexpected = self.get_unexpected_tests(expected)
+        if unexpected:
+            print(f"WARNING: {len(unexpected)} tests are not in the expected list:")
+            for test in unexpected:
+                print(f"  {test}")
+        else:
+            print("No unexpected tests found")
 
 
 class HeuristicInterface:
