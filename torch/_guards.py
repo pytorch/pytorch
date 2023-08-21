@@ -24,6 +24,7 @@ from typing import (
 )
 
 import torch
+from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +144,9 @@ class Guard:
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
+
+    stack = None
+    user_stack = None
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
@@ -428,17 +432,55 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
 
 
+# Like a Set[Guard] but will record the user stack on all guards at the
+# time they were installed at their destination
+class GuardsSet:
+    def __init__(self, inner=None):
+        if inner is None:
+            inner = set()
+        self.inner = inner
+
+    def __iter__(self):
+        return iter(self.inner)
+
+    def __len__(self):
+        return len(self.inner)
+
+    # Subtraction along with bool is typically used to determine the delta of
+    # added guards between checkpoints for higher order ops
+    def __sub__(self, other):
+        return GuardsSet(self.inner - other.inner)
+
+    def __bool__(self):
+        return bool(self.inner)
+
+    def add(self, guard: Guard, *, skip=0):
+        if guard in self.inner:
+            return
+        if guard.stack is None:
+            guard.stack = CapturedTraceback.extract(skip=1 + skip)
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
+        self.inner.add(guard)
+
+    def update(self, *others: Set[Guard]):
+        for o in others:
+            for g in o:
+                self.add(g, skip=1)
+
+
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
-        self.dynamo_guards: Set[Guard] = set()
+        self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
-        return GuardsCheckpointState(set(self.dynamo_guards))
+        return GuardsCheckpointState(set(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state):
+        # NB: "steals" the passed in state
         assert isinstance(state, GuardsCheckpointState)
-        self.dynamo_guards = state.dynamo_guards
+        self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
 _TLS = threading.local()
