@@ -28,7 +28,7 @@ class Adam(Optimizer):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if isinstance(lr, Tensor) and foreach and not capturable:
-            raise ValueError("A tensor lr with capturable=False is unsupported with foreach")
+            raise ValueError("lr as a Tensor is not supported for capturable=False and foreach=True")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
@@ -458,7 +458,7 @@ def _multi_tensor_adam(params: List[Tensor],
         return
 
     if isinstance(lr, Tensor) and not capturable:
-        raise RuntimeError("A tensor lr with capturable=False is not supported in _multi_tensor_adam")
+        raise RuntimeError("lr as a Tensor is not supported for capturable=False and foreach=True")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
@@ -590,11 +590,14 @@ def _fused_adam(
     if not params:
         return
     if differentiable:
-        raise RuntimeError("_fused_adam is not differentiable")
+        raise RuntimeError("Adam with fused=True does not support differentiable=True")
 
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
-    lr_dict = {lr.device: lr} if isinstance(lr, Tensor) and lr.device != "cpu" else None
+
+    # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    lr_dict = {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])

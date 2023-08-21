@@ -1137,7 +1137,7 @@ class TestOptim(TestCase):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
 
         with self.assertRaisesRegex(
-            ValueError, "A tensor lr with capturable=False is unsupported"
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
         ):
             optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
@@ -1206,7 +1206,7 @@ class TestOptim(TestCase):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
         with self.assertRaisesRegex(
-            ValueError, "A tensor lr with capturable=False is unsupported"
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
         ):
             optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
