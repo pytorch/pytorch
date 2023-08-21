@@ -283,7 +283,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
     )
 
-    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
+    if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
         if all_constant:
             const_args, const_kwargs = pytree.tree_map_only(
@@ -392,7 +392,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         with maybe_disable_fake_tensor_mode():
             constant = args[0].clone()
     elif (
-        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+        torch.Tag.nondeterministic_seeded not in func.tags
         and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
