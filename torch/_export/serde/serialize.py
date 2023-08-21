@@ -39,6 +39,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     RangeConstraint,
     ScalarType,
+    SCHEMA_VERSION,
     SymBool,
     SymBoolArgument,
     SymExpr,
@@ -752,6 +753,7 @@ class ExportedProgramSerializer:
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
+                schema_version=SCHEMA_VERSION,
             ),
             serialize_state_dict(exported_program.state_dict),
         )
@@ -1198,6 +1200,12 @@ class ExportedProgramDeserializer:
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
+        if serialized_exported_program.schema_version != SCHEMA_VERSION:
+            raise SerializeError(
+                f"Serialized schema version {serialized_exported_program.schema_version} "
+                f"does not match our current schema version {SCHEMA_VERSION}."
+            )
+
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in serialized_exported_program.range_constraints.items()

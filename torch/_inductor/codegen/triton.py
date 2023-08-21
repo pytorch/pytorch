@@ -259,11 +259,14 @@ class TritonOverrides(OpOverrides):
     def libdevice_sin(x):
         return f"tl.math.sin({x})"
 
-    @staticmethod
-    def index_expr(expr, dtype):
+    @classmethod
+    def index_expr(cls, expr, dtype):
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
         # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
+
+        if dtype not in {torch.int32, torch.int64}:
+            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
         var.mask_vars = mask_vars
         return var
 
