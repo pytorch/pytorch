@@ -472,7 +472,7 @@ def get_model(model_type: ModelType):
         return xgboost.XGBRegressor(
             max_depth=15,
             learning_rate=0.2,
-            n_estimators=120,
+            n_estimators=200,
             tree_method="hist",
             predictor="cpu_predictor",
             eval_metric=["rmse", "mae"],
