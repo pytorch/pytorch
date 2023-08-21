@@ -218,6 +218,8 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       sizeof(timeoutTV)));
 }
 
+using detail::queryMagicNumber;
+
 class SendBuffer {
   // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
   const size_t FLUSH_WATERMARK = 1440;
@@ -233,7 +235,11 @@ class SendBuffer {
  public:
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
-    buffer.reserve(32); // enough for most commands
+    const uint8_t* tmp_ptr = (const uint8_t*)&queryMagicNumber;
+    buffer.reserve(36); // enough for most commands
+    for (int i = 0; i < 4; i ++) {
+      buffer.push_back(tmp_ptr[i]);
+    }
     buffer.push_back((uint8_t)cmd);
   }
 

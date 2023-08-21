@@ -18,6 +18,9 @@
 namespace c10d {
 namespace detail {
 
+// Magic number prefixed to queries.
+static const uint32_t queryMagicNumber = 0xDEADC0DE;
+
 enum class QueryType : uint8_t {
   SET,
   COMPARE_SET,

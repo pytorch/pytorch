@@ -244,11 +244,18 @@ void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
 
 // query communicates with the worker. The format
 // of the query is as follows:
-// type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
+// queryMagicNumber | type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
 // or, in the case of wait
-// type of query | number of args | size of arg1 | arg1 | ...
+// queryMagicNumber | type of query | number of args | size of arg1 | arg1 | ...
 void TCPStoreMasterDaemon::query(int socket) {
   QueryType qt;
+  uint32_t qPrefix;
+  tcputil::recvBytes<uint32_t>(socket, &qPrefix, 1);
+  if (qPrefix != detail::queryMagicNumber) {
+    C10D_DEBUG("torch.distributed.TCPStore: a miscellaneous query is detected.");
+    return;
+  }
+
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
   if (qt == QueryType::SET) {
     setHandler(socket);
