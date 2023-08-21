@@ -1111,6 +1111,13 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
+def _check_available_device():
+    if TEST_CUDA:
+        return 'cuda'
+    elif TEST_PRIVATEUSE1:
+        return torch._C._get_privateuse1_backend_name()
+
+TEST_DEVICE = _check_available_device()
 
 def skipIfCrossRef(fn):
     @wraps(fn)
