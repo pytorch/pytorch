@@ -63,6 +63,20 @@ class TestPrioritizations:
             t for t in self.unranked_relevance if t not in ranked_tests
         ]
 
+    def print_info(self) -> None:
+        def _print_tests(label: str, tests: List[str]) -> None:
+            if not tests:
+                return
+
+            print(f"{label} tests ({len(tests)}):")
+            for test in tests:
+                if test in tests:
+                    print(f"  {test}")
+
+        _print_tests("Highly relevant", self.highly_relevant)
+        _print_tests("Probably relevant", self.probably_relevant)
+        _print_tests("Unranked relevance", self.unranked_relevance)
+
 
 class HeuristicInterface:
     """Interface for all heuristics."""
