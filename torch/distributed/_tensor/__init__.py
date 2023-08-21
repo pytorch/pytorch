@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 from typing import Optional, Sequence
 
 # Import all builtin dist tensor ops
