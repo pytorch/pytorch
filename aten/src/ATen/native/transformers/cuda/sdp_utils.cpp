@@ -41,34 +41,13 @@
 
 namespace sdp {
 namespace {
+// flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
   return default_order;
-}
-
-bool check_head_dim_size(sdp_params params, bool debug) {
-  const auto query_size_last = params.query.sym_size(-1);
-  const auto key_size_last = params.key.sym_size(-1);
-  const auto value_size_last = params.value.sym_size(-1);
-  if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last && query_size_last <= max_size)) {
-    if (debug) {
-      TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
-          " Got Query.size(-1): ",
-          query_size_last,
-          ", Key.size(-1): ",
-          key_size_last,
-          ", Value.size(-1): ",
-          value_size_last,
-          " instead.");
-    }
-    return false;
-  }
-  return true;
 }
 
 bool use_tensor_cores(sdp_params params, cudaDeviceProp* dprops, bool is_half) {
@@ -94,6 +73,30 @@ int64_t minimum_gemm_alignment(sdp_params params) {
     matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
   }
   return matmul_alignment_mn;
+}
+
+bool check_head_dim_size_flash(sdp_params params, bool debug) {
+  // All head_dim sizes must be equal and less than 256
+  const auto max_size = c10::SymInt(256);
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last && query_size_last <= max_size)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          key_size_last,
+          ", Value.size(-1): ",
+          value_size_last,
+          " instead.");
+    }
+    return false;
+  }
+  return true;
 }
 
 bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
