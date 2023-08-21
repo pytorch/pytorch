@@ -428,7 +428,7 @@ static int THPVariable_clear(THPVariable* self) {
     return 0;
   }
   Py_CLEAR(self->backward_hooks);
-  Py_XDECREF(self->post_accumulate_grad_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
     // Two situations to consider:
@@ -1194,7 +1194,7 @@ int THPVariable_set_post_accumulate_grad_hooks(
     obj = nullptr;
   }
   Py_XINCREF(obj);
-  Py_XDECREF(self->post_accumulate_grad_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
   self->post_accumulate_grad_hooks = obj;
   const auto& tensor = THPVariable_Unpack(self);
   if (obj) {
