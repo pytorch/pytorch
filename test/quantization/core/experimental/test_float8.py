@@ -39,7 +39,12 @@ FP8_MAX_152 = torch.tensor(57344, dtype=torch.float)
 FP8_MAX_152FNUZ = torch.tensor(57344, dtype=torch.float)
 FP8_MAX_143 = torch.tensor(448, dtype=torch.float)
 FP8_MAX_143FNUZ = torch.tensor(240, dtype=torch.float)
-FP8_MAX = {torch.float8_e5m2: FP8_MAX_152, torch.float8_e5m2fnuz: FP8_MAX_152FNUZ, torch.float8_e4m3fn: FP8_MAX_143, torch.float8_e4m3fnuz: FP8_MAX_143FNUZ}
+FP8_MAX = {
+    torch.float8_e5m2: FP8_MAX_152,
+    torch.float8_e5m2fnuz: FP8_MAX_152FNUZ,
+    torch.float8_e4m3fn: FP8_MAX_143,
+    torch.float8_e4m3fnuz: FP8_MAX_143FNUZ,
+}
 
 SPECIAL_NUMBERS = {
     torch.float8_e5m2: [
@@ -130,7 +135,15 @@ class TestFloat8Dtype(TestCase):
     Sanity test for zeros comparison
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
+    @parametrize(
+        "dtype",
+        [
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+        ],
+    )
     def test_creation_with_zeros(self, dtype, device):
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
@@ -139,7 +152,16 @@ class TestFloat8Dtype(TestCase):
     """
         Numerical test of float8 conversion
     """
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
+
+    @parametrize(
+        "dtype",
+        [
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+        ],
+    )
     def test_cast_to_float8(self, dtype, device):
         x = torch.rand((100, 100), device=device) * FP8_MAX[dtype]
         x = torch.cat((x, -x))
@@ -151,7 +173,15 @@ class TestFloat8Dtype(TestCase):
         Test special numbers
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
+    @parametrize(
+        "dtype",
+        [
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+        ],
+    )
     def test_special_numbers(self, dtype, device):
         def compare_binary_with_decimal(binary, decimal, number_name, dtype, device):
             bits_int = int(binary, 2)
@@ -183,7 +213,15 @@ class TestFloat8DtypeCPUOnly(TestCase):
     multiplication - doesn't seem worth it.
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz])
+    @parametrize(
+        "dtype",
+        [
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+        ],
+    )
     def test_mul(self, dtype):
         shape = (10, 10)
         a = torch.randn(shape)

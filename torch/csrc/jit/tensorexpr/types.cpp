@@ -37,8 +37,14 @@ Dtype ToDtype(ScalarType type) {
   case ScalarType::n:    \
     return k##n;
     AT_FORALL_SCALAR_TYPES_AND7(
-        Bool, Half, BFloat16, Float8_e5m2, Float8_e5m2fnuz, Float8_e4m3fn,
-        Float8_e4m3fnuz, TYPE_CASE)
+        Bool,
+        Half,
+        BFloat16,
+        Float8_e5m2,
+        Float8_e5m2fnuz,
+        Float8_e4m3fn,
+        Float8_e4m3fnuz,
+        TYPE_CASE)
     TYPE_CASE(c10::quint8, QUInt8);
     TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE

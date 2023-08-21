@@ -1,4 +1,3 @@
-#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
