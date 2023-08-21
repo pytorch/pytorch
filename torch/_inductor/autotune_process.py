@@ -174,8 +174,8 @@ class BenchmarkRequest:
     num_stages: int
     num_warps: int
 
-    input_tensors: List[TensorMeta]
-    output_tensor: TensorMeta
+    input_tensors: Union["TensorMeta", List["TensorMeta"]]
+    output_tensor: Union["TensorMeta", List["TensorMeta"]]
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
@@ -198,7 +198,11 @@ class BenchmarkRequest:
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
-            input_tensors = tuple(x.to_tensor() for x in self.input_tensors)
+            if isinstance(self.input_tensors, List):
+                input_tensors = tuple(x.to_tensor() for x in self.input_tensors)
+            if isinstance(self.input_tensors, TensorMeta):
+                input_tensors = tuple(self.input_tensors.to_tensor())
+            assert isinstance(self.output_tensor, TensorMeta)
             output_tensor = self.output_tensor.to_tensor()
 
         if DEBUG:
