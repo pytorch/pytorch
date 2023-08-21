@@ -39,6 +39,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     RangeConstraint,
     ScalarType,
+    SCHEMA_VERSION,
     SymBool,
     SymBoolArgument,
     SymExpr,
@@ -654,9 +655,9 @@ class GraphModuleSerializer:
             return []
         if _is_single_tensor_return(node.target):
             return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(returns[0].real_type, torch.SymIntType):  # type: ignore[attr-defined]
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymInt):
             return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(node.meta["val"], torch.SymBool):
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymBool):
             return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
 
         # There are a two possibilities at this point:
@@ -752,6 +753,7 @@ class ExportedProgramSerializer:
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
+                schema_version=SCHEMA_VERSION,
             ),
             serialize_state_dict(exported_program.state_dict),
         )
@@ -1198,6 +1200,12 @@ class ExportedProgramDeserializer:
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
+        if serialized_exported_program.schema_version != SCHEMA_VERSION:
+            raise SerializeError(
+                f"Serialized schema version {serialized_exported_program.schema_version} "
+                f"does not match our current schema version {SCHEMA_VERSION}."
+            )
+
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in serialized_exported_program.range_constraints.items()
