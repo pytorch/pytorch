@@ -63,8 +63,8 @@ def main(args):
         X_test = np.array(X_test)
         qid_test = np.array(qid_test)
         y_test = np.array(y_test)
-        scores = autotuner.model.predict(X_test[qid_test == test_id])
-        indices = np.argsort(scores)[::-1]
+        scores = autotuner.score_(X_test[qid_test == test_id])
+        indices = np.argsort(scores)
         print(scores[indices])
         print(y_test[qid_test == test_id][indices])
 
