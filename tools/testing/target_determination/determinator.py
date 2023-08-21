@@ -43,9 +43,13 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         + len(rankings.probably_relevant)
         + len(rankings.unranked_relevance)
     )
-    assert num_tests_analyzed == len(
-        tests
-    ), f"Was given {len(tests)} tests to prioritize, but only analyzed {num_tests_analyzed} tests"
+    assert num_tests_analyzed == len(tests), (
+        f"Was given {len(tests)} tests to prioritize, but only analyzed {num_tests_analyzed} tests. "
+        + "Breakdown:\n"
+        + f"Highly relevant: {len(rankings.highly_relevant)}\n"
+        + f"Probably relevant: {len(rankings.probably_relevant)}\n"
+        + f"Unranked relevance: {len(rankings.unranked_relevance)}\n"
+    )
 
     emit_metric(
         "test_reordering_prioritized_tests",
