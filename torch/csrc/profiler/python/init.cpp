@@ -112,7 +112,106 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
 namespace torch {
 namespace profiler {
 
-void initRecordFunctionFastBindings(PyObject* module);
+/* [NOTE: RecordFunctionFast]
+ * These are an alternate way to call record_function from python.
+ * The typical context manager is slow (~14us on benchmarks in Aug 2023), which
+ * is usually fine for module-level annotations in python, but slow for per-op
+ * annotations. Part of the reason it is slow is because the calls go through
+ * the dispatcher, in order to make the record_function calls work with
+ * torchscript.
+ *
+ * This implementation doesn't go through the dispatcher and so it won't work
+ * with any feature relying on the dispatcher (e.g. torchscript or
+ * torch.compile)
+ *
+ * An alternate solution would be to implement a python context manager that
+ * calls into C++ for the enter/exit function:
+ *    @contextlib.contextmanager
+ *    def record_function_fast(name):
+ *      rf = torch._C._record_function_fast_enter(name)
+ *      try:
+ *        yield
+ *      finally:
+ *        torch._C._record_function_fast_exit(rf)
+ * The C++ implementation here is faster by ~0.2-0.4us per context manager.
+ */
+
+namespace {
+struct RecordFunctionFast {
+  PyObject_HEAD PyObject* name;
+  std::unique_ptr<at::RecordFunction> guard;
+};
+
+PyObject* RecordFunctionFast_new(
+    PyTypeObject* subtype,
+    PyObject* args,
+    PyObject* kwargs) {
+  RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
+  if (self != nullptr) {
+    self->name = nullptr;
+    self->guard.reset();
+  }
+  return (PyObject*)self;
+}
+
+int RecordFunctionFast_init(
+    PyObject* selfGeneric,
+    PyObject* args,
+    PyObject* kwargs) {
+  auto self = (RecordFunctionFast*)selfGeneric;
+  constexpr const char* kwlist[] = {"name", nullptr};
+  PyObject* name = nullptr;
+  if (!PyArg_ParseTupleAndKeywords(
+          args, kwargs, "O", const_cast<char**>(kwlist), &name)) {
+    return -1;
+  }
+  if (name) {
+    Py_INCREF(name);
+    THPUtils_checkString(name);
+    self->name = name;
+  }
+  return 0;
+}
+
+void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
+  auto self = (RecordFunctionFast*)selfGeneric;
+  if (self->name) {
+    Py_CLEAR(self->name);
+  }
+  if (self->guard) {
+    self->guard.reset();
+  }
+  Py_TYPE(self)->tp_free(self);
+}
+
+PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+    auto self = (RecordFunctionFast*)selfGeneric;
+    TORCH_INTERNAL_ASSERT(
+        !self->guard,
+        "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
+    self->guard =
+        std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
+    self->guard->before(THPUtils_unpackString(self->name));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+    auto self = (RecordFunctionFast*)selfGeneric;
+    TORCH_INTERNAL_ASSERT(
+        self->guard,
+        "Trying to exit an active record_function_fast context but no guard is set");
+    self->guard.reset();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+} // namespace
 
 void initPythonBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
@@ -433,107 +532,7 @@ void initPythonBindings(PyObject* module) {
     return py_symbolize(tb_ptrs);
   });
   installCapturedTracebackPython();
-  initRecordFunctionFastBindings(m.ptr());
-}
 
-/* [NOTE: RecordFunctionFast]
- * These are an alternate way to call record_function from python.
- * The typical context manager is slow (~14us on benchmarks in Aug 2023), which
- * is usually fine for module-level annotations in python, but slow for per-op
- * annotations. Part of the reason it is slow is because the calls go through
- * the dispatcher, in order to make the record_function calls work with
- * torchscript.
- *
- * This implementation doesn't go through the dispatcher and so it won't work
- * with any feature relying on the dispatcher (e.g. torchscript or
- * torch.compile)
- *
- * An alternate solution would be to implement a python context manager that
- * calls into C++ for the enter/exit function:
- *    @contextlib.contextmanager
- *    def record_function_fast(name):
- *      rf = torch._C._record_function_fast_enter(name)
- *      try:
- *        yield
- *      finally:
- *        torch._C._record_function_fast_exit(rf)
- * The C++ implementation here is faster by ~0.2-0.4us per context manager.
- */
-
-namespace {
-struct RecordFunctionFast {
-  PyObject_HEAD PyObject* name;
-  std::unique_ptr<at::RecordFunction> guard;
-};
-
-PyObject* RecordFunctionFast_new(
-    PyTypeObject* subtype,
-    PyObject* args,
-    PyObject* kwargs) {
-  RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
-  if (self != nullptr) {
-    self->name = nullptr;
-    self->guard.reset();
-  }
-  return (PyObject*)self;
-}
-
-int RecordFunctionFast_init(
-    PyObject* selfGeneric,
-    PyObject* args,
-    PyObject* kwargs) {
-  auto self = (RecordFunctionFast*)selfGeneric;
-  constexpr const char* kwlist[] = {"name", nullptr};
-  PyObject* name = nullptr;
-  if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "O", const_cast<char**>(kwlist), &name)) {
-    return -1;
-  }
-  if (name) {
-    THPUtils_checkString(name);
-    self->name = name;
-  }
-  return 0;
-}
-
-void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
-  auto self = (RecordFunctionFast*)selfGeneric;
-  if (self->guard) {
-    self->guard.reset();
-  }
-  Py_TYPE(self)->tp_free(self);
-}
-
-PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
-  HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
-    TORCH_INTERNAL_ASSERT(
-        !self->guard,
-        "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
-    self->guard =
-        std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
-    self->guard->before(THPUtils_unpackString(self->name));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
-  HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
-    TORCH_INTERNAL_ASSERT(
-        self->guard,
-        "Trying to exit an active record_function_fast context but no guard is set");
-    self->guard.reset();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-} // namespace
-
-void initRecordFunctionFastBindings(PyObject* profilerModule) {
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
@@ -546,7 +545,7 @@ void initRecordFunctionFastBindings(PyObject* profilerModule) {
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
   RecordFunctionFast_Type.tp_dealloc = (destructor)RecordFunctionFast_dealloc;
-  RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+  RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT;
   RecordFunctionFast_Type.tp_methods = RecordFunctionFast_methods;
   RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
   RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
@@ -557,7 +556,7 @@ void initRecordFunctionFastBindings(PyObject* profilerModule) {
 
   Py_INCREF(&RecordFunctionFast_Type);
   if (PyModule_AddObject(
-          profilerModule,
+          m.ptr(),
           "_RecordFunctionFast",
           (PyObject*)&RecordFunctionFast_Type) != 0) {
     Py_DECREF(&RecordFunctionFast_Type);

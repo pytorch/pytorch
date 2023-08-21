@@ -1730,18 +1730,6 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf4"]), 4)
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf5"]), 4)
 
-        with profile() as p:
-            cm = torch._C._profiler._RecordFunctionFast(None)
-            for i in range(4):
-                cm.set_name(f"add_test_fast_rf_{i}")
-                with cm:
-                    x.add(y)
-
-        self.assertTrue(any(e.name == "add_test_fast_rf_0" for e in p.events()))
-        self.assertTrue(any(e.name == "add_test_fast_rf_1" for e in p.events()))
-        self.assertTrue(any(e.name == "add_test_fast_rf_2" for e in p.events()))
-        self.assertTrue(any(e.name == "add_test_fast_rf_3" for e in p.events()))
-
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
 
