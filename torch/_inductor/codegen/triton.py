@@ -2305,10 +2305,18 @@ class TritonScheduling:
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        src_code = kernel.codegen_kernel()
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+
+        with V.set_kernel_handler(kernel):
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
+
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        V.graph.removed_buffers |= kernel.removed_buffers
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2343,9 +2351,10 @@ class TritonScheduling:
             kernel.node_schedule = node_schedule
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
+
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
-                    node.mark_run()
+                    node.decide_inplace_update()
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
