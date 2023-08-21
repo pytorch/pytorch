@@ -511,7 +511,6 @@ def mps_ops_modifier(ops):
         'polygammapolygamma_n_4': None,
         'qr': None,
         'quantile': None,
-        'renorm': None,
         'rsub': None,
         'scatter_reduceamax': None,
         'scatter_reduceamin': None,
@@ -9437,8 +9436,8 @@ class TestConvolutionMPS(TestCaseMPS):
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg="groundtruth comparison failed for mode={}, "
-                                     "padding_mode={}".format(mode, padding_mode))
+                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     f"padding_mode={padding_mode}")
 
 class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
@@ -10724,7 +10723,7 @@ class TestConsistency(TestCaseMPS):
             elif (op.name == "native_layer_norm"):
                 atol = 1e-4
                 rtol = 1.3e-5
-            elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
+            elif op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
                 atol = 7e-4
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
