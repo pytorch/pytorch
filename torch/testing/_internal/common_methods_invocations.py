@@ -44,7 +44,7 @@ import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
 
-from distutils.version import LooseVersion
+from packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -8832,6 +8832,16 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        has_no_out_of_place=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.skip("_foreach_zero is not implemented"),
+                'TestForeach',
+                'test_outplace_forward_mode_AD',
+            ),
+        ),
     ),
 
     ForeachFuncInfo(
@@ -8931,6 +8941,12 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
+    ForeachFuncInfo(
+        "copy",
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
+        has_no_out_of_place=True,
+    )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -13512,7 +13528,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
         dtypes=complex_types(),
-        dtypesIfCUDA=empty_types(),
+        dtypesIfCUDA=complex_types(),
         supports_forward_ad=False,
         supports_autograd=False,
         assert_autodiffed=False,
@@ -13528,7 +13544,7 @@ op_db: List[OpInfo] = [
             ), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                         dtypes=(torch.cfloat,), device_type='cpu'),
+                         dtypes=(torch.cfloat,)),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
@@ -17127,11 +17143,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
@@ -18469,8 +18485,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # Not implemented
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD'),
@@ -19383,6 +19397,17 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+        ),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.complex64, torch.complex128)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -19477,7 +19502,17 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-        )
+            # Complex values error with: Greatest absolute difference: nan at index
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=[torch.complex64, torch.complex128]),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logaddexp",
@@ -19507,6 +19542,19 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,)),
+            # bfloat16 floor_divide compared with a float32 reference works inconsistently
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         dtypes=(torch.bfloat16,)),
+            # int8 floor divide has different results for -128 // -1 vs. NumPy
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.int8,)),
+            # The following tests fails on some jobs
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.float16,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                         'TestBinaryUfuncs', 'test_reference_numerics'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19529,11 +19577,29 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_contig_vs_every_other',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_non_contig',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gcd",
         torch_opinfo_name="gcd",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.int8,)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
@@ -19547,6 +19613,12 @@ python_ref_db = [
         "_refs.heaviside",
         torch_opinfo_name="heaviside",
         supports_rhs_python_scalar=False,
+        skips=(
+            # PyTorch's heaviside does not appear to propagate NaNs
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.hypot",
@@ -19567,6 +19639,9 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19649,6 +19724,15 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
+                                   torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
+                'TestBinaryUfuncs', 'test_scalar_support'),
+        ),
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -19668,6 +19752,25 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
+            # Skipping integers because they are being raised to negative powers causing an error
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=[torch.int8, torch.int16, torch.int32, torch.int64]),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=[torch.int16, torch.int32, torch.int64]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.complex32,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_large_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_extremal_values',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19678,6 +19781,12 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19701,6 +19810,32 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=True,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0),
+                                   torch.bfloat16: tol(atol=1e-5, rtol=5e-3),
+                                   torch.complex32: tol(atol=1e-5, rtol=1e-3)}),
+                'TestBinaryUfuncs', 'test_reference_numerics'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                'TestCommon', 'test_complex_half_reference_testing', device_type='cpu'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                'TestDecomp', 'test_comprehensive', device_type='cpu'),
+            DecorateInfo(
+                toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                'TestDecomp', 'test_quick', device_type='cpu'),
+        ),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics',
+                         dtypes=(torch.uint8,)),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestBinaryUfuncs',
+                         'test_reference_numerics_small_values',
+                         dtypes=(torch.uint8,)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
@@ -20255,35 +20390,113 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: uint8 input returns uint8 instead of bool
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                dtypes=[torch.uint8]),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
         error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
         error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: uint8 input returns uint8 instead of bool
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                dtypes=[torch.uint8]),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.count_nonzero",
         torch_opinfo_name="count_nonzero",
+        skips=(
+            # FIXME: count_nonzero does not accept keepdim kwarg
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_dim_default_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_dim_multi_unsorted_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
         error_inputs_func=partial(error_inputs_mean, is_ref=True),
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
         torch_opinfo_name="std",
         supports_out=True,
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=(torch.float16,)),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_ref_duplicate_values',
+                dtypes=(torch.float16,)),
+        ),
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
@@ -20295,8 +20508,23 @@ python_ref_db = [
         torch_opinfo_name="sum",
         supports_out=True,
         skips=(
-            # doesn't test out behavior properly for this operator
+            # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # FIXME: mean reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=[torch.float16]),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions',
+                'test_ref_duplicate_values',
+                dtypes=[torch.float16]),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+                dtypes=[torch.float32]),
         ),
     ),
     PythonRefInfo(
@@ -20326,15 +20554,35 @@ python_ref_db = [
         "_refs.prod",
         torch_opinfo_name="prod",
         supports_out=True,
+        supports_multiple_dims=True,
         skips=(
-            # doesn't test out behavior properly for this operator
+            # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                dtypes=[torch.float16, torch.complex64]),
         ),
     ),
     ReductionPythonRefInfo(
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True,
+        skips=(
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+        ),
     ),
     PythonRefInfo(
         "_refs.var_mean",
@@ -20638,14 +20886,14 @@ python_ref_db += opinfo.definitions.python_ref_db
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
-binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
+binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
-shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
-reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
+shape_funcs = [op for op in ops_and_refs if isinstance(op, ShapeFuncInfo)]
+reduction_ops = [op for op in ops_and_refs if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]

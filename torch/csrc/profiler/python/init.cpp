@@ -10,14 +10,111 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
+struct THPCapturedTraceback {
+  PyObject_HEAD std::shared_ptr<torch::CapturedTraceback> data;
+};
+
+static int THPCapturedTraceback_traverse(
+    PyObject* self,
+    visitproc visit,
+    void* arg) {
+  return ((THPCapturedTraceback*)self)
+      ->data->traversePython((int (*)(void*, void*))visit, arg);
+}
+
+static int THPCapturedTraceback_clear(PyObject* self) {
+  return ((THPCapturedTraceback*)self)->data->clearPython();
+}
+
+static void THPCapturedTraceback_dealloc(PyObject* self_) {
+  auto* self = (THPCapturedTraceback*)self_;
+  PyObject_GC_UnTrack(self);
+  self->data.~shared_ptr<torch::CapturedTraceback>();
+  // promptly trigger delayed frees since we have GIL
+  torch::freeDeadCapturedTracebackFrames();
+  PyObject_GC_Del(self);
+}
+
+PyTypeObject THPCapturedTracebackType = {
+    PyVarObject_HEAD_INIT(
+        NULL,
+        0) "torch._C._profiler.CapturedTraceback", /* tp_name */
+    sizeof(THPCapturedTraceback), /* tp_basicsize */
+    0, /* tp_itemsize */
+    THPCapturedTraceback_dealloc, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, /* tp_flags */
+    nullptr, /* tp_doc */
+    (traverseproc)THPCapturedTraceback_traverse, /* tp_traverse */
+    (inquiry)THPCapturedTraceback_clear, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    nullptr, /* tp_alloc */
+    nullptr, /* tp_new */
+};
+
+namespace pybind11 {
+namespace detail {
+
+template <>
+struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(
+      std::shared_ptr<torch::CapturedTraceback>,
+      _("torch._C._profiler.CapturedTraceback"));
+
+  bool load(handle src, bool) {
+    if (Py_TYPE(src.ptr()) == &THPCapturedTracebackType) {
+      value = reinterpret_cast<THPCapturedTraceback*>(src.ptr())->data;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      std::shared_ptr<torch::CapturedTraceback> src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    auto* r = PyObject_GC_New(THPCapturedTraceback, &THPCapturedTracebackType);
+    new (&r->data) std::shared_ptr<torch::CapturedTraceback>(std::move(src));
+    return py::handle((PyObject*)r);
+  }
+};
+
+} // namespace detail
+} // namespace pybind11
+
 namespace torch {
 namespace profiler {
 
-void initManualPythonBindings(PyObject* module);
+void initRecordFunctionFastBindings(PyObject* module);
 
 void initPythonBindings(PyObject* module) {
-  initManualPythonBindings(module);
-
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_profiler");
 
@@ -318,30 +415,49 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
-  py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
-      m, "CapturedTraceback");
+  TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
+  PyModule_AddObject(
+      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", py_symbolize);
+  m.def("symbolize_tracebacks", [](py::list tbs) {
+    std::vector<CapturedTraceback*> tb_ptrs;
+    tb_ptrs.reserve(tbs.size());
+    for (py::handle tb : tbs) {
+      tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
+    }
+    return py_symbolize(tb_ptrs);
+  });
   installCapturedTracebackPython();
+  initRecordFunctionFastBindings(m.ptr());
 }
 
 /* [NOTE: RecordFunctionFast]
  * These are an alternate way to call record_function from python.
- * The typical context manager is slow (~15us on benchmarks in Aug 2023), which
+ * The typical context manager is slow (~14us on benchmarks in Aug 2023), which
  * is usually fine for module-level annotations in python, but slow for per-op
  * annotations. Part of the reason it is slow is because the calls go through
  * the dispatcher, in order to make the record_function calls work with
  * torchscript.
  *
- * This implementation is less safe; it doesn't work with torchscript.
+ * This implementation doesn't go through the dispatcher and so it won't work
+ * with any feature relying on the dispatcher (e.g. torchscript or
+ * torch.compile)
  *
- * It implements a context manager in C++, which reduces the overhead compared
- * to using a python context manager that calls into C++.
+ * An alternate solution would be to implement a python context manager that
+ * calls into C++ for the enter/exit function:
+ *    @contextlib.contextmanager
+ *    def record_function_fast(name):
+ *      rf = torch._C._record_function_fast_enter(name)
+ *      try:
+ *        yield
+ *      finally:
+ *        torch._C._record_function_fast_exit(rf)
+ * The C++ implementation here is faster by ~0.2-0.4us per context manager.
  */
 
 namespace {
@@ -374,7 +490,7 @@ int RecordFunctionFast_init(
     return -1;
   }
   if (name) {
-    Py_INCREF(name);
+    THPUtils_checkString(name);
     self->name = name;
   }
   return 0;
@@ -382,9 +498,6 @@ int RecordFunctionFast_init(
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   auto self = (RecordFunctionFast*)selfGeneric;
-  if (self->name) {
-    Py_DECREF(self->name);
-  }
   if (self->guard) {
     self->guard.reset();
   }
@@ -398,12 +511,8 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     TORCH_INTERNAL_ASSERT(
         !self->guard,
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
-    TORCH_INTERNAL_ASSERT(
-        self->name,
-        "Trying to enter a new record_function_fast context but self->name is not set");
     self->guard =
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
-    THPUtils_checkString(self->name);
     self->guard->before(THPUtils_unpackString(self->name));
   }
   Py_RETURN_NONE;
@@ -422,48 +531,19 @@ PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-PyObject* RecordFunctionFast_set_name(PyObject* selfGeneric, PyObject* pyName) {
-  HANDLE_TH_ERRORS
-  auto self = (RecordFunctionFast*)selfGeneric;
-  if (self->name) {
-    Py_DECREF(self->name);
-    self->name = nullptr;
-  }
-
-  if (pyName) {
-    Py_INCREF(pyName);
-    self->name = pyName;
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
 } // namespace
 
-static PyObject* profilerManualModule = NULL;
-
-void initManualPythonBindings(PyObject* module) {
-  static PyMethodDef functions[] = {{NULL}};
-  static struct PyModuleDef def = {
-      PyModuleDef_HEAD_INIT, "torch._C._profiler_manual", NULL, -1, functions};
-  PyObject* profilerManual = PyModule_Create(&def);
-  profilerManualModule = profilerManual;
-  if (!profilerManual) {
-    throw python_error();
-  }
-
+void initRecordFunctionFastBindings(PyObject* profilerModule) {
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
-      {"set_name", RecordFunctionFast_set_name, METH_O, nullptr},
       {NULL},
   };
 
   static PyTypeObject RecordFunctionFast_Type = {
       PyVarObject_HEAD_INIT(NULL, 0)};
 
-  RecordFunctionFast_Type.tp_name =
-      "torch._C._profiler_manual.RecordFunctionFast",
+  RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
   RecordFunctionFast_Type.tp_dealloc = (destructor)RecordFunctionFast_dealloc;
   RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
@@ -477,15 +557,10 @@ void initManualPythonBindings(PyObject* module) {
 
   Py_INCREF(&RecordFunctionFast_Type);
   if (PyModule_AddObject(
-          profilerManual,
+          profilerModule,
           "_RecordFunctionFast",
           (PyObject*)&RecordFunctionFast_Type) != 0) {
     Py_DECREF(&RecordFunctionFast_Type);
-    throw python_error();
-  }
-
-  // steal a reference to to profilerManual
-  if (PyModule_AddObject(module, "_profiler_manual", profilerManual) != 0) {
     throw python_error();
   }
 }
