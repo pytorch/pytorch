@@ -743,8 +743,7 @@ class SymNode:
 
     @property
     def expr(self):
-        self._update_expr()
-        return self._expr
+        return self.shape_env.replace(self._expr)
 
     # Check if we have replacements hint_expr that would allow us to
     # simplify it into a hint
@@ -783,9 +782,6 @@ class SymNode:
             return None
         else:
             return int(self.expr)
-
-    def _update_expr(self):
-        self._expr = self.shape_env.replace(self._expr)
 
     def is_int(self):
         return self.pytype is int
@@ -1299,14 +1295,11 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
-        other_expr = other.expr
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
-        other_expr = self.shape_env.replace(other_expr)
         try:
-            out = func(expr, other_expr)
+            out = func(self.expr, other.expr)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, expr, other_expr)
+            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1336,7 +1329,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
+        expr = self.expr
         if method == "floor" or method == "ceiling":
             expr = self.shape_env._simplify_floor_div(expr)
 
@@ -2635,9 +2628,11 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
+            if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
+                val = val.node.maybe_as_int()
+
             if isinstance(val, SymInt):
                 s = val.node.expr
-
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
