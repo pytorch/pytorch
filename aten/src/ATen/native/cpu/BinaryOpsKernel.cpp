@@ -1333,6 +1333,10 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
+// Might enable AVX512 dispatch after enabling vectorization for them.
+REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
+REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
+REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
@@ -1346,8 +1350,5 @@ ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
 
 } // namespace at::native
