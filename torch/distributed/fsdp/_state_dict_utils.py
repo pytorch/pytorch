@@ -250,8 +250,11 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            buffer_clean_fqns.append(clean_key)
-            buffers.append(state_dict[fqn])
+            # skip upcasting for ignored buffers
+            if clean_key not in fsdp_state._ignored_buffer_names:
+                buffer_clean_fqns.append(clean_key)
+                buffers.append(state_dict[fqn])
+
     if buffers:
         mixed_precision_enabled_for_buffers = (
             fsdp_state._mixed_precision_enabled_for_buffers()
@@ -629,12 +632,17 @@ def _sharded_pre_load_state_dict_hook(
                 device=device,
             )
             if local_tensor.is_cpu:
+                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
+                # Convert to CPU so all_gather can work.
+                tensor_dev = tensor.device
+                tensor = tensor.cpu()
                 tensor_list = list(
                     torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
                 )
                 dist.all_gather(
                     tensor_list, local_tensor, group=fsdp_state.process_group
                 )
+                tensor.to(tensor_dev)
             else:
                 dist.all_gather_into_tensor(
                     tensor, local_tensor, group=fsdp_state.process_group

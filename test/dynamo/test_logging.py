@@ -11,11 +11,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-
 from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+
+from torch.testing._internal.common_utils import find_free_port, munge_exc
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
@@ -119,7 +119,20 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 2)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT dynamo_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
+Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+
+from user code:
+   File "test_logging.py", line N, in dynamo_error_fn
+    output = output.add(torch.ones(10, 10))""",  # noqa: B950
+        )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
@@ -148,8 +161,22 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 2)
-        self.assertIsInstance(records[0].msg, str)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT inductor_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+  File "test_logging.py", line N, in throw
+    raise AssertionError()
+torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))""",
+        )
 
         exitstack.close()
 
@@ -512,6 +539,28 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(**torch._logging.DEFAULT_LOGGING)
+    def test_default_logging(self, records):
+        def fn(a):
+            if a.sum() < 0:
+                a = torch.sin(a)
+            else:
+                a = torch.cos(a)
+            print("hello")
+            return a + 1
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(10, 10))
+        fn_opt(-torch.ones(10, 5))
+
+        self.assertGreater(len([r for r in records if ".__graph_breaks" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__recompiles" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".symbolic_shapes" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__guards" in r.name]), 0)
+        self.assertGreater(
+            len([r for r in records if "return a + 1" in r.getMessage()]), 0
+        )
+
 
 # single record tests
 exclusions = {
@@ -527,6 +576,9 @@ exclusions = {
     "trace_source",
     "trace_call",
     "custom_format_test_artifact",
+    "onnx",
+    "onnx_diagnostics",
+    "verbose_guards",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

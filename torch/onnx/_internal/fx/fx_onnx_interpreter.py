@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import operator
 import re
 import types
@@ -228,6 +229,22 @@ def _fill_tensor_shape_type(
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
+        elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
+            # Like torch.view_as_real, we flatten complex tensors to real tensors with
+            # additional last dimension of 2
+            onnxscript_value.shape = (
+                *[
+                    dim if isinstance(dim, int) else None
+                    for dim in expected_value.size()
+                ],
+                2,
+            )
+            # complex64 -> float32, complex128 -> float64, etc.
+            onnxscript_value.dtype = fx_type_utils.from_complex_to_float(
+                expected_value.dtype
+            )
+            # Dispatcher needs to know the value is complex
+            onnxscript_value.is_complex = True
         else:
             # We set node output sizes to be dynamic to continue the model conversion,
             # and inputs are also set to be dynamic in add_input().
@@ -380,9 +397,8 @@ class FxOnnxInterpreter:
             diagnostic = self.diagnostic_context.inflight_diagnostic(
                 rule=diagnostics.rules.fx_node_to_onnx
             )
-            diagnostic.with_additional_message(
-                f"### PyTorch source information\n```\n{node_stack_trace}\n```"
-            )
+            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
+                diagnostic.info("```\n%s\n```", node_stack_trace)
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)
@@ -507,11 +523,16 @@ class FxOnnxInterpreter:
                 input_name=None,
             )
         elif isinstance(fake_tensor, torch.Tensor):
+            # NOTE: ONNX doesn't support tensor of complex64/complex128, so we
+            # convert them to float32/float64 with real representation.
+            if fx_type_utils.is_torch_complex_dtype(fake_tensor.dtype):
+                fake_tensor = torch.view_as_real(fake_tensor)
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=fake_tensor.shape,
                 dtype=fake_tensor.dtype,
             )
+
         elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
             output = onnxscript_graph.add_input(
                 input_name=node.name,
@@ -576,7 +597,6 @@ class FxOnnxInterpreter:
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
-        # TODO(titaiwang): diagnostic rules.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
             onnx_args=onnx_args,

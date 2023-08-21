@@ -29,25 +29,20 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-#ifndef _WIN32
-// Windows build fails due to 65536 symbol limit
-#define TORCH_COMPILED_AUTOGRAD
-#endif
-
 namespace torch {
 namespace autograd {
 
 struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
-class CompiledNodeArgs;
-class SwapSavedVariables;
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
+using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
@@ -564,7 +559,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
   // see [Note: Compiled Autograd]
   // Used by compiled autograd to
   //   1) Extract tensors/symint args
@@ -578,23 +572,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Used by compiled autograd to call apply() with different saved tensors
   // Implementations should call saved.before() on all attrs, then apply(), then
-  // saved.after() on all attrs.
+  // saved.after() on all attrs in the same order.
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {
     throw std::runtime_error(
         std::string("apply_with_saved not implemented: ") + name());
   }
-#else
-  void compiled_args(CompiledNodeArgs& args) {
-    TORCH_CHECK(false, "Windows is not supported for compiled autograd");
-  }
-  variable_list apply_with_saved(
-      const variable_list& inputs,
-      SwapSavedVariables& saved) {
-    TORCH_CHECK(false, "Windows is not supported for compiled autograd");
-  }
-#endif
 
  protected:
   /// Performs the `Node`'s actual operation.
