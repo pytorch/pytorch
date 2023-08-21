@@ -166,8 +166,10 @@ int RecordFunctionFast_init(
     return -1;
   }
   if (name) {
+    TORCH_CHECK(
+        THPUtils_checkString(name),
+        "The name passed to RecordFunctionFast must be a string");
     Py_INCREF(name);
-    THPUtils_checkString(name);
     self->name = name;
   }
   return 0;
