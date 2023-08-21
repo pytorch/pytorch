@@ -1,9 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
+import math
 from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
@@ -304,15 +304,16 @@ def init_device_mesh(
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
+        >>>
         >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
-        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, -1), mesh_dim_names=("dp", "tp"))
     """
     if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
         raise RuntimeError(
             f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_shape)}."
         )
 
-    mesh = torch.arange(dist.get_world_size()).view(mesh_shape)
+    mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
     device_mesh = DeviceMesh(
         device_type=device_type,
         mesh=mesh,
