@@ -2273,7 +2273,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2322,7 +2322,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2344,11 +2344,11 @@ def forward(self, x):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+            RuntimeError, r"Invalid value range for 20 between \[4, 7\]."
         ) as cm:
             torch._export.export(f, (torch.tensor([20]),))
 
@@ -2361,14 +2361,14 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
@@ -2450,6 +2450,31 @@ def forward(self, x):
                 constraints=constraints,
                 aten_graph=True,
             )(x)
+
+    def test_trivial_constraint(self):
+        def foo(x):
+            # non-trivial divisibility condition
+            if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
+                return x + 1
+            else:
+                return x - 1
+
+        def bar(x):
+            # trivially true
+            if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn(12)
+        constraints = [dynamic_dim(x, 0) <= 100]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Some dynamic dimensions need to be specialized.*too complex to specify",
+        ):
+            torch._export.export(foo, (x,), constraints=constraints)
+
+        torch._export.export(bar, (x,), constraints=constraints)
 
     def test_list_contains(self):
         def func(x):

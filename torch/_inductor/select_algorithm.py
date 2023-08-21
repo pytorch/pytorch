@@ -8,7 +8,7 @@ import textwrap
 import time
 from io import StringIO
 
-from typing import Any, List
+from typing import Any, Dict, List, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -24,7 +24,7 @@ from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
-from .codegen.triton_utils import config_of, signature_of
+from .codegen.triton_utils import config_of, signature_to_meta
 
 from .utils import do_bench, sympy_dot, sympy_product, unique
 from .virtualized import V
@@ -32,7 +32,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY = False  # dict(atol=1, rtol=0.05)
+VERIFY: Dict[str, Any] = dict()
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -114,8 +114,9 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -257,7 +258,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(
+        V.ops.store(  # type: ignore[attr-defined]
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -316,6 +317,7 @@ class TritonTemplateKernel(TritonKernel):
         *,
         copy_shape=None,
         dense_indexing=False,
+        override_mask=None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -383,7 +385,7 @@ def _jinja2_env():
 
 class TritonTemplate:
     index_counter = itertools.count()
-    all_templates = dict()
+    all_templates: Dict[str, "TritonTemplate"] = dict()
 
     @staticmethod
     def _template_from_string(source):
@@ -691,7 +693,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(
+            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
@@ -717,6 +719,7 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
+        cls: Union[Type[ir.ExternKernelOut], Type[ir.ExternKernelAlloc]]
         if self.has_out_variant:
             cls = ir.ExternKernelOut
         else:
@@ -887,7 +890,7 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        benchmark.debug_str = debug_str
+        benchmark.debug_str = debug_str  # type: ignore[attr-defined]
         return benchmark
 
     @staticmethod
