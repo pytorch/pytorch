@@ -616,15 +616,18 @@ class AutotunerModel:
             self.model = self.model.to("cuda")
             self.model.eval()
 
-    def score(self, configs, autotuner_raw_data):
-        X = self.get_feature_vec(configs, autotuner_raw_data)
+    def score_(self, X):
         if self.model_type == ModelType.XGB_BASELINE:
             scores = self.model.predict(X) * -1
         else:
             scores = self.model.forward(X).squeeze().cpu().detach().numpy()
             if self.model_type == ModelType.NN_POINTWISE:
                 scores = scores * -1
-        indices = np.argsort(scores)
+        return scores
+
+    def score(self, configs, autotuner_raw_data):
+        X = self.get_feature_vec(configs, autotuner_raw_data)
+        indices = np.argsort(score_(X))
         return [configs[i] for i in indices]
 
     def predict(self, configs, autotuner_raw_data, autotuner_space):
