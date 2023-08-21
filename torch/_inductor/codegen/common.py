@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import re
 from collections import namedtuple
 from itertools import chain
@@ -195,6 +196,9 @@ class DataTypePropagation:
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
+
+        if node.target == operator.getitem:
+            return self.deduce_node_dtype(node.args[0])
 
         assert isinstance(node.target, str)
 
