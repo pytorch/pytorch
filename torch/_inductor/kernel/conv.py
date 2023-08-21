@@ -44,20 +44,33 @@ def conv_grid(n, c, h, w, meta):
         meta["GROUPS"],
     )
 
-
-conv_configs = functools.partial(
-    filtered_configs,
-    configs=(
-        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-        (64, 256, 16, 2, 4),
-        (256, 64, 16, 2, 4),
-        (1024, 16, 16, 1, 8),
-        (128, 128, 32, 2, 8),
-        (64, 64, 32, 2, 4),
-        (64, 256, 32, 2, 8),
-        (256, 64, 32, 2, 8),
-    ),
-)
+if torch.version.hip is None:
+    conv_configs = functools.partial(
+        filtered_configs,
+        configs=(
+            # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+            (64, 256, 16, 2, 4),
+            (256, 64, 16, 2, 4),
+            (1024, 16, 16, 1, 8),
+            (128, 128, 32, 2, 8),
+            (64, 64, 32, 2, 4),
+            (64, 256, 32, 2, 8),
+            (256, 64, 32, 2, 8),
+        ),
+    )
+else:
+    conv_configs = functools.partial(
+        filtered_configs,
+        configs=(
+            # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+            (64, 256, 16, 1, 4),
+            (256, 64, 16, 1, 4),
+            (64, 64, 32, 1, 4),
+            (64, 256, 16, 2, 4),
+            (256, 64, 16, 2, 4),
+            (64, 64, 32, 2, 4)
+        ),
+    )
 
 LOOP_BODY = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
