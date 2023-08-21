@@ -485,8 +485,8 @@ class TestHistogramOptimBinNums:
                 assert_equal(
                     len(a),
                     numbins,
-                    err_msg="For the {} estimator "
-                    "with datasize of {}".format(estimator, testlen),
+                    err_msg=f"For the {estimator} estimator "
+                    f"with datasize of {testlen}",
                 )
 
     def test_small(self):
@@ -532,8 +532,8 @@ class TestHistogramOptimBinNums:
                 assert_equal(
                     len(a),
                     expbins,
-                    err_msg="For the {} estimator "
-                    "with datasize of {}".format(estimator, testlen),
+                    err_msg=f"For the {estimator} estimator "
+                    f"with datasize of {testlen}",
                 )
 
     def test_incorrect_methods(self):
@@ -566,7 +566,7 @@ class TestHistogramOptimBinNums:
             assert_equal(
                 len(a),
                 numbins,
-                err_msg="{} estimator, " "No Variance test".format(estimator),
+                err_msg=f"{estimator} estimator, " "No Variance test",
             )
 
     def test_limited_variance(self):
