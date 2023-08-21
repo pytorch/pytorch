@@ -18,7 +18,6 @@ import time
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Pattern, Tuple
@@ -104,6 +103,14 @@ fragment PRReviews on PullRequestReviewConnection {
     author {
       login
     }
+    bodyText
+    createdAt
+    authorAssociation
+    editor {
+      login
+    }
+    databaseId
+    url
     state
   }
   pageInfo {
@@ -219,7 +226,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 targetUrl
               }
             }
-            pushedDate
             oid
           }
         }
@@ -713,12 +719,6 @@ class GitHubPR:
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
-    def last_pushed_at(self) -> Optional[datetime]:
-        pushed_date = self.last_commit()["pushedDate"]
-        if pushed_date is None:
-            return None
-        return datetime.fromisoformat(pushed_date[:-1])
-
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
@@ -1016,6 +1016,16 @@ class GitHubPR:
         for comment in self.get_comments():
             if comment.database_id == database_id:
                 return comment
+
+        # The comment could have actually been a review left on the PR (the message written alongside the review).
+        # (This is generally done to trigger the merge right when a comment is left)
+        # Check those review comments to see if one of those was the comment in question.
+        for node in self.info["reviews"]["nodes"]:
+            # These review comments contain all the fields regular comments need
+            comment = self._comment_from_node(node)
+            if comment.database_id == database_id:
+                return comment
+
         raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
@@ -1603,23 +1613,47 @@ def get_classifications(
     if merge_base is not None:
 
         def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+            d: Dict[str, Dict[str, Dict[str, Any]]],
+            key: str,
+            val: Dict[str, Any],
+            overwrite_failed_run_attempt: bool,
         ) -> None:
             key_no_suffix = remove_job_name_suffix(key)
             if key not in d[key_no_suffix]:
                 d[key_no_suffix][key] = val
                 return
 
-            if d[key_no_suffix][key]["id"] < val["id"]:
+            # When overwrite_failed_run_attempt is set to True, always overwrite
+            # the job with the result from the latest attempt. This option is for
+            # jobs from the pull request head_sha where the latest retry is used
+            # when merging
+            #
+            # When overwrite_failed_run_attempt is False, only overwrite the job
+            # with the result from the latest attempt if the latest retry failed.
+            # This option is for jobs from the merger_base where we want to record
+            # failures for broken trunk
+            if d[key_no_suffix][key]["id"] < val["id"] and (
+                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
+            ):
                 d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
             if rockset_result["head_sha"] == head_sha:
-                insert(head_sha_jobs, name, rockset_result)
+                insert(
+                    head_sha_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=True,
+                )
             else:
-                insert(merge_base_jobs, name, rockset_result)
+                insert(
+                    merge_base_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=False,
+                )
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
@@ -1935,18 +1969,6 @@ def merge(
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
     )
-
-    if pr.last_pushed_at() is None:
-        print(
-            f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?"
-        )
-    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
-        raise RuntimeError(
-            f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
-            "`@pytorchbot merge -r`\n"
-            "Or just rebase by leaving `@pytorchbot rebase` comment"
-        )
 
     start_time = time.time()
     last_exception = ""

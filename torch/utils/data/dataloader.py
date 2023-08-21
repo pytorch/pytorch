@@ -315,7 +315,7 @@ class DataLoader(Generic[T_co]):
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
-                    "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
+                    f"batch_sampler option, but got batch_sampler={batch_sampler}")
         else:
             shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
@@ -397,19 +397,19 @@ class DataLoader(Generic[T_co]):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
-                            ('multiprocessing_context option '
-                             'should specify a valid start method in {!r}, but got '
-                             'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
+                            'multiprocessing_context option '
+                            f'should specify a valid start method in {valid_start_methods!r}, but got '
+                            f'multiprocessing_context={multiprocessing_context!r}')
                     multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
-                    raise TypeError(('multiprocessing_context option should be a valid context '
-                                     'object or a string specifying the start method, but got '
-                                     'multiprocessing_context={}').format(multiprocessing_context))
+                    raise TypeError('multiprocessing_context option should be a valid context '
+                                    'object or a string specifying the start method, but got '
+                                    f'multiprocessing_context={multiprocessing_context}')
             else:
-                raise ValueError(('multiprocessing_context can only be used with '
-                                  'multi-process loading (num_workers > 0), but got '
-                                  'num_workers={}').format(self.num_workers))
+                raise ValueError('multiprocessing_context can only be used with '
+                                 'multi-process loading (num_workers > 0), but got '
+                                 f'num_workers={self.num_workers}')
 
         self.__multiprocessing_context = multiprocessing_context
 
@@ -598,7 +598,26 @@ class _BaseDataLoaderIter:
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
+
+        # NOTE [RNG re-seeding in Dataloader workers]
+        # When num_workers > 0, we need to ensure that all RNGs are different across workers.
+        # That concerns the builtin random module, numpy RNG, and torch Generators.
+        # We do that by generating a base seed (one per Generator), and we then re-seed the Generators in `_worker_loop()`.
+        # - For the default Generator, we sample its base seed just below (self._base_seed) via the `generator`
+        #   parameter that was passed to `Dataloader(...)`.
+        #   We also use this _base_seed to re-seed the numpy and builtin RNGs.
+        # - For all other Generator objects g, their base seed should only depend on g, not on the `generator` parameter.
+        #
+        # We generate _base_seed for the default Generator here, but for the other Generators, we generate their seed
+        # later in _worker_loop(). Why? Because if we were generating the seeds here, we would have to give _worker_loop()
+        # a Generator -> base_seed mapping, and that is really difficult to do (a simple dict would fail because Generators
+        # can't be pickled, and other solutions get very complex very fast).
+        self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
+        for g in _utils.worker._non_default_cpu_generators():
+            # We just consume the RNG here. This is to ensure different RNGs for consecutive epochs.
+            # The base seed for those generators will be generated with _worker_loop().
+            _utils.worker._generate_seed(generator=g)
+
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"

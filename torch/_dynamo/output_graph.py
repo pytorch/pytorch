@@ -42,7 +42,12 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import (
+    BackendCompilerFailed,
+    exceptions_allowed_to_be_fallback,
+    unimplemented,
+    unimplemented_with_warning,
+)
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -263,21 +268,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        # Register a SHAPE_ENV guard to make sure we setup shape guards
-        # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
-        )
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
+        self.init_ambient_guards()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -327,12 +318,38 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # Tracks if the output graph has a user defined allowed function in the
+        # graph. This is used later to determine if we should fallback to eager
+        # for certain exceptions. THe idea is that if the user has applied
+        # allow_in_graph, they would like to see the error instead of falling
+        # back for backend errors.
+        self.has_user_defined_allowed_in_graph = False
+
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
         # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+    # This gets its own helper function so guards DEBUG logs are more
+    # informative
+    def init_ambient_guards(self):
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        )
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
     @property
     def root_tracer(self):
@@ -993,6 +1010,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except exceptions_allowed_to_be_fallback as e:
+            if self.has_user_defined_allowed_in_graph:
+                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                    e.__traceback__
+                ) from None
+            msg = (
+                "Backend compiler failed with a fake tensor exception at \n"
+                f"{self.root_tx.format_frame_summary()}"
+                "Adding a graph break."
+            )
+            unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__

@@ -263,7 +263,7 @@ class EnvVarMetric:
         value = os.environ.get(self.env_var)
         if value is None and self.required:
             raise ValueError(
-                f"Missing {self.name}. Please set the {self.env_var}"
+                f"Missing {self.name}. Please set the {self.env_var} "
                 "environment variable to pass in this value."
             )
         if self.type_conversion_fn:

@@ -790,6 +790,11 @@ class Constraint(ConstraintTarget):
         }
 
     def __eq__(self, other):
+        if not isinstance(other, Constraint):
+            raise TypeError(
+                "A dynamic dim can be specified equal only to another dynamic dim. "
+                f"Equality with {type(other)} is not supported."
+            )
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,

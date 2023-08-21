@@ -318,8 +318,8 @@ class LSTM(torch.nn.Module):
             if num_layers == 1:
                 warnings.warn("dropout option adds dropout after all but last "
                               "recurrent layer, so non-zero dropout expects "
-                              "num_layers greater than 1, but got dropout={} "
-                              "and num_layers={}".format(dropout, num_layers), stacklevel=2)
+                              f"num_layers greater than 1, but got dropout={dropout} "
+                              f"and num_layers={num_layers}", stacklevel=2)
 
         layers = [_LSTMLayer(self.input_size, self.hidden_size,
                              self.bias, batch_first=False,

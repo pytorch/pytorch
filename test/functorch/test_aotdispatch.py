@@ -2870,7 +2870,6 @@ aot_autograd_failures = {
     xfail('narrow'),
     xfail('istft'),
     xfail('linalg.eig'),
-    xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
