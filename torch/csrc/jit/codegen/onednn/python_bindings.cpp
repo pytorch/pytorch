@@ -1,3 +1,5 @@
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/codegen/onednn/python_bindings.h>
@@ -540,3 +542,5 @@ void initOnednnPythonBindings(PyObject* module) {
   bind_cpartition(llga);
   bind_stream(llga);
 }
+
+#endif

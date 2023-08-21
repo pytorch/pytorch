@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import itertools
 from typing import List
+import unittest
 
 import torch
 import torch._dynamo
@@ -21,7 +22,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+ONEDNN_GRAPH_ENABLED = IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available()
 
+
+@unittest.skipIf(not ONEDNN_GRAPH_ENABLED, "oneDNN Graph is disabled")
 class TestOnednnGraphInductor(TestCase):
     def _compile_and_check_accuracy(self, mod, args, **kwargs):
         compiled_model = torch.compile(mod, options={"cpp.onednn_graph": True})
@@ -321,7 +325,7 @@ class TestOnednnGraphInductor(TestCase):
             )
             self._compile_and_check_accuracy(mod, args=(x,))
 
-
+@unittest.skipIf(not ONEDNN_GRAPH_ENABLED, "oneDNN Graph is disabled")
 class TestOnednnGraphRewrite(torch._dynamo.test_case.TestCase):
     def _check_graph_rewrites(
         self,
@@ -461,5 +465,5 @@ class TestOnednnGraphRewrite(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
+    if ONEDNN_GRAPH_ENABLED:
         run_tests()
