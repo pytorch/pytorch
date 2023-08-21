@@ -467,7 +467,7 @@ def _is_valid_quantized_cat_optimization_pattern():
             )
             for mul_node in mul_nodes
         ]
-        if not all(math.isclose(scale, scales[0], rel_tol=0.05) for scale in scales):
+        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
             return False
 
         return True
