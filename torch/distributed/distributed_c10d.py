@@ -173,6 +173,11 @@ class Backend:
 
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
+    default_device_backend_map: Dict[str, str] = {
+        'cpu' : GLOO,
+        'cuda' : NCCL,
+    }
+
     backend_capability: Dict[str, List[str]] = {
         GLOO : ["cpu", "cuda"],
         NCCL : ["cuda"],
@@ -234,6 +239,10 @@ class Backend:
 
         setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
+        if devices is not None:
+            for device in devices:
+                if device != 'cpu' and device != 'cuda':
+                    Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
@@ -262,9 +271,9 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            self.device_backend_map = {"cpu": Backend.GLOO}
-            if is_nccl_available():
-                self.device_backend_map["cuda"] = Backend.NCCL
+            for device in Backend.default_device_backend_map:
+                if is_backend_available(Backend.default_device_backend_map[device]):
+                    self.device_backend_map[device] = Backend.default_device_backend_map[device]
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -1114,9 +1123,9 @@ def init_process_group(
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
-                "For MPI backend, world_size ({}) and rank ({}) "
+                f"For MPI backend, world_size ({world_size}) and rank ({rank}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank)
+                "MPI runtime."
             )
 
         default_pg, _ = _new_process_group_helper(
@@ -1379,6 +1388,17 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     assert pg is not None
     if _world.pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
+
+    # When users register Python onCompletion hooks, those hooks will run on a
+    # different thread than the main thread. Today, the ProcessGroup dtor does
+    # wait for that thread. However, the dtor might finish after the Python
+    # Interpreter exits. After that grabbing the GIL for the Python hook will crash.
+    # We can either revive the interpreter when running hooks or keep the main one
+    # alive until all works and hooks are done. The current implementation does the
+    # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
+    # for the pending hooks to finish.
+    if pg.name().lower() == "nccl" and pg._has_hooks():
+        pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
         _update_default_pg(None)
@@ -4245,6 +4265,8 @@ def _get_group_tag(pg: ProcessGroup) -> str:
         tag = tag[5:]
     return tag
 
+def _get_process_group_name(pg: ProcessGroup) -> str:
+    return _world.pg_names[pg]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.

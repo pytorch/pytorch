@@ -286,14 +286,6 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
-    @graph_module.setter
-    def graph_module(self, gm: torch.fx.GraphModule) -> None:
-        """
-        Set the underlying ``GraphModule`` for this ``ExportedProgram``.
-        """
-        assert isinstance(gm, torch.fx.GraphModule), f'Expected a GraphModule instance, but got {type(gm)}'
-        self._graph_module = gm
-
     @property
     @compatibility(is_backward_compatible=True)
     def graph(self):
@@ -403,98 +395,45 @@ class ExportedProgram:
         """
         return unlift_exported_program_lifted_states(self)
 
+
     def transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
-        def get_output_node_names(gm):
-            output_node = list(gm.graph.nodes)[-1]
-            assert output_node.op == "output"
+        def _get_updated_range_constraints(
+            gm: torch.fx.GraphModule,
+        ) -> Dict[sympy.Symbol, RangeConstraint]:
+            def get_shape_env(gm):
+                vals = [
+                    node.meta["val"]
+                    for node in gm.graph.nodes
+                    if node.meta.get("val", None) is not None
+                ]
+                from torch._guards import detect_fake_mode
+                fake_mode = detect_fake_mode(vals)
+                if fake_mode is not None:
+                    return fake_mode.shape_env
+                for v in vals:
+                    if isinstance(v, torch.SymInt):
+                        return v.node.shape_env
 
-            return [str(arg) for arg in output_node.args[0]]
-
-        def get_input_node_names(gm):
-            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
-
-        def generate_new_graph_signature(old_signature, old_gm, new_gm):
-            """
-            Update graph_signature according to graph after transformation.
-            Transformations can lead to node name changes, which are used in
-            graph_signature to identify inputs and outputs. Therefore, after each
-            transformation, we need to update the graph_signature according to
-            new node names.
-
-            WARNING: This implementation makes a few assumptions
-                - The transformation doesn't change number of inputs/outputs
-                - Each input/output still has the same meaning.
-                    - For inputs, that means that the inputs in transformed
-                        graph map to the same lifted parameter/buffer or user
-                        input as the input of the same position in the graph
-                        before transformation.
-                    - Similarly for outputs, each output should correspond to the
-                        same mutated buffer or user output as the output value of
-                        the same position  in the graph before transformation.
-
-            It is difficult to programatically validate these assumptions, but they
-            should hold true most of the time as inputs/outputs of the graph rarely
-            need to be changed.
-            """
-            old_graph_input_node_names = get_input_node_names(old_gm)
-            new_graph_input_node_names = get_input_node_names(new_gm)
-            assert len(old_graph_input_node_names) == len(new_graph_input_node_names), f"""
-                Number of input nodes changed from {len(old_graph_input_node_names)}
-                to {len(new_graph_input_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            old_graph_output_node_names = get_output_node_names(old_gm)
-            new_graph_output_node_names = get_output_node_names(new_gm)
-            assert len(old_graph_output_node_names) == len(new_graph_output_node_names), f"""
-                Number of output values changed from {len(old_graph_output_node_names)}
-                to {len(new_graph_output_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            node_names_mapping = dict(zip(
-                old_graph_input_node_names + old_graph_output_node_names,
-                new_graph_input_node_names + new_graph_output_node_names
-            ))
-
-            new_signature = copy.deepcopy(old_signature)
-            new_signature.user_inputs = [
-                node_names_mapping[old_user_input]
-                for old_user_input in old_signature.user_inputs
-            ]
-            new_signature.user_outputs = [
-                node_names_mapping[old_user_output]
-                for old_user_output in old_signature.user_outputs
-            ]
-            new_signature.inputs_to_parameters = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[old_input_name]
-                for old_input_name in old_signature.inputs_to_parameters.keys()
+            shape_env = get_shape_env(gm)
+            if shape_env is None:
+                return {}
+            range_constraints = {
+                k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
             }
-            new_signature.inputs_to_buffers = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[old_input_name]
-                for old_input_name in old_signature.inputs_to_buffers.keys()
-            }
-            new_signature.buffers_to_mutate = {
-                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[old_output_name]
-                for old_output_name in old_signature.buffers_to_mutate.keys()
-            }
-            return new_signature
+            return range_constraints
 
-
-        new_graph_signature = generate_new_graph_signature(
-            self.graph_signature, self.graph_module, transformed_gm)
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            new_graph_signature,
+            copy.deepcopy(self.graph_signature),
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            copy.deepcopy(self.range_constraints),
+            _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
         )

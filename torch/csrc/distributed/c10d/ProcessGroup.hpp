@@ -665,6 +665,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return devices;
   }
 
+  void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+    getDefaultBackend()->registerOnCompletionHook(std::move(hook));
+  }
+
+  void waitForPendingWorks() {
+    getDefaultBackend()->waitForPendingWorks();
+  }
+
+  bool hasHooks() const {
+    return getDefaultBackend()->hasHooks();
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
