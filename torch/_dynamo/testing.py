@@ -14,7 +14,7 @@ import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
 
-from . import config, eval_frame, optimize_assert, reset, utils
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -283,37 +283,6 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     if pvalue > pvalue_threshold:
         return f"{speedup:.3f}x SAME"
     return f"{speedup:.3f}x p={pvalue:.2f}"
-
-
-@contextlib.contextmanager
-def trace_numpy() -> None:
-    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
-    try:
-        yield
-    finally:
-        config.numpy_ndarray_as_tensor = prev
-
-
-def requires_numpy_pytorch_interop(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
-
-    return _fn
-
-
-def requires_numpy(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires numpy")
-
-    return _fn
 
 
 def rand_strided(

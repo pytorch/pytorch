@@ -657,7 +657,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     export_options=export_options,
                 )
-
                 onnx_model = export_output.model_proto
 
             onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
@@ -991,6 +990,40 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.xfail(
+        "ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB"
+        "[ONNXRuntimeError] : Status Message: Indices vs updates dimensions differs at position=1 0 vs 3"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
+    )
+    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
+        "HF Bloom model does not need `model.load_state_dict` to work."
+    )
+    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
+        model_name = "bigscience/bloom-560m"
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs(model_name=model_name):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            return tokenizer("Hello world!", return_tensors="pt")
+
+        def create_model():
+            return AutoModel.from_pretrained(model_name)
+
+        self._test_fake_tensor_mode_exporter(
+            model_name.replace("/", "_"),
             create_model,
             create_args,
             create_kwargs,

@@ -181,14 +181,21 @@
 
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
 
-- func: sym_constrain_range(Scalar size, int? min=None, int? max=None) -> ()
+- func: sym_constrain_range(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
-    CPU: sym_constrain_range_cpu
-    CUDA: sym_constrain_range_cuda
+    CompositeExplicitAutograd: sym_constrain_range
+
+- func: sym_constrain_range_for_size(Scalar size, *, int? min, int? max) -> ()
+  dispatch:
+    CompositeExplicitAutograd: sym_constrain_range_for_size
 
 - func: _functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
   dispatch:
-    CPU: _functional_sym_constrain_range_cpu
+    CompositeExplicitAutograd: _functional_sym_constrain_range
+
+- func: _functional_sym_constrain_range_for_size(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _functional_sym_constrain_range_for_size
 
 - func: _make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -5780,8 +5787,10 @@
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
-- func: tile(Tensor self, int[] dims) -> Tensor
+- func: tile(Tensor self, SymInt[] dims) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: tile_symint
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
@@ -6443,7 +6452,7 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
     NestedTensorCPU, NestedTensorCUDA: clone_nested
   autogen: clone.out
-  tags: core
+  tags: [core, pointwise]
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -6641,6 +6650,16 @@
 - func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor
   structured_delegate: _addmm_activation.out
   variants: function, method
+
+- func: _scaled_mm(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _scaled_mm_cuda
+
+- func: _scaled_mm.out(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!), Tensor(b!))
+  variants: function
+  dispatch:
+    CUDA: _scaled_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -10927,6 +10946,14 @@
     CUDA: foreach_tensor_zero_cuda_
   autogen: _foreach_zero, _foreach_zero.out
 
+- func: _foreach_copy_(Tensor(a!)[] self, Tensor[] src, bool non_blocking=False) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_copy_list_kernel_slow_
+    CUDA: foreach_tensor_copy_list_kernel_cuda_
+  autogen: _foreach_copy, _foreach_copy.out
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
@@ -14208,6 +14235,7 @@
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
+    CPU: _scaled_dot_product_flash_attention_cpu
     CUDA: _scaled_dot_product_flash_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
@@ -14216,6 +14244,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _scaled_dot_product_flash_attention_backward_cpu
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
