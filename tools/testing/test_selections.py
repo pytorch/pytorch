@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
-from tools.stats.upload_stats_lib import emit_metric
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
