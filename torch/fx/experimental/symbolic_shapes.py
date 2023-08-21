@@ -2646,8 +2646,8 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            if isinstance(val, SymInt):
-                val = val.node.maybe_as_int() or val
+            if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
+                val = val.node.maybe_as_int()
 
             if isinstance(val, SymInt):
                 s = val.node.expr
