@@ -1214,6 +1214,7 @@ exclude_patterns = [
     'test/fx/test_source_matcher_utils.py',
     'test/fx/test_subgraph_rewriter.py',
     'test/fx/test_z3_gradual_types.py',
+    'test/fx/test_fx_split.py',
     'test/jit/__init__.py',
     'test/jit/_imported_class_test/__init__.py',
     'test/jit/_imported_class_test/bar.py',
