@@ -1602,6 +1602,25 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+template <>
+Tensor alias_with_sizes_and_strides(
+    const Tensor& self,
+    const c10::SymIntArrayRef& sizes,
+    const c10::SymIntArrayRef& strides) {
+  //caller should make sure that sizes and strides are valid for self
+  //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
+  Tensor self_;
+  TORCH_INTERNAL_ASSERT(
+      !self.is_quantized(),
+      "alias_with_sizes_and_strides: called with quantized tensor which is not supported for this overload");
+  self_ = at::detail::make_tensor<TensorImpl>(
+  c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  auto* self_tmp_ = self_.unsafeGetTensorImpl();
+  self_tmp_->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -3687,7 +3706,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
 }
 
 Tensor detach(const Tensor& self) {
