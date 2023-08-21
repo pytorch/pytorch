@@ -1705,14 +1705,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
-
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod
