@@ -4425,12 +4425,13 @@ Padding size:
     :math:`\text{padding\_front}, \text{padding\_back})`.
 
 Padding mode:
-    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-    padding modes works. Constant padding is implemented for arbitrary dimensions.
-    Replicate and reflection padding are implemented for padding the last 3
-    dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
-    or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
+    See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
+    :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
+    for concrete examples on how each of the padding modes works. Constant
+    padding is implemented for arbitrary dimensions. Circular, replicate and
+    reflection padding are implemented for padding the last 3 dimensions of a
+    4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
+    or the last dimension of a 2D or 3D input tensor.
 
 Note:
     When using the CUDA backend, this operation may induce nondeterministic

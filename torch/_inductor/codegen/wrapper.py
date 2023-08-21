@@ -147,10 +147,22 @@ class EnterCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if self.first_time:
-                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            if V.graph.aot_mode:
+                # In AOT mode, we have a stream provided as a param. A stream is
+                # associated with a device, so we never expect the device to change.
+                assert self.first_time
+                # CUDAStreamGuard sets the stream and the device.
+                code.writeline(
+                    f"at::cuda::CUDAStreamGuard stream_guard("
+                    f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                )
             else:
-                code.writeline(f"device_guard.set_index({self.device_idx});")
+                if self.first_time:
+                    code.writeline(
+                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                    )
+                else:
+                    code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -271,6 +283,7 @@ class WrapperCodeGen(CodeGen):
         self.comment = "#"
         self.namespace = ""
         self.none_str = "None"
+        self.optional_tensor_str = "None"
         self.size = "size()"
         self.stride = "stride()"
         self.first_device_guard = True
@@ -398,13 +411,13 @@ class WrapperCodeGen(CodeGen):
     def next_kernel_suffix(self):
         return f"{next(self._names_iter)}"
 
-    def codegen_cuda_device_guard_enter(self, device_idx):
+    def codegen_device_guard_enter(self, device_idx):
         self.writeline(
             EnterCudaDeviceContextManagerLine(device_idx, self.first_device_guard)
         )
         self.first_device_guard = False
 
-    def codegen_cuda_device_guard_exit(self):
+    def codegen_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
@@ -729,7 +742,7 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_str(self, s):
+    def val_to_arg_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
         elif isinstance(s, sympy.Expr):
@@ -743,7 +756,7 @@ class WrapperCodeGen(CodeGen):
                 def __repr__(self):
                     return self.ref
 
-            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
+            return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
         else:
@@ -884,6 +897,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def __init__(self):
         super().__init__()
+        from ..ir import OptionalTensor
+
         self.declare = "auto "
         self.ending = ";"
         self.open_bracket = "{"
@@ -891,6 +906,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "at::Tensor()"
+        self.optional_tensor_str = repr(OptionalTensor())
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -1000,6 +1016,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 c10::optional<at::Scalar> optional_scalar;
                 c10::optional<c10::string_view> optional_string;
                 c10::optional<at::Layout> optional_layout;
+                c10::optional<at::Tensor> optional_tensor;
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
@@ -1077,7 +1094,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if isinstance(output, ir.ReinterpretView) or (
+                if (
                     hasattr(output, "get_name")
                     and output.get_name() in self.outputs_need_copy
                 ):
@@ -1165,7 +1182,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if fn == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_str(reduce)}"
+                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
                 assert (
                     reduce is None
@@ -1203,7 +1220,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
-            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
     def codegen_device(self, device):
@@ -1278,11 +1295,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
-    def val_to_str(self, val):
+    def val_to_arg_str(self, val):
         from .cpp import DTYPE_TO_ATEN
 
         if val is None:
-            return self.none_str
+            # When None is passed as an argument, it represents an optional that does not contain a value.
+            return self.optional_tensor_str
         elif isinstance(val, bool):
             return "true" if val else "false"
         elif isinstance(val, str):
@@ -1297,7 +1315,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
+            return f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
         else:
             return repr(val)
 
@@ -1347,13 +1365,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int numWraps,
                     int sharedMemBytes,
                     void* args[],
-                    int device_index) {
+                    cudaStream_t stream) {
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
+
+    def write_get_cuda_stream(self, index):
+        name = f"stream{index}"
+        self.writeline(
+            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+        )
+        return name
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
@@ -1426,6 +1450,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        stream = (
+            "stream" if V.graph.aot_mode else self.write_get_cuda_stream(device_index)
+        )
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -1435,6 +1462,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["num_warps"],
                 params["shared_mem"],
                 kernel_args_var,
-                device_index,
+                stream,
             )
         )

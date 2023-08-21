@@ -1489,6 +1489,11 @@ class TestProfiler(TestCase):
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
+    # This test is broken on Windows, the likely reason is that kineto/CUPTI
+    # is not supported that particular environment. Once the CI stabilizes
+    # we can narrow the condition so Windows is checked as well (TODO)
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")

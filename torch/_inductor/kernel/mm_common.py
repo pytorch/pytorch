@@ -98,7 +98,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_k, layout):
+def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
     """
     Common options to matmul triton templates.
     """
@@ -112,13 +112,14 @@ def mm_options(config, sym_k, layout):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
+        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
+def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
@@ -126,6 +127,8 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     *b1, m, k1 = mat1.get_size()
     *b2, k2, n = mat2.get_size()
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
+    if use_4x2_dim:
+        k2 = k2 * 2
     k = V.graph.sizevars.guard_equals(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -150,9 +153,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
-        return V.ops.add(acc, bias)
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
+        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
 
     return epilogue

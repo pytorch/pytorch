@@ -1,5 +1,4 @@
 import dataclasses
-from copy import deepcopy
 import itertools
 import sympy
 from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
@@ -7,7 +6,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -541,17 +540,24 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
     def __getattr__(self, name):
-        log.warning("unhandled ValueRange op %s", name)
+        log.debug("unhandled ValueRange op %s", name)
         return self.default_handler
 
 
-def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
+def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None) -> ValueRanges:
+    ranges = ranges or {}
+
+    # If there's a tracing context, augment available constrained ranges.
+    context = torch._guards.TracingContext.get()
+    if context and context.fake_mode.shape_env:
+        ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
+
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
-        ranges = deepcopy(ranges)
+        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
             assert s.is_integer  # type: ignore[attr-defined]
             if s.is_positive:  # type: ignore[attr-defined]
@@ -560,7 +566,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> Va
                 lower = 0
             else:
                 lower = -math.inf  # type: ignore[assignment]
-
-            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+        ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)

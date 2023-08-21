@@ -179,6 +179,9 @@ aten::_foreach_clamp_min.Scalar_out
 aten::_foreach_clamp_min_.List
 aten::_foreach_clamp_min_.Scalar
 aten::_foreach_clamp_min_.ScalarList
+aten::_foreach_copy
+aten::_foreach_copy.out
+aten::_foreach_copy_
 aten::_foreach_cos
 aten::_foreach_cos.out
 aten::_foreach_cos_
@@ -257,9 +260,12 @@ aten::_foreach_mul.Scalar
 aten::_foreach_mul.ScalarList
 aten::_foreach_mul.ScalarList_out
 aten::_foreach_mul.Scalar_out
+aten::_foreach_mul.Tensor
+aten::_foreach_mul.Tensor_out
 aten::_foreach_mul_.List
 aten::_foreach_mul_.Scalar
 aten::_foreach_mul_.ScalarList
+aten::_foreach_mul_.Tensor
 aten::_foreach_neg
 aten::_foreach_neg.out
 aten::_foreach_neg_
@@ -284,6 +290,9 @@ aten::_foreach_round_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
+aten::_foreach_sign
+aten::_foreach_sign.out
+aten::_foreach_sign_
 aten::_foreach_sin
 aten::_foreach_sin.out
 aten::_foreach_sin_
@@ -316,6 +325,7 @@ aten::_foreach_zero.out
 aten::_foreach_zero_
 aten::_functional_assert_async.msg
 aten::_functional_sym_constrain_range
+aten::_functional_sym_constrain_range_for_size
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam_
@@ -441,6 +451,8 @@ aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
+aten::_scaled_mm
+aten::_scaled_mm.out
 aten::_segment_reduce_backward
 aten::_segment_reduce_backward.out
 aten::_slow_conv2d_backward.grad_input
@@ -540,7 +552,6 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
-aten::_unsafe_index.Tensor
 aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
@@ -586,8 +597,6 @@ aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
 aten::addr_
-aten::affine_grid_generator
-aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
 aten::allclose
@@ -777,6 +786,8 @@ aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
 aten::hann_window.periodic_out
+aten::hardshrink_backward
+aten::hardshrink_backward.grad_input
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -960,8 +971,6 @@ aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
 aten::native_norm.ScalarOpt_dim_dtype_out
 aten::native_norm.out
-aten::nll_loss2d_forward
-aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
 aten::nonzero_static
@@ -1108,9 +1117,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rrelu_with_noise
-aten::rrelu_with_noise.out
-aten::rrelu_with_noise_
 aten::rsub.Scalar_out
 aten::rsub.Tensor_out
 aten::scalar_tensor
@@ -1165,6 +1171,8 @@ aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::softmax.int_out
+aten::softshrink_backward
+aten::softshrink_backward.grad_input
 aten::sort
 aten::sort.stable
 aten::sort.values
@@ -1256,7 +1264,6 @@ aten::t_copy
 aten::t_copy.out
 aten::take
 aten::take.out
-aten::tensordot.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor

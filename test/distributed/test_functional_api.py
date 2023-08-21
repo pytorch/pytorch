@@ -2,11 +2,13 @@
 
 import os
 import sys
+import weakref
 from functools import wraps, partial
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
@@ -258,6 +260,26 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res[1], t1 * 4)
 
     @parametrize("device", ["cpu", "cuda"])
+    def test_all_gather_tensor(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        # testing 1d/2d mesh
+        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
+        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
+        for mesh in [mesh_1d, mesh_2d]:
+            dims_to_gather = [0, 1, 2]
+            for dim in dims_to_gather:
+                output_size = [3, 3, 3]
+                output_size[dim] *= mesh.size(0)
+                # each rank have its own tensor, all_gather gives a list
+                local_tensor = torch.ones([3, 3, 3], device=device)
+                gathered_tensor = ft_c.all_gather_tensor(local_tensor, gather_dim=dim, group=(mesh, 0))
+                self.assertEqual(gathered_tensor, torch.ones(output_size))
+
+    @parametrize("device", ["cpu", "cuda"])
     def test_all_gather_into_tensor_coalesced(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -271,6 +293,28 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1])
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_reduce_scatter_tensor(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        # testing 1d/2d mesh
+        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
+        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
+        for mesh in [mesh_1d, mesh_2d]:
+            dims_to_scatter = [0, 1]
+            for dim in dims_to_scatter:
+                group_size = mesh.size(0)
+                input_size = [3, 3]
+                output_size = [3, 3]
+                output_size[dim] *= group_size
+                input_tensor = torch.ones(output_size, device=device)
+                res_num = 1 * group_size
+                rs_tensor = ft_c.reduce_scatter_tensor(input_tensor, "sum", scatter_dim=dim, group=(mesh, 0))
+                self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
 
     @parametrize("device", ["cpu", "cuda"])
     def test_reduce_scatter_into_tensor_coalesced(self, device):
@@ -413,6 +457,86 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
+
+
+class TestOpWaitiness(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def tearDown(self):
+        super().tearDown()
+        ft_c_impl._wait_all()
+
+
+    def test_wait_reduce_outstanding_work_count(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        res.trigger_wait()
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+
+
+    def test_add_triggers_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        foo = res + torch.ones([4])
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+        self.assertFalse(isinstance(foo, ft_c.AsyncCollectiveTensor))
+
+    def test_view_does_not_trigger_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        foo = res.view([2, 2])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        self.assertTrue(ft_c_impl._tensor_needs_wait(foo))
+        self.assertTrue(isinstance(foo, ft_c.AsyncCollectiveTensor))
+
+        foo.trigger_wait()
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+    def test_dead_wrapper_triggers_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+
+        wr = weakref.ref(res)
+        self.assertTrue(wr() is not None)
+        res = None
+        self.assertTrue(wr() is None)
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+    def test_dead_wrapper_plus_view(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        res = res.view([2, 2])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        res = None
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
 if __name__ == "__main__":
     run_tests()
