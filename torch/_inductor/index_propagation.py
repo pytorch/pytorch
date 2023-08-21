@@ -199,7 +199,13 @@ class IndexPropagation:
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
-        if new_expr is NotImplemented:
+        is_valid_expr = new_expr is not NotImplemented and (
+            # Inductor doesn't expect floating point in sympy expressions, but
+            # allow floating point constants to be propagated
+            isinstance(new_expr.expr, sympy.Number)
+            or new_expr.expr.is_integer
+        )
+        if not is_valid_expr:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
