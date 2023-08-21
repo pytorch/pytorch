@@ -126,8 +126,7 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
-    # TODO: store this in slightly less formatted form
-    stack: str
+    stack: CapturedTraceback
 
 
 @dataclasses.dataclass
@@ -694,6 +693,12 @@ def tracing(context: TracingContext):
             e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
+        if (
+            context is not None
+            and context.fake_mode is not None
+            and context.fake_mode.shape_env is not None
+        ):
+            context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
 
 
