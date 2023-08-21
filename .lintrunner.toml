@@ -2642,7 +2642,7 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = ['**/*.py']
+include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
