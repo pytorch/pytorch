@@ -22,6 +22,8 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
     rankings = TestPrioritizations()
     rankings.unranked_relevance = tests.copy()
     print(f"Received {len(tests)} tests to prioritize")
+    for test in tests:
+        print(f"  {test}")
 
     for heuristic in HEURISTICS:
         new_rankings = heuristic.get_test_priorities(tests)
