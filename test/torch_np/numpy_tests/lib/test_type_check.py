@@ -291,24 +291,24 @@ class TestIsinf:
         assert_all(np.isinf(np.array((1.0,)) / 0.0) == 1)
 
     def test_posinf_scalar(self):
-            assert_all(
-                np.isinf(
-                    np.array(
-                        1.0,
-                    )
-                    / 0.0
+        assert_all(
+            np.isinf(
+                np.array(
+                    1.0,
                 )
-                == 1
+                / 0.0
             )
+            == 1
+        )
 
     def test_neginf(self):
-            assert_all(np.isinf(np.array((-1.0,)) / 0.0) == 1)
+        assert_all(np.isinf(np.array((-1.0,)) / 0.0) == 1)
 
     def test_neginf_scalar(self):
-            assert_all(np.isinf(np.array(-1.0) / 0.0) == 1)
+        assert_all(np.isinf(np.array(-1.0) / 0.0) == 1)
 
     def test_ind(self):
-            assert_all(np.isinf(np.array((0.0,)) / 0.0) == 0)
+        assert_all(np.isinf(np.array((0.0,)) / 0.0) == 0)
 
 
 class TestIsposinf:
@@ -337,9 +337,7 @@ class TestNanToNum:
         assert isinstance(vals, np.ndarray)
 
         # perform the same tests but with nan, posinf and neginf keywords
-        vals = nan_to_num(
-            np.array((-1.0, 0, 1)) / 0.0, nan=10, posinf=20, neginf=30
-        )
+        vals = nan_to_num(np.array((-1.0, 0, 1)) / 0.0, nan=10, posinf=20, neginf=30)
         assert_equal(vals, [30, 10, 20])
         assert_all(np.isfinite(vals[[0, 2]]))
         assert isinstance(vals, np.ndarray)

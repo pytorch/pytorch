@@ -399,71 +399,71 @@ class TestModulus:
 class TestComplexDivision:
     @pytest.mark.skip(reason="With pytorch, 1/(0+0j) is nan + nan*j, not inf + nan*j")
     def test_zero_division(self):
-            for t in [np.complex64, np.complex128]:
-                a = t(0.0)
-                b = t(1.0)
-                assert_(np.isinf(b / a))
-                b = t(complex(np.inf, np.inf))
-                assert_(np.isinf(b / a))
-                b = t(complex(np.inf, np.nan))
-                assert_(np.isinf(b / a))
-                b = t(complex(np.nan, np.inf))
-                assert_(np.isinf(b / a))
-                b = t(complex(np.nan, np.nan))
-                assert_(np.isnan(b / a))
-                b = t(0.0)
-                assert_(np.isnan(b / a))
+        for t in [np.complex64, np.complex128]:
+            a = t(0.0)
+            b = t(1.0)
+            assert_(np.isinf(b / a))
+            b = t(complex(np.inf, np.inf))
+            assert_(np.isinf(b / a))
+            b = t(complex(np.inf, np.nan))
+            assert_(np.isinf(b / a))
+            b = t(complex(np.nan, np.inf))
+            assert_(np.isinf(b / a))
+            b = t(complex(np.nan, np.nan))
+            assert_(np.isnan(b / a))
+            b = t(0.0)
+            assert_(np.isnan(b / a))
 
     def test_signed_zeros(self):
-            for t in [np.complex64, np.complex128]:
-                # tupled (numerator, denominator, expected)
-                # for testing as expected == numerator/denominator
-                data = (
-                    ((0.0, -1.0), (0.0, 1.0), (-1.0, -0.0)),
-                    ((0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
-                    ((0.0, -1.0), (-0.0, -1.0), (1.0, 0.0)),
-                    ((0.0, -1.0), (-0.0, 1.0), (-1.0, 0.0)),
-                    ((0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)),
-                    ((0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
-                    ((-0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
-                    ((-0.0, 1.0), (0.0, -1.0), (-1.0, -0.0)),
-                )
-                for cases in data:
-                    n = cases[0]
-                    d = cases[1]
-                    ex = cases[2]
-                    result = t(complex(n[0], n[1])) / t(complex(d[0], d[1]))
-                    # check real and imag parts separately to avoid comparison
-                    # in array context, which does not account for signed zeros
-                    assert_equal(result.real, ex[0])
-                    assert_equal(result.imag, ex[1])
+        for t in [np.complex64, np.complex128]:
+            # tupled (numerator, denominator, expected)
+            # for testing as expected == numerator/denominator
+            data = (
+                ((0.0, -1.0), (0.0, 1.0), (-1.0, -0.0)),
+                ((0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
+                ((0.0, -1.0), (-0.0, -1.0), (1.0, 0.0)),
+                ((0.0, -1.0), (-0.0, 1.0), (-1.0, 0.0)),
+                ((0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)),
+                ((0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
+                ((-0.0, -1.0), (0.0, -1.0), (1.0, -0.0)),
+                ((-0.0, 1.0), (0.0, -1.0), (-1.0, -0.0)),
+            )
+            for cases in data:
+                n = cases[0]
+                d = cases[1]
+                ex = cases[2]
+                result = t(complex(n[0], n[1])) / t(complex(d[0], d[1]))
+                # check real and imag parts separately to avoid comparison
+                # in array context, which does not account for signed zeros
+                assert_equal(result.real, ex[0])
+                assert_equal(result.imag, ex[1])
 
     def test_branches(self):
-            for t in [np.complex64, np.complex128]:
-                # tupled (numerator, denominator, expected)
-                # for testing as expected == numerator/denominator
-                data = list()
+        for t in [np.complex64, np.complex128]:
+            # tupled (numerator, denominator, expected)
+            # for testing as expected == numerator/denominator
+            data = list()
 
-                # trigger branch: real(fabs(denom)) > imag(fabs(denom))
-                # followed by else condition as neither are == 0
-                data.append(((2.0, 1.0), (2.0, 1.0), (1.0, 0.0)))
+            # trigger branch: real(fabs(denom)) > imag(fabs(denom))
+            # followed by else condition as neither are == 0
+            data.append(((2.0, 1.0), (2.0, 1.0), (1.0, 0.0)))
 
-                # trigger branch: real(fabs(denom)) > imag(fabs(denom))
-                # followed by if condition as both are == 0
-                # is performed in test_zero_division(), so this is skipped
+            # trigger branch: real(fabs(denom)) > imag(fabs(denom))
+            # followed by if condition as both are == 0
+            # is performed in test_zero_division(), so this is skipped
 
-                # trigger else if branch: real(fabs(denom)) < imag(fabs(denom))
-                data.append(((1.0, 2.0), (1.0, 2.0), (1.0, 0.0)))
+            # trigger else if branch: real(fabs(denom)) < imag(fabs(denom))
+            data.append(((1.0, 2.0), (1.0, 2.0), (1.0, 0.0)))
 
-                for cases in data:
-                    n = cases[0]
-                    d = cases[1]
-                    ex = cases[2]
-                    result = t(complex(n[0], n[1])) / t(complex(d[0], d[1]))
-                    # check real and imag parts separately to avoid comparison
-                    # in array context, which does not account for signed zeros
-                    assert_equal(result.real, ex[0])
-                    assert_equal(result.imag, ex[1])
+            for cases in data:
+                n = cases[0]
+                d = cases[1]
+                ex = cases[2]
+                result = t(complex(n[0], n[1])) / t(complex(d[0], d[1]))
+                # check real and imag parts separately to avoid comparison
+                # in array context, which does not account for signed zeros
+                assert_equal(result.real, ex[0])
+                assert_equal(result.imag, ex[1])
 
 
 class TestConversion:
