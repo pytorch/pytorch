@@ -38,6 +38,19 @@ and no guard installation notions here.
 """
 
 
+class CompileId(NamedTuple):
+    frame_id: int
+    # This id is per-frame, and counts how many times we've compiled this
+    # frame.  This could have been a global id but having this be per-frame
+    # gives you a better intuitive sense for how many recompiles have occurred
+    # so far.
+    frame_compile_id: int
+    # TODO: consider also tracking the recompilation count
+
+    def __str__(self):
+        return f"{self.frame_id}/{self.frame_compile_id}"
+
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -146,10 +159,6 @@ class Guard:
 
     stack = None
     user_stack = None
-
-    def __post_init__(self):
-        self.stack = CapturedTraceback.extract(skip=2)
-        self.user_stack = TracingContext.extract_stack()
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
@@ -435,17 +444,55 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
 
 
+# Like a Set[Guard] but will record the user stack on all guards at the
+# time they were installed at their destination
+class GuardsSet:
+    def __init__(self, inner=None):
+        if inner is None:
+            inner = set()
+        self.inner = inner
+
+    def __iter__(self):
+        return iter(self.inner)
+
+    def __len__(self):
+        return len(self.inner)
+
+    # Subtraction along with bool is typically used to determine the delta of
+    # added guards between checkpoints for higher order ops
+    def __sub__(self, other):
+        return GuardsSet(self.inner - other.inner)
+
+    def __bool__(self):
+        return bool(self.inner)
+
+    def add(self, guard: Guard, *, skip=0):
+        if guard in self.inner:
+            return
+        if guard.stack is None:
+            guard.stack = CapturedTraceback.extract(skip=1 + skip)
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
+        self.inner.add(guard)
+
+    def update(self, *others: Set[Guard]):
+        for o in others:
+            for g in o:
+                self.add(g, skip=1)
+
+
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
-        self.dynamo_guards: Set[Guard] = set()
+        self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
-        return GuardsCheckpointState(set(self.dynamo_guards))
+        return GuardsCheckpointState(set(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state):
+        # NB: "steals" the passed in state
         assert isinstance(state, GuardsCheckpointState)
-        self.dynamo_guards = state.dynamo_guards
+        self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
 _TLS = threading.local()
@@ -455,10 +502,6 @@ TracingContext is the source of truth for all currently accumulated information
 needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
 are open to managing their own TracingContext with that in mind.
 
-Currently, only guards live on the TracingContext, in the form of a GuardsContext.
-However, future implementations will move FakeTensorMode (and its owned ShapeEnv), as well
-as other structures into it.
-
 The purpose of TracingContext is not to be a dumping ground, or god object, but rather to avoid
 having to plumb complex subsystems across multiple verticals.
 
@@ -466,7 +509,28 @@ Ex: A common example is guard accumulation between dynamo, shape_env, aot_autogr
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
 to plumb objects back up to where frame interpretation happened.
+
+Note that you can end up with multiple TracingContext for a single compilation
+of a frame, as we reset the TracingContext whenever we restart analysis.
+CompileContext is a more overarching context that encompasses multiple restarts.
 """
+
+
+class CompileContext:
+    @staticmethod
+    def get() -> Optional["CompileContext"]:
+        return getattr(_TLS, "compile_context", None)
+
+    def __init__(self, compile_id):
+        assert compile_id is None or isinstance(compile_id, CompileId)
+        self.compile_id = compile_id
+
+    @staticmethod
+    def current_compile_id():
+        self = CompileContext.get()
+        if self is None:
+            return None
+        return self.compile_id
 
 
 class TracingContext:
@@ -601,15 +665,25 @@ class TracingContext:
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
 
 
-"""
-This function installs the passed in tracing context as a dynamic scoped global variable.
-
-Calls to TracingContext.get() while not under a `with tracing()` context will return None.
-"""
+@contextmanager
+def compile_context(context: CompileContext):
+    old_context = getattr(_TLS, "compile_context", None)
+    _TLS.compile_context = context
+    try:
+        yield context
+    finally:
+        _TLS.compile_context = old_context
 
 
 @contextmanager
 def tracing(context: TracingContext):
+    """
+    This function installs the passed in tracing context as a dynamic scoped
+    global variable.
+
+    Calls to TracingContext.get() while not under a `with tracing()` context
+    will return None.
+    """
     old_context = getattr(_TLS, "tracing_context", None)
     _TLS.tracing_context = context
     try:

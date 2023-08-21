@@ -16,7 +16,7 @@ from torch.testing._internal.optests import (
 
 
 def safe_schema_check(op, args, kwargs):
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
@@ -28,12 +28,12 @@ def safe_autograd_registration_check(op, args, kwargs):
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
     ):
         return
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     return autograd_registration_check(op, args, kwargs)
 
 
 def safe_fake_check(op, args, kwargs):
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs, dynamic_only=False)
 
 
@@ -45,6 +45,10 @@ def safe_aot_autograd_check(op, args, kwargs, dynamic):
     # aot_autograd_check runs func(*args, **kwargs) multiple times
     # and assumes `func` does not modify its inputs.
     return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
+
+
+def deepcopy_tensors(inputs):
+    return pytree.tree_map_only(torch.Tensor, clone_input, inputs)
 
 
 # Test util requirements
@@ -228,17 +232,20 @@ class OpCheckMode(TorchFunctionMode):
                         f"Unexpected success for operator {qualname} on test {self.test_name}"
                     )
                 continue
+        failed_ops = []
         for qualname in self.seen_ops_to_errors.keys():
             option = retrieve(self.failures_dict, qualname, self.test_name)
             if option != "success":
                 continue
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 continue
-            # Raise the first error
-            ex = self.seen_ops_to_errors[qualname][0]
-            raise OpCheckError(
-                f"{self.test_name} failed on operator {qualname}"
-            ) from ex
+            failed_ops.append(qualname)
+        if not failed_ops:
+            return
+        # Raise from the first error but also report about all of them to make
+        # recording xfails easier.
+        ex = self.seen_ops_to_errors[failed_ops[0]][0]
+        raise OpCheckError(f"{self.test_name} failed on operators {failed_ops}") from ex
 
     def __exit__(self, *args, **kwargs):
         try:
@@ -273,7 +280,7 @@ class OpCheckMode(TorchFunctionMode):
         if ns not in self.namespaces:
             return func(*args, **kwargs)
 
-        args_c, kwargs_c = pytree.tree_map(clone_input, (args, kwargs))
+        args_c, kwargs_c = deepcopy_tensors((args, kwargs))
         # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
