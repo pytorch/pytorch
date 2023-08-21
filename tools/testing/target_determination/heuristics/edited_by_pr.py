@@ -17,8 +17,7 @@ class EditedByPR(HeuristicInterface):
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
         critical_tests = sorted(_get_modified_tests())
-        test_rankings = TestPrioritizations()
-        test_rankings.highly_relevant = list(critical_tests)
+        test_rankings = TestPrioritizations(highly_relevant=critical_tests)
 
         return test_rankings
 

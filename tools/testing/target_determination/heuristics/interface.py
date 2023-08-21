@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class TestPrioritizations:
@@ -19,10 +19,15 @@ class TestPrioritizations:
     unranked_relevance: List[str]
     # future cateories could include 'definitely not relevant' and 'probably not relevant'
 
-    def __init__(self) -> None:
-        self.highly_relevant = []
-        self.probably_relevant = []
-        self.unranked_relevance = []
+    def __init__(
+        self,
+        highly_relevant: Optional[List[str]] = None,
+        probably_relevant: Optional[List[str]] = None,
+        unranked_relevance: Optional[List[str]] = None,
+    ) -> None:
+        self.highly_relevant = highly_relevant or []
+        self.probably_relevant = probably_relevant or []
+        self.unranked_relevance = unranked_relevance or []
 
     @staticmethod
     def _merge_tests(
