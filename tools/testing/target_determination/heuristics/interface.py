@@ -5,9 +5,10 @@ from typing import Any, Dict, List, Optional
 class TestPrioritizations:
     """
     Describes the results of whether heuristics consider a test relevant or not.
-    Heuristics can leave a list empty if they don't consider any tests relevant.
 
-    Heuristics can leave the unranked_relevance list empty to imply all unmentioned tests are irrelevant
+    Special meanings:
+    - Heuristics can leave a list empty if they don't consider any tests to be in that category
+    - Heuristics can leave the unranked_relevance list empty to imply all unmentioned tests are irrelevant
 
     Important: Lists of tests must always be returned in a deterministic order,
                otherwise it breaks the test sharding logic
@@ -31,15 +32,15 @@ class TestPrioritizations:
 
     @staticmethod
     def _merge_tests(
-        current_tests: List[str], new_tests: List[str], exclude_tests: List[str]
+        current_tests: List[str], new_tests: List[str], exclude_tests: List[str], orig_tests: List[str]
     ) -> List[str]:
         """
         We append all new tests to the current tests, while preserving the sorting on the new_tests
-        However, exclude any specified tests which have now moved to a higher priority list
+        However, exclude any specified tests which have now moved to a higher priority list or tests that weren't originally in the self's TestPrioritizations
         """
         current_tests.extend(new_tests)
         current_tests = [
-            test for test in current_tests if test not in exclude_tests
+            test for test in current_tests if test not in exclude_tests and test in orig_tests
         ]  # skip the excluded tests
         current_tests = list(dict.fromkeys(current_tests))  # remove dupes
 
@@ -49,24 +50,31 @@ class TestPrioritizations:
         """
         Integrates priorities from another TestPrioritizations object.
 
-        Assumes tests are only shuffled around beteen the lists, with no tests added or removed.
+        The final result takes all tests from the `self` and rearranges them based on priorities from `other`.
+        If there are tests mentioned in `other` which are not in `self`, those tests are ignored.
+        (For example, that can happen if a heuristic reports tests that are not run in the current job)
         """
+        orig_tests = set(self.highly_relevant + self.probably_relevant + self.unranked_relevance)
+
         # only add new tests to the list, while preserving the sorting
         self.highly_relevant = TestPrioritizations._merge_tests(
-            self.highly_relevant, other.highly_relevant, exclude_tests=[]
+            self.highly_relevant, other.highly_relevant, exclude_tests=[], orig_tests=orig_tests
         )
 
         self.probably_relevant = TestPrioritizations._merge_tests(
             self.probably_relevant,
             other.probably_relevant,
             exclude_tests=self.highly_relevant,
+            orig_tests=orig_tests,
         )
 
-        # We don't expect every heuristics to list all unranked tests. Easier to compute the list from scratch
-        ranked_tests = self.highly_relevant + self.probably_relevant
-        self.unranked_relevance = [
-            t for t in self.unranked_relevance if t not in ranked_tests
-        ]
+        # Remove any tests that are now in a higher priority list
+        self.unranked_relevance = TestPrioritizations._merge_tests(
+            self.unranked_relevance,
+            new_tests=[],
+            exclude_tests=(self.highly_relevant + self.probably_relevant),
+            orig_tests=orig_tests
+        )
 
     def find_conflicts(self) -> List[str]:
         """
