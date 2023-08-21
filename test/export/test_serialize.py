@@ -3,6 +3,7 @@ import io
 import pathlib
 import tempfile
 import unittest
+import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
@@ -497,6 +498,25 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
         self.assertEqual(extra_files["extra.txt"], "moo")
+
+    def test_version_error(self):
+        def f(x):
+            return x + x
+
+        ep = export(f, (torch.randn(1, 3),))
+
+        with tempfile.NamedTemporaryFile() as f:
+            save(ep, f)
+            f.seek(0)
+
+            # Modify the version
+            with zipfile.ZipFile(f, 'a') as zipf:
+                zipf.writestr('version', "-1")
+
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+                f.seek(0)
+                loaded_ep = load(f)
+
 
 if __name__ == '__main__':
     run_tests()

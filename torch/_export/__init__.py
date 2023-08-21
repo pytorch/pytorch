@@ -560,6 +560,16 @@ def load(
         f = str(f)
 
     with zipfile.ZipFile(f, 'r') as zipf:
+        # Check the version
+        version = int(zipf.read('version'))
+        from .serde.schema import SCHEMA_VERSION
+
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Serialized version {version} does not match our current "
+                f"schema version {SCHEMA_VERSION}."
+            )
+
         # Load serialized_ep and serialized_state_dict from the zip file
         serialized_ep = zipf.read('serialized_exported_program.json')
         serialized_state_dict = zipf.read('serialized_state_dict.json')
