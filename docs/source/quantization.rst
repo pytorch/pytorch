@@ -129,7 +129,7 @@ Note that for FX quantization, the corresponding functionals are also supported.
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 | nn.MultiheadAttention     | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
