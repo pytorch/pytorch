@@ -133,6 +133,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <cpuinfo.h>
 
 namespace at {
 
@@ -1325,13 +1326,14 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
-#ifdef __aarch64__
-    // Minimum dimension requirement for MKLDNN; derived based on experiments.
-    constexpr int64_t default_min_dim = 8;
-#else
-    // Always dispatch MatMul to MKLDNN by default for archs other than aarch64.
-    constexpr int64_t default_min_dim = 0;
-#endif
+    const int64_t default_min_dim = [&] {
+      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // By default, it's only enabled on Neoverse V1.
+      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
+        return 8;
+      }
+      return 0;
+    }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
@@ -1341,13 +1343,14 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
 
 static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
-#ifdef __aarch64__
-    // Minimum size requirement for MKLDNN; derived based on experiments.
-    constexpr int64_t default_min_size = 8 * 1024;
-#else
-    // Always dispatch MatMul to MKLDNN by default for archs other than aarch64.
-    constexpr int64_t default_min_size = 0;
-#endif
+    const int64_t default_min_size = [&] {
+      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // By default, it's only enabled on Neoverse V1.
+      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
+        return 8 * 1024;
+      }
+      return 0;
+    }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
