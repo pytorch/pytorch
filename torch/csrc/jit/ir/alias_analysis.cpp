@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 #include <fstream>
+#include <iostream>
 
 namespace torch::jit {
 
