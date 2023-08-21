@@ -13,7 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -699,6 +699,30 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn(x_shape, dtype=torch.float32)
         self._test_common(mod, (v,), 0, 0)
+
+    def test_multi_linear_share_same_input_dynamic(self):
+        # llama pattern.
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.w1 = torch.nn.Linear(16, 16, bias=False)
+                self.w2 = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+
+        mod = M().to(torch.bfloat16).eval()
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            # 1. view(match_count=4, match_nodes=4).
+            # 2. mm to packed linear(match_count=2, match_nodes=2).
+            # 3. view+linear+view to linear(match_count=2, match_nodes=6).
+
+            match_count = 8
+            match_nodes = 12
+            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":

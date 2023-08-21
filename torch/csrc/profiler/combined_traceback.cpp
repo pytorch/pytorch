@@ -26,6 +26,16 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
   return r;
 }
 
+int CapturedTraceback::traversePython(visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(python_);
+  return python_->traverse(frames_, visit, arg);
+}
+
+int CapturedTraceback::clearPython() {
+  TORCH_INTERNAL_ASSERT(python_);
+  return python_->clear(frames_);
+}
+
 CapturedTraceback::~CapturedTraceback() {
   if (frames_.size() > 0) {
     TORCH_INTERNAL_ASSERT(python_);

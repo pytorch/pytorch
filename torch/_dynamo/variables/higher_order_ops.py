@@ -886,14 +886,18 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
 
-        example_value = torch._functorch.vmap.vmap_impl(
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-            actual_in_dims,
-            out_dims.as_python_constant(),
-            randomness.value,
-            chunk_size.value,
-            *fake_batched_fn_args,
-        )
+        # NOTE: `body_graph` might have operators which
+        # will create new tensors. So it is required
+        # that we run `vmap` under FakeMode.
+        with tx.fake_mode:
+            example_value = torch._functorch.vmap.vmap_impl(
+                torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+                actual_in_dims,
+                out_dims.as_python_constant(),
+                randomness.value,
+                chunk_size.value,
+                *fake_batched_fn_args,
+            )
 
         # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
         proxy = vmap_proxy(*proxy_batched_fn_args)
