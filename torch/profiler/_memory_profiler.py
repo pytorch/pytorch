@@ -91,7 +91,7 @@ class _Storage:
     def __repr__(self) -> str:
         return f"{hex(self.ptr):>18} ({self.allocation_id})"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, _Storage) and self.allocation_id == other.allocation_id
 
     def __hash__(self) -> int:

@@ -362,7 +362,7 @@ def assert_deadline_disabled():
         warning_message = (
             "Your version of hypothesis is outdated. "
             "To avoid `DeadlineExceeded` errors, please update. "
-            "Current hypothesis version: {}".format(hypothesis.__version__)
+            f"Current hypothesis version: {hypothesis.__version__}"
         )
         warnings.warn(warning_message)
     else:
