@@ -1447,7 +1447,7 @@ def do_sharding(
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
 
-        # Do sharding
+    # Do sharding
     shards = calculate_shards(
         num_shards,
         selected_tests,
