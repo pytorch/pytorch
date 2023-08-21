@@ -1,6 +1,6 @@
 from typing import List
 
-from tools.stats.upload_stats_lib import emit_metric
+from tools.stats.upload_metrics import emit_metric
 
 from tools.testing.target_determination.heuristics import (
     HEURISTICS,
