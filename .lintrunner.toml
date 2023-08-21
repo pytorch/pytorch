@@ -202,6 +202,7 @@ include_patterns = [
     'torch/_inductor/kernel/mm_common.py',
     'torch/_inductor/kernel/unpack_mixed_mm.py',
     'torch/_inductor/utils.py',
+    'torch/_inductor/triton_heuristics.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]

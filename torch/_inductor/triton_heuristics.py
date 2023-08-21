@@ -11,7 +11,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import List, Set
+from typing import List, Set, Any
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -82,9 +82,9 @@ def autotune_hints_to_configs(
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4,),)
             elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+                xyz_options = ((block_size // 4, 1), (1, block_size // 4)) # type: ignore[assignment]
             elif len(size_hints) == 3:
-                xyz_options = (
+                xyz_options = ( # type: ignore[assignment]
                     (block_size // 4, 1, 1),
                     (1, block_size // 4, 1),
                     (1, 1, block_size // 4),
@@ -251,7 +251,7 @@ class CachingAutotuner(KernelInterface):
         def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
-                    {**zip(self.arg_names, args), **launcher.config.kwargs}
+                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
             cloned_args = self.clone_args(*args)
@@ -348,7 +348,7 @@ class CachingAutotuner(KernelInterface):
 
         def benchmark_one_config(config):
             with self.lock:
-                launcher = self._precompile_config(config, None)
+                launcher = self._precompile_config(config, None) # type: ignore[arg-type]
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *cloned_args, **kwargs)
@@ -396,7 +396,7 @@ class CachingAutotuner(KernelInterface):
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
-                {**zip(self.arg_names, args), **launcher.config.kwargs}
+                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
         return launcher(
             *args,
@@ -410,7 +410,7 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):
+    for frame in iter(lambda: frame.f_back, None): # type: ignore[union-attr]
         frame.f_locals
     obj_names = []
     for referrer in gc.get_referrers(obj):
@@ -421,7 +421,7 @@ def _find_names(obj):
     return obj_names
 
 
-collected_calls = []
+collected_calls: List[Any] = []
 
 
 def start_graph():
@@ -469,7 +469,7 @@ class DebugAutotuner(CachingAutotuner):
             self.cached = (ms, num_gb, gb_per_s, kernel_name)
         else:
             ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)), # type: ignore[func-returns-value]
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
         )
@@ -561,7 +561,7 @@ def cached_autotune(
                 log.debug("Save %s tuning result to %s", type_str, cache_filename)
 
     else:
-        save_cache_hook = None
+        save_cache_hook = None # type: ignore[assignment]
 
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
@@ -965,7 +965,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        None,
+        None, # type: ignore[arg-type]
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -978,7 +978,7 @@ def foreach(meta, num_warps, filename=None):
     Compile a triton foreach kernel
     """
     return cached_autotune(
-        None,
+        None, # type: ignore[arg-type]
         [triton.Config({}, num_stages=1, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
