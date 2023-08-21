@@ -168,11 +168,12 @@ def count_bytes_inner(
     shape_env = _shape_env_from_inputs(example_inputs)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph):
+    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
         graph.run(*example_inputs)
-        num_bytes, nodes_num_elem = graph.count_bytes()
+        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
         metrics.nodes_num_elem += nodes_num_elem
+        metrics.node_runtimes += node_runtimes
     return make_boxed_func(gm.forward)
 
 
@@ -564,9 +565,6 @@ def fx_codegen_and_compile(
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
 
-            if _in_aot_compilation:
-                return compiled_fn
-
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
@@ -772,8 +770,8 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph(capture_error_mode="thread_local")
-    with torch.cuda.graph(graph, stream=stream):
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
@@ -1141,9 +1139,6 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
-    if _in_aot_compilation:
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return fw_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context

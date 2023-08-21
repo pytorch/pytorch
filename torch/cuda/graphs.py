@@ -75,12 +75,7 @@ class CUDAGraph(torch._C._CUDAGraph):
                 actions in the current thread, and "relaxed" will not error on these actions.
 
         """
-        # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
-        # so I'm not taking any chances.
-        if pool is None:
-            super().capture_begin(capture_error_mode=capture_error_mode)
-        else:
-            super().capture_begin(capture_error_mode=capture_error_mode)
+        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self):
         r"""
@@ -191,7 +186,9 @@ class graph:
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
 
-        self.cuda_graph.capture_begin(*self.pool, self.capture_error_mode)
+        self.cuda_graph.capture_begin(
+            *self.pool, capture_error_mode=self.capture_error_mode
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.cuda_graph.capture_end()
