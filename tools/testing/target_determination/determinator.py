@@ -37,6 +37,7 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         if num_tests_found:
             _print_tests("Highly relevant", new_rankings.highly_relevant)
             _print_tests("Probably relevant", new_rankings.probably_relevant)
+            _print_tests("Unranked relevance", new_rankings.unranked_relevance)
 
     num_tests_analyzed = (
         len(rankings.highly_relevant)
@@ -44,7 +45,7 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         + len(rankings.unranked_relevance)
     )
     assert num_tests_analyzed == len(tests), (
-        f"Was given {len(tests)} tests to prioritize, but only analyzed {num_tests_analyzed} tests. "
+        f"Was given {len(tests)} tests to prioritize, but analysis returned {num_tests_analyzed} tests. "
         + "Breakdown:\n"
         + f"Highly relevant: {len(rankings.highly_relevant)}\n"
         + f"Probably relevant: {len(rankings.probably_relevant)}\n"
