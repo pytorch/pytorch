@@ -18,6 +18,11 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
@@ -54,7 +59,6 @@ from .utils import (
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
-    np,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -219,6 +223,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO: something here
         self.tensor_check_names: List[str] = []
         self.tensor_check_examples: List[torch.Tensor] = []
+        self.tensor_check_guards: List[Guard] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -314,19 +319,22 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        np_types = (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-            np.float16,
-            np.float32,
-            np.float64,
-        )
+        if np:
+            np_types = (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
+            )
+        else:
+            np_types = ()  # type: ignore[assignment]
         ok_types = (
             int,
             float,
@@ -655,6 +663,7 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
+                self.tensor_check_guards.append(guard)
 
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
@@ -941,7 +950,7 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid"]
         base = os.path.dirname(__file__)
 
-        def add_code_part(code, guard):
+        def add_code_part(code, guard, log_only=False):
             if guards_log.isEnabledFor(logging.DEBUG):
                 extra = ""
                 if guard is not None:
@@ -973,7 +982,8 @@ class CheckFunctionManager:
                     maybe_user_stack,
                 )
 
-            code_parts.append(code)
+            if not log_only:
+                code_parts.append(code)
 
         # TODO: Maybe better not to repeatedly spam the same guard information
         # for each individual piece?  Not sure.
@@ -1039,8 +1049,31 @@ class CheckFunctionManager:
             tensor_check_args = ", ".join(
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
-            # TODO: we can give stack reporting here
-            add_code_part(f"___check_tensors({tensor_check_args})", None)
+            # Do this manually, to un-stagger the guards in log message
+            code_parts.append(f"___check_tensors({tensor_check_args})")
+            tensor_check_guards = (
+                local_builder.tensor_check_guards + global_builder.tensor_check_guards
+            )
+            for i, name in enumerate(tensor_check_names):
+                # This is a copy of what guards.cpp checks against
+                # Keep this in sync with TensorCheck constructor
+                t = tensor_check_examples[i]
+                pytype = type(t)
+                dispatch_key = (
+                    torch._C._dispatch_keys(t)
+                    | torch._C._dispatch_tls_local_include_set()
+                ) - torch._C._dispatch_tls_local_exclude_set()
+                dtype = t.dtype
+                device_index = t.device.index
+                requires_grad = t.requires_grad
+                sizes = dynamic_dims_sizes[i]
+                strides = dynamic_dims_strides[i]
+                add_code_part(
+                    f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+                    f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
+                    tensor_check_guards[i],
+                    log_only=True,
+                )
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -1055,6 +1088,8 @@ class CheckFunctionManager:
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
+        # TODO: the "guard" here is actually just the top level SHAPE_ENV
+        # which is useless.  Get ShapeEnv to pass in more provenance.
         for gcl in local_builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)

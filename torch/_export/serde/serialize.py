@@ -655,9 +655,9 @@ class GraphModuleSerializer:
             return []
         if _is_single_tensor_return(node.target):
             return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(returns[0].real_type, torch.SymIntType):  # type: ignore[attr-defined]
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymInt):
             return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(node.meta["val"], torch.SymBool):
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymBool):
             return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
 
         # There are a two possibilities at this point:
