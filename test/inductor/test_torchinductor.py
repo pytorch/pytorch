@@ -4320,7 +4320,6 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
 
     def test_input_mutation5(self):
-
         def fn(x):
             tmp = x.ceil()
             x.add_(10)
