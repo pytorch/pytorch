@@ -41,7 +41,7 @@ try:
     # using tools/ to optimize test run.
     sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
-    from tools.stats.upload_stats_lib import emit_metric
+    from tools.stats.upload_metrics import emit_metric
     from tools.testing.test_selections import (
         calculate_shards,
         get_reordered_tests,
