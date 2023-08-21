@@ -162,6 +162,7 @@ OP_DICT = {
     "bitwise_or": 53,
     "pow": 54,
     "isnan": 55,
+    "store_reduction": 56,
 }
 
 
@@ -717,8 +718,6 @@ class AutotunerModel:
         op_counts = node_read_writes.op_counts
         op_bag = dict()
         for op in sorted(op_counts.keys()):
-            if op not in OP_DICT:
-                continue
             assert op in OP_DICT, "Unknown op: " + op
             op_bag[OP_DICT[op]] = op_counts[op]
         kernel_feature.op_vec = [op_bag.get(i, 0) for i in range(len(OP_DICT))]
