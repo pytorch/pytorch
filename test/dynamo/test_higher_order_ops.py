@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import re
 import unittest
 
 import functorch.experimental.control_flow as control_flow
@@ -84,6 +85,33 @@ def disable_functorch_capture():
         torch._dynamo.config.capture_func_transforms = org_val
 
 
+# Checks that a dict matches a dict with "regex keys". That is,
+# the keys are regex expressions.
+def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
+    regex_keys = dct_with_regex_keys.keys()
+    regex_key_to_actual_key = {}
+    for regex_key in regex_keys:
+        for key in dct:
+            if re.match(regex_key, key):
+                if regex_key in regex_key_to_actual_key:
+                    raise AssertionError(
+                        f"Single key regex mapped to multiple keys. Please improve your "
+                        f"regex. Got: regex='{regex_key}' "
+                        f"keys='{regex_key_to_actual_key[regex_key]}',"
+                        f"'{key}'"
+                    )
+                regex_key_to_actual_key[regex_key] = key
+    new_dct = {}
+    for regex_key in regex_keys:
+        if regex_key not in regex_key_to_actual_key:
+            raise AssertionError(
+                f"Got regex '{regex_key}' but could not match any key in dict with "
+                f"keys {dct.keys()}"
+            )
+        new_dct[regex_key_to_actual_key[regex_key]] = dct_with_regex_keys[regex_key]
+    self.assertEqual(dct, new_dct)
+
+
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -123,6 +151,24 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
+
+    def test_error_message_sane(self):
+        foo = []
+
+        def inner(x):
+            foo.append(x)
+            return x.clone()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return wrap(inner, x)
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "while introspecting wrap, we were unable to trace function `inner`",
+        ):
+            f(x)
 
     def test_no_freevars(self):
         def f(x):
@@ -921,6 +967,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             name_set.add(name)
         self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
 
+    def test_map_multi_return(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return control_flow.map(lambda x: (x.sin(), x.sin()), x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, (x.sin(), x.sin()))
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1248,10 +1306,11 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         f(x)
         self.assertEqual(y, x)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
             {
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)": 1
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
             },
         )
 
@@ -1350,9 +1409,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
         self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_fallback_on_nested_tuple_output(self):
@@ -1391,9 +1451,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         result = f(x)
         self.assertEqual(result, [{"a": -x}])
         self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_access_module_attr(self):
@@ -2000,10 +2061,11 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
             {
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -2025,9 +2087,10 @@ class GraphModule(torch.nn.Module):
             (x1, x2)
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -2540,9 +2603,10 @@ class GraphModule(torch.nn.Module):
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -2563,10 +2627,11 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
             {
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -2609,9 +2674,10 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"Illegal getattr invocation stride in strict mode": 2},
+            {".*Illegal getattr invocation stride in strict mode": 2},
         )
         self.assertEqual(actual, expected)
 
