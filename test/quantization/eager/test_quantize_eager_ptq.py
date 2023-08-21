@@ -1485,41 +1485,44 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             def forward(self, indices, offsets, linear_in):
                 return self.emb(indices, offsets), self.fc(linear_in)
+
         model = EmbeddingBagWithLinear().eval()
 
         qconfig_dict = {
-            torch.nn.EmbeddingBag : float_qparams_weight_only_qconfig,
-            torch.nn.Linear: default_dynamic_qconfig
+            torch.nn.EmbeddingBag: float_qparams_weight_only_qconfig,
+            torch.nn.Linear: default_dynamic_qconfig,
         }
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
         q_model = quantize_dynamic(model, qconfig_dict)
 
         q_model(indices, offsets, torch.randn(5, 5))
-        self.assertTrue('QuantizedEmbeddingBag' in str(q_model.emb))
-        self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
+        self.assertTrue("QuantizedEmbeddingBag" in str(q_model.emb))
+        self.assertTrue("DynamicQuantizedLinear" in str(q_model.fc))
 
     @skipIfNoFBGEMM
     def test_embedding_op_dynamic(self):
         class EmbeddingWithLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12,
-                                                scale_grad_by_freq=False)
+                self.emb = torch.nn.Embedding(
+                    num_embeddings=10, embedding_dim=12, scale_grad_by_freq=False
+                )
                 self.fc = torch.nn.Linear(5, 5)
-            def forward(self, indices,linear_in):
+
+            def forward(self, indices, linear_in):
                 return self.emb(indices), self.fc(linear_in)
+
         model = EmbeddingWithLinear().eval()
         qconfig_dict = {
-            torch.nn.Embedding : float_qparams_weight_only_qconfig,
-            torch.nn.Linear: default_dynamic_qconfig
+            torch.nn.Embedding: float_qparams_weight_only_qconfig,
+            torch.nn.Linear: default_dynamic_qconfig,
         }
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         q_model = quantize_dynamic(model, qconfig_dict)
-        self.assertTrue('QuantizedEmbedding' in str(q_model.emb))
-        self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
+        self.assertTrue("QuantizedEmbedding" in str(q_model.emb))
+        self.assertTrue("DynamicQuantizedLinear" in str(q_model.fc))
         q_model(indices, torch.randn(5, 5))
-
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
