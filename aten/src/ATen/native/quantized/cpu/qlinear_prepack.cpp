@@ -290,8 +290,10 @@ inline at::Tensor pack_weight_to_onednn_tensor(
   ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
   ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
+  ideep::attr_t op_attr;
+  op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   auto w_desc = ideep::matmul_forward::expected_weights_desc(
-      wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8);
+      wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
   auto packed_weight = at::native::new_with_itensor_mkldnn(

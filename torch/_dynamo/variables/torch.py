@@ -19,7 +19,6 @@ from ..source import GeneratorStateSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
-    HAS_NUMPY,
     istype,
     np,
     product,
@@ -353,11 +352,6 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif self.value is torch.from_numpy:
-            if not config.numpy_ndarray_as_tensor:
-                unimplemented(
-                    "torch.from_numpy(). Turn on config.numpy_ndarray_as_tensor to support "
-                    "torch.from_numpy()."
-                )
             assert len(args) == 1, f"Got arguments {args}"
             assert not kwargs
             t = args[0]
@@ -653,6 +647,8 @@ class TorchVariable(VariableTracker):
                     return v
 
             return torch.utils._pytree.tree_map(map_fn, tree)
+        elif isinstance(self.value, types.ModuleType):
+            unimplemented("TypeError(\"'module' object is not callable\")")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -676,8 +672,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
-                HAS_NUMPY
-                and self.value in tensortype_to_dtype
+                self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and args[0].is_python_constant()
