@@ -1355,8 +1355,13 @@ def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
-def skipCUDAIfRocm(fn):
-    return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipCUDAIfRocm: {msg}"
+        return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
