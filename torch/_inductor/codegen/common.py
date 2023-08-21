@@ -412,8 +412,13 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
+        # V.kernel may be null since this method may be called for the
+        # wrapper codegen where there is no specific kernel.
         if (
-            self.name not in (V.graph.removed_buffers | V.kernel.removed_buffers)
+            self.name
+            not in (
+                V.graph.removed_buffers | getattr(V.kernel, "removed_buffers", set())
+            )
             and self.name not in V.graph.inplaced_to_remove
         ):
             return self.line
