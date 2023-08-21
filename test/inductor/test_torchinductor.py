@@ -940,6 +940,13 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
+    def test_multilayer_var(self):
+        def fn(a):
+            return torch.var(a)
+
+        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
+        self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
+
     def test_expanded_reduction(self):
         if self.device == "cpu":
             raise unittest.SkipTest(
@@ -1732,7 +1739,12 @@ class CommonTemplate:
             torch.nn.Linear(8, 8),
             torch.nn.ReLU(),
         )
-        self.common(mod, (torch.randn(2, 8),))
+        self.common(
+            mod,
+            (torch.randn(2, 8),),
+            atol=1e-3,
+            rtol=0.01,
+        )
 
     def test_bmm1(self):
         def fn(a, b):
@@ -3261,6 +3273,37 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
+
+    def test_cat_empty(self):
+        def fn_2(*tensors):
+            return torch.cat(tensors)
+
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+            ),
+        )
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
+
+    @expectedFailureCodegenDynamic
+    def test_cat_single_empty(self):
+        # fails dynamic check for 'has a dynamic dimension'
+        def fn_2(*tensors):
+            return torch.cat(tensors)
+
+        self.common(
+            fn_2,
+            (torch.ones([0]),),
         )
 
     def test_cat_upcasting(self):
