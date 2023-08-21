@@ -3,7 +3,7 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.quantization.quantizer import (
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
 from torch.ao.quantization.quantize_pt2e import (
@@ -20,7 +20,6 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle
 
 
 class Conv2DType(Enum):
@@ -261,7 +260,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    @skip_but_pass_in_sandcastle("times out in sandcastle, maybe related to torchdynamo export, but need to follow up and debug")
     def test_conv2d_binary_with_quantizer_api(self):
         """
         Test pattern of conv2d with binary post ops (such as add) with X86InductorQuantizer.
@@ -314,7 +312,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    @skip_but_pass_in_sandcastle("times out in sandcastle, maybe related to torchdynamo export, but need to follow up and debug")
     def test_conv2d_binary_unary_with_quantizer_api(self):
         """
         Test pattern of conv2d with binary + unary post ops (such as add + relu) with X86InductorQuantizer.

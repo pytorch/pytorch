@@ -159,13 +159,14 @@ def generate_rst():
     tag_to_modules = {}
     support_level_to_modules = {}
     for example_case in example_cases.values():
-
         doc_contents = generate_example_rst(example_case)
 
         for tag in example_case.tags:
             tag_to_modules.setdefault(tag, []).append(doc_contents)
 
-        support_level_to_modules.setdefault(example_case.support_level, []).append(doc_contents)
+        support_level_to_modules.setdefault(example_case.support_level, []).append(
+            doc_contents
+        )
 
     generate_tag_rst(tag_to_modules)
     generate_index_rst(example_cases, tag_to_modules, support_level_to_modules)

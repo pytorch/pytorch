@@ -95,8 +95,6 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda()
     def test_fn(self):
-        import os
-
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         input = torch.ones([10, 10], device="cuda:0")
@@ -105,7 +103,6 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         )
         model(input).sum().backward()
 
-        os.environ["TORCHDYNAMO_REPORT_GUARD_FAILURES"] = "1"
         opt_compiled = optim_cls(model.parameters(), **kwargs)
         compiled_step = compile_opt(opt_compiled)
 
@@ -113,7 +110,6 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         with torch.set_grad_enabled(False):
             compiled_step()
 
-            torch._logging.set_logs(recompiles=True)
             compiled_step()
 
             # perturb state to force recompile
@@ -165,9 +161,9 @@ class CompiledOptimizerTests(TestCase):
     # Need to an impl which does not use python scalars
     # test_adamax = make_test(Adamax, lr=0.01)
     # test_nadam = make_test(NAdam, lr=0.01)
-    test_rprop = make_test(Rprop, kernel_count=6, lr=0.01)
+    test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta = make_test(Adadelta, kernel_count=5, lr=0.01)
+    test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
     # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
@@ -176,9 +172,9 @@ class CompiledOptimizerTests(TestCase):
     # Need an impl which does not use python scalars
     # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     # test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(Rprop, kernel_count=6, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=5, lr=0.01)
+    test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
