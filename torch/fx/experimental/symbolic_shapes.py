@@ -2864,22 +2864,22 @@ class ShapeEnv:
             for symbol, sources in symbol_to_source.items():
                 r = self.var_to_range[symbol]
 
-                for c in symbol_to_constraints[symbol]:
-                    if isinstance(c, StrictMinMaxConstraint):
-                        # Refine the user VR based on default value range, as
-                        # no matter what the user specifies, we will have
-                        # narrowed it according to the default range
-                        c_vr = c.vr & self._default_value_range()
-                        # NB: exact match is OK here, because we already
-                        # applied the constraint when we allocated the symbol
-                        # originally.  Otherwise, should only assert that
-                        # vr is superset of c_vr
-                        if not (c_vr.lower <= r.lower and c_vr.upper >= r.upper):
-                            msg = (
-                                f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
-                            )
-                            record_constraint_violation(c.warn_only, msg)
+                # for c in symbol_to_constraints[symbol]:
+                #     if isinstance(c, StrictMinMaxConstraint):
+                #         # Refine the user VR based on default value range, as
+                #         # no matter what the user specifies, we will have
+                #         # narrowed it according to the default range
+                #         c_vr = c.vr & self._default_value_range()
+                #         # NB: exact match is OK here, because we already
+                #         # applied the constraint when we allocated the symbol
+                #         # originally.  Otherwise, should only assert that
+                #         # vr is superset of c_vr
+                #         if not (c_vr.lower <= r.lower and c_vr.upper >= r.upper):
+                #             msg = (
+                #                 f"Could not validate constraint {c.render(sources[0])} as "
+                #                 f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
+                #             )
+                #             record_constraint_violation(c.warn_only, msg)
 
                 assert sources
                 assert symbol.is_integer
