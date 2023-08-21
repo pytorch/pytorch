@@ -29,7 +29,12 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
-from .quantizer import QuantizationAnnotation, QuantizationSpec, Quantizer, SharedQuantizationSpec
+from .quantizer import (
+    QuantizationAnnotation,
+    QuantizationSpec,
+    Quantizer,
+    SharedQuantizationSpec,
+)
 
 __all__ = [
     "X86InductorQuantizer",
