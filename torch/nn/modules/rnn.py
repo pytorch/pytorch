@@ -283,7 +283,14 @@ class RNNBase(Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
+    def _update_flat_weights(self):
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
     def __getstate__(self):
+        # If weights have been changed, update the _flat_weights in __getstate__ here.
+        self._update_flat_weights()
         # Don't serialize the weight references.
         state = self.__dict__.copy()
         del state['_flat_weight_refs']
@@ -469,9 +476,7 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
@@ -590,7 +595,7 @@ class LSTM(RNNBase):
     :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     In a multilayer LSTM, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
-    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    (:math:`l \ge 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
     dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
     variable which is :math:`0` with probability :attr:`dropout`.
 
@@ -710,6 +715,9 @@ class LSTM(RNNBase):
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
 
+    .. note::
+        ``proj_size`` should be smaller than ``hidden_size``.
+
     .. include:: ../cudnn_rnn_determinism.rst
 
     .. include:: ../cudnn_persistent_rnn.rst
@@ -773,9 +781,7 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -874,7 +880,7 @@ class GRU(RNNBase):
     :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
 
     In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
-    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    (:math:`l \ge 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
     dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
     variable which is :math:`0` with probability :attr:`dropout`.
 
@@ -998,9 +1004,7 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -1177,6 +1181,8 @@ class RNNCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"RNNCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1277,6 +1283,10 @@ class LSTMCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if input.dim() not in (1, 2):
             raise ValueError(f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None:
+            for idx, value in enumerate(hx):
+                if value.dim() not in (1, 2):
+                    raise ValueError(f"LSTMCell: Expected hx[{idx}] to be 1D or 2D, got {value.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1368,6 +1378,8 @@ class GRUCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"GRUCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)

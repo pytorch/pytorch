@@ -898,7 +898,7 @@ except RuntimeError as e:
             self.assertEqual(torch.cuda.current_stream(), bwd_ambient_stream)
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
+    @skipIfRocm(msg="flakey on ROCm https://github.com/pytorch/pytorch/issues/53190")
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 
@@ -3046,9 +3046,14 @@ exit(2)
                 self.assertEqual(p_control, p_graphed)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    def test_graph_adam_adamw(self):
+    def test_graph_optims(self):
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
+            (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach,
+                              "decoupled_weight_decay": decoupled_weight_decay})
+            for optimizer_ctor, foreach, decoupled_weight_decay in product(
+                (torch.optim.NAdam,), (False, True), (False, True),)
+        ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
                 (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
@@ -3062,10 +3067,11 @@ exit(2)
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    def test_graph_adam_adamw_with_explicitly_capturable_param_groups(self):
+    def test_graph_optims_with_explicitly_capturable_param_groups(self):
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
-        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW), (True, False)):
+        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
+                                                                 torch.optim.NAdam), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -3300,12 +3306,11 @@ class TestCudaMallocAsync(TestCase):
             ss = torch.cuda.memory._snapshot()
             found_it = False
             for seg in ss['segments']:
+                self.assertTrue('frames' in seg)
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue('test_cuda' in h['frames'][0]['filename'])
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue('test_cuda' in b['frames'][0]['filename'])
+                        found_it = True
             self.assertTrue(found_it)
 
             if not IS_WINDOWS:
@@ -3343,11 +3348,9 @@ class TestCudaMallocAsync(TestCase):
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue('::rand' in str(h['frames']))
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue('::rand' in str(b['frames']))
+                        found_it = True
             self.assertTrue(found_it)
 
         finally:
@@ -3435,6 +3438,32 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    def test_memory_plots_free_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(context=context)
+                x = None
+
+                def thealloc():
+                    nonlocal x
+                    x = torch.rand(3, 4, device='cuda')
+
+                def thefree():
+                    nonlocal x
+                    del x
+
+                thealloc()
+                thefree()
+                ss = json.dumps(torch.cuda.memory._snapshot())
+                self.assertTrue(('thefree' in ss) == (context == 'all'))
+                self.assertTrue(('thealloc' in ss) == (context != 'state'))
+            finally:
+                torch.cuda.memory._record_memory_history(None)
+
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3450,11 +3479,9 @@ class TestCudaMallocAsync(TestCase):
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue(h['frames'][0]['name'] == 'foo')
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue(b['frames'][0]['name'] == 'foo')
+                        found_it = True
             self.assertTrue(found_it)
 
         finally:
@@ -3578,11 +3605,10 @@ class TestCudaMallocAsync(TestCase):
                 found = False
                 for s in mem['segments']:
                     for b in s['blocks']:
-                        if b['state'] == 'active_allocated' and 'history' in b:
-                            history = b['history']
-                            if history and history[0]['real_size'] == 311 * 411 * 4:
+                        if b['state'] == 'active_allocated':
+                            if b['requested_size'] == 311 * 411 * 4:
                                 if ctx:
-                                    frame_text = str(history[0]['frames'])
+                                    frame_text = str(b['frames'])
                                     # C++ frame
                                     self.assertTrue('::rand' in frame_text)
                                     # script frame

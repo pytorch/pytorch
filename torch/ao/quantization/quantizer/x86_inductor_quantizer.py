@@ -13,26 +13,22 @@ from torch.ao.quantization.observer import (
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-from torch.ao.quantization.quantizer.utils import (
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _is_annotated,
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
 )
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
-from .quantizer import (
-    OperatorConfig,
-    OperatorPatternType,
-    QuantizationAnnotation,
-    QuantizationConfig,
-    QuantizationSpec,
-    Quantizer,
-)
-from .xnnpack_quantizer import _is_annotated
+from .quantizer import QuantizationAnnotation, QuantizationSpec, Quantizer
 
 __all__ = [
     "X86InductorQuantizer",

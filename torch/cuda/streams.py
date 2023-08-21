@@ -1,13 +1,15 @@
 import ctypes
+
 import torch
 
 from ._utils import _dummy_type
 
 
-if not hasattr(torch._C, '_CudaStreamBase'):
+if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
-    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
-    torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
+    torch._C.__dict__["_CudaStreamBase"] = _dummy_type("_CudaStreamBase")
+    torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
+
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -108,7 +110,7 @@ class Stream(torch._C._CudaStreamBase):
         return hash((self.cuda_stream, self.device))
 
     def __repr__(self):
-        return (f'<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>')
+        return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
 
 
 class ExternalStream(Stream):
@@ -160,7 +162,10 @@ class Event(torch._C._CudaEventBase):
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
         return super().__new__(
             cls,
-            enable_timing=enable_timing, blocking=blocking, interprocess=interprocess)
+            enable_timing=enable_timing,
+            blocking=blocking,
+            interprocess=interprocess,
+        )
 
     @classmethod
     def from_ipc_handle(cls, device, handle):
@@ -217,7 +222,7 @@ class Event(torch._C._CudaEventBase):
 
     def ipc_handle(self):
         r"""Returns an IPC handle of this event. If not recorded yet, the event
-        will use the current device. """
+        will use the current device."""
         return super().ipc_handle()
 
     @property
@@ -226,6 +231,6 @@ class Event(torch._C._CudaEventBase):
 
     def __repr__(self):
         if self.cuda_event:
-            return f'<torch.cuda.Event {self._as_parameter_.value:#x}>'
+            return f"<torch.cuda.Event {self._as_parameter_.value:#x}>"
         else:
-            return '<torch.cuda.Event uninitialized>'
+            return "<torch.cuda.Event uninitialized>"

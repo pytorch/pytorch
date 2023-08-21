@@ -43,31 +43,6 @@ Features described in this documentation are classified by release status:
    notes/*
 
 .. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: torch.compile
-
-   compile/index
-   compile/get-started
-   compile/troubleshooting
-   compile/faq
-   compile/technical-overview
-   compile/guards-overview
-   compile/custom-backends
-   compile/fine_grained_apis
-   compile/profiling_torch_compile
-   compile/inductor_profiling
-   compile/deep-dive
-   compile/cudagraph_trees
-   compile/performance-dashboard
-   compile/torchfunc-and-torchcompile
-   ir
-   compile/dynamic-shapes
-   compile/fake-tensor
-   logging
-   compile/transformations
-
-.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
@@ -93,7 +68,7 @@ Features described in this documentation are classified by release status:
    cuda
    mps
    torch.backends <backends>
-   export
+   torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
@@ -102,7 +77,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
-   torch.compiler <compiler>
+   torch.compiler <torch.compiler>
    torch.fft <fft>
    torch.func <func>
    futures
