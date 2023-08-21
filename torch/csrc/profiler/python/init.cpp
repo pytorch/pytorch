@@ -563,6 +563,5 @@ void initPythonBindings(PyObject* module) {
     throw python_error();
   }
 }
-
 } // namespace profiler
 } // namespace torch
