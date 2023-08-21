@@ -916,8 +916,7 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-            return cls.cache[key]
-        return None
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
