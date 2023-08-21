@@ -7193,6 +7193,63 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertTrue(max_live_tensors == 2)
 
+        @skipIfRocm
+        def test_neg_index(self):
+            def test(fn, inps, has_assert: bool, has_wrapping=True):
+                for dynamic in (True, False):
+                    fn_opt = torch.compile(dynamic=dynamic)(fn)
+                    code = run_and_get_triton_code(fn_opt, *inps)
+                    self.assertTrue(("tl.where" in code) is has_wrapping)
+                    self.assertTrue(("device_assert" in code) is has_assert)
+                    self.assertEqual(fn(*inps), fn_opt(*inps))
+
+            def indirect(a, b):
+                return a[b - 1]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.zeros(4, dtype=torch.long, device="cuda")
+            test(indirect, (a, b), has_assert=True)
+
+            def direct(x):
+                return x[:, -1]
+
+            a = torch.rand(1, 64, 32, device="cuda")
+            test(direct, (a,), has_assert=False, has_wrapping=False)
+
+            def flip(a, b):
+                return a[b]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+            test(flip, (a, b), has_assert=True)
+
+            # Constant propagate a constant that's negative
+            def flip_with_index_constant(a):
+                b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # Wrapping is constant-folded
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+            # Operation where we can't prove that the index is always positive or negative
+            def pos_and_neg(a):
+                b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # It has wrapping but no assert
+            test(pos_and_neg, (a,), has_assert=False, has_wrapping=True)
+
+            # We currently don't do constant propagation with float constants
+            def flip_with_index(a):
+                b = 1.0 * torch.arange(
+                    start=-1, end=-a.numel() - 1, step=-1, device="cuda"
+                )
+                b = b.int()
+                return a[b]
+
+            # Constant is propagated as we can prove that the result is always negative.
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
