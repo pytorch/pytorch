@@ -7,7 +7,7 @@ try:
     from caffe2.proto import caffe2_pb2
 except ImportError:
     warnings.warn('Caffe2 support is not enabled in this PyTorch build. '
-                  'Please enable Caffe2 by building PyTorch from source with `BUILD_CAFFE2=1` flag.', stacklevel=2)
+                  'Please enable Caffe2 by building PyTorch from source with `BUILD_CAFFE2=1` flag.', stacklevel=1)
     raise
 
 # TODO: refactor & remove the following alias

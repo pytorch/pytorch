@@ -498,7 +498,7 @@ def gh_get_team_members(org: str, name: str) -> List[str]:
         )
         team = query["data"]["organization"]["team"]
         if team is None:
-            warn(f"Requested non-existing team {org}/{name}", stacklevel=2)
+            warn(f"Requested non-existing team {org}/{name}", stacklevel=1)
             return []
         team_members = team["members"]
         rc += [member["login"] for member in team_members["nodes"]]
@@ -557,7 +557,7 @@ def add_workflow_conclusions(
                     if not isinstance(checkrun_node, dict):
                         warn(
                             f"Expected dictionary, but got {type(checkrun_node)}",
-                            stacklevel=2,
+                            stacklevel=1,
                         )
                         continue
                     checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
@@ -1884,7 +1884,7 @@ def categorize_checks(
                 and len(ok_failed_checks) > ok_failed_checks_threshold
                 else ""
             ),
-            stacklevel=2,
+            stacklevel=1,
         )
 
     if (

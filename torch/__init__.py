@@ -1762,7 +1762,7 @@ from torch.func import vmap
 def _sparse_coo_tensor_unsafe(*args, **kwargs):
     import warnings
     warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
-                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.', stacklevel=2)
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.', stacklevel=TO_BE_DETERMINED)
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 

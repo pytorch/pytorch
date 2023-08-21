@@ -1033,7 +1033,7 @@ def embedding(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "
             "ONNX does not support not updating the embedding vector at padding_idx during training.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
     return g.op("Gather", weight, indices)
@@ -1277,7 +1277,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
                 + "Passing an tensor of different rank in execution will be incorrect.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             squeeze_dim += rank
         else:
@@ -1297,7 +1297,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on "
             + "non-singleton dimensions, it is recommended to export this model using opset "
             + "version 11 or higher.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
@@ -1311,7 +1311,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
             + "input shapes, please use opset version 11 to "
             + "export the model.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         return self
 
@@ -1320,7 +1320,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
         + str(squeeze_dim)
         + ". If the model is "
         + "intended to be used with dynamic input shapes, please use opset version 11 to export the model.",
-        stacklevel=2,
+        stacklevel=TO_BE_DETERMINED,
     )
     return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
@@ -4251,7 +4251,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
                 + "Passing an tensor of different rank in execution will be incorrect.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             dim = dim + rank + 1
         else:
@@ -4672,7 +4672,7 @@ def _generic_rnn(
         + "when running the ONNX model with a different batch size. "
         + "Make sure to save the model with a batch size of 1, "
         + "or define the initial states (h0/c0) as inputs of the model. ",
-        stacklevel=2,
+        stacklevel=TO_BE_DETERMINED,
     )
 
     onnxActivations = [
@@ -5810,7 +5810,7 @@ def index(g: jit_utils.GraphContext, self, index):
                 "Exporting aten::index operator with indices of type Byte. "
                 "Only 1-D indices are supported. In any other case, "
                 "this will produce an incorrect ONNX graph.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             index = symbolic_helper._squeeze_helper(g, nonzero(g, index), [1])
         return index
@@ -5867,7 +5867,7 @@ def index(g: jit_utils.GraphContext, self, index):
                 " is achieved by combination of multiple ONNX operators, "
                 "including Reshape, Transpose, Concat, and Gather. "
                 "If indices include negative values, the exported graph will produce incorrect results.",
-                stacklevel=2,
+                stacklevel=TO_BE_DETERMINED,
             )
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
@@ -6626,7 +6626,7 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     warnings.warn(
         "Warning: ONNX export does not support duplicated values in 'index' field, "
         + "this will cause the ONNX model to be incorrect.",
-        stacklevel=2,
+        stacklevel=TO_BE_DETERMINED,
     )
 
     # ONNX does not support "alpha" argument, unlike aten index_add

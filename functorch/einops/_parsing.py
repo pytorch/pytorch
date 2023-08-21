@@ -181,13 +181,13 @@ class ParsedExpression:
                 warnings.warn(
                     f"It is discouraged to use axes names that are keywords: {name}",
                     RuntimeWarning,
-                    stacklevel=2,
+                    stacklevel=1,
                 )
             if name in ["axis"]:
                 warnings.warn(
                     "It is discouraged to use 'axis' as an axis name and will raise an error in future",
                     FutureWarning,
-                    stacklevel=2,
+                    stacklevel=1,
                 )
             return True, ""
 

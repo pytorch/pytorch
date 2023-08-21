@@ -220,7 +220,7 @@ def backward(
 
     if grad_variables is not None:
         warnings.warn(
-            "'grad_variables' is deprecated. Use 'grad_tensors' instead.", stacklevel=2
+            "'grad_variables' is deprecated. Use 'grad_tensors' instead.", stacklevel=TO_BE_DETERMINED
         )
         if grad_tensors is None:
             grad_tensors = grad_variables
@@ -363,7 +363,7 @@ def grad(
             "only_inputs argument is deprecated and is ignored now "
             "(defaults to True). To accumulate gradient for other "
             "parts of the graph, please use torch.autograd.backward.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
 
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))

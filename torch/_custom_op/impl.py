@@ -333,7 +333,7 @@ class CustomOp:
 
         return inner
 
-    def impl_abstract(self, _stacklevel=2) -> typing.Callable:
+    def impl_abstract(self, _stacklevel=TO_BE_DETERMINED) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
 
         WARNING: please do not use this directly (and instead use the torch._custom_ops
@@ -550,7 +550,7 @@ class CustomOp:
             self._get_impl("backward").func)
         self._register_impl("autograd", kernel)
 
-    def impl_save_for_backward(self, _stacklevel=2):
+    def impl_save_for_backward(self, _stacklevel=TO_BE_DETERMINED):
         r"""Register a function that tells us what to save for backward.
 
         Please see impl_backward for more details.
@@ -565,7 +565,7 @@ class CustomOp:
                 self._register_autograd_kernel()
         return inner
 
-    def impl_backward(self, output_differentiability=None, _stacklevel=2):
+    def impl_backward(self, output_differentiability=None, _stacklevel=TO_BE_DETERMINED):
         r"""Registers a backward formula.
 
         WARNING: if you're a user, please do not use this directly

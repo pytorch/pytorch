@@ -363,7 +363,7 @@ class StackedLSTMWithDropout(jit.ScriptModule):
                 "dropout lstm adds dropout layers after all but last "
                 "recurrent layer, it expects num_layers greater than "
                 "1, but got num_layers = 1",
-                stacklevel=2,
+                stacklevel=1,
             )
 
         self.dropout_layer = nn.Dropout(0.4)

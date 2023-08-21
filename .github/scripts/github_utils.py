@@ -162,11 +162,11 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
         else:
             warnings.warn(
                 f"Failed to get merge base for {base}...{head}: Empty response",
-                stacklevel=2,
+                stacklevel=1,
             )
     except Exception as error:
         warnings.warn(
-            f"Failed to get merge base for {base}...{head}: {error}", stacklevel=2
+            f"Failed to get merge base for {base}...{head}: {error}", stacklevel=1
         )
 
     return merge_base

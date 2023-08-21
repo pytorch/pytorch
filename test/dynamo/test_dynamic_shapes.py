@@ -84,7 +84,7 @@ if __name__ == "__main__":
         warnings.warn(
             "translation validation is off. "
             "Testing with translation validation requires Z3.",
-            stacklevel=2,
+            stacklevel=1,
         )
 
     run_tests()

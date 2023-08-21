@@ -61,7 +61,7 @@ except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
                   "to install it with commands from pytorch.org, post-fixed with "
                   "`--no-deps` to avoid overwriting the pytorch installation",
-                  UserWarning, stacklevel=2)
+                  UserWarning, stacklevel=1)
 
 # TestCase for _slice_argnums, an important helper funciton
 

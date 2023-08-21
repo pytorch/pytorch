@@ -38,7 +38,7 @@ def lazy_deprecated_import(all: List[str], old_module: str, new_module: str) -> 
         if name in all:
             # We are using the "RuntimeWarning" to make sure it is not
             # ignored by default.
-            warnings.warn(warning_message, RuntimeWarning, stacklevel=2)
+            warnings.warn(warning_message, RuntimeWarning, stacklevel=TO_BE_DETERMINED)
             package = importlib.import_module(new_module)
             return getattr(package, name)
         raise AttributeError(f"Module {new_module!r} has no attribute {name!r}.")

@@ -281,7 +281,7 @@ class TransformerEncoder(Module):
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn("enable_nested_tensor is True, but self.use_nested_tensor is False "
                           f"because {why_not_sparsity_fast_path}",
-                          stacklevel=2)
+                          stacklevel=TO_BE_DETERMINED)
             self.use_nested_tensor = False
 
 

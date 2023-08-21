@@ -120,7 +120,7 @@ forward graph of the parent module,
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.", stacklevel=2)
+            "in a future version. Please pass in a PrepareCustomConfig instead.", stacklevel=TO_BE_DETERMINED)
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     # swap FloatFunctional with FXFloatFunctional
@@ -225,7 +225,7 @@ def fuse_fx(
     if isinstance(fuse_custom_config, Dict):
         warnings.warn(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
-            "in a future version. Please pass in a FuseCustomConfig instead.", stacklevel=2)
+            "in a future version. Please pass in a FuseCustomConfig instead.", stacklevel=TO_BE_DETERMINED)
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
@@ -514,7 +514,7 @@ def _convert_fx(
     if isinstance(convert_custom_config, Dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.", stacklevel=2)
+            "in a future version. Please pass in a ConvertCustomConfig instead.", stacklevel=TO_BE_DETERMINED)
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     _check_is_graph_module(graph_module)

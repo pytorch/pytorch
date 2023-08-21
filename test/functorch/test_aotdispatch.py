@@ -64,7 +64,7 @@ except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
                   "to install it with commands from pytorch.org, post-fixed with "
                   "`--no-deps` to avoid overwriting the pytorch installation",
-                  UserWarning, stacklevel=2)
+                  UserWarning, stacklevel=1)
 
 USE_NETWORKX = False
 try:
@@ -72,7 +72,7 @@ try:
     USE_NETWORKX = True
 except ImportError:
     warnings.warn("Some tests use networkx but it was not installed",
-                  UserWarning, stacklevel=2)
+                  UserWarning, stacklevel=1)
 
 # NB: numpy is a testing dependency!
 

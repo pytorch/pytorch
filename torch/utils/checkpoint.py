@@ -59,7 +59,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
-            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=2
+            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=TO_BE_DETERMINED
         )
 
 
@@ -113,7 +113,7 @@ def _infer_device_type(*args):
             "Device state will only be saved for devices of a single device type, and the remaining "
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
-            "detected, it will be prioritized; otherwise, the first device encountered will be selected.)", stacklevel=2
+            "detected, it will be prioritized; otherwise, the first device encountered will be selected.)", stacklevel=TO_BE_DETERMINED
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -432,7 +432,7 @@ def checkpoint(
             "will be updated to be False in the future. To maintain current "
             "behavior, pass use_reentrant=True. It is recommended that you use "
             "use_reentrant=False. Refer to docs for more details on the "
-            "differences between the two variants.", stacklevel=2
+            "differences between the two variants.", stacklevel=TO_BE_DETERMINED
         )
         use_reentrant = True
     # Hack to mix *args with **kwargs in a python 2.7-compliant way

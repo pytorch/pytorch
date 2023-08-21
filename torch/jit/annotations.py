@@ -387,7 +387,7 @@ def is_tensor(ann):
             "TorchScript will treat type annotations of Tensor "
             "dtype-specific subtypes as if they are normal Tensors. "
             "dtype constraints are not enforced in compilation either.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         return True
 

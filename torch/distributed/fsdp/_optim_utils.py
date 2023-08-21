@@ -483,7 +483,7 @@ def _flatten_optim_state_dict(
                     else:
                         warnings.warn(
                             f"optim_state[{key}] is not on rank{fsdp_state.rank}.",
-                            stacklevel=2,
+                            stacklevel=TO_BE_DETERMINED,
                         )
 
             else:
@@ -1441,7 +1441,7 @@ def _optim_state_dict(
             "associated with any particular parameter. Another possible "
             "case is this state is managed by TorchRec. Otherwise, there may "
             " be a mismatched assumption of optim_state_dict of this mode.",
-            stacklevel=2,
+            stacklevel=TO_BE_DETERMINED,
         )
         fsdp_osd_state[key] = value
 

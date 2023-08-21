@@ -409,7 +409,7 @@ def kaiming_uniform_(
             nonlinearity=nonlinearity)
 
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=TO_BE_DETERMINED)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -449,7 +449,7 @@ def kaiming_normal_(
         >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=TO_BE_DETERMINED)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
