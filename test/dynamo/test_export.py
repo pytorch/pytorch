@@ -2341,44 +2341,6 @@ def forward(self, x):
         buffer = io.BytesIO()
         torch.save(gm, buffer)
 
-    def test_export_with_inline_constraints(self):
-        def f(x):
-            a = x.item()
-            constrain_as_value(a, 4, 7)
-            return torch.empty((a, 4))
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"Invalid value range for 20 between \[4, 7\]."
-        ) as cm:
-            torch._export.export(f, (torch.tensor([20]),))
-
-        ep = torch._export.export(f, (torch.tensor([5]),))
-        self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
-
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
-        ) as cm:
-            ep(torch.tensor([30]))
-
-    def test_export_with_inline_constraints_complex(self):
-        def f(x):
-            a = x.item()
-            constrain_as_value(a, 4, 7)
-            empty = torch.empty((a, 4))
-
-            return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
-
-        ep = torch._export.export(f, (torch.tensor([6]),))
-        self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
 
@@ -3025,7 +2987,6 @@ def forward(self, x):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
             ),
         ):
             x = torch.randn(3)
@@ -3192,7 +3153,6 @@ G['macademia'], accessed at:
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
             ),
         )
         # Fakefy input+model before exporting it

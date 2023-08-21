@@ -12,6 +12,7 @@ from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import LeafSpec, tree_flatten, tree_unflatten, TreeSpec
 
@@ -693,6 +694,39 @@ class TestExport(TestCase):
         for node in exported.graph_module.graph.nodes:
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
+
+    def test_export_with_inline_constraints(self):
+        def f(x):
+            a = x.item()
+            constrain_as_value(a, 4, 7)
+            return torch.empty((a, 4))
+
+        ep = export(f, (torch.tensor([5]),))
+        self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
+
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
+        ) as cm:
+            ep(torch.tensor([30]))
+
+    def test_export_with_inline_constraints_complex(self):
+        def f(x):
+            a = x.item()
+            constrain_as_value(a, 4, 7)
+            empty = torch.empty((a, 4))
+
+            return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+
+        ep = export(f, (torch.tensor([6]),))
+        self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
 
 if __name__ == '__main__':

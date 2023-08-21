@@ -459,7 +459,7 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, frame_state):
+    def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
         if (
@@ -487,10 +487,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks, frame_state)
+                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
         with compile_lock, _disable_current_modes():
-            return callback(frame, cache_size, hooks, frame_state)
+            return callback(frame, cache_entry, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
