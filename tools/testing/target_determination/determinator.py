@@ -21,6 +21,7 @@ def _print_tests(label: str, tests: List[str]) -> None:
 def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
     rankings = TestPrioritizations()
     rankings.unranked_relevance = tests
+    print(f"Received {len(tests)} tests to prioritize")
 
     for heuristic in HEURISTICS:
         new_rankings = heuristic.get_test_priorities(tests)
@@ -30,8 +31,8 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
             new_rankings.probably_relevant
         )
         print(
-            f"Heuristic {heuristic} identified {num_tests_found} tests \
-              to prioritize ({(num_tests_found / len(tests)):.2%}%)"
+            f"Heuristic {heuristic} identified {num_tests_found} tests "
+            + f"to prioritize ({(num_tests_found / len(tests)):.2%}%)"
         )
 
         if num_tests_found:
