@@ -291,11 +291,13 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T>& x) {
 
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
-#if defined(__APPLE__) || defined(__MACOSX) || defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__APPLE__) || defined(__MACOSX) || defined(__CUDACC__) || \
+    defined(__HIPCC__)
   // For Mac, the new implementation yielded a high relative error. Falling back
   // to the old version for now.
   // See https://github.com/numpy/numpy/pull/22611#issuecomment-1667945354
-  // For CUDA we also use this one, as thrust::log(thrust::complex) takes *forever* to compile
+  // For CUDA we also use this one, as thrust::log(thrust::complex) takes
+  // *forever* to compile
 
   // log1p(z) = log(1 + z)
   // Let's define 1 + z = r * e ^ (i * a), then we have
