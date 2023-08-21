@@ -113,12 +113,12 @@ namespace torch {
 namespace profiler {
 
 /* [NOTE: RecordFunctionFast]
- * These are an alternate way to call record_function from python.
- * The typical context manager is slow (~14us on benchmarks in Aug 2023), which
- * is usually fine for module-level annotations in python, but slow for per-op
- * annotations. Part of the reason it is slow is because the calls go through
- * the dispatcher, in order to make the record_function calls work with
- * torchscript.
+ * This is an alternate way to call record_function from python.
+ * The torch.profiler.record_function context manager is slow (~14us on
+ * benchmarks in Aug 2023), which is usually fine for module-level annotations
+ * in python, but slow for per-op annotations. Part of the reason it is slow is
+ * because the calls go through the dispatcher, in order to make the
+ * record_function calls work with torchscript.
  *
  * This implementation doesn't go through the dispatcher and so it won't work
  * with any feature relying on the dispatcher (e.g. torchscript or
