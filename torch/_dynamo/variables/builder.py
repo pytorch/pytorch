@@ -1248,7 +1248,8 @@ def wrap_fx_proxy_cls(
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not (
-                isinstance(value, FakeTensor) or is_fakified_functional_tensor(value)
+                isinstance(value, FakeTensor)
+                or is_fakified_functional_tensor(value, tx.fake_mode)
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1260,10 +1261,7 @@ def wrap_fx_proxy_cls(
             example_value = get_fake_value(proxy.node, tx)
 
         # Handle recursive calls here
-        elif (
-            isinstance(example_value, FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
-        ):
+        elif is_fake(example_value, tx.fake_mode):
             pass
 
         elif isinstance(example_value, torch.Tensor):
