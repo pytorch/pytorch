@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -4027,6 +4028,21 @@ class CommonTemplate:
             atol=2e-5,
             rtol=1e-3,
         )
+
+    def test_float_index_expression(self):
+        # Test that index propagation doesn't generate bad index_expr calls like
+        # ops.index_expr(0.5*x, dtype) where the expression is not integral
+        def fn(x):
+            return aten.upsample_bicubic2d(x, (256, 256), False)
+
+        x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device=self.device)
+        _, source_codes = run_and_get_code(fn, x)
+
+        pattern = r"0\.50*\*[ix][\d]"
+        for code in source_codes:
+            self.assertIsNone(
+                re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
+            )
 
     def test_sort(self):
         def fn(a):
