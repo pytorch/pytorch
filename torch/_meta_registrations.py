@@ -69,26 +69,7 @@ def check_inplace_broadcast(self_shape, *args_shape):
     )
 
 
-@register_meta(
-    [
-        aten.linspace.default,
-        aten.linspace.Tensor_Tensor,
-        aten.linspace.Tensor_Scalar,
-        aten.linspace.Scalar_Tensor,
-        aten.linspace.out,
-        aten.linspace.Tensor_Tensor_out,
-        aten.linspace.Tensor_Scalar_out,
-        aten.linspace.Scalar_Tensor_out,
-        aten.logspace.default,
-        aten.logspace.Tensor_Tensor,
-        aten.logspace.Tensor_Scalar,
-        aten.logspace.Scalar_Tensor,
-        aten.logspace.Tensor_Tensor_out,
-        aten.logspace.Tensor_Scalar_out,
-        aten.logspace.Scalar_Tensor_out,
-        aten.logspace.out,
-    ]
-)
+@register_meta([aten.linspace, aten.logspace])
 @out_wrapper()
 def meta_linspace_logspace(
     start,

@@ -6068,23 +6068,24 @@ class TestTorch(TestCase):
         # since the output of factory functions should not be part of any computational graph.
         start = 0.0
         end = 3.0
-        step = 1
-        self.assertFalse(
-            torch.linspace(
-                torch.tensor(start, requires_grad=True),
-                torch.tensor(end, requires_grad=True), step
-            ).requires_grad
-        )
-        self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
-        self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
-        self.assertFalse(
-            torch.logspace(
-                torch.tensor(start, requires_grad=True),
-                torch.tensor(end, requires_grad=True), step
-            ).requires_grad
-        )
-        self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
-        self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+
+        for step in [0, 1, 2]:
+            self.assertFalse(
+                torch.linspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+            self.assertFalse(
+                torch.logspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
 
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
