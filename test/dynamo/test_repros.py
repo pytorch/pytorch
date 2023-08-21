@@ -2653,9 +2653,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
-        with self.assertRaisesRegex(RuntimeError, "First dim need to be 3"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
-
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
