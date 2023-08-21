@@ -560,7 +560,10 @@ class Tensor(torch._C._TensorBase):
 
         .. note::
             See :ref:`backward-hooks-execution` for more information on how when this hook
-            is executed, and how its execution is ordered relative to other hooks.
+            is executed, and how its execution is ordered relative to other hooks. Since
+            this hook runs during the backward pass, it will run in no_grad mode (unless
+            create_graph is True). You can use torch.enable_grad() to re-enable autograd
+            within the hook if you need it.
 
         Example::
 
