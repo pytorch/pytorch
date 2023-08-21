@@ -37,6 +37,9 @@ struct TCPStoreOptions {
   // over the bound socket associated to this fd. This option is useful to avoid
   // port assignment races in certain scenarios.
   c10::optional<int> masterListenFd = c10::nullopt;
+
+  // A boolean value indicating whether to use the experimental libUV backend.
+  bool useLibUV = false;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -76,15 +79,15 @@ class TORCH_API TCPStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
-  void append(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
 
-  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
 
   void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values) override;
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
 

@@ -140,19 +140,33 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 # `torch.ao.quantization._pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/pt2e/quantizer/xnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_export/constraints.py",
 }
 
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
-)
+) | {
+    _module_dir(torch) + "_export/wrappers.py",
+}
 
-# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+# torch.func: need to allow this file to be able to look at functorch transforms
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_functorch/apis.py",
+    _module_dir(torch) + "_functorch/deprecated.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
+    _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/_tensor/api.py",
+    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }
 
 SKIP_DIRS_RE = None
@@ -163,12 +177,6 @@ is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 FBCODE_SKIP_DIRS = {
     "torchrec/distributed",
     "torchrec/fb/distributed",
-    # JaggedTensor and KeyedJaggedTensor are fairly badly behaved, because
-    # they tend to contain extremely long lists of integers that vary from
-    # run to run.  We are interested in tracing models that contain references
-    # to KJTs, but tracing an individual KeyedJaggedTensor is rarely
-    # profitable
-    "torchrec/sparse",
     "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
 }
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")

@@ -3,7 +3,7 @@ import operator
 import sys
 from enum import Enum
 from functools import partial, reduce
-from itertools import product
+from itertools import chain, product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -19,7 +19,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int
+from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -179,11 +179,6 @@ def hardtanh_backward(
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
-@register_decomposition(aten.hardshrink_backward)
-def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
-
-
 @register_decomposition(aten.hardswish)
 @pw_cast_for_opmath
 def hardswish(self: Tensor) -> Tensor:
@@ -267,11 +262,6 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
-@register_decomposition(aten.softshrink_backward)
-def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
-
-
 @register_decomposition(aten._prelu_kernel)
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self > 0, self, weight * self)
@@ -286,6 +276,43 @@ def _prelu_kernel_backward(
     input_grad = torch.where(self > 0, grad_output, weight * grad_output)
     weight_grad = torch.where(self > 0, 0.0, self * grad_output)
     return (input_grad, weight_grad)
+
+
+@register_decomposition(aten.rrelu_with_noise)
+@aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    assert generator is None
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper)
+        output = torch.where(not_positive, self * r, self)
+        noise.copy_(torch.where(not_positive, r, 1))
+        return output
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope)
+
+
+@register_decomposition(aten.rrelu_with_noise_)
+@aten.rrelu_with_noise_.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise_(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -690,12 +717,12 @@ def slice_forward(
 
     if start_val < 0:
         start_val = 0
-    elif start_val >= sizes[dim]:
+    elif start_val > sizes[dim]:
         start_val = sizes[dim]
 
     if end_val < start_val:
         end_val = start_val
-    elif end_val >= sizes[dim]:
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -1145,15 +1172,23 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
-    if sum(split_sizes) != self.shape[dim]:
-        raise ValueError(
-            "Split sizes don't add up to the tensor's size in the given dimension"
-        )
+    torch._check_with(
+        ValueError,
+        sum(split_sizes) == self.shape[dim],
+        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+    )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
+        torch._check(
+            length >= 0,
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
+        # We know this is true thanks to the sum, but this assertion helps
+        # out our internal reasoning
+        expect_true(start_idx + length <= self.shape[dim])
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
@@ -2155,6 +2190,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
+    input_dtype = torch.float if input.dtype == torch.uint8 else input.dtype
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
         # Indices are computed as following:
@@ -2162,7 +2198,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
         osize = output_size[d]
-        output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
+        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
@@ -2357,6 +2393,56 @@ def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
     out = torch.cat(step_output, 0)
 
     return out, cur_hidden.squeeze(0)
+
+
+def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+    w0 = params[0]
+    w1 = params[1]
+    if has_biases:
+        w2 = params[2]
+        w3 = params[3]
+    else:
+        w2 = torch.zeros(w0.size())
+        w3 = torch.zeros(w1.size())
+
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
+
+    batch_sizes: List[int] = []
+    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    hidden_size = hx.size(2)
+    num_layers = 1
+
+    # _rnn_helper already handles bidirectional and batch_first so we hard-code them to False here
+    bidirectional = False
+    batch_first = False
+
+    train = False
+    # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
+    # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
+    inp = inp.contiguous()
+    hx = hx.contiguous()
+    cx = cx.contiguous()
+    outputs = torch.ops.aten.mkldnn_rnn_layer.default(
+        inp,
+        w0,
+        w1,
+        w2,
+        w3,
+        hx,
+        cx,
+        reverse,
+        batch_sizes,
+        mode,
+        hidden_size,
+        num_layers,
+        has_biases,
+        bidirectional,
+        batch_first,
+        train,
+    )
+    y, hy, cy = outputs[0], outputs[1], outputs[2]
+    return y, (hy.squeeze(0), cy.squeeze(0))
 
 
 def _rnn_helper(
@@ -2636,6 +2722,56 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
     return out, hidden_out
 
 
+def select_one_layer_lstm_function(input, hx, params):
+    r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
+    All the below conditions need to be met:
+        * ``torch._C._has_mkldnn`` returns ``True``.
+        * All the input args are on CPU.
+        * The dtypes of args are either torch.float or torch.bfloat16.
+        * Inference.
+        * ``has_projections`` returns ``False``.
+
+    Args:
+        * input: the input sequence to LSTM
+        * hx: a tuple of the input hidden state and cell state ``(h_0, c_0)`` to LSTM
+        * params: the weight and bias tensors of LSTM
+    """
+
+    def use_mkldnn(input, hx, params):
+        if not torch._C._has_mkldnn:
+            return False
+
+        tensors = [input] + list(hx) + list(chain.from_iterable(params))
+        devices = {t.device for t in tensors}
+        if len(devices) != 1:
+            return False
+
+        device = devices.pop()
+        if device != torch.device("cpu"):
+            return False
+        # With autocast, possible to have mixed dtype here
+        dtypes = {t.dtype for t in tensors}
+        for dtype in dtypes:
+            if dtype not in [torch.float, torch.bfloat16]:
+                return False
+
+        if input.requires_grad:
+            return False
+
+        has_projections = hx[0].size(2) != hx[1].size(2)
+        if has_projections:
+            return False
+
+        return True
+
+    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
+    # will expand over the seq_len dim
+    if use_mkldnn(input, hx, params):
+        return mkldnn_one_layer_lstm
+    else:
+        return one_layer_lstm
+
+
 @register_decomposition(aten.lstm.input)
 @aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.lstm.input.py_impl(DispatchKey.Autograd)
@@ -2653,6 +2789,7 @@ def lstm_impl(
     assert len(hx) == 2, "lstm expects two hidden states"
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
+    layer_fn = select_one_layer_lstm_function(input, hx, params)
     out, final_hiddens = _rnn_helper(
         input,
         hidden,
@@ -2663,7 +2800,7 @@ def lstm_impl(
         train,
         bidirectional,
         batch_first,
-        one_layer_lstm,
+        layer_fn,
     )
     final_hiddens = list(zip(*final_hiddens))
     return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
@@ -2893,6 +3030,64 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+@register_decomposition([aten._unsafe_index])
+def _index(x, indices):
+    return aten.index(x, indices)
+
+
+def _nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        if n_dims > 1:
+            shape = [
+                1,
+            ] * n_dims
+            shape[channel_dim] = weight.shape[0]
+            w = weight.view(shape)
+        else:
+            w = weight
+        self = self * w
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
+
+    result = torch.where(target != ignore_index, result, 0)
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = self.new_full((), 0.0)
+        return result, total_weight
+
+    if weight is not None:
+        w = w.expand(self.shape)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
+        total_weight = wsum.sum()
+    else:
+        total_weight = (target != ignore_index).sum().to(self)
+
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        result = result.sum() / total_weight
+
+    return result, total_weight
+
+
 @register_decomposition(aten.nll_loss_forward)
 def nll_loss_forward(
     self: Tensor,
@@ -2917,43 +3112,18 @@ def nll_loss_forward(
         weight.dim() == 1 and weight.numel() == n_classes
     ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
 
-    # self can be [N, C] or [C]
-    # target can be [N] or []
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
-    n_dims = self.dim()
-    channel_dim = 1
-    if n_dims < 2:
-        channel_dim = 0
 
-    if weight is not None:
-        w = weight.unsqueeze(0) if n_dims > 1 else weight
-        self = self * w
-    safe_target = torch.where(target != ignore_index, target, 0)
-    safe_target_ = safe_target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-
-    result = torch.where(target != ignore_index, result, 0)
-
-    if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = self.new_full((), 0.0)
-        return result, total_weight
-
-    if weight is not None:
-        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
-        wsum = torch.where(target != ignore_index, wsum, 0)
-        total_weight = wsum.sum()
-    else:
-        total_weight = (target != ignore_index).sum().to(self)
-
-    if reduction == Reduction.SUM.value:
-        result = result.sum()
-    elif reduction == Reduction.MEAN.value:
-        result = result.sum() / total_weight
-
-    return result, total_weight
+@register_decomposition(aten.nll_loss2d_forward)
+def nll_loss2d_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
 
 # These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
@@ -2984,6 +3154,83 @@ def _upsample_cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
 # Need this instead of just sum() to keep mypy happy
 def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
     return reduce(torch.add, ts)
+
+
+def _linspace_from_neg_one(
+    num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device
+):
+    if num_steps <= 1:
+        return torch.tensor(0, device=device, dtype=dtype)
+
+    a = ((num_steps - 1) / num_steps) if not align_corners else 1
+    return torch.linspace(-a, a, steps=num_steps, device=device, dtype=dtype)
+
+
+def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    # Using padding and summation generates a single kernel vs using torch.stack where 3 kernels generated
+    # corresponding to each individual tensor: grid_x, grid_y, grid_one
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(h, 1, 1)
+    grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_one
+
+
+def _make_base_grid_5d(theta: Tensor, d: int, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, h, 1, 1)
+    grid_z = _linspace_from_neg_one(d, align_corners, dtype, device).view(d, 1, 1, 1)
+    grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_z + grid_one
+
+
+def _affine_grid_generator_4d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, h, w = size
+    base_grid = _make_base_grid_4d(theta, h, w, align_corners=align_corners)
+    # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (h * w, 3, 1) * (n, 1, 3, 2) -> (n, h * w, 2)
+    grid = (base_grid.view(-1, 3, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, h, w, 2)
+
+
+def _affine_grid_generator_5d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, d, h, w = size
+    base_grid = _make_base_grid_5d(theta, d, h, w, align_corners=align_corners)
+    # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (d * h * w, 4, 1) * (n, 1, 4, 3) -> (n, h * w, 3)
+    grid = (base_grid.view(-1, 4, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, d, h, w, 3)
+
+
+@register_decomposition(aten.affine_grid_generator)
+@pw_cast_for_opmath
+def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
+    torch._check(
+        len(size) in (4, 5),
+        lambda: "affine_grid_generator needs 4d (spatial) or 5d (volumetric) inputs.",
+    )
+    if len(size) == 4:
+        return _affine_grid_generator_4d(theta, size, align_corners=align_corners)
+    else:
+        return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
 
 
 @register_decomposition(aten.grid_sampler_2d)
@@ -3203,34 +3450,30 @@ def binary_cross_entropy_with_logits(
     return apply_loss_reduction(loss, reduction)
 
 
-def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
-    dim_tensor1 = tensor1.ndim
-    if dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
-        t1_sizes_ptr = tensor1.shape
-        t1_strides = tensor1.stride()
-        if (
-            dim_tensor1 == 3
-            and dim_tensor2 == 2
-            and t1_strides[-1] != 1
-            and t1_strides[0] == t1_sizes_ptr[1] * t1_sizes_ptr[2]
-        ):
-            # First dim is slowest moving, and then the following two dims are
-            # transposed. This can happen for example by permute(0, 2, 1).
-            # First 2 dims could be folded to use mm but would require permutation
-            # with actual data movement, which can be instead handled by BMM with each
-            # GEMM transposed.
-            # This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
-            # dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
-            # For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
-            # Y = 3, and Z = 1.
-            return False
-        else:
-            return True
-    else:
+def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
+    # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
+
+    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+
+    if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
+    if t2.requires_grad:
+        return True
+    if tensor1.ndim == 2:
+        return False
+    if t1.numel() == 0:
+        return True
+
+    t1_shape = t1.shape
+    t1_stride = t1.stride()
+    return all(
+        st1 == st2 * s2
+        for (st1, st2, s2) in zip(t1_stride[:-2], t1_stride[1:-1], t1_shape[1:-1])
+    )
 
 
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@out_wrapper()
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
@@ -3242,12 +3485,8 @@ def matmul(tensor1, tensor2):
     elif dim_tensor1 == 1 and dim_tensor2 == 2:
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
-        # if tensor1.shape[1] != tensor2.shape[0]:
-        #     breakpoint()
         return torch.mm(tensor1, tensor2)
-    elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
-        # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
-
+    elif should_fold(tensor1, tensor2):
         # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
         # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
         # and some condition on the strides is fulfilled
@@ -3273,10 +3512,13 @@ def matmul(tensor1, tensor2):
         t2_is_matrix = t2.dim() == 2
         if t2_is_matrix:
             output_shape.append(t2.shape[1])
+
+        # This will almost always be a view.
+        # It may not be a view if t2->requires_grad(). See should_fold in aten/ for an explanation
         t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
         if t2_is_matrix:
-            # FIXME This path always does an unnecessary copy when transpose == True as the returned
-            # result from BLAS is already C-transposed
+            # This copies if we perform a 2D @ 3D and the first tensor requires_grad
+            # See should_fold native/LinearAlgebra.cpp for why.
             output = t1_folded.mm(t2).view(output_shape)
             return output.mT.contiguous() if transpose else output
         else:
@@ -3290,10 +3532,23 @@ def matmul(tensor1, tensor2):
         batch_tensor1 = tensor1.shape[:-2]
         m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
         p = tensor2.size(-1) if dim_tensor2 > 1 else 1
+
         batch_tensor2: List[int] = []
         # TODO: handling of slice
         for i in range(dim_tensor2 - 2):
             batch_tensor2.append(tensor2.size(i))
+
+        # Same optimization for the gradients as that in should_fold
+        # If we're going to broadcast, we force it to go through the should_fold branch
+        if (
+            dim_tensor1 == 3
+            and dim_tensor2 == 3
+            and batch_tensor1[0] != batch_tensor2[0]
+        ):
+            if batch_tensor1[0] == 1 and tensor1.requires_grad():
+                return matmul(tensor1.squeeze(0), tensor2)
+            if batch_tensor2[0] == 1 and tensor2.requires_grad():
+                return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
         expand_batch_portion = list(
@@ -3301,7 +3556,6 @@ def matmul(tensor1, tensor2):
         )
 
         tensor1_expand_size = expand_batch_portion + [n, m1]
-        tensor2_expand_size = expand_batch_portion + [m2, p]
 
         expand_batch_product = prod(expand_batch_portion)
 
@@ -3309,9 +3563,20 @@ def matmul(tensor1, tensor2):
         tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
             expand_batch_product, n, m1
         )
-        tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
-            expand_batch_product, m2, p
-        )
+
+        vector_rhs = dim_tensor2 == 1
+        if vector_rhs:
+            tensor2_expand_size = expand_batch_portion + [m2]
+            tensor2_expanded = (
+                tensor2.expand(tensor2_expand_size)
+                .reshape(expand_batch_product, m2)
+                .unsqueeze(2)
+            )
+        else:
+            tensor2_expand_size = expand_batch_portion + [m2, p]
+            tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
+                expand_batch_product, m2, p
+            )
 
         output_shape = expand_batch_portion
         if dim_tensor1 > 1:
@@ -3320,7 +3585,10 @@ def matmul(tensor1, tensor2):
         if dim_tensor2 > 1:
             output_shape.append(p)
 
-        return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
+        if vector_rhs:
+            return tensor1_expanded.bmm(tensor2_expanded).squeeze(-1).view(output_shape)
+        else:
+            return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
     else:
         torch._check(False, lambda: "both arguments to matmul need to be at least 1D")
 

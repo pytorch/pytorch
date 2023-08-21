@@ -8622,7 +8622,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # FX Graph Mode and Eager Mode now diverages in numerics of add_scalar and mul_scalar
             # self.assertEqual(m(data), ref_m(data))
 
-    def test_embedding(self):
+
+
+    def test_embedding_fx(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8636,12 +8638,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
             indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
             example_inputs = (indices,)
             quantized_node = ns.call_module(nnq.Embedding)
+
+            # check dynamic quant
+            self.checkGraphModeFxOp(
+                model,
+                example_inputs,
+                QuantType.DYNAMIC,
+                quantized_node,
+                custom_qconfig_dict={"": qconfig_type}
+            )
+            model = M().eval()
+
             configs = [
                 (qconfig_type, ns.call_module(nnq.Embedding)),
                 (None, ns.call_module(nn.Embedding)),
                 (default_qconfig, ns.call_module(nn.Embedding)),
             ]
 
+            # check static quantization
             for qconfig, node in configs:
                 qconfig_dict = {"": qconfig}
                 m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
@@ -8653,7 +8667,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # make sure it runs
                 m(*example_inputs)
 
-    def test_embedding_bag(self):
+    def test_embedding_bag_fx(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()

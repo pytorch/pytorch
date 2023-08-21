@@ -59,7 +59,6 @@ class TestOutDtypeOp(TestCase):
         ep = torch._export.export(
             m,
             (x,),
-            _add_runtime_assertions=False,
         )
         FileCheck().check("torch.ops.higher_order.out_dtype").check("aten.mm.default").run(ep.graph_module.code)
         self.assertTrue(torch.allclose(m(x), ep(x)))
@@ -142,11 +141,16 @@ class TestOutDtypeOp(TestCase):
             )
 
         inp = (torch.randn(5, 5, requires_grad=True), torch.randn(5, 5, requires_grad=True))
-        with self.assertRaisesRegex(RuntimeError, "Autograd is not supported for out_dtype"):
-            f(*inp)
+        # error is delayed
+        f(*inp)
 
         with torch.no_grad():
             f(*inp)
+
+        with self.assertRaisesRegex(RuntimeError, "does not require grad and does not have a grad_fn"):
+            out = f(*inp)
+            loss = out - torch.ones(out.shape)
+            loss.backward()
 
     def test_out_dtype_wrong_output(self) -> None:
         def multiple_out(x):

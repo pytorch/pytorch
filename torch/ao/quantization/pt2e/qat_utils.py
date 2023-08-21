@@ -8,7 +8,7 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
-from .quantizer import (
+from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
     SharedQuantizationSpec,
@@ -226,10 +226,10 @@ def _get_quantized_qat_conv2d_bn_pattern(
             )
         else:
             scaled_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
-                scaled_weight, 1.0, int(0), weight_quant_min, weight_quant_max, torch.int8,
+                scaled_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
             )
             scaled_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                scaled_weight, 1.0, int(0), weight_quant_min, weight_quant_max, torch.int8,
+                scaled_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
             )
         if has_bias:
             zero_bias = torch.zeros_like(kwargs["conv_bias"], dtype=x.dtype)
@@ -283,10 +283,10 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
             )
         else:
             conv_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
-                conv_weight, 1.0, int(0), weight_quant_min, weight_quant_max, torch.int8,
+                conv_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
             )
             conv_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                conv_weight, 1.0, int(0), weight_quant_min, weight_quant_max, torch.int8,
+                conv_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
             )
         if has_bias:
             x = F.conv2d(x, conv_weight, kwargs["conv_bias"])
