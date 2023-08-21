@@ -1,4 +1,3 @@
-import xgboost
 import argparse
 import os
 import pickle
@@ -7,6 +6,7 @@ from torch._inductor.autotuner.model import AutotunerModel, ModelType
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_dir", type=str, default="./")
+parser.add_argument("--output_dir", type=str, default="./")
 parser.add_argument("--full_train", action="store_true", default=False)
 
 
@@ -58,14 +58,15 @@ def main(args):
     )
 
     qid_test_unique = np.unique(qid_test)
-    test_id = qid_test_unique[1]
-
-    print(test_id)
-    scores = autotuner.model.predict(X_test[qid_test == test_id])
-
-    indices = np.argsort(scores)[::-1]
-    print(scores[indices])
-    print(y_test[qid_test == test_id][indices])
+    for test_id in qid_test_unique[:10]:
+        print(test_id)
+        X_test = np.array(X_test)
+        qid_test = np.array(qid_test)
+        y_test = np.array(y_test)
+        scores = autotuner.model.predict(X_test[qid_test == test_id])
+        indices = np.argsort(scores)[::-1]
+        print(scores[indices])
+        print(y_test[qid_test == test_id][indices])
 
     # dump model
     with open("xgb_baseline.pkl", "wb") as f:
