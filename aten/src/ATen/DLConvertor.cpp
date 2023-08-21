@@ -1,9 +1,6 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
 
-#include <iostream>
-#include <sstream>
-
 using namespace std;
 namespace at {
 
@@ -52,6 +49,10 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
+      break;
+    case ScalarType::Float8_e5m2:
+    case ScalarType::Float8_e4m3fn:
+      TORCH_CHECK(false, "float8 types are not supported by dlpack");
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:

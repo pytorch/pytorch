@@ -41,7 +41,7 @@ def get_tag(pytorch_root: Union[str, Path]) -> str:
 
 def get_torch_version(sha: Optional[str] = None) -> str:
     pytorch_root = Path(__file__).parent.parent
-    version = open(pytorch_root / "version.txt", "r").read().strip()
+    version = open(pytorch_root / "version.txt").read().strip()
 
     if os.getenv("PYTORCH_BUILD_VERSION"):
         assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
@@ -86,11 +86,11 @@ if __name__ == "__main__":
         version = tagged_version
 
     with open(version_path, "w") as f:
-        f.write("__version__ = '{}'\n".format(version))
+        f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(bool(args.is_debug))))
-        f.write("cuda = {}\n".format(repr(args.cuda_version)))
-        f.write("git_version = {}\n".format(repr(sha)))
-        f.write("hip = {}\n".format(repr(args.hip_version)))
+        f.write(f"debug = {repr(bool(args.is_debug))}\n")
+        f.write(f"cuda = {repr(args.cuda_version)}\n")
+        f.write(f"git_version = {repr(sha)}\n")
+        f.write(f"hip = {repr(args.hip_version)}\n")

@@ -115,7 +115,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Allows incremental refactor of call sites to use philox_cuda_state.
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
 
-  static DeviceType device_type();
+  static c10::DeviceType device_type();
 
 private:
   CUDAGeneratorImpl* clone_impl() const override;
@@ -128,13 +128,11 @@ private:
   std::atomic_flag no_reset_rnn_state_;
 };
 
-namespace cuda {
-namespace detail {
+namespace cuda::detail {
 
 TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
     DeviceIndex device_index = -1);
 TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
-} // namespace detail
-} // namespace cuda
+} // namespace cuda::detail
 } // namespace at

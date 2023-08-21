@@ -4,9 +4,19 @@ aten::__irshift__.Scalar
 aten::__irshift__.Tensor
 aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
+aten::_addmm_activation
+aten::_addmm_activation.out
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
+aten::_log_softmax
+aten::_log_softmax.out
+aten::_native_batch_norm_legit
+aten::_native_batch_norm_legit.no_stats
+aten::_native_batch_norm_legit_functional
+aten::_native_batch_norm_legit_no_training
+aten::_softmax
+aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
 aten::_unsafe_view
@@ -169,6 +179,8 @@ aten::diagonal_scatter.out
 aten::digamma
 aten::digamma.out
 aten::digamma_
+aten::dist
+aten::dist.out
 aten::div.Scalar
 aten::div.Scalar_mode
 aten::div.Scalar_mode_out
@@ -183,8 +195,6 @@ aten::div_.Tensor
 aten::div_.Tensor_mode
 aten::embedding
 aten::embedding.out
-aten::empty_like
-aten::empty_like.out
 aten::empty_strided
 aten::empty_strided.out
 aten::eq.Scalar
@@ -246,6 +256,8 @@ aten::ge.Tensor
 aten::ge.Tensor_out
 aten::ge_.Scalar
 aten::ge_.Tensor
+aten::gelu
+aten::gelu.out
 aten::geometric
 aten::geometric.out
 aten::geometric_
@@ -257,6 +269,8 @@ aten::gt.Tensor
 aten::gt.Tensor_out
 aten::gt_.Scalar
 aten::gt_.Tensor
+aten::hardtanh
+aten::hardtanh.out
 aten::hypot
 aten::hypot.out
 aten::hypot_
@@ -269,6 +283,8 @@ aten::igammac.out
 aten::igammac_
 aten::index_put_
 aten::index_reduce_
+aten::index_select
+aten::index_select.out
 aten::is_same_size
 aten::isinf
 aten::isinf.out
@@ -283,6 +299,8 @@ aten::le.Tensor
 aten::le.Tensor_out
 aten::le_.Scalar
 aten::le_.Tensor
+aten::leaky_relu
+aten::leaky_relu.out
 aten::lgamma
 aten::lgamma.out
 aten::lgamma_
@@ -340,8 +358,13 @@ aten::mul_.Scalar
 aten::mul_.Tensor
 aten::narrow_copy
 aten::narrow_copy.out
+aten::native_batch_norm
+aten::native_batch_norm.out
 aten::native_dropout
 aten::native_dropout.out
+aten::native_group_norm
+aten::native_layer_norm
+aten::native_layer_norm.out
 aten::ne.Scalar
 aten::ne.Scalar_out
 aten::ne.Tensor
@@ -358,6 +381,8 @@ aten::nextafter.out
 aten::nextafter_
 aten::nll_loss2d_backward
 aten::nll_loss2d_backward.grad_input
+aten::nll_loss2d_forward
+aten::nll_loss2d_forward.output
 aten::normal.Tensor_Tensor
 aten::normal.Tensor_Tensor_out
 aten::normal.Tensor_float
@@ -487,6 +512,7 @@ aten::trunc
 aten::trunc.out
 aten::trunc_
 aten::unbind.int
+aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_

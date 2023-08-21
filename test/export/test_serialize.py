@@ -4,6 +4,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import dynamic_dim, export
+from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -11,6 +12,7 @@ from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     deserialize,
     serialize,
+    SerializeError,
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -69,10 +71,10 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
+        node = serialized.graph_module.graph.nodes[-1]
+        self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
-        self.assertEqual(len(node.outputs), 2)
+        self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
         seen = set()
@@ -177,9 +179,12 @@ class TestDeserialize(TestCase):
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, constraints)
+        ep = export(fn, inputs, {}, constraints)
+        ep.graph.eliminate_dead_code()
+
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
@@ -196,52 +201,47 @@ class TestDeserialize(TestCase):
 
         self.assertEqual(len(ep.graph.nodes), len(deserialized_ep.graph.nodes))
         for node1, node2 in zip(ep.graph.nodes, deserialized_ep.graph.nodes):
-            # Check "val" metadata
-            val1 = node1.meta.get("val", None)
-            val2 = node2.meta.get("val", None)
+            self.assertEqual(node1.op, node2.op)
+            if node1.op == "call_function":
+                # Check "val" metadata
+                val1 = node1.meta.get("val", None)
+                val2 = node2.meta.get("val", None)
+                if val1 is None or val2 is None:
+                    # Either both are None
+                    self.assertEqual(val1, val2)
+                elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
+                    # Or both are fake tensors with the same shape/dtype
+                    self.assertEqual(len(val1.shape), len(val2.shape))
+                    for s1, s2 in zip(val1.shape, val2.shape):
+                        if is_concrete_int(s1) and is_concrete_int(s2):
+                            self.assertEqual(s1, s2)
+                        else:
+                            self.assertEqual(str(s1), str(s2))
+                    self.assertEqual(val1.dtype, val2.dtype)
+                elif isinstance(val1, list) and isinstance(val2, list):
+                    # Or both are fake tensors lists with one element and with the
+                    # same shape/dtype
+                    self.assertTrue(len(val1) == 1 and len(val2) == 1)
+                    self.assertEqual(val1[0].shape, val2[0].shape)
+                    self.assertEqual(val1[0].dtype, val2[0].dtype)
+                else:
+                    # For expressions like 's0 < 10' can only compare through string
+                    self.assertEqual(str(val1), str(val2))
 
-            if val1 is None or val2 is None:
-                # Either both are None
-                self.assertEqual(val1, val2)
-            elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
-                # Or both are fake tensors with the same shape/dtype
-                self.assertEqual(len(val1.shape), len(val2.shape))
-                for s1, s2 in zip(val1.shape, val2.shape):
-                    if is_concrete_int(s1) and is_concrete_int(s2):
-                        self.assertEqual(s1, s2)
-                    else:
-                        self.assertEqual(str(s1), str(s2))
-                self.assertEqual(val1.dtype, val2.dtype)
-            elif isinstance(val1, list) and isinstance(val2, list):
-                # Or both are fake tensors lists with one element and with the
-                # same shape/dtype
-                self.assertTrue(len(val1) == 1 and len(val2) == 1)
-                self.assertEqual(val1[0].shape, val2[0].shape)
-                self.assertEqual(val1[0].dtype, val2[0].dtype)
-            else:
-                # For expressions like 's0 < 10' can only compare through string
-                self.assertEqual(str(val1), str(val2))
-
-            # Check "stack_trace" metadata
-            if "None" in node1.meta.get("stack_trace"):
-                self.assertTrue(
-                    node2.meta.get("stack_trace") is None
-                    or "None" in node2.meta.get("stack_trace")
-                )
-            else:
+                # Check "stack_trace" metadata
                 self.assertEqual(
                     node1.meta.get("stack_trace", None),
                     node2.meta.get("stack_trace", None),
                 )
 
-            # Check "nn_module_stack" metadata
-            self.assertEqual(
-                node1.meta.get("nn_module_stack", None),
-                node2.meta.get("nn_module_stack", None),
-            )
+            if node1.op != "get_attr" and node1.op != "placeholder":
+                # Check "nn_module_stack" metadata
+                self.assertEqual(
+                    node1.meta.get("nn_module_stack", None),
+                    node2.meta.get("nn_module_stack", None),
+                )
 
-            # Check "source_fn" metadata
-            if node1.op != "get_attr":
+                # Check "source_fn" metadata
                 self.assertEqual(
                     node1.meta.get("source_fn", None),
                     node2.meta.get("source_fn", None),
@@ -361,15 +361,36 @@ class TestDeserialize(TestCase):
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         inputs = normalize_inputs(case.example_inputs)
         self.check_graph(model, inputs.args)
 
+    def test_constraints(self):
+        def f(x, y):
+            n = x.item()
+            constrain_as_size(n, min=2)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
+
 
 instantiate_parametrized_tests(TestDeserialize)
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSchemaVersioning(TestCase):
+    def test_error(self):
+        def f(x):
+            return x + x
+
+        ep = export(f, (torch.randn(1, 3),))
+
+        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
+        serialized_ep.schema_version = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
 
 
 class TestOpVersioning(TestCase):
