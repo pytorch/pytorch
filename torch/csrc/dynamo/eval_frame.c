@@ -305,9 +305,7 @@ typedef struct cache_entry {
   struct cache_entry* next;
 } CacheEntry;
 
-#define Py_NONE_CACHE_ENTRY (CacheEntry*)Py_None
-
-static void destroy_cache_entry(CacheEntry* e);
+static void cache_entry_dealloc(CacheEntry* e);
 
 #define DECLARE_CACHE_ENTRY_ATTR(name) \
 static PyObject* CacheEntry_##name(CacheEntry* self, PyObject* _noargs) { \
@@ -327,23 +325,23 @@ static struct PyGetSetDef CacheEntry_properties[] = {
     {NULL}};
 
 
-static PyObject* new_cache_entry(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+static PyObject* cache_entry_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   CacheEntry *self;
   self = (CacheEntry*) type->tp_alloc(type, 0);
   if (self != NULL) {
-    // The corresponding decrefs for Py_None are in init_cache_entry.
+    // The corresponding decrefs for Py_None are in cache_entry_init.
     Py_INCREF(Py_None);
     self->check_fn = Py_None;
     Py_INCREF(Py_None);
     self->code = (PyCodeObject*)Py_None;
     Py_INCREF(Py_None);
-    self->next = Py_NONE_CACHE_ENTRY;
+    self->next = (CacheEntry*)Py_None;
   }
   return (PyObject*)self;
 }
 
 
-static int init_cache_entry(CacheEntry* self, PyObject* args, PyObject* kwds) {
+static int cache_entry_init(CacheEntry* self, PyObject* args, PyObject* kwds) {
   PyObject* check_fn = NULL;
   PyCodeObject* code = NULL;
   CacheEntry* next = NULL;
@@ -358,18 +356,21 @@ static int init_cache_entry(CacheEntry* self, PyObject* args, PyObject* kwds) {
 
   if (check_fn) {
     PyObject* tmp = self->check_fn;
+    Py_INCREF(check_fn);
     self->check_fn = check_fn;
     Py_XDECREF(tmp);
   }
 
   if (code) {
     PyCodeObject* tmp = self->code;
+    Py_INCREF(code);
     self->code = code;
     Py_XDECREF(tmp);
   }
 
   if (next) {
     CacheEntry* tmp = self->next;
+    Py_INCREF(next);
     self->next = next;
     Py_XDECREF(tmp);
   }
@@ -382,9 +383,9 @@ static PyTypeObject CacheEntryType = {
   .tp_basicsize = sizeof(CacheEntry),
   .tp_itemsize = 0,
   .tp_flags = Py_TPFLAGS_DEFAULT,
-  .tp_new = new_cache_entry,
-  .tp_init = (initproc)init_cache_entry,
-  .tp_dealloc = (destructor)destroy_cache_entry,
+  .tp_new = cache_entry_new,
+  .tp_init = (initproc)cache_entry_init,
+  .tp_dealloc = (destructor)cache_entry_dealloc,
   .tp_getset = CacheEntry_properties,
 };
 
@@ -418,20 +419,25 @@ static CacheEntry* create_cache_entry(
   //   - guarded_code: Borrowed
   //  return
   //   - CacheEntry*: new reference.
-  PyObject* check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
-  PyCodeObject* code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code");
+  PyObject* check_fn = PyObject_GetAttrString(guarded_code, "check_fn"); // new reference
+  PyCodeObject* code = (PyCodeObject*)PyObject_GetAttrString(guarded_code, "code"); // new reference
 
   // equivalent to CacheEntry(check_fn, code, next) in Python
   PyObject* args = Py_BuildValue("OOO", check_fn, code, next);
-  CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject*)&CacheEntryType, args);
+  CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject*)&CacheEntryType, args); // new reference
+  // CacheEntry e is the now the owner of old cachey entry next. This happens
+  // when we incref the next pointer in cache_entry_init.
+  Py_DECREF(next);
+  Py_DECREF(check_fn);
+  Py_DECREF(code);
   Py_DECREF(args);
   return e;
 }
 
-static void destroy_cache_entry(CacheEntry* e) {
+static void cache_entry_dealloc(CacheEntry* e) {
   Py_XDECREF(e->check_fn);
   Py_XDECREF(e->code);
-  // This will recursively call destroy_cache_entry for the next items in the
+  // This will recursively call cache_entry_dealloc for the next items in the
   // linked list.
   Py_XDECREF(e->next);
   Py_TYPE(e)->tp_free((PyObject*)e);
@@ -499,7 +505,7 @@ inline static void destroy_extra_state(void* obj) {
 
   ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
-    // Cpython gc will call destroy_cache_entry on its own when the ref count
+    // Cpython gc will call cache_entry_dealloc on its own when the ref count
     // goes to 0.
     Py_XDECREF(extra->cache_entry);
     Py_XDECREF(extra->frame_state);
@@ -548,7 +554,7 @@ inline static ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(extra_state);
   // We set the last node in the linked list to Py_None. We incref the Py_None
-  // here, the corresponding decref is in destroy_cache_entry.
+  // here, the corresponding decref is in cache_entry_dealloc.
   Py_INCREF(Py_None);
   extra_state->cache_entry = (CacheEntry*)Py_None;
   extra_state->frame_state = PyDict_New();
@@ -582,7 +588,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   if (!outer_list) {
     return NULL;  // Return NULL if failed to create list
   }
-  while (current_node != NULL && current_node != Py_NONE_CACHE_ENTRY) {
+  while (current_node != NULL && current_node != (CacheEntry*)Py_None) {
     // Creating a new Python tuple for the check_fn and code of current CacheEntry
     PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
     int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
@@ -637,7 +643,7 @@ static PyObject* call_guard_fail_hook(
       e->code,
       f_locals,
       (Py_ssize_t)index,
-      (e->next == Py_NONE_CACHE_ENTRY ? Py_True : Py_False));
+      (e->next == (CacheEntry*)Py_None ? Py_True : Py_False));
 }
 
 static PyObject* call_profiler_start_hook(PyObject* name_str) {
@@ -659,7 +665,7 @@ static void call_profiler_end_hook(PyObject* record) {
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
-  if (e == Py_NONE_CACHE_ENTRY) {
+  if (e == (CacheEntry*)Py_None) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
   }
