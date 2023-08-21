@@ -387,7 +387,7 @@ void max_pool3d_with_indices_out_cuda_template(
   }
   Tensor work_indices = indices;
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{

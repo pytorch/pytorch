@@ -13082,8 +13082,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
@@ -13108,7 +13108,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
@@ -13147,8 +13147,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_max_pool3d,

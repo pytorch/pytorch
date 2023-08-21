@@ -216,7 +216,7 @@ void max_pool3d_with_indices_out_cpu_template(
     /* indices will contain ti,i,j locations for each output point */
     indices.resize_({nslices, otime, oheight, owidth});
 
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(),
       "max_pool3d_with_indices_cpu",
       [&] {
         scalar_t *input_data = input.data_ptr<scalar_t>();
@@ -246,7 +246,7 @@ void max_pool3d_with_indices_out_cpu_template(
     /* indices will contain ti,i,j locations for each output point */
     indices.resize_({nbatch, nslices, otime, oheight, owidth});
 
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(),
       "max_pool3d_with_indices_cpu",
       [&] {
         scalar_t *input_data = input.data_ptr<scalar_t>();
