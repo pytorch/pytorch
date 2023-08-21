@@ -614,8 +614,8 @@ def _lobpcg(
 
     if m < 3 * n:
         raise ValueError(
-            "LPBPCG algorithm is not applicable when the number of A rows (={})"
-            " is smaller than 3 x the number of requested eigenpairs (={})".format(m, n)
+            f"LPBPCG algorithm is not applicable when the number of A rows (={m})"
+            f" is smaller than 3 x the number of requested eigenpairs (={n})"
         )
 
     method = "ortho" if method is None else method
@@ -1151,9 +1151,7 @@ class LOBPCG:
                 assert B is not None
                 raise ValueError(
                     "Overdetermined shape of U:"
-                    " #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold".format(
-                        B.shape[-1], U.shape[-1], V.shape[-1]
-                    )
+                    f" #B-cols(={B.shape[-1]}) >= #U-cols(={U.shape[-1]}) + #V-cols(={V.shape[-1]}) must hold"
                 )
         self.ivars["ortho_i"] = i
         self.ivars["ortho_j"] = j

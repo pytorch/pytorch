@@ -544,13 +544,12 @@ class Tensor(torch._C._TensorBase):
 
         The hook will be called after all gradients for a tensor have been accumulated,
         meaning that the .grad field has been updated on that tensor. The post
-        accumulate grad hook is ONLY applicable for leaf tensors as the AccumulateGrad
-        node is only called for leaf tensors. Registering this hook on a non-leaf
-        tensor will do nothing!
+        accumulate grad hook is ONLY applicable for leaf tensors (tensors without a
+        .grad_fn field). Registering this hook on a non-leaf tensor will error!
 
         The hook should have the following signature::
 
-            hook(Tensor param) -> None
+            hook(param: Tensor) -> None
 
         Note that, unlike other autograd hooks, this hook operates on the tensor
         that requires grad and not the grad itself. The hook can in-place modify
@@ -582,6 +581,10 @@ class Tensor(torch._C._TensorBase):
         if not self.requires_grad:
             raise RuntimeError(
                 "cannot register a hook on a tensor that doesn't require gradient"
+            )
+        if self.grad_fn is not None:
+            raise RuntimeError(
+                "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()

@@ -34,17 +34,13 @@ struct PyFunctionPostHook : public FunctionPostHook {
   PyObject* dict;
 };
 
-// PyFunctionTensorPostAccGradHook is a DICTIONARY of PostAccumulateGradHooks,
-// NOT just one hook! Thus, adding one hook is actually just replacing the
-// existing dictionary with a (bigger) dictionary of hooks.
-//
-// Why? This way, we can take advantage of the existing infra for the other
-// hooks (like calling the _call_hooks endpoint). I suppose a more adequate
-// name would be PyFunctionTensorPostAccGradHooks but let's follow the
-// precedent set by the hooks above (e.g., PyFunctionPreHook).
-struct PyFunctionTensorPostAccGradHook : public PostAccumulateGradHook {
-  PyFunctionTensorPostAccGradHook(PyObject* dict);
-  ~PyFunctionTensorPostAccGradHook() override;
+// PyFunctionTensorPostAccGradHooks is a dictionary of PostAccumulateGradHooks,
+// and it is understandable if you are confused by why it's a subclass. We are
+// simply following the precedent of PyFunctionPreHook and PyFunctionPostHook
+// above to easily enroll into existing infrastructure.
+struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
+  PyFunctionTensorPostAccGradHooks(PyObject* dict);
+  ~PyFunctionTensorPostAccGradHooks() override;
   void operator()(const Variable& tensor) override;
   // fall back to the compiled_args of PostAccumulateGradHook superclass
   PyObject* dict;
