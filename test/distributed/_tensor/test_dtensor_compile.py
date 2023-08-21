@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -137,6 +138,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(compiled_out, out)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_tp_compile(self):
         data_parallel_size = 2
         model = SimpleModel(self.device_type)
