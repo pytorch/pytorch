@@ -126,7 +126,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), {"b": torch.tensor(5.0)}
+            func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
     @pytorch_test_common.xfail(
@@ -150,6 +150,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+        onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
         onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
         ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
         ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
@@ -499,7 +500,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
-            # additional_test_inputs=[((y,),)],
+            # additional_test_inputs=[((y,),)],  # TODO: Without `additional_test_inputs` arg, dynamic shape cannot be verified
+            skip_dynamic_shapes_check=True,  # Has static shape for dynamic_shapes=True due to 0/1 specialization
         )
 
     def test_flatten_dynamic_axes(self):
@@ -564,7 +566,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, [], inputs, additional_test_inputs=[((), another_inputs)]
+            model,
+            [],
+            input_kwargs=inputs,
+            additional_test_inputs=[((), another_inputs)],
         )
 
     def test_prims_device_put(self):
@@ -652,8 +657,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     export_options=export_options,
                 )
-
                 onnx_model = export_output.model_proto
+
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -872,6 +878,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     fake_model, *fake_args, **fake_kwargs, export_options=export_options
                 )
 
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
+
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 export_output.save(
                     tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
@@ -982,6 +990,40 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.xfail(
+        "ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB"
+        "[ONNXRuntimeError] : Status Message: Indices vs updates dimensions differs at position=1 0 vs 3"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
+    )
+    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
+        "HF Bloom model does not need `model.load_state_dict` to work."
+    )
+    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
+        model_name = "bigscience/bloom-560m"
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs(model_name=model_name):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            return tokenizer("Hello world!", return_tensors="pt")
+
+        def create_model():
+            return AutoModel.from_pretrained(model_name)
+
+        self._test_fake_tensor_mode_exporter(
+            model_name.replace("/", "_"),
             create_model,
             create_args,
             create_kwargs,
