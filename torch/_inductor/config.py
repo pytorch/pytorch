@@ -167,8 +167,16 @@ debug_index_asserts = False
 
 # Provides a way to toggle the enforcement of NHWC fallbacks for convolutions
 # this is necessary if they are less performant
-if torch.version.hip and "MI200" in torch.cuda.get_device_name: 
-    conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "0") == "1"
+if torch.version.hip:
+    try:
+        gpu_name = torch.cuda.get_device_name(0)
+    except:
+        gpu_name = None
+
+    if "MI2" in gpu_name:
+        conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "0") == "1"
+    else:
+        conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
 else:
     conv_force_channels_last = os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
 
