@@ -1169,6 +1169,40 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(state_dict["net2.0.bias"], state_dict["net3.0.bias"])
             self.assertEqual(state_dict["net2.0.weight"], state_dict["net3.0.weight"])
 
+    @skip_if_lt_x_gpu(2)
+    def test_sharded_load_multi_backend_pg(self):
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        fsdp_kwargs = {
+            "auto_wrap_policy": auto_wrap_policy,
+            "use_orig_params": True,
+        }
+        for load_cpu in [True, False]:
+            with self.subTest(load_cpu=load_cpu):
+                pg = dist.new_group(backend="cpu:gloo,cuda:nccl")
+                fsdp_model = TransformerWithSharedParams.init(
+                    pg,
+                    FSDPInitMode.RECURSIVE,
+                    CUDAInitMode.CUDA_BEFORE,
+                    fsdp_kwargs,
+                )
+                FSDP.set_state_dict_type(fsdp_model, StateDictType.SHARDED_STATE_DICT)
+                sharded = fsdp_model.state_dict()
+                param_copy = [t.clone().detach_() for t in fsdp_model.parameters()]
+                with torch.no_grad():
+                    for p in fsdp_model.parameters():
+                        p.zero_()
+
+                if load_cpu:
+                    # Offload to CPU to simulate CPU state_dict load
+                    for k, v in sharded.items():
+                        sharded[k] = v.cpu()
+
+                fsdp_model.load_state_dict(sharded)
+                for p1, p2 in zip(param_copy, fsdp_model.parameters()):
+                    self.assertEqual(p1, p2, f"not equal: {p1.sum()} vs {p2.sum()}")
+
 
 instantiate_parametrized_tests(TestFSDPStateDict)
 
