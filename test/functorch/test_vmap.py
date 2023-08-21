@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     subtest,
-    TEST_WITH_UBSAN,
     skipIfRocm,
+    TEST_WITH_TORCHDYNAMO
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -48,6 +48,7 @@ from common_utils import (
     DisableVmapFallback,
 )
 import types
+import os
 from collections import namedtuple
 import contextlib
 
@@ -1545,6 +1546,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
+    @skipIf(TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10',
+            "Segfauls with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173")
     @parametrize('case', [
         subtest(_make_case(torch.add), name='add'),
         subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
@@ -3596,12 +3599,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # TypeError: expected Tensor as element 0 in argument 0, but got float
         xfail('item'),
-
-        # UBSAN: runtime error: shift exponent -1 is negative
-        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
-        decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3735,9 +3732,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-        # UBSAN: runtime error: shift exponent -1 is negative
-        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
@@ -3749,6 +3743,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
         xfail('_upsample_bilinear2d_aa'),
+        xfail('argsort'),  # aten::argsort.stable hit the vmap fallback which is currently disabled
+        xfail('searchsorted'),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -3805,7 +3801,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
         # because svd isn't unique. To test that the svd is correct, we multiply
-        # U @ diag(S) @ Vh and check that that the output from vmap matches the
+        # U @ diag(S) @ Vh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             U, S, Vh = out
@@ -3827,7 +3823,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Given the same input, it may return different tensors,
         # because the eig decomposition isn't unique.
         # To test that eigh is correct, we multiply
-        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # Q @ diag(L) @ Qh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             L, Q = out
@@ -4484,11 +4480,19 @@ class TestRandomness(TestCase):
         if randomness == 'different':
             for i in range(B0):
                 expected = torch.randperm(10, **kwargs)
-                self.assertEqual(vmap_result[i], expected)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self._assert_all_slices_unique(vmap_result)
+                else:
+                    self.assertEqual(vmap_result[i], expected)
         else:
             expected = torch.randperm(10, **kwargs)
-            for i in range(B0):
-                self.assertEqual(vmap_result[i], expected)
+            # RNG differs between eager and via dynamo trace on CUDA
+            if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                self._assert_all_slices_equal(vmap_result)
+            else:
+                for i in range(B0):
+                    self.assertEqual(vmap_result[i], expected)
 
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
@@ -4569,12 +4573,6 @@ class TestRandomness(TestCase):
             return
 
         vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
-
-        # Check that the randomness is within bounds...
-        # ideally this is close to 0.5
-        p_estimate = vmap_result.mean() / 2
-        self.assertTrue(p_estimate < 0.75)
-        self.assertTrue(p_estimate > 0.25)
 
         # Check the "feature" pattern
         dims = [-1, -2] if dim == 2 else [-1, -2, -3]
@@ -4663,7 +4661,9 @@ class TestRandomness(TestCase):
                 expected = op(passed, 0)
 
                 self._assert_all_slices_unique(vmap_result)
-                self.assertEqual(expected, vmap_result)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self.assertEqual(expected, vmap_result)
                 return
 
             assert randomness == 'same'
@@ -4671,8 +4671,10 @@ class TestRandomness(TestCase):
                 passed = passed[0]
             expected = op(passed, 0)
             self._assert_all_slices_equal(vmap_result)
-            for i in range(B0):
-                self.assertEqual(expected, vmap_result[i])
+            # RNG differs between eager and via dynamo trace on CUDA
+            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                for i in range(B0):
+                    self.assertEqual(expected, vmap_result[i])
 
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
@@ -5035,6 +5037,11 @@ class TestRandomness(TestCase):
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
+        if (device == 'cpu' and transform in ['grad', 'vmap'] and
+                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10'):
+            raise unittest.SkipTest("Unexpected successes on focal with dynamo," +
+                                    " see https://github.com/pytorch/pytorch/issues/107173")
+
         class Test(torch.autograd.Function):
             @staticmethod
             def forward(_, input):

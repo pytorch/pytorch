@@ -148,6 +148,18 @@ except ImportError as e:
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPU  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCUDA  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
 
 if __name__ == '__main__':
     run_tests()

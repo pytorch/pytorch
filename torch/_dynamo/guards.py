@@ -39,7 +39,8 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
-from torch.utils.weak import WeakIdRef
+from torch.utils._traceback import report_compile_source_on_error
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -50,7 +51,6 @@ from .utils import (
     dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
-    HAS_NUMPY,
     is_guard_failure_reporting_enabled,
     istype,
     np,
@@ -86,6 +86,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
+        ("__as_tensor", torch.as_tensor),
     ]
 )
 
@@ -266,6 +267,11 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
 
+    def DATA_PTR_MATCH(self, guard: Guard):
+        obj = self.get(guard.name)
+        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
+        self._produce_guard_code(guard, [code])
+
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
         assert m, f"invalid hasattr check {guard.name}"
@@ -285,21 +291,17 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         np_types = (
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-                np.float16,
-                np.float32,
-                np.float64,
-            )
-            if HAS_NUMPY
-            else ()
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+            np.float16,
+            np.float32,
+            np.float64,
         )
         ok_types = (
             int,
@@ -574,12 +576,16 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard):
+    def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            value = self.get(guard.name)
+            if isinstance(value, TensorWeakRef):
+                value = value()
+
+            value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
+
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
@@ -607,15 +613,18 @@ class GuardBuilder(GuardBuilderBase):
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
-                    "device.type",
-                    "device.index",
+                    "device",
                     "requires_grad",
                     "ndimension()",
                 ]
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
-                    code.append(f"{tensor_name}.{term} == {real_value}")
+                    if istype(real_value, (torch.device, torch.dtype)):
+                        # copy pasted from EQUALS_MATCH
+                        code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
+                    else:
+                        code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
@@ -832,7 +841,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List["ReferenceType[object]"] = []
+        self._weakrefs: List[ReferenceType[object]] = []
         self._seen_ids: Set[int] = set()
         self.output_graph = output_graph
 
@@ -902,10 +911,6 @@ class CheckFunctionManager:
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
-        verbose_code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        )
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -958,11 +963,10 @@ class CheckFunctionManager:
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
-            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_args = ", ".join(
+            tensor_check_args = ", ".join(
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
-            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+            code_parts.append(f"___check_tensors({tensor_check_args})")
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -975,12 +979,10 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
-                verbose_code_parts.append(code_part)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
         closure_vars = collections.OrderedDict(
@@ -999,7 +1001,7 @@ class CheckFunctionManager:
         guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", guard_body)
+            print("GUARDS\n", guard_body)
 
         if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
@@ -1015,9 +1017,10 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
-        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {"G": global_builder.scope["G"]}
+        guard_fn.global_scope = {
+            "G": global_builder.scope["G"],
+        }
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
@@ -1099,11 +1102,15 @@ def guard_fail_hook(
         return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
+    scope["___check_tensors"] = scope["___check_tensors_verbose"]
     reason = None
-    for part in guard_fn.verbose_code_parts:
-        fail_reason = eval(part, guard_fn.global_scope, scope)
-        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
-        # is updated to return a string explaining the failure.
+    for part in guard_fn.code_parts:
+        global_scope = dict(guard_fn.global_scope)
+        global_scope["__compile_source__"] = part
+        with report_compile_source_on_error():
+            fail_reason = eval(part, global_scope, scope)
+        # Only ___check_tensors knows how to return a fancy fail reason;
+        # for everything else we just report the code that failed
         if isinstance(fail_reason, str):
             reason = fail_reason
             break

@@ -15,7 +15,7 @@ def is_sparse(A):
 
     error_str = "expected Tensor"
     if not torch.jit.is_scripting():
-        error_str += " but got {}".format(type(A))
+        error_str += f" but got {type(A)}"
     raise TypeError(error_str)
 
 
