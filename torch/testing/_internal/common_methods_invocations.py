@@ -6274,14 +6274,12 @@ def skips_mvlgamma(skip_redundant=False):
     skips = (
         # outside domain values are hard error for mvlgamma op.
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_float_domains'),
-        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
-                     'test_reference_numerics_extremal'),
-        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
-                     'test_reference_numerics_large',
-                     dtypes=(torch.float16, torch.int8)),
-        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
-                     'test_reference_numerics_small',
-                     dtypes=(torch.int8,)),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
     )
     if skip_redundant:
         # Redundant tests
@@ -15685,7 +15683,12 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-                   ),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
@@ -15706,7 +15709,12 @@ op_db: List[OpInfo] = [
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
-                   ),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -15727,7 +15735,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -15748,7 +15762,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -15770,7 +15790,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                                    dtypes=[torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
