@@ -11,15 +11,11 @@ from os.path import join, isdir, isfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_dir", type=str, required=True)
-parser.add_argument("--model_type", type=str, required=True)
+parser.add_argument("--model_type", type=int, required=True)
 parser.add_argument("--output_dir", type=str, required=True)
 parser.add_argument("--train", type=float, default=0.8)
 parser.add_argument("--pairwise-threshold", type=float, default=10)
 parser.add_argument("--seed", type=int, default=0)
-
-kernel_counter = 0
-config_counter = 0
-seen_kernels = set()
 
 
 def get_baseline_config_num(logpath: str) -> int:
@@ -33,12 +29,14 @@ def get_baseline_config_num(logpath: str) -> int:
 
 def main(args):
     data_dir = args.data_dir
-    model_type = args.model_type
+    model_type = ModelType(args.model_type)
     output_dir = args.output_dir
     train_split = args.train
     assert 0 <= train_split <= 1
 
     autotuner_model = AutotunerModel(model_type)
+    kernel_counter = 0
+    seen_kernels = set()
 
     X_all = list()
     y_all = list()
@@ -74,17 +72,19 @@ def main(args):
                 if kernel_name in seen_kernels:
                     continue
 
+                seen_kernels.add(kernel_name)
                 log_path = join(kernel_path, kernel_name + ".log")
                 pkl_path = join(kernel_path, py + ".pkl")
                 all_config_path = join(kernel_path, kernel_name + ".all_config")
 
                 ## Sanith check, make sure log, pkl, and all_config exist
-                assert isfile(log_path)
-                assert isfile(pkl_path)
-                assert isfile(all_config_path)
+                assert isfile(log_path), log_path
+                assert isfile(pkl_path), pkl_path
+                assert isfile(all_config_path), all_config_path
 
                 # Read the raw data
                 autotuner_raw_data = pickle.load(open(pkl_path, "rb"))
+                src_code = autotuner_raw_data.src_code
 
                 ## Sanity check, making sure the metadata is correct
                 src_code = src_code.replace("KERNEL_NAME", "triton_")
@@ -113,8 +113,8 @@ def main(args):
                         num_stages = config.pop("num_stages")
                         timing = config.pop("timing")
                         config.pop("n_regs")
-                        config.pop("n_shared")
-                        config.pop("n_bspills")
+                        config.pop("shared")
+                        config.pop("n_spills")
                         config_list.append(
                             Config(
                                 kwargs=config,
