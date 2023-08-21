@@ -286,14 +286,6 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
-    @graph_module.setter
-    def graph_module(self, gm: torch.fx.GraphModule) -> None:
-        """
-        Set the underlying ``GraphModule`` for this ``ExportedProgram``.
-        """
-        assert isinstance(gm, torch.fx.GraphModule), f'Expected a GraphModule instance, but got {type(gm)}'
-        self._graph_module = gm
-
     @property
     @compatibility(is_backward_compatible=True)
     def graph(self):
@@ -409,13 +401,39 @@ class ExportedProgram:
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
+
+        def _get_updated_range_constraints(
+            gm: torch.fx.GraphModule,
+        ) -> Dict[sympy.Symbol, RangeConstraint]:
+            def get_shape_env(gm):
+                vals = [
+                    node.meta["val"]
+                    for node in gm.graph.nodes
+                    if node.meta.get("val", None) is not None
+                ]
+                from torch._guards import detect_fake_mode
+                fake_mode = detect_fake_mode(vals)
+                if fake_mode is not None:
+                    return fake_mode.shape_env
+                for v in vals:
+                    if isinstance(v, torch.SymInt):
+                        return v.node.shape_env
+
+            shape_env = get_shape_env(gm)
+            if shape_env is None:
+                return {}
+            range_constraints = {
+                k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+            }
+            return range_constraints
+
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
             copy.deepcopy(self.graph_signature),
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            copy.deepcopy(self.range_constraints),
+            _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
         )

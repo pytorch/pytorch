@@ -196,13 +196,7 @@ def set_tensor_metadata(tensor, metadata):
 
 
 def _rebuild_tensor_v2(
-    storage,
-    storage_offset,
-    size,
-    stride,
-    requires_grad,
-    backward_hooks,
-    metadata=None,
+    storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad

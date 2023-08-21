@@ -196,12 +196,13 @@ void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
   }
 }
 
-PyFunctionTensorPostAccGradHook::PyFunctionTensorPostAccGradHook(PyObject* dict)
+PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
+    PyObject* dict)
     : dict(dict) {
   Py_INCREF(dict);
 }
 
-PyFunctionTensorPostAccGradHook::~PyFunctionTensorPostAccGradHook() {
+PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
@@ -209,7 +210,7 @@ PyFunctionTensorPostAccGradHook::~PyFunctionTensorPostAccGradHook() {
   }
 }
 
-auto PyFunctionTensorPostAccGradHook::operator()(const Variable& tensor)
+auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
     -> void {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr tup(PyTuple_New(1));
