@@ -2451,6 +2451,31 @@ def forward(self, x):
                 aten_graph=True,
             )(x)
 
+    def test_trivial_constraint(self):
+        def foo(x):
+            # non-trivial divisibility condition
+            if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
+                return x + 1
+            else:
+                return x - 1
+
+        def bar(x):
+            # trivially true
+            if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn(12)
+        constraints = [dynamic_dim(x, 0) <= 100]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Some dynamic dimensions need to be specialized.*too complex to specify",
+        ):
+            torch._export.export(foo, (x,), constraints=constraints)
+
+        torch._export.export(bar, (x,), constraints=constraints)
+
     def test_list_contains(self):
         def func(x):
             assert x.size(-1) in [4, 5, 6], "bad"
