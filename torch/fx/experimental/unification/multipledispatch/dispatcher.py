@@ -205,9 +205,9 @@ class Dispatcher:
             if not isinstance(typ, (type, list)):
                 str_sig = ', '.join(c.__name__ if isinstance(c, type)
                                     else str(c) for c in signature)
-                raise TypeError("Tried to dispatch on non-type: {}\n"
-                                "In signature: <{}>\n"
-                                "In function: {}".format(typ, str_sig, self.name))
+                raise TypeError(f"Tried to dispatch on non-type: {typ}\n"
+                                f"In signature: <{str_sig}>\n"
+                                f"In function: {self.name}")
 
             # handle variadic signatures
             if isinstance(typ, list):
@@ -272,11 +272,10 @@ class Dispatcher:
 
             raise NotImplementedError(
                 "Matching functions for "
-                "{}: <{}> found, but none completed successfully".format(
-                    self.name, str_signature(types),),) from e
+                f"{self.name}: <{str_signature(types)}> found, but none completed successfully",) from e
 
     def __str__(self):
-        return "<dispatched %s>" % self.name
+        return f"<dispatched {self.name}>"
     __repr__ = __str__
 
     def dispatch(self, *types):
@@ -339,7 +338,7 @@ class Dispatcher:
 
     @property
     def __doc__(self):
-        docs = ["Multiply dispatched method: %s" % self.name]
+        docs = [f"Multiply dispatched method: {self.name}"]
 
         if self.doc:
             docs.append(self.doc)
@@ -348,7 +347,7 @@ class Dispatcher:
         for sig in self.ordering[::-1]:
             func = self.funcs[sig]
             if func.__doc__:
-                s = 'Inputs: <%s>\n' % str_signature(sig)
+                s = f'Inputs: <{str_signature(sig)}>\n'
                 s += '-' * len(s) + '\n'
                 s += func.__doc__.strip()
                 docs.append(s)
@@ -379,7 +378,7 @@ class Dispatcher:
 
 
 def source(func):
-    s = 'File: %s\n\n' % inspect.getsourcefile(func)
+    s = f'File: {inspect.getsourcefile(func)}\n\n'
     s = s + inspect.getsource(func)
     return s
 
@@ -420,12 +419,12 @@ def str_signature(sig):
 
 def warning_text(name, amb):
     """ The text for ambiguity warnings """
-    text = "\nAmbiguities exist in dispatched function %s\n\n" % (name)
+    text = f"\nAmbiguities exist in dispatched function {name}\n\n"
     text += "The following signatures may result in ambiguous behavior:\n"
     for pair in amb:
         text += "\t" + \
                 ', '.join('[' + str_signature(s) + ']' for s in pair) + "\n"
     text += "\n\nConsider making the following additions:\n\n"
     text += '\n\n'.join(['@dispatch(' + str_signature(super_signature(s))
-                         + ')\ndef %s(...)' % name for s in amb])
+                         + f')\ndef {name}(...)' for s in amb])
     return text

@@ -36,6 +36,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten.copy_.default,
     _ops.aten.sym_constrain_range.default,
+    _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}
@@ -82,7 +83,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     # torch.Tensor.{fn}
-    if isinstance(func, types.MethodDescriptorType) and func is getattr(torch.Tensor, func.__name__, None):
+    if (isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
+       and func is getattr(torch.Tensor, func.__name__, None)):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     module = _find_module_of_method(func)
@@ -198,7 +200,7 @@ class Node:
         # would appear once here, but represents two uses.
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
-        self.users : Dict['Node', None] = {}
+        self.users : Dict[Node, None] = {}
         # Type expression representing the output value of this node.
         # This should contain the same class of Type objects that would appear
         # as type annotations for function inputs/outputs.

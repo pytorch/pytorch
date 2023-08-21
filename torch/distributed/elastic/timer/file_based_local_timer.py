@@ -234,7 +234,7 @@ class FileTimerServer:
         now = time.time()
         reaped_worker_pids = set()
         for worker_pid, expired_timers in self.get_expired_timers(now).items():
-            log.info("Reaping worker_pid=[%s]." " Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
+            log.info("Reaping worker_pid=[%s]. Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
             reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer
             # with a valid signal (>0) in the expiration time order.

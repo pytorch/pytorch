@@ -11,6 +11,7 @@ import functools
 import gc
 import inspect
 import itertools
+import linecache
 import logging
 import math
 import operator
@@ -24,39 +25,26 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
+
+import numpy as np
 
 import torch._logging
+import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
+from torch._logging import LazyString
 from . import config
 
-try:
-    import numpy as np
 
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
+# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-try:
-    import torch_np
-
-    HAS_NUMPY_TORCH_INTEROP = True
-except ModuleNotFoundError:
-    torch_np = None
-    HAS_NUMPY_TORCH_INTEROP = False
-
-if HAS_NUMPY:
-    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
-    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
-
-if HAS_NUMPY_TORCH_INTEROP:
-    NP_TO_TORCH_NP_MODULE = {
-        np: torch_np,
-        np.fft: torch_np.fft,
-        np.linalg: torch_np.linalg,
-        np.random: torch_np.random,
-    }
+NP_TO_TNP_MODULE = {
+    np: tnp,
+    np.fft: tnp.fft,
+    np.linalg: tnp.linalg,
+    np.random: tnp.random,
+}
 
 import importlib
 
@@ -76,8 +64,11 @@ nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
-# profiling compilation time
-compilation_metrics = collections.OrderedDict()
+# profiling compilation time by function
+compilation_time_metrics = collections.OrderedDict()
+
+# profiling compilation time by frame phase
+frame_phase_timing = collections.OrderedDict()
 
 timer_counter = itertools.count()
 
@@ -114,8 +105,6 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-frame_phase_timing = collections.OrderedDict()
-
 curr_frame = 0
 
 
@@ -129,6 +118,7 @@ def increment_frame():
 def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
+    compilation_time_metrics.clear()
     curr_frame = 0
 
 
@@ -148,7 +138,7 @@ def increment_op_count(cnt):
 def print_time_report():
     total = 0
     total_by_key = {}
-    for frame, timings in frame_phase_timing.items():
+    for timings in frame_phase_timing.values():
         for key, timing in timings.items():
             total += timing
             if key not in total_by_key:
@@ -164,7 +154,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
@@ -184,14 +174,13 @@ def dynamo_timed(original_function=None, phase_name=None):
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
+            if key not in compilation_time_metrics:
+                compilation_time_metrics[key] = []
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(time_spent)
+            compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
@@ -230,8 +219,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_metrics
+            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_time_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -239,9 +228,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-            for v in compilation_metrics.values()
+            for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_metrics.keys())
+        headers = list(compilation_time_metrics.keys())
         return headers, values
 
 
@@ -417,43 +406,34 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
 
 
 def is_numpy_float_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.float16,
-                np.float32,
-                np.float64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
 
 
 def is_numpy_ndarray(value):
-    if HAS_NUMPY:
-        return istype(value, np.ndarray)
-    else:
-        return False
+    return istype(value, np.ndarray)
 
 
 def istensor(obj):
@@ -499,6 +479,22 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         ) from e
+
+
+@dataclasses.dataclass
+class CompilationMetrics:
+    frame_key: str
+    co_name: str
+    co_filename: str
+    co_firstlineno: int
+    cache_size: int
+    guard_count: Optional[int]
+    graph_op_count: Optional[int]
+    graph_node_count: Optional[int]
+    graph_input_count: Optional[int]
+    entire_frame_compile_time_s: Optional[float]
+    backend_compile_time_s: Optional[float]
+    fail_reason: Optional[str]
 
 
 @dataclasses.dataclass
@@ -1525,23 +1521,13 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if type(tensor) is torch.nn.Parameter:
+    if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
-    if guard_source.is_nn_module():
-        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
-
-
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
 
 
 def lazy_format_graph_code(name, gm, maybe_id=None):
@@ -1600,12 +1586,13 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
-def nnmodule_has_hooks(
+def nn_module_get_all_hooks(
     mod,
     check_forward_hooks=False,
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
+    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -1622,12 +1609,38 @@ def nnmodule_has_hooks(
         hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
         hook_dicts_to_check.extend(state_dict_hook_names)
-    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+    all_hooks = []
+    for hook_dict_name in hook_dicts_to_check:
+        hooks = getattr(mod, hook_dict_name, [])
+        for hook_name in hooks:
+            hook = hooks[hook_name]
+
+            all_hooks.append(hook)
+    return all_hooks
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Helper function to check if a module has any hooks attached to it.
+    """
+    hooks = nn_module_get_all_hooks(
+        mod,
+        check_forward_hooks=check_forward_hooks,
+        check_backward_hooks=check_backward_hooks,
+        check_state_dict_hooks=check_state_dict_hooks,
+    )
+    return bool(hooks)
 
 
 def to_numpy_helper(value):
-    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
         return value.cpu().numpy()
@@ -1638,8 +1651,10 @@ def to_numpy_helper(value):
 
 
 def numpy_to_tensor(value):
-    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, np.ndarray):
+        return torch.as_tensor(value)
+    if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):
         return type(value)(numpy_to_tensor(obj) for obj in value)
@@ -1661,16 +1676,16 @@ class numpy_to_tensor_wrapper:
 
 
 def numpy_attr_wrapper(obj, name):
-    if isinstance(obj, torch_np.ndarray):
+    if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
     elif isinstance(obj, torch.Tensor):
-        out = getattr(torch_np.ndarray(obj), name)
+        out = getattr(tnp.ndarray(obj), name)
         return numpy_to_tensor(out)
 
 
 class numpy_method_wrapper:
-    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+    """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
     def __init__(self, method: str):
         self.method = method
@@ -1682,7 +1697,7 @@ class numpy_method_wrapper:
     def __call__(self, *args, **kwargs):
         obj = args[0]
         if isinstance(obj, torch.Tensor):
-            obj = torch_np.ndarray(obj)
+            obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
         return numpy_to_tensor(out)
@@ -1756,8 +1771,269 @@ def is_compile_supported(device_type):
     return compile_supported
 
 
+# The following 3.11 source code functions are adapted from
+# https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
+# in order to output source code corresponding to bytecode in 3.11+.
+# We need our own versions since we want to support multiline expressions.
+def _fix_offset(str: str, offset: int) -> int:
+    """
+    Convert byte offset `offset` of `str` into character offset.
+    Byte offset is used for 3.11+ instruction column data.
+    Takes things like unicode characters into consideration.
+
+    Unchanged from CPython implementation.
+    """
+    as_utf8 = str.encode("utf-8")
+    return len(as_utf8[:offset].decode("utf-8", errors="replace"))
+
+
+@dataclasses.dataclass
+class _Anchors:
+    # inclusive
+    left_end_lineno: int
+    left_end_offset: int
+    right_start_lineno: int
+    # exclusive
+    right_start_offset: int
+
+
+def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
+    """
+    Given source code `segment` corresponding to a bytecode
+    instruction, determine:
+        - for binary ops, the location of the binary op
+        - for indexing, the location of the brackets.
+    `segment` is expected to be a valid Python expression
+    """
+    assert sys.version_info >= (3, 11)
+
+    import ast
+
+    try:
+        # Without brackets, `segment` is parsed as a statement.
+        # We expect an expression, so wrap `segment` in
+        # brackets to handle multi-line expressions.
+        tree = ast.parse("(\n" + segment + "\n)")
+    except SyntaxError:
+        return None
+
+    if len(tree.body) != 1:
+        return None
+
+    lines = segment.split("\n")
+
+    # get character index given byte offset
+    def normalize(lineno, offset):
+        return _fix_offset(lines[lineno], offset)
+
+    # Gets the next valid character index in `lines`, if
+    # the current location is not valid. Handles empty lines.
+    def next_valid_char(lineno, col):
+        while lineno < len(lines) and col >= len(lines[lineno]):
+            col = 0
+            lineno += 1
+        assert lineno < len(lines) and col < len(lines[lineno])
+        return lineno, col
+
+    # Get the next valid character index in `lines`.
+    def increment(lineno, col):
+        col += 1
+        lineno, col = next_valid_char(lineno, col)
+        assert lineno < len(lines) and col < len(lines[lineno])
+        return lineno, col
+
+    # Get the next valid character at least on the next line
+    def nextline(lineno, col):
+        col = 0
+        lineno += 1
+        lineno, col = next_valid_char(lineno, col)
+        assert lineno < len(lines) and col < len(lines[lineno])
+        return lineno, col
+
+    statement = tree.body[0]
+    if isinstance(statement, ast.Expr):
+        expr = statement.value
+        if isinstance(expr, ast.BinOp):
+            # ast gives locations for BinOp subexpressions, e.g.
+            # ( left_expr ) + ( right_expr )
+            #   left^^^^^       right^^^^^
+            # -2 since end_lineno is 1-indexed and because we added an extra
+            # bracket to `segment` when calling ast.parse
+            cur_lineno = expr.left.end_lineno - 2
+            cur_col = normalize(cur_lineno, expr.left.end_col_offset)
+            cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
+
+            # Heuristic to find the operator character.
+            # The original CPython implementation did not look for ), \, or #,
+            # leading to incorrect anchor location, e.g.
+            # (x) + (y)
+            # ~~^~~~~~~
+            while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
+                if ch in "\\#":
+                    cur_lineno, cur_col = nextline(cur_lineno, cur_col)
+                else:
+                    cur_lineno, cur_col = increment(cur_lineno, cur_col)
+
+            # binary op is 1 or 2 characters long, on the same line
+            right_col = cur_col + 1
+            if (
+                right_col < len(lines[cur_lineno])
+                and not (ch := lines[cur_lineno][right_col]).isspace()
+                and ch not in "\\#"
+            ):
+                right_col += 1
+            # right_col can be invalid since it is exclusive
+
+            return _Anchors(cur_lineno, cur_col, cur_lineno, right_col)
+        elif isinstance(expr, ast.Subscript):
+            # ast gives locations for value and slice subexpressions, e.g.
+            # ( value_expr ) [ slice_expr ]
+            #   value^^^^^     slice^^^^^
+            # subscript^^^^^^^^^^^^^^^^^^^^
+            # find left bracket (first '[' after value)
+            left_lineno = expr.value.end_lineno - 2
+            left_col = normalize(left_lineno, expr.value.end_col_offset)
+            left_lineno, left_col = next_valid_char(left_lineno, left_col)
+            while lines[left_lineno][left_col] != "[":
+                left_lineno, left_col = increment(left_lineno, left_col)
+            # find right bracket (final character of expression)
+            right_lineno = expr.end_lineno - 2
+            right_col = normalize(right_lineno, expr.end_col_offset)
+            return _Anchors(left_lineno, left_col, right_lineno, right_col)
+        elif isinstance(expr, ast.Call):
+            # ( func_expr ) (args, kwargs)
+            #   func^^^^^
+            # call^^^^^^^^^^^^^^^^^^^^^^^^
+            # find left bracket (first '(' after func)
+            left_lineno = expr.func.end_lineno - 2
+            left_col = normalize(left_lineno, expr.func.end_col_offset)
+            left_lineno, left_col = next_valid_char(left_lineno, left_col)
+            while lines[left_lineno][left_col] != "(":
+                left_lineno, left_col = increment(left_lineno, left_col)
+            # find right bracket (final character of expression)
+            right_lineno = expr.end_lineno - 2
+            right_col = normalize(right_lineno, expr.end_col_offset)
+            return _Anchors(left_lineno, left_col, right_lineno, right_col)
+
+    return None
+
+
+def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+    """
+    Python 3.11+ only. Returns lines of source code (from code object `code`)
+    corresponding to `inst`'s location data, and underlines relevant code to `inst`.
+
+    Example: CALL on `g`:
+    f(g(
+      ^^
+        h(x)))
+        ^^^^^
+
+    We need our own implementation since `format_frame_summary` in
+    Python's `traceback` module doesn't handle multi-line expressions
+    (and their anchor extraction code is not completely correct).
+    """
+    if inst.positions.lineno is None:
+        return ""
+    # The rstrip + "\n" pattern is used throughout this function to handle
+    # linecache.getline errors. Error lines are treated as empty strings "", but we want
+    # to treat them as blank lines "\n".
+    first_line = linecache.getline(code.co_filename, inst.positions.lineno).rstrip()
+    if inst.positions.end_lineno is None:
+        return first_line
+    if inst.positions.col_offset is None or inst.positions.end_col_offset is None:
+        return first_line
+
+    # character index of the start of the instruction
+    start_offset = _fix_offset(first_line, inst.positions.col_offset)
+    # character index of the end of the instruction
+    # compute later since end may be a different line
+    end_offset = None
+    # expression corresponding to the instruction so we can get anchors
+    segment = ""
+    # underline markers to be printed - start with `~` marker and replace with `^` later
+    markers = []
+
+    # Compute segment and initial markers
+    if inst.positions.end_lineno == inst.positions.lineno:
+        end_offset = _fix_offset(first_line, inst.positions.end_col_offset)
+        segment = first_line[start_offset:end_offset]
+        markers.append(" " * start_offset + "~" * (end_offset - start_offset))
+    else:
+        segment = first_line[start_offset:] + "\n"
+        markers.append(" " * start_offset + "~" * (len(first_line) - start_offset))
+        last_line = linecache.getline(
+            code.co_filename, inst.positions.end_lineno
+        ).rstrip()
+        end_offset = _fix_offset(last_line, inst.positions.end_col_offset)
+        for lineno in range(inst.positions.lineno + 1, inst.positions.end_lineno):
+            line = linecache.getline(code.co_filename, lineno).rstrip()
+            segment += line + "\n"
+            # don't underline leading spaces
+            num_spaces = len(line) - len(line.lstrip())
+            markers.append(" " * num_spaces + "~" * (len(line) - num_spaces))
+        segment += last_line[:end_offset]
+        num_spaces = len(last_line) - len(last_line.lstrip())
+        markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
+
+    anchors: Optional[_Anchors] = None
+    try:
+        anchors = _extract_anchors_from_expr(segment)
+    except AssertionError:
+        pass
+
+    # replace `~` markers with `^` where necessary
+    if anchors is None:
+        markers = [marker.replace("~", "^") for marker in markers]
+    else:
+        # make markers mutable
+        markers = [list(marker) for marker in markers]
+
+        # anchor positions do not take start_offset into account
+        if anchors.left_end_lineno == 0:
+            anchors.left_end_offset += start_offset
+        if anchors.right_start_lineno == 0:
+            anchors.right_start_offset += start_offset
+
+        # Turn `~`` markers between anchors to `^`
+        for line in range(len(markers)):
+            for col in range(len(markers[line])):
+                if line < anchors.left_end_lineno:
+                    continue
+                if line == anchors.left_end_lineno and col < anchors.left_end_offset:
+                    continue
+                if (
+                    line == anchors.right_start_lineno
+                    and col >= anchors.right_start_offset
+                ):
+                    continue
+                if line > anchors.right_start_lineno:
+                    continue
+                if markers[line][col] == "~":
+                    markers[line][col] = "^"
+
+        # make markers into strings again
+        markers = ["".join(marker) for marker in markers]
+
+    result = ""
+    for i in range(len(markers)):
+        result += (
+            linecache.getline(code.co_filename, inst.positions.lineno + i).rstrip()
+            + "\n"
+        )
+        result += markers[i] + "\n"
+    return result
+
+
 def is_guard_failure_reporting_enabled():
     return (
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
+
+
+def get_static_address_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None

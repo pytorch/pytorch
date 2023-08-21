@@ -52,7 +52,7 @@ from torch.distributed.fsdp.flat_param import (
     FlatParamHandle,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _FSDPPolicy
+from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -78,10 +78,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -97,9 +97,10 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
-    policy: Optional[_FSDPPolicy],
+    policy: Optional[_Policy],
 ) -> _FSDPState:
-    if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+    is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
+    if is_hybrid_strategy:
         if process_group is None and policy is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
@@ -107,16 +108,24 @@ def _init_process_group_state(
             raise ValueError(
                 f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
             )
-        else:
-            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+        state = _init_process_group_state_for_hybrid_shard(state, process_group)
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
         )
-
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
-
+    data_parallel_world_size = state.world_size
+    if is_hybrid_strategy:
+        data_parallel_world_size *= state._inter_node_pg.size()
+    state._gradient_predivide_factor = (
+        default_hooks.DefaultState._get_gradient_predivide_factor(
+            data_parallel_world_size
+        )
+    )
+    state._gradient_postdivide_factor = (
+        data_parallel_world_size / state._gradient_predivide_factor
+    )
     return state
 
 
@@ -264,6 +273,10 @@ def _init_ignored_module_states(
         module,
         state._ignored_modules,
         ignored_parameters,
+    )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -433,12 +446,9 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
-    state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
-    state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
-    state._hook_registered = False
+    state._comm_hook = None
+    state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 
@@ -450,14 +460,6 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
-    _handles_prefetched: Dict[FlatParamHandle, bool] = {}
-    state._handles_prefetched = _handles_prefetched
-    # Used for guarding against mistargeted backward prefetches
-    _needs_pre_backward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_backward_unshard = _needs_pre_backward_unshard
-    # Used for guarding against mistargeted forward prefetches
-    _needs_pre_forward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_forward_unshard = _needs_pre_forward_unshard
     # The data structures use tuples of handles to generalize over the case
     # where a module's forward involves multiple handles.
     return state
@@ -635,6 +637,37 @@ def _get_ignored_params(
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
+
+
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """
+    Returns the cleaned buffer FQNs in ``ignored_modules``
+    """
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:

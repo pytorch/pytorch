@@ -126,15 +126,13 @@ class ATenDialectVerifier(Verifier):
             )
 
         if (
-            torch.Tag.core not in op.tags  # type: ignore[attr-defined]
-            and torch.Tag.view_copy not in op.tags  # type: ignore[attr-defined]
+            torch.Tag.core not in op.tags
+            and torch.Tag.view_copy not in op.tags
         ):
             # NOTE(qihan): whether view_copy operators are marked as canonical is still under
             #            discussion.
             raise SpecViolationError(
-                "Operator {}.{} is not Aten Canonical.".format(
-                    op.__module__, op.__name__
-                )
+                f"Operator {op.__module__}.{op.__name__} is not Aten Canonical."
             )
 
     @compatibility(is_backward_compatible=False)

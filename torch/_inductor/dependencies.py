@@ -69,6 +69,10 @@ class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
 
+    @property
+    def index(self):
+        raise NotImplementedError("StarDep does not have an index")
+
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
             return StarDep(renames[self.name])
@@ -94,6 +98,10 @@ class StarDep(typing.NamedTuple):
 # B must be ordered after A
 class WeakDep(typing.NamedTuple):
     name: str
+
+    @property
+    def index(self):
+        raise NotImplementedError("WeakDep does not have an index")
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
@@ -153,6 +161,19 @@ class ReadWrites:
         else:
             op_counts = other.op_counts
         return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
+
+    @staticmethod
+    def merge_list(read_writes: List["ReadWrites"]):
+        all_writes = set.union(*[rw.writes for rw in read_writes])
+        all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
+        all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
+
+        op_counts = collections.Counter()
+        for rw in read_writes:
+            if rw.op_counts is not None:
+                op_counts.update(rw.op_counts)
+
+        return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
