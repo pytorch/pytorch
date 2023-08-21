@@ -181,6 +181,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["debug"] = (
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
+        compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
             triton.compile(

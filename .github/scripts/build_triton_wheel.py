@@ -137,6 +137,7 @@ def build_triton(
         )
 
         if build_rocm:
+            print(f"rocm_nightly_version:\t{nightly_rocm_version}")
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
 
         check_call(
@@ -147,7 +148,7 @@ def build_triton(
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
-            check_call(".github/scripts/fix_so.sh", cwd=triton_basedir, shell=True)
+            check_call("scripts/amd/fix_so.sh", cwd=triton_basedir, shell=True)
 
         return Path.cwd() / whl_path.name
 
@@ -158,6 +159,7 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
+    parser.add_argument("--nightly_rocm_version", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
