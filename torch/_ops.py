@@ -646,10 +646,8 @@ class OpOverloadPacket:
             # an object name different from the one the attribute
             # query was performed on.
             raise AttributeError(
-                "'{}' can't have an overload name beginning with '__' and the "
-                "underlying op {} has no attribute {} either.".format(
-                    str(self), str(self._op), key
-                )
+                f"'{str(self)}' can't have an overload name beginning with '__' and the "
+                f"underlying op {str(self._op)} has no attribute {key} either."
             ) from None
 
         try:
