@@ -1,26 +1,31 @@
 from dataclasses import dataclass
+
 import torch
-from torch.multiprocessing.reductions import StorageWeakRef
 
 import torch.utils._pytree as pytree
 
-from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
-from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
+from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._dynamo.exc import CondOpArgsMismatchError
+from torch._functorch.eager_transforms import (
+    _unwrap_all_tensors_from_functional,
+    _wrap_all_tensors_to_functional,
+    functionalize,
+)
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
     make_fx,
+    ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch.utils._pytree import tree_flatten
-from torch._dynamo.exc import CondOpArgsMismatchError
 
 
 @dataclass
@@ -32,11 +37,16 @@ class UnsupportedAliasMutationException(RuntimeError):
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-cond = HigherOrderOperator("cond", _deprecated_global_ns=True)
+cond = HigherOrderOperator("cond")
+
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
-    assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
+    assert isinstance(
+        operands, (list, tuple)
+    ), "Cond operands must be a list or tuple of tensors"
+    assert all(
+        isinstance(o, torch.Tensor) for o in operands
+    ), "Cond operands must be a list of tensors"
 
     with disable_proxy_modes_tracing():
         true_graph = make_fx(true_fn)(*operands)
@@ -45,11 +55,11 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     true_outs = []
     false_outs = []
     for node in true_graph.graph.nodes:
-        if node.op == 'output':
+        if node.op == "output":
             true_outs.extend(node.args)
 
     for node in false_graph.graph.nodes:
-        if node.op == 'output':
+        if node.op == "output":
             false_outs.extend(node.args)
 
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
@@ -64,7 +74,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
+        if true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]:
             raise CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
@@ -85,7 +95,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     true_name = next_name
     false_name = f"false_graph_{i}"
-    assert(not hasattr(proxy_mode.tracer.root, false_name))
+    assert not hasattr(proxy_mode.tracer.root, false_name)
 
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
@@ -94,8 +104,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
-    out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
-                                               name="conditional")
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function", func_overload, proxy_args, {}, name="conditional"
+    )
 
     # At this point, we're *guaranteed* that whether an output came from the
     # true or false branch is indistinguishable. So, as this is just for tracing
@@ -112,51 +123,20 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 @cond.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
-    assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
+    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
         return true_fn(*operands)
     else:
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.Autograd)
-def cond_autograd(pred, true_fn, false_fn, *operands):
-    # TODO: support autograd
-    flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
-
-    requires_grad = any(
-        isinstance(arg, torch.Tensor) and arg.requires_grad
-        for arg in flat_operands
-    )
-
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
-        result = cond(pred, true_fn, false_fn, *operands)
-
-        # If there is requires_grad, we delay the error until backward pass
-        if requires_grad:
-            # cond can only return one value
-            err_fn = torch._C._functions.DelayedError(
-                b"NYI: torch.cond doesn't support autograd",
-                1,
-            )
-            # Create aliases of the output that has requires_grad=True. We need
-            # at least one of the inputs to err_fn to require grad so that the
-            # output will have a grad_fn.
-
-            def fake_requires_grad(var):
-                if var is not None:
-                    var = var.detach()
-                    var.requires_grad = True
-                return var
-            return err_fn(fake_requires_grad(result))
-
-        return result
+cond.py_impl(DispatchKey.Autograd)(autograd_not_implemented(cond, deferred_error=True))
 
 
 @cond.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
-    assert (mode is not None), "Mode should always be enabled for python fallback key"
+    assert mode is not None, "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
             return trace_cond(mode, cond, pred, true_fn, false_fn, operands)
@@ -177,7 +157,8 @@ def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
             raise RuntimeError(
-                f"Unmatched tensor metadata from cond() branches.\ntrue branch: {true_meta}, false branch: {false_meta}")
+                f"Unmatched tensor metadata from cond() branches.\ntrue branch: {true_meta}, false branch: {false_meta}"
+            )
     return true_outs
 
 
@@ -203,7 +184,10 @@ def _has_potential_branch_input_mutation(branch, inputs):
                 input_nodes.add(node)
             if node.op == "call_function":
                 target = node.target
-                if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+                if (
+                    isinstance(target, torch._ops.OpOverload)
+                    and target._schema.is_mutable
+                ):
                     for arg in node.args:
                         if arg in input_nodes:
                             return True
@@ -241,13 +225,15 @@ def _has_potential_branch_input_alias(branch, inputs):
             # for map operator, where num_mapped_args is a scalar
             # and doesn't have a "val" meta.
             if node.op == "placeholder" and "val" in node.meta:
-                input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
+                input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
             if node.op == "output":
+
                 def check_alias(out):
                     if out is not None and "val" in out.meta:
-                        out_storage = StorageWeakRef(out.meta['val']._typed_storage())
+                        out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
                         return out_storage in input_storages
                     return False
+
                 if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
                     return True
 
@@ -263,22 +249,30 @@ def _has_potential_branch_input_alias(branch, inputs):
 @cond.py_impl(DispatchKey.Functionalize)
 def cond_func(pred, true_fn, false_fn, inputs):
     reapply_views = torch._C._functionalization_reapply_views_tls()
-    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
-    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
-    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(
+        inputs, reapply_views=reapply_views
+    )
+    unwrapped_pred = _unwrap_all_tensors_from_functional(
+        pred, reapply_views=reapply_views
+    )
+    mode = "mutations_and_views" if reapply_views else "mutations"
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         functional_true = functionalize(true_fn, remove=mode)
         functional_false = functionalize(false_fn, remove=mode)
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                        "might be modifying the input!")
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch " "might be modifying the input!"
+                )
 
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                        "might be aliasing the input!")
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch " "might be aliasing the input!"
+                )
 
-        cond_return = cond(unwrapped_pred, functional_true, functional_false, unwrapped_inputs)
+        cond_return = cond(
+            unwrapped_pred, functional_true, functional_false, unwrapped_inputs
+        )
         return _wrap_all_tensors_to_functional(cond_return, level=0)
 
 
@@ -290,10 +284,14 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
       2. Our check for above condition is not exhaustive
     """
     reapply_views = interpreter.functionalize_add_back_views()
-    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    mode = "mutations_and_views" if reapply_views else "mutations"
     # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
-    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(
+        inputs, reapply_views=reapply_views
+    )
+    unwrapped_pred = _unwrap_all_tensors_from_functional(
+        pred, reapply_views=reapply_views
+    )
 
     functional_true_fn = functionalize(true_fn, remove=mode)
     functional_false_fn = functionalize(false_fn, remove=mode)
@@ -301,15 +299,20 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
     with interpreter.lower():
         for branch in [functional_true_fn, functional_false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                        "might be modifying the input!")
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch " "might be modifying the input!"
+                )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                        "might be aliasing the input!")
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch " "might be aliasing the input!"
+                )
 
-        cond_return = cond(unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs)
+        cond_return = cond(
+            unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs
+        )
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
+
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
 cond.fallthrough(DispatchKey.PythonDispatcher)

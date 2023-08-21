@@ -1,100 +1,37 @@
+import operator
 from functools import partial
 from typing import Dict, Optional
 
-import sympy
-
 import torch
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody
-from .utils import cache_on_self, dominated_nodes, sympy_subs
+from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
-
-
-def get_expr_range(expr, vars_ranges: dict):
-    free_symbols = list(expr.free_symbols)
-    if len(free_symbols) == 0:
-        return ValueRanges(expr, expr)
-
-    def replace_symbols_for_deriv(expr):
-        # for the purposes of finding local, minimum, maximum, assume smoothness
-        def mod_indexing_rep(x, y, z):
-            if z.is_constant():
-                return x / y
-
-            # never really happens, we'll bail on optimizing
-            return (x / y) % z
-
-        def indexing_div_rep(x, y):
-            return x / y
-
-        return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-            FloorDiv, indexing_div_rep
-        )
-
-    symbols = expr.free_symbols
-    monotonic_increasing = []
-    monotonic_decreasing = []
-    other_symbols = []
-
-    expr_for_deriv = replace_symbols_for_deriv(expr)
-    for symbol in symbols:
-        diff = sympy.diff(expr_for_deriv, symbol)
-        if diff.is_positive:
-            monotonic_increasing.append(symbol)
-        elif diff.is_positive is False:  # can return None
-            monotonic_decreasing.append(symbol)
-        else:
-            # If diff_free_symbols only one symbol and it is the same as symbol,
-            # If this symbol's lower and upper bounds are the same, then it is constant.
-            # Add it to monotonic_increasing or monotonic_decreasing is ok.
-            diff_free_symbols = list(diff.free_symbols)
-            if (
-                len(diff_free_symbols) == 1
-                and symbol in diff_free_symbols
-                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
-            ):
-                monotonic_increasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-    if not other_symbols:
-        max_val = sympy_subs(
-            expr,
-            {
-                k: (v.upper if k in monotonic_increasing else v.lower)
-                for k, v in vars_ranges.items()
-            },
-        )
-        min_val = sympy_subs(
-            expr,
-            {
-                k: (v.lower if k in monotonic_increasing else v.upper)
-                for k, v in vars_ranges.items()
-            },
-        )
-        return ValueRanges(min_val, max_val)
-    else:
-        # bail on optimizing, have not run into this yet
-        return ValueRanges(-math.inf, math.inf)
 
 
 class BoundVars:
     """
     Performs Value Range Analysis on LoopBody's fx graph by calling BoundVars.run()
     It exposes the ranges of the nodes in the `bounds` variable
+
+    Note. A current limitation of this analysis is that it just works on a per-loop basis.
+    We should be able to propagate the bounds between across the whole graph. This may benefit
+    the case a bounded variable is returned by a kernel and fed into another.
     """
 
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v) for k, v in loop_body.var_ranges.items()
+            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
+            for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
             node
             for node in self.loop_body.get_nodes()
-            if node.target in ["load", "reduction"] or "masked_subblock" in node.target
+            if node.target in ["load", "reduction", operator.getitem]
+            or "masked_subblock" in node.target
         )
         # To access this variable call `get_bounds()`
         self._bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = {}
@@ -106,7 +43,7 @@ class BoundVars:
         # Initialize the environment with the unbounded variables
         for node in self.unbounded_vars:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
-            if (
+            if not isinstance(node.target, str) or (
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
             ):
@@ -155,9 +92,10 @@ class BoundVars:
     def get_index(self, name):
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
-        if bound is not None:
-            return bound
-
-        bound = self.get_expr_range(expr, self.replacement_vals)
+        if bound is None:
+            bound = bound_sympy(expr, self.replacement_vals)
+        # The following assertion is true at the time of this writing
+        # We don't assert is as to not execute bound_sympy when bound is not None
+        # assert bound is None or bound == bound_sympy(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound

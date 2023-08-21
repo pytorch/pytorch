@@ -174,6 +174,8 @@ class SocketImpl {
     return hnd_;
   }
 
+  bool waitForInput(std::chrono::milliseconds timeout);
+
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
@@ -396,6 +398,14 @@ bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
   auto buf = value ? 1 : 0;
 #endif
   return setSocketOption(hnd_, level, optname, &buf, sizeof(buf)) == 0;
+}
+
+bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
+  ::pollfd pfd{};
+  pfd.fd = hnd_;
+  pfd.events = POLLIN;
+
+  return pollFd(&pfd, 1, static_cast<int>(timeout.count())) > 0;
 }
 
 namespace {
@@ -982,6 +992,10 @@ std::uint16_t Socket::port() const {
 
 Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
     : impl_{std::move(impl)} {}
+
+bool Socket::waitForInput(std::chrono::milliseconds timeout) {
+  return impl_->waitForInput(timeout);
+}
 
 } // namespace detail
 

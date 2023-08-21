@@ -3,6 +3,7 @@ import contextlib
 import itertools
 
 import torch
+from torch._dynamo import config as dynamo_config
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
@@ -48,7 +49,7 @@ binary_list = {
 
 
 @config.patch({"freezing": True})
-class TestPaternMatcher(TestCase):
+class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
         return not any(
             isinstance(unary_fn, fn)
@@ -106,6 +107,8 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
+
+class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
@@ -188,6 +191,23 @@ class TestPaternMatcher(TestCase):
                 self._test_common(
                     mod, (v,), matcher_count, matcher_nodes, check_autocast=True
                 )
+
+    def test_linear_fp32(self):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 30, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        for bias in [True, False]:
+            mod = M(bias=bias).eval()
+            v = torch.randn(2, 10)
+            # packing pass.
+            matcher_count = 1
+            matcher_nodes = 1
+            self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
@@ -304,9 +324,36 @@ class TestPaternMatcher(TestCase):
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                self._test_common(
-                    mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
-                )
+                mod_c = torch.compile(mod)
+                out, code = run_and_get_code(mod_c, v, other)
+                self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
+                # TODO - assert fusions work code
+
+    def test_multi_linear_share_same_input(self):
+        # llama pattern.
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.w1 = torch.nn.Linear(16, 16, bias=False)
+                self.w2 = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+
+        mod = M().to(torch.bfloat16).eval()
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            # 1. view(match_count=4, match_nodes=4).
+            # 2. mm to packed linear(match_count=2, match_nodes=2).
+            # 3. view+linear+view to linear(match_count=2, match_nodes=6).
+            # 4. linear+silu fusion(match_count=1, match_nodes=5)
+            # 5. linear+relu fusion(match_count=1, match_nodes=2)
+
+            match_count = 10
+            match_nodes = 19
+            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
@@ -354,7 +401,7 @@ class TestPaternMatcher(TestCase):
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
                 )
@@ -456,7 +503,7 @@ class TestPaternMatcher(TestCase):
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
             def __init__(self):
-                super(Model2, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -470,7 +517,7 @@ class TestPaternMatcher(TestCase):
         # we can't do the fusion when add's inputs are mixed dtype.
         class Model3(torch.nn.Module):
             def __init__(self):
-                super(Model3, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -506,7 +553,7 @@ class TestPaternMatcher(TestCase):
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
             def forward(self, input_tensor):
@@ -518,6 +565,54 @@ class TestPaternMatcher(TestCase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+
+@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
+    test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
+    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+
+    def test_conv_transpose2d_dynamic_shapes(self):
+        # We don't support conv_transpose2d for now.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    3, 16, 3, stride=2, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose2d(x)
+
+        x_shape = (1, 3, 28, 28)
+        mod = M().eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        self._test_common(mod, (v,), 0, 0)
+
+    def test_multi_linear_share_same_input_dynamic(self):
+        # llama pattern.
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.w1 = torch.nn.Linear(16, 16, bias=False)
+                self.w2 = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+
+        mod = M().to(torch.bfloat16).eval()
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            # 1. view(match_count=4, match_nodes=4).
+            # 2. mm to packed linear(match_count=2, match_nodes=2).
+            # 3. view+linear+view to linear(match_count=2, match_nodes=6).
+
+            match_count = 8
+            match_nodes = 12
+            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":
