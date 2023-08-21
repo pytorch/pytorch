@@ -2421,11 +2421,13 @@ class TritonScheduling:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        src_code = partial_code.finalize()
-        node_schedule = [template_node, *epilogue_nodes]
-        kernel_name = self.define_kernel(src_code, node_schedule)
+        with V.set_kernel_handler(kernel):
+            src_code = partial_code.finalize()
+            node_schedule = [template_node, *epilogue_nodes]
+            kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
