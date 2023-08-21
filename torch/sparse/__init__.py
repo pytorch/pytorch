@@ -523,6 +523,7 @@ def as_sparse_gradcheck(gradcheck):
                 if obj.layout is torch.sparse_coo:
                     obj = obj.coalesce()
                     indices, values = obj.indices(), obj.values()
+                    d.update(is_coalesced=obj.is_coalesced())
                     if masked:
                         d.update(indices=indices)
                         return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
@@ -597,10 +598,7 @@ def as_sparse_gradcheck(gradcheck):
             representation.
             """
             if d['layout'] is torch.sparse_coo:
-                # TODO: After fixing gh-107097, apply
-                # `._coalesced_(d['original'].is_coalesced())` to the
-                # returned tensor.
-                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape'])
+                return torch.sparse_coo_tensor(d['indices'], values, d['shape'], d['is_coalesced'])
             elif d['layout'] in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
                 dense_dim = d['original'].dense_dim()
                 batch_dim = d['compressed_indices'].ndim - 1

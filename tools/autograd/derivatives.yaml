@@ -1873,7 +1873,8 @@
   self: sparse_mask_backward(grad, mask, self.layout())
   mask: non_differentiable
 
-- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, bool is_coalesced, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+  indices: non_differentiable
   values: grad.sparse_mask(result)._values()
 
 - name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
@@ -3058,13 +3059,16 @@
 - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
   other: div_tensor_other_backward(grads[i], self[i], other[i])
+  result: (self_t - other_t * result[i]) / other_p
 
 - name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   self: pow_backward_self(grads[i], self[i], exponent[i])
   exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
+  result: (pow_backward_self(self_t.conj(), self_p, exponent_p) + pow_backward_exponent(exponent_t.conj(), self_p, exponent_p, result[i])).conj()
 
 - name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
   self: pow_backward(grads[i], self[i], exponent[i])
+  result: pow_backward(self_t.conj(), self_p, exponent[i]).conj()
 
 - name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
   exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
@@ -3073,12 +3077,22 @@
 # of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.
 - name: _foreach_minimum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] > scalar, 0)
+  result: scalar + at::where(self_p == scalar, at::scalar_tensor(0.5, result[i].options()), (self_p < scalar).to(result[i].scalar_type())) * (self_t - scalar)
 
 - name: _foreach_minimum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > scalars[i], 0)
+  result: scalars[i] + at::where(self_p == scalars[i], at::scalar_tensor(0.5, result[i].options()), (self_p < scalars[i]).to(result[i].scalar_type())) * (self_t - scalars[i])
 
 - name: _foreach_maximum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] < scalar, 0)
+  result: scalar + at::where(self_p == scalar, at::scalar_tensor(0.5, result[i].options()), (self_p > scalar).to(result[i].scalar_type())) * (self_t - scalar)
 
 - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
+  result: scalars[i] + at::where(self_p == scalars[i], at::scalar_tensor(0.5, result[i].options()), (self_p > scalars[i]).to(result[i].scalar_type())) * (self_t - scalars[i])
+
+# note(crcrpar): forward-mode AD is tricky for a simple string replace to handle:
+#   formula.replace("p", "ord") produces `norm_jvord(self_ord, self_t, ord, result)`
+- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2) -> Tensor[]
+  self: norm_backward(grads[i], self[i], ord, result[i])
+  result: norm_jvp(self_p, self_t, ord, result[i])
