@@ -18,7 +18,11 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    is_fake,
+    is_fakified_functional_tensor,
+)
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -1243,7 +1247,9 @@ def wrap_fx_proxy_cls(
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not (
+                isinstance(value, FakeTensor) or is_fakified_functional_tensor(value)
+            ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
