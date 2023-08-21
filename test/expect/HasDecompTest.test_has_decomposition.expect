@@ -1177,6 +1177,8 @@ aten::sort
 aten::sort.stable
 aten::sort.values
 aten::sort.values_stable
+aten::sparse_compressed_tensor.comp_plain_value
+aten::sparse_compressed_tensor.comp_plain_value_size
 aten::sparse_coo_tensor.size
 aten::sparse_coo_tensor.size_out
 aten::sparse_dim

@@ -117,7 +117,7 @@ def empty_permuted(size, physical_layout, **kwargs):
     return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
-@register_decomposition([aten.convolution_backward])
+@register_decomposition([aten.convolution_backward.default])
 def convolution_backward(
     grad_output,
     input,
