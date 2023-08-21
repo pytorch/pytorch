@@ -1,5 +1,3 @@
-import contextlib
-
 import torch
 
 from . import _dtypes
@@ -14,7 +12,3 @@ def iinfo(dtyp):
     torch_dtype = _dtypes.dtype(dtyp).torch_dtype
     return torch.iinfo(torch_dtype)
 
-
-@contextlib.contextmanager
-def errstate(*args, **kwds):
-    yield

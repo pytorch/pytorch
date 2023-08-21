@@ -552,7 +552,6 @@ class TestSeterr:
         )
 
     def test_set(self):
-        with np.errstate():
             err = np.seterr()
             old = np.seterr(divide="print")
             assert_(err == old)
@@ -567,7 +566,6 @@ class TestSeterr:
     @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     @pytest.mark.skipif(platform.machine() == "armv5tel", reason="See gh-413.")
     def test_divide_err(self):
-        with np.errstate(divide="raise"):
             with assert_raises(FloatingPointError):
                 np.array([1.0]) / np.array([0.0])
 
@@ -581,10 +579,9 @@ class TestSeterr:
         try:
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
-                with np.errstate(divide="warn"):
-                    np.seterrobj([20000, 1, None])
-                    np.array([1.0]) / np.array([0.0])
-                    assert_equal(len(w), 1)
+                np.seterrobj([20000, 1, None])
+                np.array([1.0]) / np.array([0.0])
+                assert_equal(len(w), 1)
 
             def log_err(*args):
                 self.called += 1
@@ -592,14 +589,12 @@ class TestSeterr:
                 assert_(len(extobj_err) == 2)
                 assert_("divide" in extobj_err[0])
 
-            with np.errstate(divide="ignore"):
-                np.seterrobj([20000, 3, log_err])
-                np.array([1.0]) / np.array([0.0])
+            np.seterrobj([20000, 3, log_err])
+            np.array([1.0]) / np.array([0.0])
             assert_equal(self.called, 1)
 
             np.seterrobj(olderrobj)
-            with np.errstate(divide="ignore"):
-                np.divide(1.0, 0.0, extobj=[20000, 3, log_err])
+            np.divide(1.0, 0.0, extobj=[20000, 3, log_err])
             assert_equal(self.called, 2)
         finally:
             np.seterrobj(olderrobj)
@@ -652,7 +647,6 @@ class TestFloatExceptions:
     @pytest.mark.parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
-        with np.errstate(all="raise"):
             ftype = np.obj2sctype(typecode)
             if np.dtype(ftype).kind == "f":
                 # Get some extreme values for the type
@@ -706,8 +700,7 @@ class TestFloatExceptions:
     def test_warnings(self):
         # test warning code path
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            with np.errstate(all="warn"):
+                warnings.simplefilter("always")
                 np.divide(1, 0.0)
                 assert_equal(len(w), 1)
                 assert_("divide by zero" in str(w[0].message))
@@ -2315,8 +2308,7 @@ class TestLikeFuncs:
         self.check_like_function(np.full_like, 1000, True)
         self.check_like_function(np.full_like, 123.456, True)
         # Inf to integer casts cause invalid-value errors: ignore them.
-        with np.errstate(invalid="ignore"):
-            self.check_like_function(np.full_like, np.inf, True)
+        self.check_like_function(np.full_like, np.inf, True)
 
     @pytest.mark.parametrize(
         "likefunc", [np.empty_like, np.full_like, np.zeros_like, np.ones_like]

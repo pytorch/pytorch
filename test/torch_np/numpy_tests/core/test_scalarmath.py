@@ -399,7 +399,6 @@ class TestModulus:
 class TestComplexDivision:
     @pytest.mark.skip(reason="With pytorch, 1/(0+0j) is nan + nan*j, not inf + nan*j")
     def test_zero_division(self):
-        with np.errstate(all="ignore"):
             for t in [np.complex64, np.complex128]:
                 a = t(0.0)
                 b = t(1.0)
@@ -416,7 +415,6 @@ class TestComplexDivision:
                 assert_(np.isnan(b / a))
 
     def test_signed_zeros(self):
-        with np.errstate(all="ignore"):
             for t in [np.complex64, np.complex128]:
                 # tupled (numerator, denominator, expected)
                 # for testing as expected == numerator/denominator
@@ -441,7 +439,6 @@ class TestComplexDivision:
                     assert_equal(result.imag, ex[1])
 
     def test_branches(self):
-        with np.errstate(all="ignore"):
             for t in [np.complex64, np.complex128]:
                 # tupled (numerator, denominator, expected)
                 # for testing as expected == numerator/denominator

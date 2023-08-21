@@ -471,7 +471,6 @@ class TestNanFunctions_NumberTypes:
     nanfunc_ids = [i.__name__ for i in nanfuncs]
 
     @pytest.mark.parametrize("nanfunc,func", nanfuncs.items(), ids=nanfunc_ids)
-    @np.errstate(over="ignore")
     def test_nanfunc(self, mat, dtype, nanfunc, func):
         mat = mat.astype(dtype)
         tgt = func(mat)
