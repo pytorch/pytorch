@@ -28,7 +28,10 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-
+from torch.testing._internal.opinfo.refs import (
+    ElementwiseBinaryPythonRefInfo,
+    ReductionPythonRefInfo
+)
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -38,9 +41,14 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_bsc)
 
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
 
-binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
+reduction_ops_with_sparse_support = [
+    op for op in reduction_ops if 'masked.' not in op.name and
+    _op_supports_any_sparse(op) and not isinstance(op, ReductionPythonRefInfo)]
+
+binary_ufuncs_with_sparse_support = [
+    op for op in binary_ufuncs if _op_supports_any_sparse(op) and
+    not isinstance(op, ElementwiseBinaryPythonRefInfo)]
 
 like_fns_with_sparse_support = [op for op in op_db if _op_supports_any_sparse(op) and '_like' in op.name]
 
@@ -472,6 +480,27 @@ class TestSparse(TestSparseBase):
         self.assertRaises(
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
+
+    @coalescedonoff
+    @dtypes(torch.double)
+    def test_ctor_is_coalesced_with_gradcheck(self, device, dtype, coalesced):
+        for sparse_size, nnz in (((3, 3), 5), ((2, 3, 1, 5), 11)):
+            t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size, dtype, device, coalesced)
+            self.assertEqual(t.is_coalesced(), coalesced)
+
+            def func(indices, values, shape, is_coalesced):
+                s = torch.sparse_coo_tensor(indices, values, shape, is_coalesced, check_invariants=True)
+                self.assertEqual(s.is_coalesced(), is_coalesced)
+                return s.to_dense(masked_grad=False)
+
+            if coalesced:
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
+            else:
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
+                with self.assertRaisesRegex(RuntimeError,
+                                            "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
+                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")

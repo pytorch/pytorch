@@ -1117,6 +1117,18 @@ Tensor sparse_coo_tensor_ctor(
     ARG_CHECK_INVARIANTS2,
     ARGS_COUNT2
   };
+  enum {
+    ARG_INDICES3 = 0,
+    ARG_VALUES3,
+    ARG_SIZE3,
+    ARG_IS_COALESCED3,
+    ARG_TYPE3,
+    ARG_DEVICE3,
+    ARG_REQUIRES_GRAD3,
+    ARG_CHECK_INVARIANTS3,
+    ARGS_COUNT3
+  };
+
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
   bool default_check_invariants =
@@ -1199,6 +1211,40 @@ Tensor sparse_coo_tensor_ctor(
                r.intlist(ARG_SIZE2),
                inferred_options.dtype(inferred_scalar_type).layout(at::kSparse))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD2));
+  } else if (r.idx == 3) {
+    bool type_inference = r.isNone(ARG_TYPE3);
+    const auto inferred_options =
+        typeIdWithDefault(r, ARG_DEVICE3, dispatch_key);
+    const auto inferred_scalar_type =
+        r.scalartypeWithDefault(ARG_TYPE3, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE3));
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS3, default_check_invariants));
+
+    Tensor values = internal_new_from_data(
+        inferred_options,
+        inferred_scalar_type,
+        r.deviceOptional(ARG_DEVICE3),
+        r.pyobject(ARG_VALUES3),
+        /*copy_variables=*/false,
+        /*copy_numpy=*/true,
+        /*type_inference=*/type_inference);
+    // See Note [Ensuring sparse values and indices match devices]
+    Tensor indices = internal_new_from_data(
+        values.options(),
+        kLong,
+        r.deviceOptional(ARG_DEVICE3),
+        r.pyobject(ARG_INDICES3),
+        /*copy_variables=*/false,
+        /*copy_numpy=*/true,
+        /*type_inference=*/false);
+    return at::sparse_coo_tensor(
+               indices,
+               values,
+               r.intlist(ARG_SIZE3),
+               r.toBool(ARG_IS_COALESCED3),
+               values.options().layout(at::kSparse))
+        .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }

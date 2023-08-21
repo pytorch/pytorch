@@ -92,7 +92,8 @@ def validate_args_and_maybe_create_graph_inputs(
             new_arg = a
         else:
             raise unimplemented(
-                "HigherOrderOperator with body that accepts non-Tensors as input"
+                f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                f"Got: {a.python_type()}"
             )
 
         args.append(new_arg)
@@ -107,6 +108,7 @@ def speculate_subgraph(
     sub_kwargs,
     graph_checkpoint,
     checkpoint,
+    description,
     *,
     always_restore=False,
     enable_grad=False,
@@ -196,14 +198,20 @@ def speculate_subgraph(
                 )
 
     except Unsupported as ex:
-        log.warning(
-            "TorchDynamo tracing of HigherOrderOperator did not go well. "
-            "Falling back to eager behavior. This can result in a slowdown."
+        msg = (
+            f"speculate_subgraph: while introspecting {description}, we were unable "
+            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"that Dynamo was unable to prove safety for this API and will "
+            f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
+        log.warning(msg)
         log.exception(ex)
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
-        raise
+        raise Unsupported(
+            f"{msg} Scroll up for the stack trace "
+            f"of the initial exception. The reason was: {ex.msg}"
+        ) from ex
 
 
 def make_attr(tx, name):
@@ -375,7 +383,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             try:
                 # TODO: Support kwargs
                 ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
-                    tx, args[ix], operands, {}, graph_checkpoint, checkpoint
+                    tx,
+                    args[ix],
+                    operands,
+                    {},
+                    graph_checkpoint,
+                    checkpoint,
+                    "cond",
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
@@ -468,6 +482,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def non_single_tensor_return_unsupported(api, ret):
+    from . import TensorVariable
+
+    if not isinstance(ret, TensorVariable):
+        raise Unsupported(
+            f"{api} over function that returns something " f"other than one Tensor"
+        )
+
+
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -514,6 +537,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             tx.output.graph,
             checkpoint,
+            "torch.ops.higher_order.map",
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -531,6 +555,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
+        non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r.new_empty(
             [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
@@ -649,6 +674,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             graph_checkpoint,
             checkpoint,
+            "torch.func.grad",
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
         )
@@ -837,6 +863,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 graph_checkpoint,
                 checkpoint,
+                "torch.vmap",
             )
 
         body_name = add_subgraph(
@@ -886,14 +913,18 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
 
-        example_value = torch._functorch.vmap.vmap_impl(
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-            actual_in_dims,
-            out_dims.as_python_constant(),
-            randomness.value,
-            chunk_size.value,
-            *fake_batched_fn_args,
-        )
+        # NOTE: `body_graph` might have operators which
+        # will create new tensors. So it is required
+        # that we run `vmap` under FakeMode.
+        with tx.fake_mode:
+            example_value = torch._functorch.vmap.vmap_impl(
+                torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+                actual_in_dims,
+                out_dims.as_python_constant(),
+                randomness.value,
+                chunk_size.value,
+                *fake_batched_fn_args,
+            )
 
         # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
         proxy = vmap_proxy(*proxy_batched_fn_args)
@@ -941,6 +972,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             {},
             graph_checkpoint,
             checkpoint,
+            "the user-defined autograd.Function",
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
@@ -961,6 +993,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
+        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r
 
@@ -980,7 +1013,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def create_wrapped_node(self, tx, args, kwargs):
+    def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph
@@ -996,6 +1029,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             graph_checkpoint,
             checkpoint,
+            description,
             manually_set_subgraph_inputs=False,
         )
 
@@ -1026,7 +1060,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
+        p_args, p_kwargs, example_value = self.create_wrapped_node(
+            tx, args, kwargs, "wrap"
+        )
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -1084,7 +1120,9 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value = self.create_wrapped_node(tx, args, gmod_kwargs)
+        p_args, _, example_value = self.create_wrapped_node(
+            tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
+        )
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
