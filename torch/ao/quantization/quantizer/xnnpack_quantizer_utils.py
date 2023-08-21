@@ -1,27 +1,67 @@
 import itertools
 import operator
-from typing import Callable, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
+import torch.nn.functional as F
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.quantizer import QuantizationSpecBase, SharedQuantizationSpec
+from torch.ao.quantization.quantizer import (
+    QuantizationAnnotation,
+    QuantizationSpec,
+    QuantizationSpecBase,
+    SharedQuantizationSpec,
+)
 
-# TODO: move these to this file
 from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
     _is_sym_size_node,
     _node_only_used_for_sym_size,
-    get_bias_qspec,
-    get_input_act_qspec,
-    get_output_act_qspec,
-    get_weight_qspec,
 )
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
-# TODO: move QuantizationConfig here
-from .quantizer import QuantizationAnnotation, QuantizationConfig
+
+__all__ = [
+    "OperatorConfig",
+    "OperatorPatternType",
+    "QuantizationConfig",
+    "get_input_act_qspec",
+    "get_output_act_qspec",
+    "get_weight_qspec",
+    "get_bias_qspec",
+]
+
+
+# In the absence of better name, just winging it with QuantizationConfig
+@dataclass(eq=True, frozen=True)
+class QuantizationConfig:
+    input_activation: Optional[QuantizationSpec]
+    output_activation: Optional[QuantizationSpec]
+    weight: Optional[QuantizationSpec]
+    bias: Optional[QuantizationSpec]
+    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
+    is_qat: bool = False
+
+
+OperatorPatternType = List[Callable]
+OperatorPatternType.__module__ = (
+    "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
+)
+
+
+class OperatorConfig(NamedTuple):
+    # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
+    # Basically we are mapping a quantization config to some list of patterns.
+    # a pattern is defined as a list of nn module, function or builtin function names
+    # e.g. [nn.Conv2d, torch.relu, torch.add]
+    # We have not resolved whether fusion can be considered internal details of the
+    # quantizer hence it does not need communication to user.
+    # Note this pattern is not really informative since it does not really
+    # tell us the graph structure resulting from the list of ops.
+    config: QuantizationConfig
+    operators: List[OperatorPatternType]
 
 
 # make everything private for now
@@ -49,6 +89,62 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
             if "quantization_annotation" not in node.meta:
                 node.meta["quantization_annotation"] = QuantizationAnnotation()
             node.meta["quantization_annotation"]._annotated = True
+
+
+def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
+        return None
+    if quantization_config.input_activation is None:
+        return None
+    quantization_spec: QuantizationSpec = quantization_config.input_activation
+    assert quantization_spec.qscheme in [
+        torch.per_tensor_affine,
+        torch.per_tensor_symmetric,
+    ]
+    return quantization_spec
+
+
+def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
+        return None
+    if quantization_config.output_activation is None:
+        return None
+    quantization_spec: QuantizationSpec = quantization_config.output_activation
+    assert quantization_spec.qscheme in [
+        torch.per_tensor_affine,
+        torch.per_tensor_symmetric,
+    ]
+    return quantization_spec
+
+
+def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
+        return None
+    assert quantization_config is not None
+    if quantization_config.weight is None:
+        return None
+    quantization_spec: QuantizationSpec = quantization_config.weight
+    if quantization_spec.qscheme not in [
+        torch.per_tensor_symmetric,
+        torch.per_channel_symmetric,
+    ]:
+        raise ValueError(
+            f"Unsupported quantization_spec {quantization_spec} for weight"
+        )
+    return quantization_spec
+
+
+def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
+        return None
+    assert quantization_config is not None
+    if quantization_config.bias is None:
+        return None
+    quantization_spec: QuantizationSpec = quantization_config.bias
+    assert (
+        quantization_spec.dtype == torch.float
+    ), "Only float dtype for bias is supported for bias right now"
+    return quantization_spec
 
 
 def _annotate_linear(
@@ -378,7 +474,7 @@ def _annotate_gru_io_only(
         _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
 
-def _annotate_maxpool2d(
+def _annotate_max_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
@@ -419,6 +515,54 @@ def _annotate_maxpool2d(
             output_qspec=act_qspec,
             _annotated=True,
         )
+
+
+def _annotate_input_out_obs_sharing_op(
+    op: Callable,
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
+    partitions = list(itertools.chain(*module_partitions.values()))
+    for partition in partitions:
+        io_obs_sharing_node = partition.output_nodes[0]
+        if _is_annotated([io_obs_sharing_node]):
+            continue
+
+        input_act = io_obs_sharing_node.args[0]
+        assert isinstance(input_act, Node)
+
+        # only annotate input output sharing operator
+        # when the output of the input node is annotated
+        if (
+            "quantization_annotation" not in input_act.meta
+            or not input_act.meta["quantization_annotation"]._annotated
+            or input_act.meta["quantization_annotation"].output_qspec is None
+        ):
+            continue
+
+        act_qspec = SharedQuantizationSpec(input_act)
+        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                input_act: act_qspec,
+            },
+            output_qspec=act_qspec,
+            _annotated=True,
+        )
+
+
+def _annotate_adaptive_avg_pool2d(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    _annotate_input_out_obs_sharing_op(
+        torch.nn.AdaptiveAvgPool2d, gm, quantization_config, filter_fn
+    )
+    _annotate_input_out_obs_sharing_op(
+        F.adaptive_avg_pool2d, gm, quantization_config, filter_fn
+    )
 
 
 def _annotate_add_relu(
@@ -502,9 +646,10 @@ OP_TO_ANNOTATOR = {
     "conv2d_relu": _annotate_conv2d_relu,
     "conv2d_bn": _annotate_conv2d_bn,
     "conv2d_bn_relu": _annotate_conv2d_bn_relu,
-    "maxpool2d": _annotate_maxpool2d,
+    "max_pool2d": _annotate_max_pool2d,
     "add": _annotate_add,
     "add_relu": _annotate_add_relu,
+    "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,
 }

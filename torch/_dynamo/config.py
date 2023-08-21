@@ -242,9 +242,6 @@ report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
-numpy_ndarray_as_tensor = False
-
 # Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
@@ -253,6 +250,12 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+
+# Default NumPy dtypes when tracing with torch.compile
+# We default to 64bits. For efficiency, one may want to change these to float32
+numpy_default_float = "float64"
+numpy_default_complex = "complex128"
+numpy_default_int = "int64"
 
 
 def is_fbcode():
@@ -286,6 +289,11 @@ capture_func_transforms = True
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
+
+# wraps (un)equalities with 'Not' class after recording the correct expression
+# in the FX graph. This should incorrectly construct the divisible and replacement
+# lists, and incorrectly issue guards.
+inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
