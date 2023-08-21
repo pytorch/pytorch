@@ -78,9 +78,18 @@ def main(args):
                 all_config_path = join(kernel_path, kernel_name + ".all_config")
 
                 ## Sanith check, make sure log, pkl, and all_config exist
-                assert isfile(log_path), log_path
-                assert isfile(pkl_path), pkl_path
-                assert isfile(all_config_path), all_config_path
+                # assert isfile(log_path), log_path
+                # assert isfile(pkl_path), pkl_path
+                # assert isfile(all_config_path), all_config_path
+                if not isfile(log_path):
+                    print("Missing log file: " + log_path)
+                    continue
+                if not isfile(pkl_path):
+                    print("Missing pkl file: " + pkl_path)
+                    continue
+                if not isfile(all_config_path):
+                    print("Missing all_config file: " + all_config_path)
+                    continue
 
                 # Read the raw data
                 autotuner_raw_data = pickle.load(open(pkl_path, "rb"))

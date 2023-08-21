@@ -279,15 +279,16 @@ def dep_list(deps, strides, sizes, total_bytes, rw_lim, ndims_lim):
         zip(deps, strides, sizes, total_bytes), key=lambda x: x[-1], reverse=True
     )
     for dep, strides, sizes, bytes in rw_list[:rw_lim]:
+        isStarDepOrWeakDep = isinstance(dep, (StarDep, WeakDep))
         dep_feature = make_dep_feature(
             ndims_lim=ndims_lim,
-            StarDepOrWeakDep=isinstance(dep, (StarDep, WeakDep)),
+            StarDepOrWeakDep=isStarDepOrWeakDep,
             bytes=bytes,
             strides=strides,
             sizes=sizes,
-            is_contiguous=dep.is_contiguous(),
-            is_scalar=dep.is_scalar(),
-            is_indirect=dep.is_indirect(),
+            is_contiguous=dep.is_contiguous() if not isStarDepOrWeakDep else False,
+            is_scalar=dep.is_scalar() if not isStarDepOrWeakDep else False,
+            is_indirect=dep.is_indirect() if not isStarDepOrWeakDep else False,
         )
         if strides is not None and sizes is not None:
             assert len(strides) == len(sizes)
