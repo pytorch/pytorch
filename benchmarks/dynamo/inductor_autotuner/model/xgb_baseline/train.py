@@ -17,6 +17,7 @@ np.set_printoptions(edgeitems=30, linewidth=100000)
 
 def main(args):
     data_dir = args.data_dir
+    output_dir = args.output_dir
     full_train = args.full_train
 
     def load(file_name):
@@ -69,7 +70,7 @@ def main(args):
         print(y_test[qid_test == test_id][indices])
 
     # dump model
-    with open("xgb_baseline.pkl", "wb") as f:
+    with open(os.path.join(output_dir, "xgb_baseline.pkl"), "wb") as f:
         pickle.dump(autotuner, f)
 
 
