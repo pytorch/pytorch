@@ -342,9 +342,14 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
-    # dump the raw data for model-based autotuner training
+    # dump the raw kernel data for model-based autotuner training
     dump_autotuner_data = (
         os.environ.get("TORCHINDUCTOR_DUMP_AUTOTUNER_DATA", "0") == "1"
+    )
+    
+    # dump the configs explored for model-based autotuner training
+    dump_autotuner_config = (
+        os.environ.get("TORCHINDUCTOR_DUMP_AUTOTUNER_CONFIG", "0") == "1"
     )
 
     # The path to the autotuner model file
