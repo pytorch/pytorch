@@ -2687,7 +2687,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+            exported(torch.Tensor([5, 6, 7]))
 
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
