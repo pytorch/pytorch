@@ -318,7 +318,8 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         results = re.findall(pattern, version_string)
         if len(results) != 1:
             # Clang is also a supported compiler on Linux
-            return version_string.startswith('clang version')
+            # Though on Ubuntu it's sometimes called "Ubuntu clang version"
+            return 'clang version' in version_string
         compiler_path = os.path.realpath(results[0].strip())
         # On RHEL/CentOS c++ is a gcc compiler wrapper
         if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
@@ -1423,11 +1424,9 @@ def load_inline(name,
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append(
-                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
-                    .format(function_name, docstring))
+                module_def.append(f'm.def("{function_name}", torch::wrap_pybind_function({function_name}), "{docstring}");')
             else:
-                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
+                module_def.append(f'm.def("{function_name}", {function_name}, "{docstring}");')
         module_def.append('}')
         cpp_sources += module_def
 
@@ -1834,7 +1833,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             archs = []
     else:
         archs = _archs.replace(' ', ';').split(';')
-    flags = ['--offload-arch=%s' % arch for arch in archs]
+    flags = [f'--offload-arch={arch}' for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 

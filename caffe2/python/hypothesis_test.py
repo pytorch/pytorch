@@ -1,15 +1,16 @@
-import numpy as np
 import copy
-import time
-from functools import partial, reduce
-from hypothesis import assume, given, settings, HealthCheck
-import hypothesis.strategies as st
-import unittest
 import threading
+import time
+import unittest
+from functools import partial, reduce
 
-from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
 from caffe2.proto import caffe2_pb2
+
+from caffe2.python import core, dyndep, tt_core, workspace
+from hypothesis import assume, given, HealthCheck, settings
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -213,6 +214,7 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
+    @settings(suppress_health_check=[HealthCheck.too_slow])
     def test_div(self):
         def ref(x, y):
             return (x / y, )

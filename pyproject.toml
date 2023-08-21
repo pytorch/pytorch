@@ -31,7 +31,7 @@ ignore = [
     "B019", "B020",
     "B023", "B024", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
-    "B904", "B905",
+    "B904",
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
@@ -55,6 +55,8 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
+    "UP006", # keep-runtime-typing
+    "UP007", # keep-runtime-typing
 ]
 line-length = 120
 select = [
@@ -66,13 +68,25 @@ select = [
     "SIM1",
     "W",
     # Not included in flake8
+    "UP",
     "PERF",
+    "PGH004",
+    "PIE807",
+    "PIE810",
     "PLE",
+    "RUF017",
     "TRY302",
 ]
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
+"test/jit/**" = [
+    "UP", # We don't want to modify the jit test as they test specify syntax
+]
+"torch/onnx/**" = [
+    "UP037", # ONNX does runtime type checking
+]
+
 "torchgen/api/types/__init__.py" = [
     "F401",
     "F403",
@@ -80,4 +94,7 @@ select = [
 "torchgen/executorch/api/types/__init__.py" = [
     "F401",
     "F403",
+]
+"torch/utils/collect_env.py" = [
+    "UP", # collect_env.py needs to work with older versions of Python
 ]

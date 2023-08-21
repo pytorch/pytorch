@@ -7,13 +7,10 @@ from torch.fx import (
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-# TODO[jerryzh168]: move this to a more general util function
-from torch.ao.quantization.fx.prepare import (
-    _is_activation_post_process_node,
-)
 import copy
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, List, Union
+from torch.utils._pytree import LeafSpec
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -121,55 +118,6 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.graph.eliminate_dead_code()
     m.recompile()
 
-# TODO: remove hack when we have better support for pattern matching
-# move around the observer for addmm
-def _rearrange_weight_observer_for_decomposed_linear(
-    model: GraphModule,
-) -> None:
-    """
-    Linear is decomposed to `t - addmm` (w/ bias) or `t - mm` (w/o bias)
-    before:
-         weight - t - observer \
-           input - observer - addmm/mm
-    after:
-         weight - observer - t \
-           input - observer - addmm/mm
-    """
-    aten = torch.ops.aten
-    op_to_weight_obs_index = {
-        aten.addmm.default : 2,
-        aten.mm.default : 1,
-    }
-    named_modules = dict(model.named_modules(remove_duplicate=False))
-    for node in model.graph.nodes:
-        if node.target not in (aten.addmm.default, aten.mm.default):
-            continue
-        root_node = node
-        maybe_weight_obs = root_node.args[op_to_weight_obs_index[root_node.target]]
-        if not _is_activation_post_process_node(maybe_weight_obs, named_modules):
-            continue
-        transpose_node = maybe_weight_obs.args[0]
-        if transpose_node.target != torch.ops.aten.t.default:
-            continue
-        # swap the order of transpose and observation
-
-        maybe_weight_obs.replace_input_with(transpose_node, transpose_node.args[0])
-        # remove the transpose node
-        with model.graph.inserting_after(maybe_weight_obs):
-            args = list(transpose_node.args)
-            args[0] = maybe_weight_obs
-            new_transpose_node = model.graph.create_node(
-                "call_function",
-                torch.ops.aten.t.default,
-                tuple(args),
-                transpose_node.kwargs
-            )
-        root_node.replace_input_with(maybe_weight_obs, new_transpose_node)
-
-    model.graph.eliminate_dead_code()
-    model.graph.lint()
-    model.recompile()
-
 def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
@@ -194,9 +142,10 @@ def get_aten_graph_module(
     import torch._dynamo
     aten_pattern, _ = torch._dynamo.export(
         pattern,
-        *copy.deepcopy(example_inputs),
         aten_graph=True,
         tracing_mode="real",
+    )(
+        *copy.deepcopy(example_inputs),
         **kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
@@ -290,3 +239,174 @@ def _replace_dropout_for_eval(m: GraphModule):
         ignore_literals=True,
     )
     m.recompile()
+
+def _is_literal(arg):
+    if isinstance(arg, (int, float)):
+        return True
+    if isinstance(arg, (tuple, list)):
+        return all(map(_is_literal, arg))
+    return False
+
+def _replace_literals_with_new_placeholders(
+    gm: torch.fx.GraphModule,
+    merge_dup: bool = False,
+    exclude_literals: Optional[List[Any]] = None
+):
+    """Replace the literals in the graph with placeholder nodes that's created on the fly while we
+    traverse the graph, so that the literal arguments in the graph can be matched and replaced
+
+    To use this, the pattern and replacement graph should have the exact same number of literal args
+    and they should be used in the exact same order in the pattern and replacement graph.
+
+    If the literal arguments are not used in the same order in pattern and replacement graph, please
+    use `_replace_literals_with_existing_placeholders` instead
+
+    Args:
+        `gm`: input GraphModule that we'll transform
+        `merge_dup`: boolean flag to indicate that if the same literal appears multiple times in
+         the graph, whether they should correspond to the same placeholder or not
+        `exclude_literals`: a list of literals that will not be replaced with placeholders
+
+    Example:
+
+    # 1. Original Graph
+    def pattern(self, x):
+        return x + 3
+
+    def replacement(self, x):
+        return x - 3
+
+    example_inputs = (torch.randn(1, 3, 3, 3),)
+    pattern_gm = get_aten_graph_module(pattern, example_inputs)
+    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+
+    # 2. Before calling replace literals we'll see the following graph:
+    def pattern(self, x):
+        return x + 3
+
+    def replacement(self, x):
+        return x - 3
+
+    pattern_gm = _replace_literals_with_new_placeholders(pattern_gm)
+    replacement_gm = _replace_literals_with_new_placeholders(replacement_gm)
+
+    # 3. After replacing literals with new placeholder nodes
+
+    def pattern(self, x, new_ph):
+        return x + new_ph
+
+    def pattern(self, x, new_ph):
+        return x - new_ph
+
+    """
+    last_ph = None
+    cnt = 0
+    literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
+    if exclude_literals is None:
+        exclude_literals = []
+
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            last_ph = node
+            cnt += 1
+            continue
+        with gm.graph.inserting_after(last_ph):
+            new_args = []
+            for arg in node.args:
+                if _is_literal(arg) and arg not in exclude_literals:
+                    if merge_dup and arg in literal_to_ph:
+                        new_args.append(literal_to_ph[arg])
+                    else:
+                        ph_node = gm.graph.placeholder("arg" + str(cnt))
+                        new_args.append(ph_node)
+                        gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                        cnt += 1
+                        if merge_dup:
+                            literal_to_ph[arg] = ph_node
+                else:
+                    new_args.append(arg)
+            new_args = tuple(new_args)
+
+        node.args = new_args
+    return gm
+
+
+def _replace_literals_with_existing_placeholders(
+    gm: torch.fx.GraphModule,
+    exclude_literals: Optional[List[Any]] = None,
+    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None
+):
+    """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
+    in the graph can be matched and replaced
+
+    To use this, all literal args in the graph should be unique and each of them should correspond
+    to exactly one placeholder node
+
+    # 1. Original Graph
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        return torch.dequantize_per_tensor(x_i8, scale, zero_point, quant_min, quant_max)
+
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        x_i8 = torch.clamp(x_i8, quant_min, quant_max)
+        return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
+
+    example_inputs = (
+        torch.randn(1, 3, 3, 3),
+        1.0,
+        0,
+        -128,
+        127,
+    )
+    pattern_gm = get_aten_graph_module(pattern, example_inputs)
+    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+
+    # 2. Before calling replace literals we'll see the following graph:
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        return torch.dequantize_per_tensor(x_i8, 1.0, 0, -128, 127)
+
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        x_i8 = torch.clamp(x_i8, -128, 127)
+        return ((x_i8.to(torch.float32) - 0) * 1.0).to(dtype=torch.float32)
+
+    # Note that literal args appear in different order in pattern and replacement graph, so
+    # we can't use _replace_literals_with_new_placeholders
+
+    literal_to_ph_idx = {1.0: 1, 0: 2, -128: 3, 127: 4}
+    pattern_gm = _replace_literals_with_existing_placeholders(pattern_gm, literal_to_ph_idx)
+    replacement_gm = _replace_literals_with_existing_placeholders(replacement_gm, literal_to_ph_idx)
+
+    # 3. After replacing literals with existing placeholder nodes
+
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        return torch.dequantize_per_tensor(x_i8, scale, zero_point, quant_min, quant_max)
+
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        x_i8 = torch.clamp(x_i8, quant_min, quant_max)
+        return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
+    """
+    if exclude_literals is None:
+        exclude_literals = []
+
+    if literal_to_ph_idx is None:
+        literal_to_ph_idx = {}
+
+    phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        new_args = []
+        for arg in node.args:
+            if _is_literal(arg) and arg not in exclude_literals and arg in literal_to_ph_idx:
+                ph_idx = literal_to_ph_idx[arg]
+                ph_node = phs[ph_idx]
+                new_args.append(ph_node)
+            else:
+                new_args.append(arg)
+        new_args = tuple(new_args)
+        node.args = new_args
+    return gm

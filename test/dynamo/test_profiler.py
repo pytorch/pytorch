@@ -79,6 +79,18 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with torch.profiler.profile(record_shapes=True):
             opt_fn(*inputs)
 
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
+    def test_profile_dynamic_shapes_list_compilation(self):
+        def fn(x, y, z):
+            return torch.cat([x, y], dim=0) + z
+
+        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+
+        inputs = (torch.rand(4, 16), torch.rand(12, 16), torch.rand(16, 16))
+
+        with torch.profiler.profile(record_shapes=True):
+            opt_fn(*inputs)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

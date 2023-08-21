@@ -4,18 +4,22 @@ This file includes private common utilities for FSDP.
 
 import traceback
 import warnings
+import weakref
 from enum import auto, Enum
+from functools import partial
 from typing import (
     Any,
     Callable,
     cast,
     Dict,
     Generator,
+    Iterable,
     List,
     no_type_check,
     Optional,
     Set,
     Tuple,
+    Type,
 )
 
 import torch
@@ -27,6 +31,8 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.utils import _apply_to_tensors
+from torch.utils._mode_utils import no_dispatch
 
 from .api import (
     FullOptimStateDictConfig,
@@ -40,6 +46,15 @@ from .api import (
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
+
+# Save a global mapping from module to its input tensor dtype to be populated
+# during the forward pre-hook and consumed in the forward post-hook when
+# overriding a module's mixed precision
+# NOTE: We currently take the last input tensor's dtype in the case of multiple
+# floating-point input tensors, which may be incorrect. However, since there is
+# not a 1:1 correspondence between input and output tensors, we must use *some*
+# heuristic like this to predict the desired output dtype.
+_MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 class _FSDPDeviceHandle:
@@ -96,9 +111,12 @@ class _FSDPState(_State):
         # FSDP/fully_shard.
         self._ignored_modules: Set[nn.Module] = set()
         self._ignored_params: Set[nn.Parameter] = set()
+        # Buffer names are cleaned (without wrapper prefixes)
+        self._ignored_buffer_names: Set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
+        self._device_mesh: Optional[DeviceMesh] = None
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
@@ -112,6 +130,10 @@ class _FSDPState(_State):
             nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
+        self._gradient_predivide_factor: int = 0
+        self._gradient_postdivide_factor: int = 0
+        self._comm_hook: Optional[Callable] = None
+        self._comm_hook_state: Optional[Any] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -119,7 +141,6 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-        self._device_mesh: Optional[DeviceMesh] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -252,11 +273,24 @@ def _get_param_to_fqns(
     dedup_shared_params: bool = True,
 ) -> Dict[nn.Parameter, List[str]]:
     """
-    Constructs a mapping from parameter to a list of its FQNs. Each normal
-    parameter maps to a singleton list containing its FQN, while each
+    Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
+    we use canonical to mean the fully-qualified name assigned to the parameter
+    based on its position in the original nn.Module hierarchy before any wrapper
+    or parallelism has been applied to it. This is in contrast to FQNs that may be
+    generated after parallelisms or wrappers have been applied to the model.
+
+    Each normal parameter maps to a singleton list containing its FQN, while each
     ``FlatParameter`` maps to a list of its original parameter FQNs, which may
-    have length greater than one. All FQNs are prefixed starting from
-    ``model``.
+    have length greater than one.  All FQNs are prefixed starting from ``model``.
+
+    In the case where FSDP was applied with ``use_orig_params=True``, there should be no
+    ``FlatParameter`` s registered to the model's modules and this mapping will only
+    contain mappings from ``nn.Parameter`` s to singleton FQN lists.
+
+    It is only in the case where FSDP was applied with ``use_orig_params=False`` where
+    a ``FlatParameter`` will be registered in place of the original parameters and there
+    will be mappings from each ``FlatParameter`` to lists of FQNs corresponding to the
+    original parameters.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
@@ -358,12 +392,16 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when using DMP with FSDP. "
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
+                        if (
+                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                        ):
+                            # TODO(voz): Don't graph break on this
+                            warnings.warn(
+                                "An unexpected prefix is detected. This case "
+                                " should only happen when using DMP with FSDP. "
+                                f"prefix = {prefix}, "
+                                f"submodule_name = {submodule_name}"
+                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
                         warnings.warn(
@@ -424,3 +462,74 @@ def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
         if is_root_module:
             root_modules.add(candidate_module)
     return root_modules
+
+
+def _override_module_mixed_precision(
+    root: torch.nn.Module,
+    module_classes_to_override: Iterable[Type[nn.Module]],
+    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
+) -> Set[Type[nn.Module]]:
+    module_classes_to_override = tuple(set(module_classes_to_override))
+    # Return a set of the actually overridden module classes
+    overridden_module_classes: Set[Type[nn.Module]] = set()
+    for mod in root.modules():
+        if isinstance(mod, module_classes_to_override):
+            overridden_module_classes.add(type(mod))
+            mod._wrap_overrides = wrap_override_dict  # type: ignore[assignment]
+            # TODO: We need to run this mixed precision ignored module in fp32,
+            # but ensure subsequent modules, that may possibly be running with
+            # mixed precision, still receive the appropriate precision inputs
+            # without user having to adjust mixed precision config too much.
+            # As a result, we attach pre and post forward hooks to up / down
+            # cast. We should revisit this design.
+
+            def cast_fn(
+                dtype: torch.dtype, module: nn.Module, x: torch.Tensor
+            ) -> torch.Tensor:
+                if not torch.is_floating_point(x) or x.dtype == dtype:
+                    return x
+                _MODULE_TO_INP_DTYPE[module] = x.dtype
+                return x.to(dtype)
+
+            def forward_pre_hook(module, args):
+                return _apply_to_tensors(partial(cast_fn, torch.float32, module), args)
+
+            def forward_post_hook(module, args, output):
+                # NOTE: If the forward did not have any floating-point tensors,
+                # then the dtype will not be set for this module, and we do not
+                # upcast the dtype.
+                if module in _MODULE_TO_INP_DTYPE:
+                    old_dtype = _MODULE_TO_INP_DTYPE[module]
+                    return _apply_to_tensors(
+                        partial(cast_fn, old_dtype, module), output
+                    )
+
+            # We intentionally append both of these hooks so that they run after
+            # all other hooks.
+            mod.register_forward_pre_hook(forward_pre_hook, prepend=False)
+            mod.register_forward_hook(forward_post_hook, prepend=False)
+    return overridden_module_classes
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
+    # FIXME record_stream doesn't work with non-cuda tensors
+    if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return
+
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        # Don't no dispatch under torch compile like this
+        with no_dispatch():
+            tensor.record_stream(stream)
+    else:
+        # from @ezyang:
+        # The no_dispatch was added in https://github.com/pytorch/pytorch/pull/88014 cc @fegin
+        # Looking over the PR, it looks like this is because we don't actually support Stream arguments
+        # in torch dispatch, so it just chokes.
+        # If Dynamo is able to answer "are there any torch dispatch modes" active (it should answer False),
+        # a better version of this would just be to check if there are any modes before disabling dispatch.
+        # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
+        tensor.record_stream(stream)
+
+
+def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
+    return x._typed_storage()._data_ptr() == data_ptr
