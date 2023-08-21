@@ -624,7 +624,7 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=save_cache_hook,
             save_whole_cache_hook=save_whole_cache_hook
-            if config.triton.dump_autotuner_data
+            if config.triton.dump_autotuner_config
             else None,
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
