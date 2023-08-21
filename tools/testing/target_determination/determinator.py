@@ -20,7 +20,7 @@ def _print_tests(label: str, tests: List[str]) -> None:
 
 def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
     rankings = TestPrioritizations()
-    rankings.unranked_relevance = tests
+    rankings.unranked_relevance = tests.copy()
     print(f"Received {len(tests)} tests to prioritize")
 
     for heuristic in HEURISTICS:
