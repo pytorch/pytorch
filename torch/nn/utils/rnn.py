@@ -327,8 +327,8 @@ def pad_packed_sequence(
         if total_length < max_seq_length:
             raise ValueError("Expected total_length to be at least the length "
                              "of the longest sequence in input, but got "
-                             "total_length={} and max sequence length being {}"
-                             .format(total_length, max_seq_length))
+                             f"total_length={total_length} and max sequence length being {max_seq_length}"
+                             )
         max_seq_length = total_length
     padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
