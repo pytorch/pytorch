@@ -11,6 +11,8 @@ import boto3  # type: ignore[import]
 import requests
 import rockset  # type: ignore[import]
 
+from tools.stats.upload_metrics import emit_metric
+
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
 
