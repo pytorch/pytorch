@@ -706,7 +706,13 @@ Tensor scaled_dot_product_attention(
       auto og_scale = sdp::calculate_scale(query_, scale);
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
           query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
-      return std::get<0>(out_lse_softmax).slice_symint(-1, 0, og_size);
+      auto out = std::get<0>(out_lse_softmax);
+      if (!out.is_nested()){
+        out = out.slice_symint(-1, 0, og_size);
+      } else{
+        TORCH_CHECK(out.size(-1) == og_size, "FlashAttentionV2 returned a nested tensor with an incorrect size")
+      }
+      return out;
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
