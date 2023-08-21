@@ -10,6 +10,7 @@ import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from traceback import StackSummary
 from typing import (
     Any,
     Callable,
@@ -127,6 +128,7 @@ class GuardBuilderBase:
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
     stack: CapturedTraceback
+    user_stack: StackSummary
 
 
 @dataclasses.dataclass
@@ -253,7 +255,7 @@ class Guard:
         self.guarded_class_weakref = guarded_class
 
         if not self.code_list:
-            self.code_list = code_list
+            self.code_list = list(code_list)
         else:
             self.code_list.extend(code_list)
 
@@ -573,7 +575,7 @@ class TracingContext:
         self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
-    def extract_stack():
+    def extract_stack() -> StackSummary:
         self = TracingContext.get()
         if self is None:
             return traceback.StackSummary()

@@ -47,6 +47,16 @@ log = logging.getLogger(__name__)
 class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
+class CacheIgnore:
+    def __init__(self, o):
+        self.obj = o
+
+    def __eq__(self, other):
+        return True
+
+    def __hash__(self):
+        return 0
+
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence
@@ -1516,6 +1526,12 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+@dataclass
+class ShapeGuardCode:
+    code: str
+    guard: ShapeGuard = None
+
+
 # This is pretty similar to ShapeGuard but it also comes with a message,
 # and is exclusively used for things that MUST be true (unlike guards,
 # which can evaluate False, in which case you just choose not to use
@@ -2030,6 +2046,9 @@ class ShapeEnv:
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
+        # The guard that caused a replacement to be populated, solely for
+        # debugging purposes
+        self.replacement_guards: Dict[sympy.Symbol, ShapeGuard] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Duck-shaping says that if two input tensors have the same size,
@@ -2501,7 +2520,10 @@ class ShapeEnv:
     # some equality guards are nontrivial!  It would be nice to get simplified
     # output to print them too).  It's private because it's not
     # intended for normal use
-    def produce_guards(
+    def produce_guards(*args, **kwargs) -> List[str]:
+        return [g.code for g in self.produce_guards_extended(*args, **kwargs)]
+
+    def produce_guards_extended(
         self,
         placeholders,
         sources,
@@ -2516,7 +2538,7 @@ class ShapeEnv:
         _simplified=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
-    ) -> List[str]:
+    ) -> List[ShapeGuardCode]:
         self.log.info("produce_guards")
 
         assert len(placeholders) == len(sources)
@@ -2751,8 +2773,18 @@ class ShapeEnv:
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
 
+                for tv, tss in self.var_to_sources.items():
+                    for ts in tss:
+                        if ts == source:
+                            break
+                    else:
+                        continue
+                    break
+                else:
+                    tv = None
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                guard = self.replacement_guards.get(tv, None)
+                exprs.append(ShapeGuardCode(f"{source_ref(source)} == {sexpr}", guard))
                 if (
                     isinstance(expr, sympy.Symbol) and
                     expr in symbol_to_constraints and
@@ -2789,7 +2821,7 @@ class ShapeEnv:
                 if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
                     self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
-                exprs.append(guard_expr)
+                exprs.append(ShapeGuardCode(guard_expr, guard))
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
@@ -2880,7 +2912,8 @@ class ShapeEnv:
                         self.dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
-                    exprs.append(" <= ".join(bounds))
+                    # TODO: maybe track what stacks caused bound refinement
+                    exprs.append(ShapeGuardCode(" <= ".join(bounds)))
 
         if constraint_violations:
             warn_msgs = []
@@ -3185,7 +3218,7 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr", guard: Optional[ShapeGuard] = None) -> None:
         """
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = expr`.
@@ -3201,6 +3234,7 @@ class ShapeEnv:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
+        self.replacement_guards[a] = guard
 
         # When specializing 'a == expr', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
@@ -3219,11 +3253,11 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), self.replacement_guards[a])
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
+    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool, w_guard: CacheIgnore) -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
@@ -3256,7 +3290,7 @@ class ShapeEnv:
                 r = try_solve(expr, free[0], floordiv_inequality=False)
                 if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     new_var = self._find(r[1])
-                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var, w_guard.obj)
             except NotImplementedError:
                 pass
             except RecursionError:
@@ -3431,8 +3465,18 @@ class ShapeEnv:
                 if isinstance(expr, (sympy.Eq, sympy.Ne)):
                     expr = sympy.Not(expr)
 
+            if concrete_val is sympy.true:
+                g = expr
+            elif concrete_val is sympy.false:
+                g = sympy.Not(expr)
+            else:
+                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            stack = CapturedTraceback.extract(skip=1)
+            guard = ShapeGuard(g, stack, TracingContext.extract_stack())
+
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                self._maybe_guard_eq(expr, bool(concrete_val))
+                self._maybe_guard_eq(expr, bool(concrete_val), CacheIgnore(guard))
                 # TODO: If we successfully eliminate a symbol via equality, it
                 # is not actually necessary to save a guard for the equality,
                 # as we will implicitly generate a guard when we match that
@@ -3445,18 +3489,9 @@ class ShapeEnv:
                 # very clear algebraic laws that hold for floating point, such
                 # simplifications are error prone anyway, so be sure not to
                 # maybe_guard_eq in those cases.
-                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
-
-            if concrete_val is sympy.true:
-                g = expr
-            elif concrete_val is sympy.false:
-                g = sympy.Not(expr)
-            else:
-                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True, CacheIgnore(guard))
 
             if not self._suppress_guards_tls():
-                stack = CapturedTraceback.extract(skip=1)
-                guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
         except Exception:
             self.remove_fx_node(node)

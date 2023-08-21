@@ -32,6 +32,7 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
+    ShapeGuard,
     Source,
 )
 from torch.fx.experimental.symbolic_shapes import (
@@ -68,6 +69,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
+
+NOT_SHAPE = object()
 
 
 # For user stack printing
@@ -163,7 +166,7 @@ def strip_getattr_getitem(name):
 @dataclasses.dataclass
 class GuardCodeList:
     code_list: List[str]
-    guard: Guard
+    guard: Union[Guard, ShapeGuard]
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -591,7 +594,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             equalities_inputs = None
-        guards = output_graph.shape_env.produce_guards(
+        guards = output_graph.shape_env.produce_guards_extended(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
@@ -602,7 +605,9 @@ class GuardBuilder(GuardBuilderBase):
         )
         output_graph.shape_env.freeze()
         for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+            self._produce_guard_code(
+                guard, [shape_guard.code], shape_guard=shape_guard.guard
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
@@ -705,7 +710,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
+        self, guard, code_list, provided_guarded_object=None, *, shape_guard=NOT_SHAPE
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -722,8 +727,12 @@ class GuardBuilder(GuardBuilderBase):
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
-        if shape_env:
-            self.shape_env_code.append(GuardCodeList(code_list, guard))
+        if shape_guard is not NOT_SHAPE:
+            self.shape_env_code.append(
+                GuardCodeList(
+                    code_list, shape_guard if shape_guard is not None else guard
+                )
+            )
         else:
             self.code.append(GuardCodeList(code_list, guard))
 
@@ -1081,8 +1090,6 @@ class CheckFunctionManager:
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
-        # TODO: the "guard" here is actually just the top level SHAPE_ENV
-        # which is useless.  Get ShapeEnv to pass in more provenance.
         for gcl in local_builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
