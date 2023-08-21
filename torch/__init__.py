@@ -883,16 +883,36 @@ def set_float32_matmul_precision(precision: str) -> None:
 
     Supports three settings:
 
-        * "highest", float32 matrix multiplications use the float32 datatype for
-          internal computations.
-        * "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
-          datatypes for internal computations, if fast matrix multiplication algorithms
-          using those datatypes internally are available. Otherwise float32
-          matrix multiplications are computed as if the precision is "highest".
-        * "medium", float32 matrix multiplications use the bfloat16 datatype for
-          internal computations, if a fast matrix multiplication algorithm
+        * "highest", float32 matrix multiplications use the float32 datatype (24 mantissa
+          bits) for internal computations.
+        * "high", float32 matrix multiplications either use the TensorFloat32 datatype (10
+          mantissa bits) or treat each float32 number as the sum of two bfloat16 numbers
+          (approximately 16 mantissa bits), if the appropriate fast matrix multiplication
+          algorithms are available.  Otherwise float32 matrix multiplications are computed
+          as if the precision is "highest".  See below for more information on the bfloat16
+          approach.
+        * "medium", float32 matrix multiplications use the bfloat16 datatype (8 mantissa
+          bits) for internal computations, if a fast matrix multiplication algorithm
           using that datatype internally is available. Otherwise float32
           matrix multiplications are computed as if the precision is "high".
+
+    When using "high" precision, float32 multiplications may use a bfloat16-based algorithm
+    that is more complicated than simply truncating to some smaller number mantissa bits
+    (e.g. 10 for TensorFloat32, 8 for bfloat16).  Refer to [Henry2019]_ for a complete
+    description of this algorithm.  To briefly explain here, the first step is to realize
+    that we can perfectly encode a single float32 number as the sum of three bfloat16
+    numbers (because float32 has 24 mantissa bits while bfloat16 has 8, and both have the
+    same number of exponent bits).  This means that the product of two float32 numbers can
+    be exactly given by the sum of nine products of bfloat16 numbers.  We can then trade
+    accuracy for speed by dropping some of these products.  The "high" precision algorithm
+    specifically keeps only the three most significant products, which conveniently excludes
+    all of the products involving the last 8 mantissa bits of either input.  This means that
+    we can represent our inputs as the sum of two bfloat16 numbers rather than three.
+    Because bfloat16 fused-multiply-add (FMA) instructions are typically >10x faster than
+    float32 ones, it's faster to do three multiplications and 2 additions with bfloat16
+    precision than it is to do a single multiplication with float32 precision.
+
+    .. [Henry2019] http://arxiv.org/abs/1904.06376
 
     .. note::
 
@@ -1710,8 +1730,8 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError("The runtime module of '{}' has already "
-                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+        raise RuntimeError(f"The runtime module of '{device_type}' has already "
+                           f"been registered with '{getattr(m, device_type)}'")
     setattr(m, device_type, module)
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module

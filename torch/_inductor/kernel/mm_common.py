@@ -153,9 +153,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
-        return V.ops.add(acc, bias)
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
+        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
 
     return epilogue
