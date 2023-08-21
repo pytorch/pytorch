@@ -202,41 +202,62 @@ ReluCompileError:""",
         from torch.fx.experimental.validator import ValidationException
 
         @torch.compile
-        def fn(x):
-            return x.reshape(-1, 4)
+        def fn(x, shape):
+            return x.split(shape)
 
         self.assertExpectedInlineMunged(
             ValidationException,
-            lambda: fn(torch.randn(20)),
+            lambda: fn(torch.randn(20), (5, 10, 5)),
             """\
 translation validation failed.
 
 Model:
+  ==> s0: 3
   ==> L['x'].storage_offset(): 0
-  ==> s0: 4
+  ==> L['shape'][0]: 0
+  ==> L['shape'][2]: 0
+  ==> s1: 0
   ==> L['x'].stride()[0]: 1
-  ==> L['x'].size()[0]: 4
+  ==> s2: 0
+  ==> L['shape'][1]: 0
+  ==> s3: 0
+  ==> L['x'].size()[0]: 3
 
 Assertions:
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 1)
-  ==> (Not (And (< L['x'].size()[0] 4) (>= L['x'].size()[0] 0)))
+  ==> (== L['shape'][2] s3)
   ==> (True)
   ==> (== 0 L['x'].storage_offset())
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
   ==> (== 1 L['x'].stride()[0])
-  ==> (True)
 
 Target Expressions:
-  ==> (>= 9223372036854775806 s0)
-  ==> (== 4 L['x'].size()[0])
+  ==> (== L['x'].size()[0] s0)
+  ==> (== 0 s3)
+  ==> (>= 9223372036854775806 s1)
+  ==> (== 0 s2)
+  ==> (== 0 L['shape'][2])
+  ==> (>= 9223372036854775806 s3)
+  ==> (== 0 s1)
   ==> (== 0 L['x'].storage_offset())
+  ==> (<= 0 s3)
+  ==> (<= 0 s2)
+  ==> (== 0 L['shape'][0])
   ==> (> s0 0)
   ==> (== 1 L['x'].stride()[0])
   ==> (<= 2 s0)
-  ==> (== 4 s0)
+  ==> (== 0 L['shape'][1])
+  ==> (<= 0 s1)
+  ==> (>= 9223372036854775806 s2)
+  ==> (>= 9223372036854775806 s0)
 
 Failed Source Expressions:
-  ==> (!= 4 L['x'].size()[0])""",
+  ==> (!= 0 L['shape'][1])
+  ==> (!= 0 L['shape'][0])
+  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])
+  ==> (!= 0 L['shape'][2])""",
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
