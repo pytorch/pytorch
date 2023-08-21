@@ -185,11 +185,11 @@ class Guard:
             return self.create_fn
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self.originating_source.name()
 
     @property
-    def source(self):
+    def source(self) -> GuardSource:
         return self.originating_source.guard_source()
 
     @staticmethod
