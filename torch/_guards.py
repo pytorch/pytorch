@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 
 import dataclasses
@@ -132,24 +134,25 @@ class ShapeGuard(NamedTuple):
 
 @dataclasses.dataclass
 class Guard:
-    # The name of a Guard specifies what exactly it is the guard is guarding
-    # on.  The meaning of the name is dependent on the create_fn; you must
-    # look at the use-site inside create_fn to know what name means.
+    # originating_source is the source that called the make_guard method to
+    # construct this guard object. The property name specifies what exactly it
+    # is the guard is guarding on.  The meaning of the name is dependent on the
+    # create_fn; you must look at the use-site inside create_fn to know what
+    # name means.
     #
     # That being said, although you might think this is just a "name", name is
     # usually an arbitrary Python expression that will be evaluated with all
     # globals (and locals, if you create a LOCAL guard) to extract the Python
     # object that we want to perform guard tests on.  This evaluation
     # typically happens in GuardBuilder.eval.  In these cases, name is
-    # typically produced by Source.name() (not to be confused with
-    # GuardSource)--morally, we could have stored a Source here.
+    # typically produced by originating_source.name() (not to be confused with
+    # GuardSource - the property source).
     #
     # Occasionally, name is not a valid Python expression; sometimes
     # it is meaningless.  Example create_fns that are like this include
     # GRAD_MODE and SHAPE_ENV.
-    name: str
-    source: GuardSource
-    create_fn: Callable[[GuardBuilderBase, "Guard"], None]
+    originating_source: Source
+    create_fn: Callable[[GuardBuilderBase, Guard], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -180,6 +183,14 @@ class Guard:
             return self.create_fn.func
         else:
             return self.create_fn
+
+    @property
+    def name(self) -> str:
+        return self.originating_source.name()
+
+    @property
+    def source(self) -> GuardSource:
+        return self.originating_source.guard_source()
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -288,8 +299,8 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_source_a: "Source"
-    input_source_b: "Source"
+    input_source_a: Source
+    input_source_b: Source
 
     def __post_init__(self):
         assert self.input_source_a != self.input_source_b
@@ -519,7 +530,7 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 
 class CompileContext:
     @staticmethod
-    def get() -> Optional["CompileContext"]:
+    def get() -> Optional[CompileContext]:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id):
@@ -543,7 +554,7 @@ class TracingContext:
     """
 
     @staticmethod
-    def get() -> Optional["TracingContext"]:
+    def get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, fake_mode):
@@ -713,7 +724,7 @@ class Source:
     def make_guard(self, fn, is_volatile=False) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self.name(), self.guard_source(), fn, is_volatile)
+        return Guard(self, fn, is_volatile)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()

@@ -6,7 +6,6 @@ from typing import DefaultDict, Set
 from weakref import ReferenceType
 
 from . import config
-from .guards import CLOSURE_VARS
 
 log = logging.getLogger(__name__)
 """
@@ -53,13 +52,17 @@ def compute_cache_size(frame, cache_entry):
     return CacheSize(total, cache_size_per_id_matched_obj, sources)
 
 
-def is_recompilation(frame, cache_size):
-    # TODO(janimesh) - Do we care about ID_MATCH'd objects in f_globals?
-    # TODO(janimesh) - Consider code reorganization so that
-    # CheckFnManager/GuardBuilder shares this code.
-    def get(name):
-        return eval(name, {"L": frame.f_locals}, CLOSURE_VARS)
+def _get_weakref_from_f_locals(frame, source):
+    obj = frame.f_locals.get(source, None)
+    weak_id = None
+    try:
+        weak_id = weakref.ref(obj)
+    except TypeError:
+        pass  # cannot weakref bool object
+    return weak_id
 
+
+def is_recompilation(frame, cache_size):
     sources = cache_size.id_guarded_sources
 
     if not sources:
@@ -67,16 +70,17 @@ def is_recompilation(frame, cache_size):
 
     per_id_guarded_obj = cache_size.per_id_guarded_obj
     for source in sources:
-        weak_id = weakref.ref(get(source))
-        if weak_id in per_id_guarded_obj and per_id_guarded_obj[weak_id] >= 1:
+        weak_id = _get_weakref_from_f_locals(frame, source)
+        if (
+            weak_id
+            and weak_id in per_id_guarded_obj
+            and per_id_guarded_obj[weak_id] >= 1
+        ):
             return True
     return False
 
 
 def exceeds_cache_size(frame, cache_size) -> bool:
-    def get(name):
-        return eval(name, {"L": frame.f_locals}, CLOSURE_VARS)
-
     sources = cache_size.id_guarded_sources
     per_id_guarded_obj = cache_size.per_id_guarded_obj
     accumulated_limit = config.accumulated_cache_size_limit
@@ -88,8 +92,12 @@ def exceeds_cache_size(frame, cache_size) -> bool:
         return cache_size.total >= limit
 
     for source in sources:
-        weak_id = weakref.ref(get(source))
-        if weak_id in per_id_guarded_obj and per_id_guarded_obj[weak_id] >= limit:
+        weak_id = _get_weakref_from_f_locals(frame, source)
+        if (
+            weak_id
+            and weak_id in per_id_guarded_obj
+            and per_id_guarded_obj[weak_id] >= limit
+        ):
             return True
 
     # Ensure that total number of cache entries are bounded.

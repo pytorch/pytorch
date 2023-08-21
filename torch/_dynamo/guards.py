@@ -15,7 +15,7 @@ import sys
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
@@ -46,6 +46,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
+from .source import LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -171,6 +172,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
+        lookup_weakrefs: Callable[[Type[object]], WeakIdRef],
         user_scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
         *,
@@ -179,6 +181,7 @@ class GuardBuilder(GuardBuilderBase):
         self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
+        self.lookup_weakrefs = lookup_weakrefs
         if user_scope:
             scope = {"L" if local else "G": user_scope}
         else:
@@ -278,11 +281,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
-        m = re.match(r"^type\((.+)\)$", guard.name)
-        if m:
+        if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
+                Guard(
+                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
+                )
             )
 
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
@@ -408,11 +412,18 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        if guard.is_local():
-            # TODO(janimesh) - Attach a callback to clean up the CacheEntry
-            # after we make CacheEntry a doubly linked list in eval_frame.c and
-            # move CacheEntry formation to Python.
-            self.id_matched_objs[ref] = weakref.ref(val)
+        # Keep track of objects
+        if self.local and isinstance(guard.originating_source, LocalSource):
+            local_name = guard.originating_source.local_name
+            if local_name in self.scope["L"]:
+                # TODO(janimesh) - Attach a callback to clean up the CacheEntry
+                # after we make CacheEntry a doubly linked list in eval_frame.c and
+                # move CacheEntry formation to Python.
+                weak_id = self.lookup_weakrefs(val)
+                assert (
+                    weak_id is not None
+                ), "ID_MATCH is not called on the NN_MODULE guard"
+                self.id_matched_objs[local_name] = weak_id
 
         def setup_guard():
             assert istype(val.training, bool)
@@ -877,8 +888,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List[ReferenceType[object]] = []
-        self._seen_ids: Set[int] = set()
+        self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
 
         # Note: right overrides left
@@ -903,12 +913,18 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
+            self.lookup_weakrefs,
             combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, output_graph.global_scope, self, local=False
+            self.id_ref,
+            source_ref,
+            self.lookup_weakrefs,
+            output_graph.global_scope,
+            self,
+            local=False,
         )
 
         # We need to transplant a copy here, because some guards
@@ -934,7 +950,6 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
         )
-        self._seen_ids.clear()
         self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
@@ -1144,12 +1159,16 @@ class CheckFunctionManager:
     def id_ref(self, obj):
         """add a weakref, return the id"""
         try:
-            if id(obj) not in self._seen_ids:
-                self._weakrefs.append(weakref.ref(obj, self.invalidate))
-                self._seen_ids.add(id(obj))
+            if id(obj) not in self._weakrefs:
+                self._weakrefs[id(obj)] = weakref.ref(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+    def lookup_weakrefs(self, obj):
+        if id(obj) in self._weakrefs:
+            return self._weakrefs[id(obj)]
+        return None
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
