@@ -14,6 +14,7 @@ import textwrap
 import time
 import unittest
 from io import StringIO
+from itertools import chain
 from typing import (
     Any,
     Callable,
@@ -1030,3 +1031,31 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_symbolic(a: Optional[torch.Tensor]):
+    return a is not None and any(
+        isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
+    )
+
+
+def is_mm_compute_bound(M, K, N, dtype):
+    denominator = M * K + N * K + M * N
+    if denominator == 0:
+        return False
+    arithmetic_intensity = (M * N * K) / denominator
+
+    # Fails with AMD
+    try:
+        machine_balance = (1000 * get_device_tflops(dtype)) / get_gpu_dram_gbps()
+    except Exception:
+        return True
+
+    # dram_gbps might be underestimating bandwidth because of cache.
+    # if we estimate machine balance too low we might miss some speedups,
+    # if we extimate too high there will be unnecessary compilation time increase.
+    # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
+    # 80% of reads are in cache and cache is 4x faster than dram_gbps
+    machine_balance = machine_balance * 0.5
+
+    return arithmetic_intensity > machine_balance

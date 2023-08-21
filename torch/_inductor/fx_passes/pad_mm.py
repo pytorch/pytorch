@@ -1,5 +1,4 @@
 import functools
-from itertools import chain
 from typing import Optional
 
 import torch
@@ -45,14 +44,8 @@ def check_dtype(a: Tensor, b: Tensor):
     return a.is_floating_point() and b.is_floating_point()
 
 
-def is_symbolic(a: Optional[Tensor]):
-    return a is not None and any(
-        isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
-    )
-
-
 def any_is_symbolic(*args):
-    return any(is_symbolic(a) for a in args)
+    return any(utils.is_symbolic(a) for a in args)
 
 
 def should_pad_common(mat1, mat2, input=None):
@@ -148,30 +141,6 @@ def pad_addmm(
         ]
 
 
-def is_mm_compute_bound(M, K, N, dtype):
-    denominator = M * K + N * K + M * N
-    if denominator == 0:
-        return False
-    arithmetic_intensity = (M * N * K) / denominator
-
-    # Fails with AMD
-    try:
-        machine_balance = (
-            1000 * utils.get_device_tflops(dtype)
-        ) / utils.get_gpu_dram_gbps()
-    except Exception:
-        return True
-
-    # dram_gbps might be underestimating bandwidth because of cache.
-    # if we estimate machine balance too low we might miss some speedups,
-    # if we extimate too high there will be unnecessary compilation time increase.
-    # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
-    # 80% of reads are in cache and cache is 4x faster than dram_gbps
-    machine_balance = machine_balance * 0.5
-
-    return arithmetic_intensity > machine_balance
-
-
 @functools.lru_cache(None)
 def get_pad_cache():
     return torch._inductor.codecache.LocalCache()
@@ -235,7 +204,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-        if not is_mm_compute_bound(m, k, n, mat1.dtype):
+        if not utils.is_mm_compute_bound(m, k, n, mat1.dtype):
             return False
 
         # We don't want to look up the cache for cases that are trivially false

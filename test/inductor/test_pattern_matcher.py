@@ -337,6 +337,43 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
+    def test_addmm_activation(self):
+        def fn_addmm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
+
+        args = [
+            torch.randn(20, device="cuda"),  # input
+            torch.randn(10, 15, device="cuda"),  # mat1
+            torch.randn(15, 20, device="cuda"),  # mat2
+        ]
+
+        expected = fn_addmm_relu(*args)
+        actual, (code,) = run_and_get_code(torch.compile(fn_addmm_relu), *args)
+        torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+        self.assertTrue("_addmm_activation" in code)
+
+        counters.clear()
+        torch.compile(
+            fn_addmm_relu,
+            # replacement disabled on max_autotune_gemm
+            options={"max_autotune_gemm": True},
+        )(*args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
+        args_not_replaced = [
+            # addmm + activation with a rank-2 input
+            # is not fusable, hence not replaced
+            torch.randn(10, 20, device="cuda"),  # input
+            torch.randn(10, 15, device="cuda"),  # mat1
+            torch.randn(15, 20, device="cuda"),  # mat2
+        ]
+
+        counters.clear()
+        torch.compile(fn_addmm_relu)(*args_not_replaced)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
     def test_cat_addmm(self):
         def fn(a, b, c):
             return torch.cat(

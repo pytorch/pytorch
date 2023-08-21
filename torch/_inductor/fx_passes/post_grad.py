@@ -8,6 +8,7 @@ from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+from torch._inductor.utils import is_mm_compute_bound, is_symbolic
 
 from .. import config, ir, pattern_matcher
 
@@ -19,6 +20,7 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -26,6 +28,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     remove_extra_clones,
     stable_topological_sort,
 )
@@ -45,6 +48,9 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
+
+# patterns applied after pass_patterns and inference_patterns
+final_patterns = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -71,6 +77,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             patterns.apply(gm.graph)
         if is_inference:
             inference_patterns.apply(gm.graph)
+        final_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
     gm.recompile()
@@ -454,6 +461,54 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
+
+
+def should_replace_addmm_activation(match):
+    if config.max_autotune_gemm or config.max_autotune:
+        # keep addmm for tuning
+        return False
+
+    input = match.kwargs["input"].meta["val"]
+    # conditions of epilogue fusion in _addmm_activation
+    if not (input.is_cuda and input.dim() == 1 and input.is_contiguous()):
+        return False
+
+    output = match.output_node()
+
+    # if the relu would be fused into a pointwise use anyway, dont replace
+    return not (all(is_pointwise_use(use) for use in output.users))
+
+
+def register_addmm_activation_replacement():
+    if torch.cuda.is_available():
+        # workaround https://github.com/pytorch/pytorch/issues/97894
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # sizes/values dont actually matter for initial trace
+    # once we get a possible match we re-trace with the actual values and verify the match still holds
+    inp = functools.partial(torch.empty, (5,), device=device)
+    mat1 = functools.partial(torch.empty, (3, 4), device=device)
+    mat2 = functools.partial(torch.empty, (4, 5), device=device)
+
+    register_replacement(
+        addmm_relu_pattern,
+        addmm_relu_replacement,
+        [inp(), mat1(), mat2()],
+        inference_graph,
+        inference_patterns,
+        extra_check=should_replace_addmm_activation,
+    )
+
+
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -535,7 +590,7 @@ def is_pointwise_use(use):
 
 @register_graph_pattern(
     CallFunction(aten.addmm, Arg(), Arg(), Arg()),
-    pass_dict=pass_patterns[2],
+    pass_dict=final_patterns,
 )
 def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
     if not inp.meta["val"].is_cuda:
@@ -544,6 +599,15 @@ def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
     output = match.output_node()
     if not all(is_pointwise_use(use) for use in output.users):
         return
+
+    m1_t = mat1.meta["val"]
+    m2_t = mat2.meta["val"]
+
+    if not is_symbolic(m1_t) and not is_symbolic(m2_t):
+        if not is_mm_compute_bound(
+            m1_t.shape[0], m1_t.shape[1], m2_t.shape[1], m1_t.dtype
+        ):
+            return
 
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
