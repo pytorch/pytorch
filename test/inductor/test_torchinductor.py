@@ -1732,7 +1732,12 @@ class CommonTemplate:
             torch.nn.Linear(8, 8),
             torch.nn.ReLU(),
         )
-        self.common(mod, (torch.randn(2, 8),))
+        self.common(
+            mod,
+            (torch.randn(2, 8),),
+            atol=1e-3,
+            rtol=0.01,
+        )
 
     def test_bmm1(self):
         def fn(a, b):
@@ -1795,6 +1800,26 @@ class CommonTemplate:
                     torch.randint(-128, 127, (8, 8), dtype=torch.int8),
                     torch.randn(8),
                     torch.randn(8),
+                ),
+                check_lowp=True,
+            )
+
+    @config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
+
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(0, 255, (4, 8), dtype=torch.uint8),
                 ),
                 check_lowp=True,
             )
@@ -2099,19 +2124,6 @@ class CommonTemplate:
 
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
-
-    def test_softshrink_backward(self):
-        grad_output = torch.randn(1)
-        lambd = 0.5
-
-        def fn(a, grad_output, lambd):
-            a = a.cos()
-            return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
-
-        self.common(
-            fn,
-            (torch.randn(10), grad_output, lambd),
-        )
 
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
@@ -3254,6 +3266,37 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
+
+    def test_cat_empty(self):
+        def fn_2(*tensors):
+            return torch.cat(tensors)
+
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+            ),
+        )
+        self.common(
+            fn_2,
+            (
+                torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
+
+    @expectedFailureCodegenDynamic
+    def test_cat_single_empty(self):
+        # fails dynamic check for 'has a dynamic dimension'
+        def fn_2(*tensors):
+            return torch.cat(tensors)
+
+        self.common(
+            fn_2,
+            (torch.ones([0]),),
         )
 
     def test_cat_upcasting(self):

@@ -290,6 +290,11 @@ capture_func_transforms = True
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
+# wraps (un)equalities with 'Not' class after recording the correct expression
+# in the FX graph. This should incorrectly construct the divisible and replacement
+# lists, and incorrectly issue guards.
+inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
+
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
     "requires_grad",
