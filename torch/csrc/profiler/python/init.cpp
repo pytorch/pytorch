@@ -177,9 +177,7 @@ int RecordFunctionFast_init(
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   auto self = (RecordFunctionFast*)selfGeneric;
-  if (self->name) {
-    Py_CLEAR(self->name);
-  }
+  Py_CLEAR(self->name);
   if (self->guard) {
     self->guard.reset();
   }
