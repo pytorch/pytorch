@@ -11224,7 +11224,7 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
-    @skipCUDAIfRocm
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16

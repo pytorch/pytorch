@@ -1389,6 +1389,17 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     if _world.pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
 
+    # When users register Python onCompletion hooks, those hooks will run on a
+    # different thread than the main thread. Today, the ProcessGroup dtor does
+    # wait for that thread. However, the dtor might finish after the Python
+    # Interpreter exits. After that grabbing the GIL for the Python hook will crash.
+    # We can either revive the interpreter when running hooks or keep the main one
+    # alive until all works and hooks are done. The current implementation does the
+    # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
+    # for the pending hooks to finish.
+    if pg.name().lower() == "nccl" and pg._has_hooks():
+        pg._wait_for_pending_works()
+
     if group is None or group == GroupMember.WORLD:
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -4254,6 +4265,8 @@ def _get_group_tag(pg: ProcessGroup) -> str:
         tag = tag[5:]
     return tag
 
+def _get_process_group_name(pg: ProcessGroup) -> str:
+    return _world.pg_names[pg]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
