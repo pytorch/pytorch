@@ -917,6 +917,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     std::string& post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
+  output_scale = 1.0f / output_scale;
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
       "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
@@ -928,7 +929,8 @@ static at::Tensor linear_int8_with_onednn_weight(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
 
-  auto src = at::native::itensor_from_tensor(input);
+  auto input_contig = input.contiguous();
+  auto src = at::native::itensor_from_tensor(input_contig);
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
@@ -963,11 +965,19 @@ static at::Tensor linear_int8_with_onednn_weight(
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
       tensor::desc();
   auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args);
-  op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
-  op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  if (input_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
+  }
+  if (input_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  }
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, ideep::utils::op_scale_mask(weight_scales.numel()));
-  op_attr.set_scales_mask(DNNL_ARG_DST, 0);
-  op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
+  if (output_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_DST, 0);
+  }
+  if (output_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
+  }
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto engine = ideep::engine::cpu_engine();
   auto primitive_desc = with_bias ?
@@ -975,12 +985,14 @@ static at::Tensor linear_int8_with_onednn_weight(
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
   auto primitive = dnnl::matmul(primitive_desc);
 
+  // Reorder weight if needed
+  auto expected_weight = packed_weight.reorder_if_differ_in(primitive_desc.weights_desc());
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
   ideep::exec_args args;
   args.insert({DNNL_ARG_SRC, src});
-  args.insert({DNNL_ARG_WEIGHTS, packed_weight});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   if (with_bias) {

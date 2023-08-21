@@ -2,7 +2,8 @@ import copy
 import functools
 import itertools
 import operator
-from typing import Any, Dict, List, Optional, Set
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -30,7 +31,9 @@ from .quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
+    QuantizationSpecBase,
     Quantizer,
+    SharedQuantizationSpec,
 )
 from .xnnpack_quantizer import _is_annotated
 
