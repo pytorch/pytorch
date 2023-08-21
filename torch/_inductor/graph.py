@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+import torch._inductor.config as inductor_config
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
@@ -366,9 +367,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         output_set = set()
         for n in reversed(self.module.graph.nodes):
-            if n.target == torch.ops.aten.convolution.default:
-                output_set.add(n)
-                continue
+            if inductor_config.conv_force_channels_last:
+                if n.target == torch.ops.aten.convolution.default:
+                    output_set.add(n)
+                    continue
 
             for user in n.users:
                 if user in output_set:
@@ -670,11 +672,12 @@ class GraphLowering(torch.fx.Interpreter):
                     pass
 
         self.finalize()
-        log.debug(
-            "Force channels last inputs for %d conv for the current graph with id %d",
-            self.num_channels_last_conv,
-            self.graph_id,
-        )
+        if inductor_config.conv_force_channels_last:
+            log.debug(
+                "Force channels last inputs for %d conv for the current graph with id %d",
+                self.num_channels_last_conv,
+                self.graph_id,
+            )
 
     def finalize(self):
         for buf in self.buffers:
