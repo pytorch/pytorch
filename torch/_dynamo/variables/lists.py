@@ -31,6 +31,7 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            collections.deque: DequeVariable,
         }[obj]
 
     def __init__(
@@ -436,6 +437,16 @@ class DequeVariable(CommonListMethodsVariable):
                 DequeVariable(list(items), regen_guards=False, **options),
             )
             return result
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -758,7 +769,7 @@ class SetVariable(VariableTracker):
         def __hash__(self) -> int:
             return hash(self.underlying_value)
 
-        def __eq__(self, other: Any) -> bool:
+        def __eq__(self, other: object) -> bool:
             if not isinstance(other, SetVariable.SetElement):
                 return False
             if isinstance(self.vt, variables.TensorVariable):
