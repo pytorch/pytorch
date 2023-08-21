@@ -149,17 +149,14 @@ class TestCppExtensionJIT(common.TestCase):
             err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
-                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
-                                     "Output: {} ".format(flags, p.returncode,
-                                                          err, output))
+                raise AssertionError(f"Flags: {flags}\nReturncode: {p.returncode}\nStderr: {err}\n"
+                                     f"Output: {output} ")
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = sorted(['sm_' + xx for xx in expected_values])
             self.assertEqual(actual_arches, expected_arches,
-                             msg="Flags: {},  Actual: {},  Expected: {}\n"
-                                 "Stderr: {}\nOutput: {}".format(
-                                     flags, actual_arches, expected_arches,
-                                     err, output))
+                             msg=f"Flags: {flags},  Actual: {actual_arches},  Expected: {expected_arches}\n"
+                                 f"Stderr: {err}\nOutput: {output}")
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)

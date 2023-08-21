@@ -36,11 +36,13 @@ time python test/run_test.py --verbose -i distributed/test_functional_api
 
 
 # DTensor tests
-time python test/run_test.py --verbose -i distributed/_tensor/test_device_mesh.py
-time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops.py
+time python test/run_test.py --verbose -i distributed/_tensor/test_device_mesh
+time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
+time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compile
 
 # DTensor/TP tests
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_2d_parallel
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_ddp_2d_parallel
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_fsdp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
 
 # Other tests
