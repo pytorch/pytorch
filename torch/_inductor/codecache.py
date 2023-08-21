@@ -1152,6 +1152,7 @@ class CppWrapperCodeCache:
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
                         extra_include_paths=[extra_include_paths],
+                        use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
                 else:
