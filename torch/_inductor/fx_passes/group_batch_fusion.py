@@ -6,7 +6,11 @@ import torch
 from torch._dynamo.utils import counters
 
 from .. import config
-from ..pattern_matcher import CallFunctionVarArgs, get_arg_value
+from ..pattern_matcher import (
+    CallFunctionVarArgs,
+    get_arg_value,
+    stable_topological_sort,
+)
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -22,8 +26,10 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 MIN_FUSE_SET_SIZE = 5
-MAX_FUSE_SET_SIZE = 100
+MAX_FUSE_SET_SIZE = 300
 MAX_FUSE_SEARCH_DEPTH = 5
+# The maximum tensor size that can go into the fusion group
+MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
 
 
 class GroupBatchFusionBase:
@@ -60,6 +66,8 @@ class GroupLinearFusion(GroupFusion):
             and len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
+            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+            for shape in input_shape + weight_shape
         )
 
     def _mm_node_can_be_fused(self, node):
@@ -69,6 +77,8 @@ class GroupLinearFusion(GroupFusion):
             len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
+            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+            for shape in input_shape + weight_shape
         )
 
     def match(self, node):
@@ -120,19 +130,98 @@ class GroupLinearFusion(GroupFusion):
             graph.erase_node(original_mm)
 
 
+class BatchLinearLHSFusion(BatchFusion):
+    """
+    Batch linear left-hand side fusion. This pass tries to fuse the following patterns:
+
+        torch.nn.functional.linear(x, w1), linear(x, w2),... * linear(x, wn)
+        -> torch.mm(x, torch.cat([w1, w2,... * wn]).transpose(0, 1))
+
+    We have a separate pass to eliminate contiguous transpose in a generic way.
+    """
+
+    def _linear_node_can_be_fused(self, node):
+        input = get_arg_value(node, 0, "input")
+        weight = get_arg_value(node, 1, "weight")
+        return (
+            is_node_meta_valid(node)
+            and len(input.meta["example_value"].shape) == 2
+            and len(weight.meta["example_value"].shape) == 2
+        )
+
+    def match(self, node):
+        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+            node
+        ) and self._linear_node_can_be_fused(node):
+            input = get_arg_value(node, 0, "input")
+            bias = get_arg_value(node, 2, "bias")
+            group_key = ("batch_linear_lhs", bias is None, input)
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph, subset):
+        batch_nodes = []
+        batch_input = None
+        batch_weights = []
+        batch_biases = []
+        split_sections = []
+        for node in subset:
+            input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
+            bias = get_arg_value(node, 2, "bias")
+            batch_nodes.append(node)
+            if batch_input is None:
+                batch_input = input
+            else:
+                assert batch_input is input
+            batch_weights.append(weight)
+            if bias:
+                batch_biases.append(bias)
+            split_sections.append(weight.meta["example_value"].shape[0])
+
+        with graph.inserting_before(subset[0]):
+            cat_weights = graph.call_function(torch.cat, args=((batch_weights, 0)))
+            transposed_weights = graph.call_function(
+                torch.transpose, args=(cat_weights, 0, 1)
+            )
+            if len(batch_biases) > 0:
+                cat_biases = graph.call_function(torch.cat, args=((batch_biases, 0)))
+                fused_lhs = graph.call_function(
+                    torch.addmm,
+                    args=(cat_biases, batch_input, transposed_weights),
+                )
+            else:
+                fused_lhs = graph.call_function(
+                    torch.mm,
+                    args=(batch_input, transposed_weights),
+                )
+            fused_lhs_list = graph.call_function(
+                torch.split, args=((fused_lhs, split_sections, 1))
+            )
+
+        for i, node in enumerate(batch_nodes):
+            with graph.inserting_after(fused_lhs_list):
+                new_node = graph.call_function(
+                    operator.getitem, args=(fused_lhs_list, i)
+                )
+            node.replace_all_uses_with(new_node)
+            new_node.meta.update(node.meta)
+            graph.erase_node(node)
+
+
+def is_node_meta_valid(node):
+    if node is None:
+        return True
+    if "example_value" not in node.meta:
+        return False
+    return True
+
+
 class BatchLayernormFusion(BatchFusion):
     """
     Batch layer norm fusion in pre grad pass
     """
-
-    def is_node_meta_valid(self, node):
-        if node is None:
-            return True
-        else:
-            if "example_value" in node.meta:
-                return True
-            else:
-                return False
 
     def match(self, node):
         if CallFunctionVarArgs(torch.nn.functional.layer_norm).match(node):
@@ -151,8 +240,8 @@ class BatchLayernormFusion(BatchFusion):
                     str(get_arg_value(node, 4, "eps")),
                 )
                 if "example_value" in input.meta
-                and self.is_node_meta_valid(weight)
-                and self.is_node_meta_valid(bias)
+                and is_node_meta_valid(weight)
+                and is_node_meta_valid(bias)
                 else None
             )
         else:
@@ -310,6 +399,7 @@ def get_fusion_candidates(rule, root_node, fused_set):
 
 
 def apply_group_batch_fusion(graph, rule):
+    stable_topological_sort(graph)
     fused_set = set()
 
     for node in reversed(graph.nodes):
@@ -346,7 +436,7 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
     fusions = []
 
     if config.batch_fusion:
-        fusions += [BatchLayernormFusion()]
+        fusions += [BatchLinearLHSFusion(), BatchLayernormFusion()]
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
