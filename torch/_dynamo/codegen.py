@@ -134,6 +134,8 @@ class PyCodegen:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
+            # If something is a valid output, and it can have hooks, it is sound to register hooks for it now.
+            self.tx.output.side_effects.codegen_hooks(self, value)
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:

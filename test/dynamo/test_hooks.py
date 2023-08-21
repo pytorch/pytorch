@@ -204,26 +204,10 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         out = torch.randn(1, requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = torch._dynamo.optimize(cnts, nopython=True)(f)
+        fn = torch._dynamo.optimize(cnts, nopython=False)(f)
         res = fn(out)
         res.backward()
         self.assertEqual(res, f(out))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(out.grad, torch.Tensor([2.0]))
-
-    def test_intermediary_hooks_inductor(self):
-        def simple_hook(g):
-            return g * 2
-
-        def f(x):
-            y = x + 1
-            y.register_hook(simple_hook)
-            z = y + 1
-            return z
-
-        out = torch.randn(1, requires_grad=True)
-        fn = torch._dynamo.optimize("aot_eager", nopython=True)(f)
-        res = fn(out)
-        res.backward()
-        self.assertEqual(res, f(out))
+        # NYI!
+        self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(out.grad, torch.Tensor([2.0]))

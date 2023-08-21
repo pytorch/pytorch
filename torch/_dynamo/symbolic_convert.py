@@ -793,7 +793,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # If the last top VT in the stack (just popped) is a handle (see On dynamo tensor_hooks), we associate
         # the stored name.
         if isinstance(loaded_vt, RemovableHandleVariable):
-            new_rhv = loaded_vt.clone(last_seen_name=name)
+            new_name = self.output.new_var(name)
+            new_rhv = loaded_vt.clone(last_seen_name=new_name)
             loaded_vt = self.replace_all(loaded_vt, new_rhv)
         self.symbolic_locals[name] = loaded_vt
 

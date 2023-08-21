@@ -795,6 +795,26 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        def install_remaining_hooks(curr_pass):
+            # This is a tricky bit of logic, lets go over it.
+            # At this point, we will already have installed hooks for outputs.
+            # So, remaining hooks are hooks with sources - specifically, we want to avoid installing hooks
+            # on intermediaries, as that will accrue a new output value in the graph, which we do not want.
+            # So, we iterate over all known hooked tensors, and install their hooks if there is a source (meaning, )
+            # this is an input or a known attr. If there is not a source, it can still be hooked if this intermediary
+            # value is used in output (Hence the False check, that value should only be False if there have been)
+            # no attempts to install this accumulated hook. As such, we have to graph break here, as it would be
+            # unsound to proceed with a hook on a value that is neither an input, nor an output - and it would be
+            # unsound to ignore this hook.
+            for tensor in list(self.side_effects.tensor_hooks):
+                if tensor.source:
+                    self.side_effects.codegen_hooks(curr_pass, tensor)
+                else:
+                    if self.side_effects.tensor_hooks[tensor][1] is False:
+                        unimplemented(
+                            f"Uninstalled hooks, probably on intermediaries {self.side_effects.tensor_hooks.keys()}"
+                        )
+
         # to handle random calls
         if len(tx.random_calls) > 0:
             append_prefix_insts()
@@ -832,6 +852,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
+            install_remaining_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -843,6 +864,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
+            install_remaining_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)
