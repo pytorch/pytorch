@@ -555,6 +555,9 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None) -> ValueRanges:
+    if isinstance(expr, sympy.Number):
+        return ValueRanges.wrap(expr)
+
     ranges = ranges or {}
 
     # If there's a tracing context, augment available constrained ranges.
