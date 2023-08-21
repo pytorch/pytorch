@@ -57,18 +57,23 @@ def are_tensors(var):
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+    from . import (
+        AutogradFunctionContextVariable,
+        ConstantVariable,
+        NNModuleVariable,
+        TensorVariable,
+    )
     from .builder import wrap_fx_proxy
 
     assert tracer.parent is not None
 
-    args = []
-    for a in sub_args:
-        assert isinstance(a, VariableTracker)
+    def run(arg):
+        if not isinstance(arg, VariableTracker):
+            return [el for a in arg for el in run(a)]
 
-        if isinstance(a, ConstantVariable):
+        if isinstance(arg, ConstantVariable):
             # Ensures that we recompile when the constant value changes
-            a.add_guard(GuardBuilder.CONSTANT_MATCH)
+            arg.add_guard(GuardBuilder.CONSTANT_MATCH)
 
             if manually_set_subgraph_inputs:
                 # This arg is not used in the body of the higher order op.
@@ -76,30 +81,31 @@ def validate_args_and_maybe_create_graph_inputs(
                 # happy, which expect a fixed number of arguments. In
                 # future, we can clean this up.
                 tracer.create_graph_input("const")
-            new_arg = a
-        elif isinstance(a, TensorVariable):
+            return [arg]
+        elif isinstance(arg, TensorVariable):
             if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
-                example_value = a.as_proxy().node.meta["example_value"]
-                new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
-                )
+                new_proxy = tracer.create_graph_input(arg.as_proxy().node.name)
+                example_value = arg.as_proxy().node.meta["example_value"]
+                return [
+                    wrap_fx_proxy(tx=tx, proxy=new_proxy, example_value=example_value)
+                ]
             else:
-                new_arg = a
-        elif isinstance(a, AutogradFunctionContextVariable):
+                return [arg]
+        elif isinstance(arg, AutogradFunctionContextVariable):
             if manually_set_subgraph_inputs:
-                tracer.create_graph_input(a.as_proxy().node.name)
-            new_arg = a
+                tracer.create_graph_input(arg.as_proxy().node.name)
+            return [arg]
+        elif not isinstance(arg, NNModuleVariable) and arg.has_unpack_var_sequence(tx):
+            return run(arg.unpack_var_sequence(tx))
         else:
-            raise unimplemented(
-                "HigherOrderOperator with body that accepts non-Tensors as input"
+            unimplemented(
+                f"HigherOrderOperator with body that accepts non-Tensors as input: {type(arg)}"
             )
 
-        args.append(new_arg)
-    return args
+    return run(sub_args)
 
 
-# See NOTE [HigherOrderOperator tracing design] for details of the design
+# See NOTE [HigherOrderOperator tracing design]x for details of the design
 def speculate_subgraph(
     tx,
     f,
@@ -204,6 +210,12 @@ def speculate_subgraph(
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise
+
+
+def get_example_value_from_proxy_container(expr):
+    return pytree.tree_map_only(
+        torch.fx.Proxy, lambda a: a.node.meta["example_value"], expr
+    )
 
 
 def make_attr(tx, name):
@@ -961,10 +973,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
-
         _, p_kwargs = proxy_args_kwargs([], kwargs)
+        example_value = get_example_value_from_proxy_container(body_r.as_proxy())
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -1013,11 +1023,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
         proxy_args = (body_node,) + lifted_args
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
+        example_value = get_example_value_from_proxy_container(body_r.as_proxy())
 
         return proxy_args, {}, example_value
 

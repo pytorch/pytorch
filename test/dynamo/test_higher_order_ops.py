@@ -1556,6 +1556,25 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+    def test_multiple_return(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin(), x.sin()
+
+            @staticmethod
+            def backward(ctx, grad0, grad1):
+                (x,) = ctx.saved_tensors
+                return grad0 * x.cos(), grad1 * x.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn([], requires_grad=True)
+        f(x)
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
