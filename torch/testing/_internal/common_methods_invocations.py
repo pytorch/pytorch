@@ -13528,7 +13528,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
         dtypes=complex_types(),
-        dtypesIfCUDA=empty_types(),
+        dtypesIfCUDA=complex_types(),
         supports_forward_ad=False,
         supports_autograd=False,
         assert_autodiffed=False,
@@ -13544,7 +13544,7 @@ op_db: List[OpInfo] = [
             ), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                         dtypes=(torch.cfloat,), device_type='cpu'),
+                         dtypes=(torch.cfloat,)),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
