@@ -2651,6 +2651,44 @@ class GraphModule(torch.nn.Module):
             {"torch.func.vmap: out_dims is not an int or tuple variable.": 2},
         )
 
+    def test_vmap_new_tensor_in_body(self):
+        def fn(x):
+            return x + torch.ones(3)
+
+        def wrapper_fn(x):
+            return torch.func.vmap(fn)(x)
+
+        x = torch.randn(
+            3,
+        )
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
+
+    def test_vmap_new_tensor_unused_in_body(self):
+        def fn(x):
+            return torch.tensor(0.5)
+
+        def wrapper_fn(x):
+            return torch.func.vmap(fn)(x)
+
+        x = torch.randn(3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
+
+    def test_vmap_new_tensor_implicit_via_op(self):
+        def wrapper_fn(x):
+            return torch.func.vmap(lambda t: torch.add(t, 0.5))(x)
+
+        x = torch.randn(3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):

@@ -1,4 +1,5 @@
 import functools
+import inspect
 import itertools
 import logging
 import os
@@ -16,7 +17,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
-from torch.utils._traceback import format_traceback_short
+from torch.utils._traceback import format_frame, format_traceback_short
 
 from . import config, exc
 from .allowed_functions import is_allowed
@@ -67,8 +68,20 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
+
+
+# For user stack printing
+@functools.lru_cache(None)
+def uninteresting_files():
+    import torch._dynamo.external_utils
+
+    mods = [
+        torch._dynamo.external_utils,
+    ]
+    return {inspect.getfile(m) for m in mods}
 
 
 class Tracker:
@@ -529,15 +542,42 @@ def _compile(
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [
-                    f"  {code}"
-                    for guard in sorted(output.guards)
-                    if guard.code_list is not None
-                    for code in guard.code_list
-                ]
-            )
-            guards_log.debug(guard_str)
+            base = os.path.dirname(__file__)
+            for guard in sorted(output.guards):
+                if guard.code_list is None:
+                    continue
+
+                extra = ""
+                if guard.user_stack:
+                    for fs in reversed(guard.user_stack):
+                        if fs.filename not in uninteresting_files():
+                            break
+                    else:
+                        fs = guard.user_stack[-1]
+                    extra = f"  # {format_frame(fs, line=True)}"
+                elif guard.stack:
+                    extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+
+                for code in guard.code_list:
+                    guard_str += f"  {code:<60}{extra}\n"
+            guards_log.debug("%s", guard_str)
+
+        if verbose_guards_log.isEnabledFor(logging.DEBUG):
+            for guard in sorted(output.guards):
+                if guard.code_list is None:
+                    continue
+                cat_code = " and ".join(guard.code_list)
+                maybe_user_stack = ""
+                if guard.user_stack:
+                    maybe_user_stack = (
+                        f"\nUser stack:\n{''.join(guard.user_stack.format())}"
+                    )
+                verbose_guards_log.debug(
+                    "GUARD: %s\nStack:\n%s%s",
+                    cat_code,
+                    "".join(guard.stack.format()),
+                    maybe_user_stack,
+                )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
