@@ -1702,9 +1702,11 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
-    def add(self, expr):
+    def add(self, expr) -> bool:
+        # Add an expression to the set of constraints.
+        # Return whether the expression is a trivial constraint (i.e., an obvious tautology).
         if expr == sympy.true:
-            return
+            return True
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
@@ -1724,17 +1726,19 @@ class DimConstraints:
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
             expr = self.rewrite_with_congruences(s, expr)
-            if expr != sympy.true:
-                reduced = expr.subs(self._var_to_val)
-                if reduced == sympy.false:
-                    self._inconsistencies.append(
-                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
-                        "is inconsistent!"
-                    )
-                if isinstance(expr, sympy.Eq):
-                    # special status for symbols that have equalities (see `solve` below)
-                    self._symbols_with_equalities.add(s)
-                self._univariate_inequalities[s].add(expr)
+            if expr == sympy.true:
+                return True
+            reduced = expr.subs(self._var_to_val)
+            if reduced == sympy.false:
+                self._inconsistencies.append(
+                    f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                    "is inconsistent!"
+                )
+            if isinstance(expr, sympy.Eq):
+                # special status for symbols that have equalities (see `solve` below)
+                self._symbols_with_equalities.add(s)
+            self._univariate_inequalities[s].add(expr)
+        return False
 
     def add_equality(self, source, expr):
         if expr.free_symbols:
@@ -1984,15 +1988,6 @@ class DimConstraints:
 TLS = threading.local()
 
 
-class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
-        # TODO: Maybe suppress the envid if not DEBUG?
-        return f"{self.extra['envid']}: {msg}", kwargs
-
-
-ENV_COUNTER = collections.Counter()
-
-
 class ShapeEnv:
     def __init__(
         self, *,
@@ -2018,7 +2013,6 @@ class ShapeEnv:
         # symbolically equal.
         duck_shape=True,
         # For debugging
-        frame_id=None,
         co_fields=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
@@ -2091,13 +2085,7 @@ class ShapeEnv:
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
-        per_frame_id = ENV_COUNTER[frame_id]
-        ENV_COUNTER[frame_id] += 1
-        if frame_id is None:
-            env_id = per_frame_id
-        else:
-            env_id = f"{frame_id}.{per_frame_id}"
-        self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
+        self.log = log
         self.log.info("create_env")
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
@@ -2808,14 +2796,15 @@ class ShapeEnv:
             issued.add(expr)
 
             try:
+                is_trivial = False
                 if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(expr)
+                    is_trivial = self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
-                if len(expr.free_symbols) == 1:
+                if len(expr.free_symbols) == 1 and not is_trivial:
                     symbol = list(expr.free_symbols)[0]
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
@@ -2862,7 +2851,9 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
-                r = self.var_to_range[symbol]
+                r = self.runtime_var_to_range.get(symbol)
+                if r is None:
+                    r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:
                     if isinstance(c, StrictMinMaxConstraint):
@@ -2944,6 +2935,9 @@ class ShapeEnv:
             # Add value range bound guards for all symbols with no trivial bounds.
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
+            #
+            # NB: do NOT use runtime var ranges, they're unsound!  You will
+            # only get correct TV with the compile-time ranges.
             for sym, vr in self.var_to_range.items():
                 if vr.lower != -sympy.oo:
                     self._add_target_expr(sympy.Le(vr.lower, sym))
