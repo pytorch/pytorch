@@ -773,11 +773,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             # If device_mesh is passed in when initalizing FSDP, we automatically turn the
             # _use_dtensor flag to be true for ShardedStateDictConfig() and ShardedOptimStateDictConfig().
-            if module.device_mesh and isinstance(
+            if getattr(module, "device_mesh", None) and isinstance(
                 state_dict_settings.state_dict_config, ShardedStateDictConfig
             ):
                 state_dict_settings.state_dict_config._use_dtensor = True
-            if module.device_mesh and isinstance(
+            if getattr(module, "device_mesh", None) and isinstance(
                 state_dict_settings.optim_state_dict_config, ShardedOptimStateDictConfig
             ):
                 state_dict_settings.optim_state_dict_config._use_dtensor = True
