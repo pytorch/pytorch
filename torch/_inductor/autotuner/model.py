@@ -5,6 +5,7 @@ import logging
 import functools
 import itertools
 import dataclasses
+from enum import IntEnum
 from typing import Dict, List, Tuple, NamedTuple
 
 import torch
@@ -196,7 +197,7 @@ class FeatureVector:
     num_stages: int
 
 
-class KernelCategory(enumerate):
+class KernelCategory(IntEnum):
     POINTWISE = 0
     REDUCTION = 1
     PERSISTENT_REDUCTION = 2
@@ -303,7 +304,7 @@ def dep_list(deps, strides, sizes, total_bytes, rw_lim, ndims_lim):
 ### model arch related
 
 
-class ModelType(enumerate):
+class ModelType(IntEnum):
     XGB_BASELINE = 0
     NN_POINTWISE = 1
     NN_PAIRWISE = 2
@@ -503,7 +504,7 @@ def get_model(model_type: ModelType):
 
 
 ### search space related
-class AutotunerSpaceCategory(enumerate):
+class AutotunerSpaceCategory(IntEnum):
     MAX_AUTOTUNE_TOP1 = 0
     MAX_AUTOTUNE_TOP2 = 1
     RADIUS_1_TOP1 = 2
