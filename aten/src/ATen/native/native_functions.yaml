@@ -6473,12 +6473,6 @@
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_compressed_
   autogen: resize_as_sparse, resize_as_sparse.out
 
-- func: zero(Tensor self) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: zero
-
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method, function
@@ -6490,7 +6484,7 @@
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
     NestedTensorCPU, NestedTensorCUDA: zero_nested_
-  autogen: zero.out
+  autogen: zero, zero.out
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -10933,20 +10927,13 @@
     CUDA: foreach_tensor_trunc_cuda_
   autogen: _foreach_trunc.out
 
-- func: _foreach_zero(Tensor[] self) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_zero_slow
-    CUDA: foreach_tensor_zero_cuda
-
 - func: _foreach_zero_(Tensor(a!)[] self) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_zero_slow_
     CUDA: foreach_tensor_zero_cuda_
-  autogen: _foreach_zero.out
+  autogen: _foreach_zero, _foreach_zero.out
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:

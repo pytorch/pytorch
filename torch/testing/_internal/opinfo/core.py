@@ -2664,6 +2664,11 @@ def get_foreach_method_names(name):
     return op, inplace_op, ref, ref_inplace
 
 
+# Not exposed to the Python frontend.
+def _foreach_zero(*args, **kwargs):
+    raise NotImplementedError("_foreach_zero")
+
+
 class ForeachFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach functions"""
 
@@ -2687,6 +2692,12 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
+        if name == "zero":
+            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
+            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
+            # is not defined at the moment.
+            assert foreach_method is None
+            foreach_method = _foreach_zero
         super().__init__(
             name="_foreach_" + name,
             op=foreach_method,

@@ -378,41 +378,6 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
   all_types_complex_bfloat16_half_bool_<Abs>(tensors);
 }
 
-std::vector<Tensor> foreach_tensor_zero_cuda(TensorList tensors) {
-  check_foreach_api_restrictions(tensors);
-
-  if (!can_use_fast_route(tensors)) {
-    return at::native::foreach_tensor_zero_slow(tensors);
-  }
-
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  std::vector<at::Tensor> vec_res;
-  vec_res.reserve(tensors.size());
-  for (const auto& t : tensors) {
-    vec_res.emplace_back(at::native::empty_like(t));
-  }
-
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      tensors[0].scalar_type(),
-      "foreach_zero_cuda",
-      [&]() {
-        multi_tensor_apply<2>(
-            tensor_lists,
-            ZeroFunctor<
-                scalar_t,
-                /* depth */ 2,
-                /* r_args_depth */ 1,
-                /* res_arg_index */ 1>());
-      });
-
-    return tensor_lists[1];
-}
-
 void foreach_tensor_zero_cuda_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
 

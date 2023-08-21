@@ -157,9 +157,5 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-Tensor zero(const Tensor& self) {
-  return at::empty_like(self).zero_();
-}
-
 } // namespace native
 } // namespace at

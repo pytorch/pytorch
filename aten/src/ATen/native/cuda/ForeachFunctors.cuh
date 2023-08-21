@@ -378,7 +378,7 @@ template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct ZeroFunctor {
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl) {
+      TensorListMetadata<1>& tl) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];

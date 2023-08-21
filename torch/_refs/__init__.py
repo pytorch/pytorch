@@ -1724,10 +1724,6 @@ def trunc_divide(
 
 @register_decomposition(aten.addcdiv)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "tensor1", "tensor2"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 def addcdiv(
     self: TensorLikeType,
     tensor1: TensorLikeType,
@@ -1738,17 +1734,38 @@ def addcdiv(
     """
     Reference implementation of torch.addcdiv
     """
-    if value is not None:
-        dtype = self.dtype  # no scalars allowed, see add
-        python_type = utils.dtype_to_type(dtype)
-        torch._check_value(
-            utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
-        )
-    # torch.addcdiv(torch.tensor(2), torch.tensor(3), torch.tensor(4), value=2.6)
-    #  == integer division runtime error
+    # Note: not essential for getting the foreach variant work.
+    if (utils.is_integer_dtype(tensor1.dtype) or utils.is_boolean_dtype(tensor1.dtype)) and\
+       (utils.is_integer_dtype(tensor2.dtype) or utils.is_boolean_dtype(tensor2.dtype)):
+        torch._check(
+            False,
+            lambda: ("Integer division with addcdiv is no longer supported, and in a future  "
+                     "release addcdiv will perform a true division of tensor1 and tensor2. "
+                     "The historic addcdiv behavior can be implemented as "
+                     "(input + value * torch.trunc(tensor1 / tensor2)).to(input.dtype) "
+                     "for integer inputs and as "
+                     "(input + value * tensor1 / tensor2) for float inputs. "
+                     "The future addcdiv behavior is just the latter implementation: "
+                     "(input + value * tensor1 / tensor2), for all dtypes."))
 
-    return self + value * tensor1 / tensor2
+    @elementwise_type_promotion_wrapper(
+        type_promoting_args=("self", "tensor1", "tensor2"),
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    def _inner(self, tensor1, tensor2, value):
+        if value is not None:
+            dtype = self.dtype  # no scalars allowed, see add
+            python_type = utils.dtype_to_type(dtype)
+            torch._check_value(
+                utils.is_weakly_lesser_type(type(value), python_type),
+                lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
+            )
+        # torch.addcdiv(torch.tensor(2), torch.tensor(3), torch.tensor(4), value=2.6)
+        #  == integer division runtime error
+
+        return self + value * tensor1 / tensor2
+
+    return _inner(self, tensor1, tensor2, value)
 
 
 @register_decomposition(aten.addcmul)

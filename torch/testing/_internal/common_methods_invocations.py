@@ -8333,12 +8333,19 @@ class foreach_inputs_sample_func:
                 requires_grad=_foreach_inputs_kwargs.get("requires_grad", False),
             )]
         should_use_simpler_scalars = opinfo.name == "_foreach_pow" and dtype in (torch.float16, torch.bfloat16)
+        # passing non-bool scalar with bool tensors leads to unsafe cast
+        should_use_bool_scalars = opinfo.name == "_foreach_add" and dtype == torch.bool
         # passing float scalar with int tensors leads to unsafe cast
-        should_use_int_scalars = opinfo.name == "_foreach_addcmul" and dtype in integral_types()
+        should_use_int_scalars = opinfo.name in ["_foreach_addcmul", "_foreach_addcdiv", "_foreach_add"] and dtype in integral_types()
         # same for complex
         should_use_int_float_scalars = (
-            opinfo.name == "_foreach_addcmul" and dtype in floating_types_and(torch.float16, torch.bfloat16)
-        )
+            opinfo.name in ["_foreach_addcmul", "_foreach_addcdiv", "_foreach_add"] and dtype in floating_types_and(torch.float16, torch.bfloat16)
+        ) or opinfo.name in ["_foreach_clamp_min", "_foreach_clamp_max", "_foreach_maximum", "_foreach_minimum"] \
+          or opinfo.name in ["_foreach_div"]
+        # pow doesn't support bool on CUDA
+        # sub doesn't support bool: use the `~` or `logical_not()`
+        should_skip_bool = (opinfo.name == "_foreach_pow" and torch.device(device).type == 'cuda'
+        ) or opinfo.name == "_foreach_sub"
 
         def to_int(x):
             if type(x) is complex:
@@ -8349,6 +8356,12 @@ class foreach_inputs_sample_func:
         def to_int_float(x):
             if type(x) is complex:
                 return x.real
+            else:
+                return x
+
+        def bool_to_int(x):
+            if type(x) is bool:
+                return int(x)
             else:
                 return x
 
@@ -8369,10 +8382,14 @@ class foreach_inputs_sample_func:
                 [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
                 [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
             ]
-            if should_use_int_scalars:
+            if should_use_bool_scalars:
+                res = [[bool(x) for x in y] for y in res]
+            elif should_use_int_scalars:
                 res = [[to_int(x) for x in y] for y in res]
             elif should_use_int_float_scalars:
                 res = [[to_int_float(x) for x in y] for y in res]
+            elif should_skip_bool:
+                res = [[bool_to_int(x) for x in y] for y in res]
             return res
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
             res = (
@@ -8381,10 +8398,14 @@ class foreach_inputs_sample_func:
                 True,
                 complex(sample_float(), sample_float()),
             )
-            if should_use_int_scalars:
+            if should_use_bool_scalars:
+                res = tuple(bool(x) for x in res)
+            elif should_use_int_scalars:
                 res = tuple(to_int(x) for x in res)
             elif should_use_int_float_scalars:
                 res = tuple(to_int_float(x) for x in res)
+            elif should_skip_bool:
+                res = tuple(bool_to_int(x) for x in res)
             return res
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
@@ -8852,8 +8873,8 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "sub",
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
         supports_alpha_param=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
@@ -8940,8 +8961,8 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ),
     ForeachFuncInfo(
         "addcdiv",
-        dtypes=all_types_and_complex(),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
