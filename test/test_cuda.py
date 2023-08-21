@@ -3201,15 +3201,15 @@ exit(2)
             try:
                 with torch.cuda.stream(stream):
                     mem = torch.cuda.caching_allocator_alloc(1024)
-            finally:
+            except BaseException:
                 if mem is None:
                     return
             try:
                 torch.cuda.caching_allocator_delete(mem)
                 mem = None
                 return None
-            finally:
-                return mem
+            except BaseException:
+                pass
 
         def throws_on_cuda_event(capture_error_mode):
             graph = torch.cuda.CUDAGraph()

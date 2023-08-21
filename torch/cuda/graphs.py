@@ -1,5 +1,4 @@
 import gc
-from typing import Literal
 
 import torch
 from torch.utils._pytree import (
@@ -159,7 +158,7 @@ class graph:
         cuda_graph,
         pool=None,
         stream=None,
-        capture_error_mode: Literal["global", "thread_local", "relaxed"] = "global",
+        capture_error_mode: str = "global",
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
