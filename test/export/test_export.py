@@ -1,18 +1,19 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
 import unittest
+from contextlib import contextmanager
+from dataclasses import dataclass
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim, DEFAULT_EXPORT_DYNAMO_CONFIG
+from functorch.experimental.control_flow import map
+from torch import Tensor
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._pytree import tree_flatten, tree_unflatten, LeafSpec, TreeSpec
-from functorch.experimental.control_flow import map
-from contextlib import contextmanager
-from dataclasses import dataclass
+from torch.utils._pytree import LeafSpec, tree_flatten, tree_unflatten, TreeSpec
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -706,6 +707,20 @@ class TestExport(TestCase):
                 case_5(torch.tensor(5), torch.ones(4, 5)),
             )
         )
+
+    def test_mixed_input(self):
+        def func(a, b, alpha: int):
+            return torch.add(a, b, alpha=alpha)
+
+        a = torch.rand(1, 2)
+        b = torch.rand(1, 2)
+        alpha = 10
+
+        exported = torch._export.export(func, (a, b, alpha))
+        for node in exported.graph_module.graph.nodes:
+            if node.op == "placeholder":
+                self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
+
 
 if __name__ == '__main__':
     run_tests()
