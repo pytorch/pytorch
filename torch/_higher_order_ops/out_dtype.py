@@ -55,6 +55,8 @@ class OutDtypeOperator(HigherOrderOperator):
         self.__module__ = "torch.ops.higher_order"
 
     def __call__(self, op, output_dtype, *args):
+        # import pdb
+        # pdb.set_trace()
         if not isinstance(op, torch._ops.OpOverload):
             raise ValueError("out_dtype's first argument must be an OpOverload")
         if op._schema.is_mutable:
@@ -87,6 +89,8 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
+    import pdb
+    pdb.set_trace()
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
@@ -138,8 +142,6 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args
 ):
-    import pdb
-    pdb.set_trace()
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:

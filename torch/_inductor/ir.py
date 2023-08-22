@@ -2977,6 +2977,8 @@ class ExternKernel(InputsKernel):
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
+            import pdb
+            pdb.set_trace()
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
@@ -3011,7 +3013,7 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs)
+        example_output = kernel(*new_args, **new_kwargs) # this destroys the non tensor ops
 
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
