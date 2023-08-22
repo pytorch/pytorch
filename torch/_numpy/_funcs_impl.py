@@ -1387,6 +1387,8 @@ def _sort_helper(tensor, axis, kind, order):
 
 
 def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     # `order` keyword arg is only relevant for structured dtypes; so not supported here.
     a, axis, stable = _sort_helper(a, axis, kind, order)
     result = torch.sort(a, dim=axis, stable=stable)
@@ -1394,6 +1396,8 @@ def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     a, axis, stable = _sort_helper(a, axis, kind, order)
     return torch.argsort(a, dim=axis, stable=stable)
 
@@ -1401,6 +1405,9 @@ def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
+    if a.dtype.is_complex:
+        return NotImplemented
+
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
 
