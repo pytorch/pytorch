@@ -903,7 +903,9 @@ def _unpool_output_size(
         if len(output_size) != len(kernel_size):
             raise ValueError(
                 "output_size should be a sequence containing "
-                f"{len(kernel_size)} or {len(kernel_size) + 2} elements, but it has a length of '{len(output_size)}'"
+                "{} or {} elements, but it has a length of '{}'".format(
+                    len(kernel_size), len(kernel_size) + 2, len(output_size)
+                )
             )
         for d in range(len(kernel_size)):
             min_size = default_size[d] - stride[d]
@@ -2354,8 +2356,8 @@ def embedding_bag(
 
     if per_sample_weights is not None and input.size() != per_sample_weights.size():
         raise ValueError(
-            f"embedding_bag: If per_sample_weights ({per_sample_weights.shape}) is not None, "
-            f"then it must have the same shape as the input ({input.shape})"
+            "embedding_bag: If per_sample_weights ({}) is not None, "
+            "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
     if not weight.dim() == 2:
@@ -2373,7 +2375,7 @@ def embedding_bag(
                 "if input is 2D, then offsets has to be None"
                 ", as input is treated is a mini-batch of"
                 " fixed length sequences. However, found "
-                f"offsets of type {type_str}"
+                "offsets of type {}".format(type_str)
             )
         offsets = torch.arange(0, input.numel(), input.size(1), dtype=input.dtype, device=input.device)
 
@@ -2414,7 +2416,7 @@ def embedding_bag(
         raise NotImplementedError(
             "embedding_bag: per_sample_weights was not None. "
             "per_sample_weights is only supported for mode='sum' "
-            f"(got mode='{mode}'). Please open a feature request on GitHub."
+            "(got mode='{}'). Please open a feature request on GitHub.".format(mode)
         )
 
     ret, _, _, _ = torch.embedding_bag(
@@ -3221,9 +3223,9 @@ def smooth_l1_loss(
         )
     if not (target.size() == input.size()):
         warnings.warn(
-            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
+            "Using a target size ({}) that is different to the input size ({}). "
             "This will likely lead to incorrect results due to broadcasting. "
-            "Please ensure they have the same size.",
+            "Please ensure they have the same size.".format(target.size(), input.size()),
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
@@ -3258,9 +3260,9 @@ def huber_loss(
             delta=delta,
         )
     if not (target.size() == input.size()):
-        warnings.warn(f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
-                      "Please ensure they have the same size.",
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
                       stacklevel=2)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
@@ -3286,9 +3288,9 @@ def l1_loss(
         )
     if not (target.size() == input.size()):
         warnings.warn(
-            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
+            "Using a target size ({}) that is different to the input size ({}). "
             "This will likely lead to incorrect results due to broadcasting. "
-            "Please ensure they have the same size.",
+            "Please ensure they have the same size.".format(target.size(), input.size()),
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
@@ -3317,9 +3319,9 @@ def mse_loss(
         )
     if not (target.size() == input.size()):
         warnings.warn(
-            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
+            "Using a target size ({}) that is different to the input size ({}). "
             "This will likely lead to incorrect results due to broadcasting. "
-            "Please ensure they have the same size.",
+            "Please ensure they have the same size.".format(target.size(), input.size()),
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
@@ -4042,8 +4044,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
-        f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
-        f" (got {mode})"
+        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
+        " (got {})".format(input.dim(), mode)
     )
 
 
@@ -4275,7 +4277,7 @@ def grid_sample(
         raise ValueError(
             "nn.functional.grid_sample(): expected padding_mode "
             "to be 'zeros', 'border', or 'reflection', "
-            f"but got: '{padding_mode}'"
+            "but got: '{}'".format(padding_mode)
         )
 
     if mode == "bilinear":
@@ -4383,7 +4385,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
         raise NotImplementedError(
             "affine_grid only supports 4D and 5D sizes, "
             "for 2D and 3D affine transforms, respectively. "
-            f"Got size {size}."
+            "Got size {}.".format(size)
         )
     # check for empty span
     if align_corners and min(spatial_size) == 1:

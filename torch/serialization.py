@@ -202,8 +202,10 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
     except Exception as e:
         message = (
-            f"'{module.__name__}' module version string is malformed '{module.__version__}' and cannot be compared"
-            f" with tuple {str(req_version_tuple)}"
+            "'{}' module version string is malformed '{}' and cannot be compared"
+            " with tuple {}"
+        ).format(
+            module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
             raise RuntimeError(message) from e

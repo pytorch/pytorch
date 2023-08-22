@@ -205,9 +205,9 @@ class Dispatcher:
             if not isinstance(typ, (type, list)):
                 str_sig = ', '.join(c.__name__ if isinstance(c, type)
                                     else str(c) for c in signature)
-                raise TypeError(f"Tried to dispatch on non-type: {typ}\n"
-                                f"In signature: <{str_sig}>\n"
-                                f"In function: {self.name}")
+                raise TypeError("Tried to dispatch on non-type: {}\n"
+                                "In signature: <{}>\n"
+                                "In function: {}".format(typ, str_sig, self.name))
 
             # handle variadic signatures
             if isinstance(typ, list):
@@ -272,7 +272,8 @@ class Dispatcher:
 
             raise NotImplementedError(
                 "Matching functions for "
-                f"{self.name}: <{str_signature(types)}> found, but none completed successfully",) from e
+                "{}: <{}> found, but none completed successfully".format(
+                    self.name, str_signature(types),),) from e
 
     def __str__(self):
         return f"<dispatched {self.name}>"

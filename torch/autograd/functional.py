@@ -33,13 +33,17 @@ def _as_tuple(inp, arg_name=None, fn_name=None):
         if not isinstance(el, torch.Tensor):
             if is_inp_tuple:
                 raise TypeError(
-                    f"The {arg_name} given to {fn_name} must be either a Tensor or a tuple of Tensors but the"
-                    f" value at index {i} has type {type(el)}."
+                    "The {} given to {} must be either a Tensor or a tuple of Tensors but the"
+                    " value at index {} has type {}.".format(
+                        arg_name, fn_name, i, type(el)
+                    )
                 )
             else:
                 raise TypeError(
-                    f"The {arg_name} given to {fn_name} must be either a Tensor or a tuple of Tensors but the"
-                    f" given {arg_name} has type {type(el)}."
+                    "The {} given to {} must be either a Tensor or a tuple of Tensors but the"
+                    " given {} has type {}.".format(
+                        arg_name, fn_name, arg_name, type(el)
+                    )
                 )
 
     return is_inp_tuple, inp
@@ -130,35 +134,37 @@ def _check_requires_grad(inputs, input_type, strict):
         if inp is None:
             # This can only be reached for grad_inputs.
             raise RuntimeError(
-                f"The output of the user-provided function is independent of input {i}."
-                " This is not allowed in strict mode."
+                "The output of the user-provided function is independent of input {}."
+                " This is not allowed in strict mode.".format(i)
             )
         if not inp.requires_grad:
             if input_type == "hessian":
                 raise RuntimeError(
-                    f"The hessian of the user-provided function with respect to input {i}"
+                    "The hessian of the user-provided function with respect to input {}"
                     " is independent of the input. This is not allowed in strict mode."
                     " You should ensure that your function is thrice differentiable and that"
-                    " the hessian depends on the inputs."
+                    " the hessian depends on the inputs.".format(i)
                 )
             elif input_type == "jacobian":
                 raise RuntimeError(
                     "While computing the hessian, found that the jacobian of the user-provided"
-                    f" function with respect to input {i} is independent of the input. This is not"
+                    " function with respect to input {} is independent of the input. This is not"
                     " allowed in strict mode. You should ensure that your function is twice"
                     " differentiable and that the jacobian depends on the inputs (this would be"
-                    " violated by a linear function for example)."
+                    " violated by a linear function for example).".format(i)
                 )
             elif input_type == "grad_inputs":
                 raise RuntimeError(
-                    f"The gradient with respect to input {i} is independent of the inputs of the"
-                    " user-provided function. This is not allowed in strict mode."
+                    "The gradient with respect to input {} is independent of the inputs of the"
+                    " user-provided function. This is not allowed in strict mode.".format(
+                        i
+                    )
                 )
             else:
                 raise RuntimeError(
-                    f"Output {i} of the user-provided function does not require gradients."
+                    "Output {} of the user-provided function does not require gradients."
                     " The outputs must be computed in a differentiable manner from the input"
-                    " when running in strict mode."
+                    " when running in strict mode.".format(i)
                 )
 
 
@@ -215,25 +221,27 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
                 if stage == "back":
                     raise RuntimeError(
                         "The output of the user-provided function is independent of "
-                        f"input {i}. This is not allowed in strict mode."
+                        "input {}. This is not allowed in strict mode.".format(i)
                     )
                 elif stage == "back_trick":
                     raise RuntimeError(
-                        f"The gradient with respect to the input is independent of entry {i}"
+                        "The gradient with respect to the input is independent of entry {}"
                         " in the grad_outputs when using the double backward trick to compute"
-                        " forward mode gradients. This is not allowed in strict mode."
+                        " forward mode gradients. This is not allowed in strict mode.".format(
+                            i
+                        )
                     )
                 elif stage == "double_back":
                     raise RuntimeError(
                         "The jacobian of the user-provided function is independent of "
-                        f"input {i}. This is not allowed in strict mode."
+                        "input {}. This is not allowed in strict mode.".format(i)
                     )
                 else:
                     raise RuntimeError(
                         "The hessian of the user-provided function is independent of "
-                        f"entry {i} in the grad_jacobian. This is not allowed in strict "
+                        "entry {} in the grad_jacobian. This is not allowed in strict "
                         "mode as it prevents from using the double backward trick to "
-                        "replace forward mode AD."
+                        "replace forward mode AD.".format(i)
                     )
 
             grads_i = torch.zeros_like(refs[i])
@@ -242,12 +250,16 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
                 if "double" not in stage:
                     raise RuntimeError(
                         "The jacobian of the user-provided function is independent of "
-                        f"input {i}. This is not allowed in strict mode when create_graph=True."
+                        "input {}. This is not allowed in strict mode when create_graph=True.".format(
+                            i
+                        )
                     )
                 else:
                     raise RuntimeError(
                         "The hessian of the user-provided function is independent of "
-                        f"input {i}. This is not allowed in strict mode when create_graph=True."
+                        "input {}. This is not allowed in strict mode when create_graph=True.".format(
+                            i
+                        )
                     )
 
         res += (grads_i,)
@@ -799,17 +811,17 @@ def jacobian(
                         if strict and create_graph and not vj_el.requires_grad:
                             msg = (
                                 "The jacobian of the user-provided function is "
-                                f"independent of input {i}. This is not allowed in "
-                                "strict mode when create_graph=True."
+                                "independent of input {}. This is not allowed in "
+                                "strict mode when create_graph=True.".format(i)
                             )
                             raise RuntimeError(msg)
                         jac_i_el.append(vj_el)
                     else:
                         if strict:
                             msg = (
-                                f"Output {i} of the user-provided function is "
-                                f"independent of input {el_idx}. This is not allowed in "
-                                "strict mode."
+                                "Output {} of the user-provided function is "
+                                "independent of input {}. This is not allowed in "
+                                "strict mode.".format(i, el_idx)
                             )
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))

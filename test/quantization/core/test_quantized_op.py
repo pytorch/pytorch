@@ -806,11 +806,11 @@ class TestQuantizedOps(TestCase):
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar results don't match: "
-                         f"{C_ref.dequantize()} vs {C_hat.dequantize()}")
+                         msg="{}_scalar results don't match: "
+                         "{} vs {}".format(binary_op_name, C_ref.dequantize(), C_hat.dequantize()))
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar_relu results don't match: "
-                         f"{C_relu_ref.dequantize()} vs {C_relu_hat.dequantize()}")
+                         msg="{}_scalar_relu results don't match: "
+                         "{} vs {}".format(binary_op_name, C_relu_ref.dequantize(), C_relu_hat.dequantize()))
 
     @unittest.skipIf(IS_MACOS, "skipping macos test")
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
