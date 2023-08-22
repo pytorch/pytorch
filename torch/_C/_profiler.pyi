@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
+from typing_extensions import TypeAlias
 
 # defined in torch/csrc/profiler/python/init.cpp
 
@@ -134,8 +135,8 @@ class _TensorMetadata:
     @property
     def strides(self) -> List[int]: ...
 
-Scalar = Union[int, float, bool, complex]
-Input = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
+Scalar: TypeAlias = Union[int, float, bool, complex]
+Input: TypeAlias = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
 
 class _ExtraFields_TorchOp:
     name: str
