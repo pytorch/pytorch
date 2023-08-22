@@ -379,7 +379,7 @@ class _SpectralNorm(Module):
 
         if n_power_iterations <= 0:
             raise ValueError('Expected n_power_iterations to be positive, but '
-                             f'got n_power_iterations={n_power_iterations}')
+                             'got n_power_iterations={}'.format(n_power_iterations))
         self.dim = dim if dim >= 0 else dim + ndim
         self.eps = eps
         if ndim > 1:

@@ -200,10 +200,10 @@ class BenchmarkRunner:
     def _print_header(self):
         DASH_LINE = "-" * 40
         print(
-            f"# {DASH_LINE}\n"
+            "# {}\n"
             "# PyTorch/Caffe2 Operator Micro-benchmarks\n"
-            f"# {DASH_LINE}\n"
-            f"# Tag : {self.args.tag_filter}\n"
+            "# {}\n"
+            "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter)
         )
         if self.args.list_tests:
             print("# List of tests:")
