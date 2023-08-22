@@ -12,24 +12,32 @@ class ForeachKernel(Kernel):
     MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
 
     @staticmethod
-    def horizontal_partition(nodes):
-        """Generates a list of list of nodes where each node sublist is
-        guaranteed to not exceed CUDA limits for number of args (read/writes)."""
-        assert len(nodes) >= 1
+    def horizontal_partition(subkernel_nodes, triton_scheduling):
+        """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel) for each subkernel node
+        where each sublist is guaranteed to not exceed CUDA limits for number of args (read/writes) and to have the same 2D
+        or 1D blocking strategy."""
+        assert len(subkernel_nodes) >= 1
 
         cur_count = 0
         partitions = []
         cur_partition = []
-        for node in nodes:
+        for node in subkernel_nodes:
+            fused_nodes = node.get_nodes()
+            _, (numel, rnumel) = max(
+                fused_nodes, key=lambda x: int(x.is_reduction())
+            ).group
+            tiled_groups = triton_scheduling.select_tiling(fused_nodes, numel, rnumel)
+            node_info = fused_nodes, tiled_groups, numel, rnumel
+
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
             if cur_count + read_write_count > ForeachKernel.MAX_NUM_ARGS:
                 partitions.append(cur_partition)
-                cur_partition = [node]
+                cur_partition = [node_info]
                 cur_count = read_write_count
             else:
                 cur_count += read_write_count
-                cur_partition.append(node)
+                cur_partition.append(node_info)
 
         if cur_partition:
             partitions.append(cur_partition)
@@ -38,7 +46,8 @@ class ForeachKernel(Kernel):
 
     def __init__(self):
         super().__init__()
-        self.block_size = 1024  # Try tuning this value
+        self.xblock_size = 1024  # Try tuning this value
+        self.yblock_size = 1
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
@@ -53,7 +62,7 @@ class ForeachKernel(Kernel):
         return num_blocks
 
     def codegen_pid_range(self, code, num_elems):
-        num_blocks = ceildiv(num_elems, self.block_size)
+        num_blocks = ceildiv(num_elems, self.xblock_size)
         upper_bound_pid = self.block_count + num_blocks
         lower_bound_pid = self.block_count
         if self.block_count == 0:
@@ -124,7 +133,8 @@ class ForeachKernel(Kernel):
 
         with code.indent():
             code.splice("pid = tl.program_id(0)")
-            code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
+            code.splice(f"XBLOCK: tl.constexpr = {self.xblock_size}")
+            code.splice(f"YBLOCK: tl.constexpr = {self.yblock_size}")
 
             for sub_kernel in self.sub_kernels:
                 num_elems = int(sympy_product(sub_kernel.numels))
