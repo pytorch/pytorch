@@ -909,12 +909,36 @@ class TestExport(TestCase):
         reexported = torch._export.export(exported, (inp,))
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
-        exported = torch._export.export(Foo(), (inp,))
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, 'Cannot provide constraints for already exported program.'):
             _ = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         # Reexported program should still work for dynamic shapes.
-        rexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,))
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
+
+    def test_retrace_graph_level_meta_preservation(self):
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        inp = torch.ones(7, 5)
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        stateful_module = exported.module()
+        self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
+
+        re_exported = torch._export.export(stateful_module, (inp,))
+        self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
+        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5))))
+
+        re_exported_v2 = torch._export.export(exported, (inp,))
+        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
+        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
 
 
 if __name__ == '__main__':

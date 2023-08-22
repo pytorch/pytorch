@@ -226,11 +226,14 @@ def export(
             )
         f = f.module()
 
+    safe = False
+
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                safe = True
                 if len(constraints) > 0:
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
@@ -364,8 +367,7 @@ def export(
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
-    for key, val in gm_torch_level.meta.items():
-        gm.meta[key] = val
+    gm.meta.update(gm_torch_level.meta)
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
