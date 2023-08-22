@@ -1,7 +1,10 @@
 import dataclasses
 import inspect
+import io
 import re
+import pathlib
 import weakref
+import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -434,6 +437,153 @@ def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dic
         f"but got {len(args)} positional args, {len(kwargs)} kwargs."
     )
     return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args):]})
+
+
+def save(
+    ep: ExportedProgram,
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    opset_version: Optional[Dict[str, int]] = None,
+) -> None:
+    """
+    Saves an :class:`ExportedProgram` to a file-like object. It can then be
+    loaded using the Python API :func:`torch._export.load <torch._export.load>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+            implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): Map from filename to contents
+            which will be stored as part of f.
+
+        opset_version (Optional[Dict[str, int]]): A map of opset names
+            to the version of this opset
+
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        import torch._export
+        import io
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        ep = torch._export.export(MyModule(), torch.randn(5))
+
+        # Save to file
+        torch._export.save(ep, 'exported_program.pt2')
+
+        # Save to io.BytesIO buffer
+        buffer = io.BytesIO()
+        torch._export.save(ep, buffer)
+
+        # Save with extra files
+        extra_files = {'foo.txt': b'bar'}
+        torch._export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+    """
+    from .serde.serialize import serialize
+    from .serde.schema import SCHEMA_VERSION
+    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+
+    if isinstance(f, (str, pathlib.Path)):
+        f = str(f)
+
+    with zipfile.ZipFile(f, 'w') as zipf:
+        # Save serialized_ep and serialized_state_dict to the zip file
+        zipf.writestr('serialized_exported_program.json', serialized_program)
+        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        zipf.writestr('version', str(SCHEMA_VERSION))
+
+        # Add extra files if provided
+        if extra_files:
+            for extra_file_name, content in extra_files.items():
+                encoded_content = content.encode('utf-8')
+                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
+
+
+def load(
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    expected_opset_version: Optional[Dict[str, int]] = None,
+) -> ExportedProgram:
+    """
+    Loads an :class:`ExportedProgram` previously saved with
+    :func:`torch._export.save <torch._export.save>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+            implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): The extra filenames given in
+            this map would be loaded and their content would be stored in the
+            provided map.
+
+        expected_opset_version (Optional[Dict[str, int]]): A map of opset names
+            to expected opset versions
+
+    Returns:
+        An :class:`ExportedProgram` object
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        import torch._export
+        import io
+
+        # Load ExportedProgram from file
+        ep = torch._export.load('exported_program.pt2')
+
+        # Load ExportedProgram from io.BytesIO object
+        with open('exported_program.pt2', 'rb') as f:
+            buffer = io.BytesIO(f.read())
+        buffer.seek(0)
+        ep = torch._export.load(buffer)
+
+        # Load with extra files.
+        extra_files = {'foo.txt': ''}  # values will be replaced with data
+        ep = torch._export.load('exported_program.pt2', extra_files=extra_files)
+        print(extra_files['foo.txt'])
+    """
+    if isinstance(f, (str, pathlib.Path)):
+        f = str(f)
+
+    with zipfile.ZipFile(f, 'r') as zipf:
+        # Check the version
+        version = int(zipf.read('version'))
+        from .serde.schema import SCHEMA_VERSION
+
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Serialized version {version} does not match our current "
+                f"schema version {SCHEMA_VERSION}."
+            )
+
+        # Load serialized_ep and serialized_state_dict from the zip file
+        serialized_ep = zipf.read('serialized_exported_program.json')
+        serialized_state_dict = zipf.read('serialized_state_dict.json')
+
+        # Deserialize ExportedProgram
+        from .serde.serialize import deserialize
+        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+
+        # Populate extra_files map
+        if extra_files is not None:
+            for filename in extra_files.keys():
+                extra_files[filename] = zipf.read(f"extra_files/{filename}").decode('utf-8')
+
+        return ep
 
 
 def aot_compile(
