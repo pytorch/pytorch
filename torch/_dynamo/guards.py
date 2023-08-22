@@ -412,13 +412,11 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        # Keep track of objects
+        # Keep track of ID_MATCH'd nn module objects. This will be used to
+        # modify the cache size logic
         if self.local and isinstance(guard.originating_source, LocalSource):
             local_name = guard.originating_source.local_name
             if local_name in self.scope["L"]:
-                # TODO(janimesh) - Attach a callback to clean up the CacheEntry
-                # after we make CacheEntry a doubly linked list in eval_frame.c and
-                # move CacheEntry formation to Python.
                 weak_id = self.lookup_weakrefs(val)
                 assert (
                     weak_id is not None
@@ -1154,6 +1152,9 @@ class CheckFunctionManager:
 
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false
+        # TODO(janimesh) - Free up cache entry after the cache entry formation
+        # is in python, and the underlying data structure is a doubly linked
+        # list.
         self.valid = False
 
     def id_ref(self, obj):
