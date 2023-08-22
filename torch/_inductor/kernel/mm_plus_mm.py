@@ -144,7 +144,7 @@ def mm_configs():
             ),
         ]
     else:
-        # Seperate ROCm configs as pipelining currently gives no benefit
+        # Separate ROCm configs as pipelining currently gives no benefit
         # so we need to set "num_stages" to 1 and carefully pick the block configs
         # to avoid running out of shared memory
         return [
