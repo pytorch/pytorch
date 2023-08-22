@@ -566,6 +566,7 @@ class TestSerializeCustomClass(TestCase):
                 arg0, arg1 = node.args
                 self.assertTrue(isinstance(arg1, torch._C.ScriptObject))
                 self.assertEqual(arg1.__getstate__(), custom_obj.__getstate__())
+                self.assertEqual(arg1.top(), custom_obj.top())
 
 
 if __name__ == '__main__':

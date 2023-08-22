@@ -392,7 +392,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<std::vector<int64_t>>())
       .def_pickle(
           [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
-            return std::vector<int64_t>{1, 3, 3, 7};
+            return self->vals;
           },
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<PickleTester>(std::move(state));

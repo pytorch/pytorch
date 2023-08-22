@@ -585,11 +585,15 @@ class GraphModuleSerializer:
             return Argument.create(as_memory_format=_TORCH_TO_SERIALIZE_MEMORY_FORMAT[arg])
         elif isinstance(arg, torch.layout):
             return Argument.create(as_layout=_TORCH_TO_SERIALIZE_LAYOUT[arg])
-        elif hasattr(type(arg), "__getstate__") and hasattr(type(arg), "__setstate__"):
-            # Custom objects serializable through pickle, such as objects
-            # created through torchbind with a .def_pickle implementation,
-            # contain a __getstate__ and __setstate__ serialize/deserialize
-            # function.
+        elif (
+            isinstance(arg, torch._C.ScriptObject) and
+            hasattr(type(arg), "__getstate__") and
+            hasattr(type(arg), "__setstate__")
+        ):
+            # Custom objects through torchind are serializable with pickle,
+            # through implementing the .def_pickle function.  This should result
+            # in the object containing a __getstate__ and __setstate__
+            # serialize/deserialize function.
             blob = pickle.dumps(arg)
             blob = base64.b64encode(blob).decode('utf-8')
             return Argument.create(as_custom_obj=CustomObjArgument(blob))
@@ -1042,10 +1046,8 @@ class GraphModuleDeserializer:
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
         elif isinstance(value, CustomObjArgument):
-            # Custom objects created through torchbind are serialized through
-            # implementing the .def_pickle function. This creates a __getstate__
-            # function which is used to serialize the object, and __setstate__
-            # function which is used to deserialize the object.
+            # Custom objects through torchind are deserializable with pickle,
+            # through implementing the .def_pickle function.
             blob = base64.b64decode(value.blob)
             return pickle.loads(blob)
         else:
