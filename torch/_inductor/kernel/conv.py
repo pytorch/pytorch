@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import functools
 import logging
-from typing import List
+from typing import List, TypedDict
 
 import torch
 from .. import config, ir
@@ -197,15 +199,24 @@ def conv1x1_via_mm(x, w, *, out):
 aten_conv1x1_via_mm = ExternKernelChoice(conv1x1_via_mm, None)
 
 
+class ConvLayoutParams(TypedDict):
+    stride: tuple[int, ...]
+    padding: tuple[int, ...]
+    dilation: tuple[int, ...]
+    transposed: bool
+    output_padding: tuple[int, ...]
+    groups: int
+
+
 def conv_layout(
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    stride: tuple[int, ...],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
@@ -283,7 +294,7 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     assert isinstance(groups, int)
-    kwargs = {
+    kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
         "dilation": dilation,
@@ -308,8 +319,20 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
+    def channels_last_conv():
+        if V.graph.layout_opt and ndim == 2:
+            return True
+
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        return req_stride_order == ir.NHWC_STRIDE_ORDER
+
+    autotuning_gemm = config.max_autotune or config.max_autotune_gemm
+
     if (
-        config.conv_1x1_as_mm
+        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
@@ -357,11 +380,11 @@ def convolution(
         "groups",
     ]
     if bias is None:
-        args = (x, weight)
-        kwargs["bias"] = None
+        args = [x, weight]
+        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
-        args = (x, weight, bias)
+        args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())

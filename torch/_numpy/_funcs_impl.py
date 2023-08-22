@@ -801,65 +801,6 @@ def tri(
     return torch.tril(tensor, diagonal=k)
 
 
-# ### nanfunctions ###
-
-
-def nanmean():
-    raise NotImplementedError
-
-
-def nanmin():
-    raise NotImplementedError
-
-
-def nanmax():
-    raise NotImplementedError
-
-
-def nanvar():
-    raise NotImplementedError
-
-
-def nanstd():
-    raise NotImplementedError
-
-
-def nanargmin():
-    raise NotImplementedError
-
-
-def nanargmax():
-    raise NotImplementedError
-
-
-def nansum():
-    raise NotImplementedError
-
-
-def nanprod():
-    raise NotImplementedError
-
-
-def nancumsum():
-    raise NotImplementedError
-
-
-def nancumprod():
-    raise NotImplementedError
-
-
-def nanmedian():
-    raise NotImplementedError
-
-
-def nanquantile():
-    raise NotImplementedError
-
-
-def nanpercentile():
-    raise NotImplementedError
-
-
 # ### equality, equivalence, allclose ###
 
 
