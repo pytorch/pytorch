@@ -18,11 +18,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    is_fake,
-    is_fakified_functional_tensor,
-)
+from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -1244,12 +1240,22 @@ def wrap_fx_proxy_cls(
 
     initial_example_value = example_value
 
+    def _is_functional_tensor_fakified_by_dynamo(x):
+        if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+            reapply_views = torch._C._functionalization_reapply_views_tls()
+            unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+            return (
+                isinstance(unwrapped, FakeTensor)
+                and unwrapped.fake_mode == tx.fake_mode
+            )
+        return False
+
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not (
                 isinstance(value, FakeTensor)
-                or is_fakified_functional_tensor(value, tx.fake_mode)
+                or _is_functional_tensor_fakified_by_dynamo(value)
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1261,7 +1267,10 @@ def wrap_fx_proxy_cls(
             example_value = get_fake_value(proxy.node, tx)
 
         # Handle recursive calls here
-        elif is_fake(example_value, tx.fake_mode):
+        elif (
+            isinstance(example_value, FakeTensor)
+            and example_value.fake_mode is tx.fake_mode
+        ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
         elif isinstance(example_value, torch.Tensor):
