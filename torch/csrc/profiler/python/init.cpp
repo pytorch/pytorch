@@ -10,6 +10,105 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
+struct THPCapturedTraceback {
+  PyObject_HEAD std::shared_ptr<torch::CapturedTraceback> data;
+};
+
+static int THPCapturedTraceback_traverse(
+    PyObject* self,
+    visitproc visit,
+    void* arg) {
+  return ((THPCapturedTraceback*)self)
+      ->data->traversePython((int (*)(void*, void*))visit, arg);
+}
+
+static int THPCapturedTraceback_clear(PyObject* self) {
+  return ((THPCapturedTraceback*)self)->data->clearPython();
+}
+
+static void THPCapturedTraceback_dealloc(PyObject* self_) {
+  auto* self = (THPCapturedTraceback*)self_;
+  PyObject_GC_UnTrack(self);
+  self->data.~shared_ptr<torch::CapturedTraceback>();
+  // promptly trigger delayed frees since we have GIL
+  torch::freeDeadCapturedTracebackFrames();
+  PyObject_GC_Del(self);
+}
+
+PyTypeObject THPCapturedTracebackType = {
+    PyVarObject_HEAD_INIT(
+        NULL,
+        0) "torch._C._profiler.CapturedTraceback", /* tp_name */
+    sizeof(THPCapturedTraceback), /* tp_basicsize */
+    0, /* tp_itemsize */
+    THPCapturedTraceback_dealloc, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, /* tp_flags */
+    nullptr, /* tp_doc */
+    (traverseproc)THPCapturedTraceback_traverse, /* tp_traverse */
+    (inquiry)THPCapturedTraceback_clear, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    nullptr, /* tp_alloc */
+    nullptr, /* tp_new */
+};
+
+namespace pybind11 {
+namespace detail {
+
+template <>
+struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(
+      std::shared_ptr<torch::CapturedTraceback>,
+      _("torch._C._profiler.CapturedTraceback"));
+
+  bool load(handle src, bool) {
+    if (Py_TYPE(src.ptr()) == &THPCapturedTracebackType) {
+      value = reinterpret_cast<THPCapturedTraceback*>(src.ptr())->data;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      std::shared_ptr<torch::CapturedTraceback> src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    auto* r = PyObject_GC_New(THPCapturedTraceback, &THPCapturedTracebackType);
+    new (&r->data) std::shared_ptr<torch::CapturedTraceback>(std::move(src));
+    return py::handle((PyObject*)r);
+  }
+};
+
+} // namespace detail
+} // namespace pybind11
+
 namespace torch {
 namespace profiler {
 
@@ -314,17 +413,24 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
-  py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
-      m, "CapturedTraceback");
+  TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
+  PyModule_AddObject(
+      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", py_symbolize);
+  m.def("symbolize_tracebacks", [](py::list tbs) {
+    std::vector<CapturedTraceback*> tb_ptrs;
+    tb_ptrs.reserve(tbs.size());
+    for (py::handle tb : tbs) {
+      tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
+    }
+    return py_symbolize(tb_ptrs);
+  });
   installCapturedTracebackPython();
 }
-
 } // namespace profiler
 } // namespace torch
