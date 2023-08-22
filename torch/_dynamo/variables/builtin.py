@@ -524,7 +524,9 @@ class BuiltinVariable(VariableTracker):
                         *proxy_args_kwargs(args, kwargs),
                     )
 
-                    return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy, **options)
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable, tx, proxy, **options
+                    )
 
                 proxy = tx.output.create_proxy(
                     "call_function",
