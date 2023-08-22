@@ -459,7 +459,9 @@ def has_incompatible_cudagraph_ops(gm):
 
 
 instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+    "instance_descriptor",
+    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+    defaults=[set(), set(), set(), set()],
 )
 
 
