@@ -5781,6 +5781,14 @@ class Wait(ExternKernelAlloc):
         return [self.inputs[0].codegen_reference()]
 
 
+def _wrapper_add_import_for_dist(wrapper):
+    wrapper.add_import_once("import torch.distributed as dist")
+    wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
+    wrapper.add_import_once(
+        "import torch.distributed._functional_collectives_impl as fun_col_impl"
+    )
+
+
 class CollectiveKernel(ExternKernel):
     """
     Each collective should follow the pattern:
@@ -5812,11 +5820,7 @@ class CollectiveKernel(ExternKernel):
         return list(map(wrap_input, inputs))
 
     def codegen(self, wrapper):
-        wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
-        wrapper.add_import_once(
-            "import torch.distributed._functional_collectives_impl as fun_col_impl"
-        )
+        _wrapper_add_import_for_dist(wrapper)
         # extract references to our args in string form for codegen output
         input_names = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
@@ -5832,6 +5836,28 @@ class CollectiveKernel(ExternKernel):
         wrapper.writeline(
             f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
         )
+
+
+class CollectiveKernelAlloc(ExternKernelAlloc):
+    def __init__(self, layout, inputs, constant_args):
+        super().__init__(layout, inputs, constant_args)
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        raise NotImplementedError("Must implement")
+
+    def codegen_input(self, wrapper, output_name, input_names):
+        raise NotImplementedError("Must implement")
+
+    def codegen(self, wrapper):
+        _wrapper_add_import_for_dist(wrapper)
+        # extract references to our args in string form for codegen output
+        input_names = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+
+        self.codegen_input(wrapper, output_name, input_names)
+        # NOTE: the underlying external kernel for this collective
+        # is responsible for calling `_register_tensor_work`.
+        self.codegen_collective(wrapper, output_name, input_names)
 
 
 class InPlaceCollectiveKernel(CollectiveKernel):
@@ -6185,4 +6211,90 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
+        )
+
+
+class AllToAllSingle(CollectiveKernelAlloc):
+    """
+    NOTE: `all_to_all_single` is implemented differently from other collectives
+    because its output shape is data-dependent on input `output_split_sizes`.
+    Instead of letting Inductor manage allocation of output buffer that has
+    data-dependent dim size which is difficult to do, we resort to using
+    `ExternKernelAlloc` and letting the underlying `fun_col_impl._all_to_all_single`
+    kernel manage the output buffer allocation.
+    """
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args,
+        arg_index_to_input_index,
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.inputs = inputs
+        self.arg_index_to_input_index = arg_index_to_input_index
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        output_split_sizes: Optional["TensorBox"],
+        input_split_sizes: Optional["TensorBox"],
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        x_realized = cls.realize_input(x)
+        inputs_allow_none = []
+        output_split_sizes_realized = None
+        if output_split_sizes is not None:
+            output_split_sizes_realized = cls.realize_input(output_split_sizes)
+        input_split_sizes_realized = None
+        if input_split_sizes is not None:
+            input_split_sizes_realized = cls.realize_input(input_split_sizes)
+        inputs_allow_none = [
+            x_realized,
+            output_split_sizes_realized,
+            input_split_sizes_realized,
+        ]
+        inputs = [inp for inp in inputs_allow_none if inp is not None]
+        arg_index_to_input_index = {}
+        for i in range(len(inputs_allow_none)):
+            if inputs_allow_none[i] is not None:
+                arg_index_to_input_index[i] = inputs.index(inputs_allow_none[i])
+            else:
+                arg_index_to_input_index[i] = None
+
+        return AllToAllSingle(
+            layout=inputs[0].get_layout(),
+            inputs=inputs,
+            constant_args=[tag, ranks, group_size],
+            arg_index_to_input_index=arg_index_to_input_index,
+        )
+
+        return cls.create_output_nodes(packed, outputs)[0]
+
+    def codegen_input(self, wrapper, output_name, input_names):
+        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        input_strs = [f"{output_name}_inputs[0]"]
+        for i in range(1, len(self.arg_index_to_input_index)):
+            input_index = self.arg_index_to_input_index[i]
+            if input_index is None:
+                input_strs.append("None")
+            else:
+                input_strs.append(f"{output_name}_inputs[{input_index}]")
+
+        tag, ranks, group_size = self.constant_args
+
+        wrapper.writeline(
+            f"{output_name} = fun_col_impl._all_to_all_single("
+            f"input={input_strs[0]}, "
+            f"output_split_sizes={input_strs[1]}, "
+            f"input_split_sizes={input_strs[2]}, "
+            f"tag='{tag}', "
+            f"ranks={ranks}, "
+            f"group_size={group_size})",
         )

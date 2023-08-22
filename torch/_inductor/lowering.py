@@ -4823,6 +4823,20 @@ try:
         )
         return list(map(TensorBox.create, result))
 
+    # NOTE: Under torch.compile, the default `type_promotion_kind` will allocate float32 buffers
+    # for `output_split_sizes` and `input_split_sizes` and then copy the inputs (int64 tensors)
+    # into the float32 buffers, which is incorrect. Here we set `type_promotion_kind=None` to
+    # disable that behavior.
+    @register_lowering(c10d_functional.all_to_all_single, type_promotion_kind=None)
+    def all_to_all_single(
+        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+    ):
+        return TensorBox.create(
+            ir.AllToAllSingle.create(
+                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+            )
+        )
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
