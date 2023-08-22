@@ -106,6 +106,16 @@ def out_dtype_dense(
     output_dtype: torch.dtype,
     *args
 ):
+    if (
+        len(args)==2 and
+        args[0].dtype == torch.int8 and
+        args[1].dtype == torch.int8 and
+        args[0].is_cuda and
+        args[1].is_cuda and
+        op == torch.ops.aten.mm.default and
+        output_dtype == torch.int32
+    ):
+        return torch._int_mm(*args)
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
@@ -128,6 +138,8 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args
 ):
+    import pdb
+    pdb.set_trace()
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
