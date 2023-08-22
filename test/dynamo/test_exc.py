@@ -220,6 +220,7 @@ Assertions:
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 1)
   ==> (Not (And (< L['x'].size()[0] 4) (>= L['x'].size()[0] 0)))
+  ==> (True)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
   ==> (True)

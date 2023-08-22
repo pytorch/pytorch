@@ -540,7 +540,8 @@ def nonzero(fake_mode, func, arg):
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
             if arg.numel() >= 2:
-                maxval = arg.numel()
+                maxval = int(arg.numel())
+
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
