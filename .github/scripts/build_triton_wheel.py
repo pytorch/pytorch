@@ -139,10 +139,11 @@ def build_triton(
 
         if build_rocm:
             print(f"rocm_version:\t{rocm_version}")
-            check_call(
-                [sys.executable, "chmod", "+x", "scripts/amd/setup_rocm_libs.sh"], cwd=triton_basedir, shell=True
-            )
+            #check_call(
+            #    [sys.executable, "chmod", "+x", "scripts/amd/setup_rocm_libs.sh"], cwd=triton_basedir, shell=True
+            #)
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
+            print(f"ROCm libraries setup for triton installation...")
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
