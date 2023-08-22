@@ -832,12 +832,22 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
+            (
+                optim.Adam,
+                dict(lr=torch.tensor(.001), weight_decay=1.0, amsgrad=True,
+                     capturable=True, maximize=True)
+            ),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
+            (
+                optim.AdamW,
+                dict(lr=torch.tensor(.001), weight_decay=0.0, amsgrad=False,
+                     capturable=True, maximize=True)
+            ),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
@@ -931,6 +941,7 @@ class TestOptim(TestCase):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
+                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
@@ -1097,11 +1108,25 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=torch.tensor(1e-3),
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.Adam)
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1110,6 +1135,11 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -1152,13 +1182,33 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.AdamW(
+                [weight, bias],
+                lr=torch.tensor(1e-3),
+                weight_decay=1,
+                amsgrad=True,
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.AdamW)
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
