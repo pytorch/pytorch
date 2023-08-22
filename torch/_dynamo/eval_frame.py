@@ -600,10 +600,16 @@ def optimize(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
+        # TODO: Maybe we don't need to do this, we can just call
+        # convert_frame (no assert) with one_graph set appropriately.
+        # This would change the suppress_errors behavior (today it does
+        # nothing if you do fullgraph, but maybe you do want it to
+        # do something)
         return optimize_assert(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            nopython=nopython,
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -1323,6 +1329,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    nopython=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1334,7 +1341,7 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend, export=export, export_constraints=export_constraints, one_graph=nopython
         ),
         hooks,
         backend_ctx_ctor,
