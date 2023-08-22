@@ -15019,12 +15019,30 @@
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam, _fused_adam.out
 
+- func: _fused_adam_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, Tensor lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now),
+  # but still skip the device check as the Tensor LR can be on CPU
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _fused_adam_kernel_cuda_
+  autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
+
 - func: _fused_adamw_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+- func: _fused_adamw_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, Tensor lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now),
+  # but still skip the device check as the Tensor LR can be on CPU
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _fused_adamw_kernel_cuda_
+  autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
