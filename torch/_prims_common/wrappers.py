@@ -147,14 +147,13 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
     if utils.same_shape(out.shape, shape):
         return False
     if out.numel() != 0:
-        msg = (
+        warnings.warn(
             f"An output with one or more elements was resized since it had shape {str(out.shape)} "
             "which does not match the required output shape {str(shape)}. "
             "This behavior is deprecated, and in a future PyTorch release outputs will not "
             "be resized unless they have zero elements. "
-            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
-        )
-        warnings.warn(msg, stacklevel=TO_BE_DETERMINED)
+            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).",
+            FutureWarning, stacklevel=2)
     return True
 
 

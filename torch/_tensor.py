@@ -776,7 +776,7 @@ class Tensor(torch._C._TensorBase):
     def resize(self, *sizes):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.resize, (self,), self, *sizes)
-        warnings.warn("non-inplace resize is deprecated", stacklevel=TO_BE_DETERMINED)
+        warnings.warn("non-inplace resize is deprecated", DeprecationWarning, stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, sizes)
@@ -784,7 +784,7 @@ class Tensor(torch._C._TensorBase):
     def resize_as(self, tensor):
         if has_torch_function_variadic(self, tensor):
             return handle_torch_function(Tensor.resize_as, (self, tensor), self, tensor)
-        warnings.warn("non-inplace resize_as is deprecated", stacklevel=TO_BE_DETERMINED)
+        warnings.warn("non-inplace resize_as is deprecated", DeprecationWarning, stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, tensor.size())
@@ -938,7 +938,7 @@ class Tensor(torch._C._TensorBase):
                 "iterations executed (and might lead to errors or silently give "
                 "incorrect results).",
                 category=torch.jit.TracerWarning,
-                stacklevel=TO_BE_DETERMINED,
+                stacklevel=2,
             )
         return iter(self.unbind(0))
 

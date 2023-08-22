@@ -178,7 +178,7 @@ class ActivationSparsifier:
         if name in self.data_groups:  # unregister layer if already present
             warnings.warn("layer already attached to the sparsifier, "
                           "deregistering the layer and registering with new config",
-                          stacklevel=TO_BE_DETERMINED)
+                          stacklevel=2)
             self.unregister_layer(name=name)
 
         local_args = copy.deepcopy(self.defaults)

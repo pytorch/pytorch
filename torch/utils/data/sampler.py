@@ -62,7 +62,7 @@ class Sampler(Generic[T_co]):
             import warnings
 
             warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
-                          "You may still have custom implementation that utilizes it.", stacklevel=TO_BE_DETERMINED)
+                          "You may still have custom implementation that utilizes it.", FutureWarning, stacklevel=2)
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError

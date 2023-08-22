@@ -154,7 +154,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             warnings.warn(
                 "Unlimited buffer size is set for `fork`, "
                 "please be aware of OOM at random places",
-                UserWarning, stacklevel=TO_BE_DETERMINED
+                UserWarning, stacklevel=2
             )
         if copy is None:
             self.copy_fn = _no_op
@@ -331,7 +331,7 @@ class _ChildDataPipe(IterDataPipe):
             # Whenever a new generation of iterator is created, the `main_datapipe` must reset
             if not self.main_datapipe.is_every_instance_exhausted():
                 warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
-                              "the buffer and each child DataPipe will read from the start again.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                              "the buffer and each child DataPipe will read from the start again.", UserWarning, stacklevel=2)
             self.main_datapipe.reset()
         # 3. Otherwise, the iterator is behind the others, so it will just need to catch up by setting
         #    the instance's iterator to match that of `main_datapipe`
@@ -412,7 +412,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
             warnings.warn(
                 "Unlimited buffer size is set for `demux`, "
                 "please be aware of OOM at random places",
-                UserWarning, stacklevel=TO_BE_DETERMINED
+                UserWarning, stacklevel=2
             )
         self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]

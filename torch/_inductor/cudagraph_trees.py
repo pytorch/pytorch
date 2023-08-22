@@ -2046,7 +2046,7 @@ class CUDAGraphTreeManager:
             "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
             "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
             "before each model invocation",
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
 
     def dealloc_current_path_weakrefs(self):

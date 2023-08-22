@@ -59,7 +59,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
-            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=TO_BE_DETERMINED
+            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=2
         )
 
 
@@ -113,7 +113,7 @@ def _infer_device_type(*args):
             "Device state will only be saved for devices of a single device type, and the remaining "
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
-            "detected, it will be prioritized; otherwise, the first device encountered will be selected.)", stacklevel=TO_BE_DETERMINED
+            "detected, it will be prioritized; otherwise, the first device encountered will be selected.)", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()

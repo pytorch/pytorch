@@ -1762,7 +1762,8 @@ from torch.func import vmap
 def _sparse_coo_tensor_unsafe(*args, **kwargs):
     import warnings
     warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
-                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.', stacklevel=TO_BE_DETERMINED)
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.',
+                  DeprecationWarning, stacklevel=2)
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 
@@ -2021,7 +2022,8 @@ def __getattr__(name):
     replacement = _deprecated_attrs.get(name)
     if replacement is not None:
         import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'",
+                      DeprecationWarning, stacklevel=2)
         return replacement()
 
     # Lazy modules
