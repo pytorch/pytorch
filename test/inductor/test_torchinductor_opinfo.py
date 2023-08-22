@@ -288,7 +288,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.instance_norm": {f16},
     "nn.functional.local_response_norm": {f16},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.soft_margin_loss": {f16},
     "nn.functional.softsign": {f16},
     "nn.functional.triplet_margin_loss": {f16},
