@@ -689,9 +689,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[is_expandable_s] = segmentInfo.is_expandable;
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
+    auto address = segmentInfo.address;
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
       py::dict blockDict;
+      blockDict[address_s] = address;
       blockDict[size_s] = blockInfo.size;
       blockDict[requested_size_s] = blockInfo.requested_size;
       blockDict[state_s] =
@@ -700,6 +702,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
                : (blockInfo.active ? active_pending_free_s : inactive_s));
       add_frame_key(blockDict, blockInfo.context_when_allocated);
       blocks.append(blockDict);
+      address += blockInfo.size;
     }
     segmentDict[blocks_s] = blocks;
 
