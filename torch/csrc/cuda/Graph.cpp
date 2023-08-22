@@ -45,7 +45,7 @@ void THCPGraph_init(PyObject* module) {
             } else if (capture_error_mode == "relaxed") {
               capture_mode = cudaStreamCaptureModeRelaxed;
             } else {
-              TORCH_INTERNAL_ASSERT(
+              TORCH_CHECK(
                   false,
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
