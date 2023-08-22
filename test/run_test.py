@@ -13,13 +13,13 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
 
 import pkg_resources
 
 import torch
 import torch.distributed as dist
+from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -41,7 +41,7 @@ try:
     # using tools/ to optimize test run.
     sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
-    from tools.stats.upload_stats_lib import emit_metric
+    from tools.stats.upload_metrics import emit_metric
     from tools.testing.test_selections import (
         calculate_shards,
         get_reordered_tests,
@@ -1366,7 +1366,9 @@ def get_selected_tests(options) -> List[ShardedTest]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":
+    if torch.version.cuda is not None and version.parse(
+        torch.version.cuda
+    ) >= version.parse("11.6"):
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1416,21 +1418,30 @@ def get_selected_tests(options) -> List[ShardedTest]:
 
 def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
-    path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
-    if os.path.exists(path):
-        with open(path) as f:
-            test_file_times = cast(Dict[str, Any], json.load(f))
-    else:
-        test_file_times = {}
-    test_config = os.environ.get("TEST_CONFIG")
-    if test_config not in test_file_times:
-        print(
-            "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
-        )
+    path = os.path.join(str(REPO_ROOT), file)
+    if not os.path.exists(path):
+        print("::warning:: Failed to find test times file. Using round robin sharding.")
         return {}
+
+    with open(path) as f:
+        test_times_file = cast(Dict[str, Any], json.load(f))
+    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    test_config = os.environ.get("TEST_CONFIG")
+    if test_config in test_times_file.get(build_environment, {}):
+        print("Found test times from artifacts")
+        return test_times_file[build_environment][test_config]
+    elif test_config in test_times_file["default"]:
+        print(
+            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
+            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+        )
+        return test_times_file["default"][test_config]
     else:
-        print("Found test time stats from artifacts")
-        return test_file_times[test_config]
+        print(
+            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
+            f" and {test_config} test config. Using default build env and default test config instead."
+        )
+        return test_times_file["default"]["default"]
 
 
 def do_sharding(
