@@ -238,7 +238,6 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(
                 backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
             )
-            breakpoint()
             self.assertExpectedInline(actual, exp_graph)
 
         t = torch.randn([3, 4])
