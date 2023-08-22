@@ -246,6 +246,11 @@ def export(
         raise UserError(UserErrorType.INVALID_INPUT,
                         f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}")
 
+    # We convert to nn.Module because __call__ of ExportedProgram
+    # is untracable right now.
+    if isinstance(f, ExportedProgram):
+        f = f.module()
+
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
