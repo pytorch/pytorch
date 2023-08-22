@@ -33,6 +33,7 @@ import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
@@ -284,7 +285,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             export_error = e
             export_output = e.export_output
 
-        if verbose:
+        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
             export_output.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
