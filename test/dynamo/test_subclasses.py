@@ -8,6 +8,8 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils.checkpoint
 
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
 
 class MockSubclass(torch.Tensor):
     @classmethod
@@ -104,29 +106,85 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
 
-    def test_compile_with_fake_tensor(self):
+    def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
-        x2 = torch.randn([4, 3])
-        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return torch.sin(x)
 
-        f(x)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        def test_dynamic_dim(f, x, dim_dynamic, exp_frame_count, exp_op_count):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
 
-        f(x2)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
+            opt_f = torch.compile(f, backend=cnt, fullgraph=True)
 
-        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
-            fake_tensor = fake_mode.from_tensor(x)
-            f(fake_tensor)
+            x1 = torch.rand_like(x)
+            shape_env = ShapeEnv()
+            with torch._subclasses.fake_tensor.FakeTensorMode(
+                shape_env=shape_env
+            ) as fake_mode:
+                x_fake = fake_mode.from_tensor(
+                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                x1_fake = fake_mode.from_tensor(
+                    x1, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                opt_f(x_fake)
+                opt_f(x1_fake)
 
-        self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 3)
+            self.assertEqual(cnt.frame_count, exp_frame_count)
+            self.assertEqual(cnt.op_count, exp_op_count)
+
+        test_dynamic_dim(f, x, DimDynamic.DYNAMIC, 1, 1)
+        test_dynamic_dim(f, x, DimDynamic.DUCK, 1, 1)
+        test_dynamic_dim(f, x, DimDynamic.STATIC, 1, 1)
+
+    def test_compile_with_fake_tensor_automatic_dynamic(self):
+        x = torch.randn([3, 4])
+        x2 = torch.randn([4, 3])
+        x3 = torch.randn([5, 6])
+
+        def f(x):
+            return torch.sin(x)
+
+        def test_automatic_dynamic(
+            f, x, y, z, dim_dynamic, exp_frame_count, exp_op_count
+        ):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+
+            shape_env = ShapeEnv()
+            with torch._subclasses.fake_tensor.FakeTensorMode(
+                shape_env=shape_env
+            ) as fake_mode:
+                fake_x = fake_mode.from_tensor(
+                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                fake_y = fake_mode.from_tensor(
+                    y, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                fake_z = fake_mode.from_tensor(
+                    z, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                opt_f(fake_x)
+                opt_f(fake_y)
+                opt_f(fake_z)
+            self.assertEqual(cnt.frame_count, exp_frame_count)
+            self.assertEqual(cnt.op_count, exp_op_count)
+
+        x = torch.randn([3, 4])
+        y = torch.randn([4, 5])
+        z = torch.randn([5, 6])
+        a = torch.randn([3, 5])
+        b = torch.randn([4, 4])
+        for dim_dynamic in [DimDynamic.DYNAMIC, DimDynamic.DUCK, DimDynamic.STATIC]:
+            # Recompile once, first with dim 0 and 1 become Dynamic
+            test_automatic_dynamic(f, x, y, z, dim_dynamic, 2, 2)
+            # Recompile 2 times, first with dim 1 become Dynamic, second with dim 0 becomes Dynamic.
+            test_automatic_dynamic(f, x, a, z, dim_dynamic, 3, 3)
+            # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
+            test_automatic_dynamic(f, x, b, z, dim_dynamic, 3, 3)
 
 
 if __name__ == "__main__":

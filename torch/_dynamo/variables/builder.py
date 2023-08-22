@@ -954,6 +954,30 @@ class VariableBuilder:
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
+        if isinstance(value, FakeTensor):
+            # Replace all the symints in original fake_tensor with concrete ints.
+            # Relying on _automatic_dynamic to determine if this is a dynamic shaped tensor
+            assert all(isinstance(sz, (int, torch.SymInt)) for sz in value.size())
+            assert all(isinstance(st, (int, torch.SymInt)) for st in value.stride())
+            specialized_size = tuple(
+                sz if isinstance(sz, int) else sz.node.require_hint()
+                for sz in value.size()
+            )
+            specialized_stride = tuple(
+                st if isinstance(st, int) else st.node.require_hint()
+                for st in value.stride()
+            )
+            empty = torch.empty_strided(
+                specialized_size,
+                specialized_stride,
+                dtype=value.dtype,
+                device=value.device,
+                requires_grad=value.requires_grad,
+            )
+            value = value.fake_mode.from_tensor(
+                empty, source=source, static_shapes=True
+            )
+
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
         )
@@ -965,7 +989,9 @@ class VariableBuilder:
                 functools.partial(
                     GuardBuilder.TENSOR_MATCH,
                     value=value
+                    # Need to hold a reference to FakeTensor otherwise it gets garbage collected
                     if isinstance(source, NumpyTensorSource)
+                    or isinstance(value, FakeTensor)
                     else TensorWeakRef(value),
                 )
             ),
