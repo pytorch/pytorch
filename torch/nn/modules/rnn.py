@@ -70,8 +70,8 @@ class RNNBase(Module):
         if dropout > 0 and num_layers == 1:
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
-                          f"num_layers greater than 1, but got dropout={dropout} and "
-                          f"num_layers={num_layers}")
+                          "num_layers greater than 1, but got dropout={} and "
+                          "num_layers={}".format(dropout, num_layers))
 
         if not isinstance(hidden_size, int):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")

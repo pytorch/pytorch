@@ -1098,8 +1098,10 @@ class TestCommon(TestCase):
                             RuntimeError,
                             msg=(
                                 "inplace variant either incorrectly allowed "
-                                f"resizing or you have marked the sample {sample.summary()}"
-                                " incorrectly with `broadcasts_self=True"
+                                "resizing or you have marked the sample {}"
+                                " incorrectly with `broadcasts_self=True".format(
+                                    sample.summary()
+                                )
                             ),
                         ):
                             variant_forward = variant(

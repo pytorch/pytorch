@@ -1195,7 +1195,7 @@ class dtypes:
                 assert isinstance(arg, (list, tuple)), \
                     "When one dtype variant is a tuple or list, " \
                     "all dtype variants must be. " \
-                    f"Received non-list non-tuple dtype {str(arg)}"
+                    "Received non-list non-tuple dtype {}".format(str(arg))
                 assert all(isinstance(dtype, torch.dtype) for dtype in arg), f"Unknown dtype in {str(arg)}"
         else:
             assert all(isinstance(arg, torch.dtype) for arg in args), f"Unknown dtype in {str(args)}"

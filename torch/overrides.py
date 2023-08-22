@@ -1577,9 +1577,9 @@ def handle_torch_function(
 
     func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
-        f"no implementation found for '{func_name}' on types that implement "
-        f'__torch_function__: {[type(arg) for arg in overloaded_args]}'
-    )
+        "no implementation found for '{}' on types that implement "
+        '__torch_function__: {}'
+    ).format(func_name, [type(arg) for arg in overloaded_args])
     if _is_torch_function_mode_enabled():
         msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)

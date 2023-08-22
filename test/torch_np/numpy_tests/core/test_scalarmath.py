@@ -264,7 +264,9 @@ class TestPower:
                 a = t1(3)
                 b = t2(2)
                 result = a**b
-                msg = f"error with {t1!r} and {t2!r}:" f"got {result!r}, expected {9!r}"
+                msg = ("error with {!r} and {!r}:" "got {!r}, expected {!r}").format(
+                    t1, t2, result, 9
+                )
                 if np.issubdtype(np.dtype(result), np.integer):
                     assert_(result == 9, msg)
                 else:

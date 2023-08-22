@@ -1611,9 +1611,11 @@ def load_inline(name,
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append(f'm.def("{function_name}", torch::wrap_pybind_function({function_name}), "{docstring}");')
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
             else:
-                module_def.append(f'm.def("{function_name}", {function_name}, "{docstring}");')
+                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
         cpp_sources += module_def
 
