@@ -407,7 +407,10 @@ class CachingAutotuner(KernelInterface):
             )
 
         # guard the record_function_ctx and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on.
+        # in progress, to reduce latency when profiler is not turned on. Note that
+        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        # it is faster than entering and exiting a context manager, even if the context
+        # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             with self.record_function_ctx:
                 return launcher(
