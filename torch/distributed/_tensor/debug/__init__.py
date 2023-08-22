@@ -4,7 +4,7 @@ from torch.distributed._tensor.api import DTensor
 def get_sharding_prop_cache_info():
     """
     Get the cache info for the sharding propagation cache, used for debugging purpose only.
-    This would return a named tuple showing hits, misses, maxsize and currsize of the sharding
+    This would return a named tuple showing hits, misses, maxsize and cursize of the sharding
     propagator cache.
     """
     return (
