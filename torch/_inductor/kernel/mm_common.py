@@ -85,6 +85,9 @@ if torch.version.hip is None:
         ),
     )
 else:
+    # Seperate ROCm configs as pipelining currently gives no benefit
+    # so we need to set "num_stages" to 1 and carefully pick the block configs
+    # to avoid running out of shared memory
     mm_configs = functools.partial(
         filtered_configs,
         configs=(

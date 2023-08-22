@@ -144,6 +144,9 @@ def mm_configs():
             ),
         ]
     else:
+        # Seperate ROCm configs as pipelining currently gives no benefit
+        # so we need to set "num_stages" to 1 and carefully pick the block configs
+        # to avoid running out of shared memory
         return [
             triton.Config(
                 {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=1, num_warps=4
