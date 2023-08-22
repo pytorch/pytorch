@@ -163,7 +163,7 @@ def _is_tensor_constructor(func: OpOverload):
 def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
-    elif is_traceable_wrapper_subclass(x):
+    if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
         # need to recurse because we could have nested subclasses
@@ -171,9 +171,6 @@ def is_fake(x):
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
-    elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-        reapply_views = torch._C._functionalization_reapply_views_tls()
-        return is_fake(torch._C._functorch._unwrap_functional_tensor(x, reapply_views))
     return False
 
 
