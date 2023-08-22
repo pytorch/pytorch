@@ -268,7 +268,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return "torch.autograd.graph"
 
     def fn_name(self):
-        return "disable_saved_tensors_hook"
+        return "disable_saved_tensors_hooks"
 
 
 class AutocastModeVariable(ContextWrappingVariable):

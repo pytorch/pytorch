@@ -17,23 +17,24 @@ from torch.ao.quantization import (
     QConfigMapping,
 )
 from torch.ao.quantization.quantizer import (
-    ComposableQuantizer,
     DerivedQuantizationSpec,
-    EmbeddingQuantizer,
     FixedQParamsQuantizationSpec,
-    OperatorConfig,
-    XNNPACKQuantizer,
     QuantizationAnnotation,
     QuantizationSpec,
     Quantizer,
     SharedQuantizationSpec,
 )
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    XNNPACKQuantizer,
+    get_symmetric_quantization_config,
+)
 from torch.ao.quantization.quantizer.composable_quantizer import (  # noqa: F811
     ComposableQuantizer,
 )
-from torch.ao.quantization.quantizer.xnnpack_quantizer import (
-    get_symmetric_quantization_config,
+from torch.ao.quantization.quantizer.embedding_quantizer import (  # noqa: F811
+    EmbeddingQuantizer,
 )
+
 from torch.ao.quantization.quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
     convert_pt2e,
@@ -603,10 +604,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
-                pass
-
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -672,10 +669,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         m = torch.nn.Conv2d(2, 2, 1)
@@ -775,10 +768,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         m = TestHelperModules.ConvMaxPool2d()
@@ -881,10 +870,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
-                pass
-
         m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -956,10 +941,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         m = M().eval()
@@ -1089,9 +1070,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
-                pass
 
         m = TestHelperModules.Conv2dWithCat().eval()
         example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5))
@@ -1584,10 +1562,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     n.meta["quantization_annotation"] = None
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         quantizer = XNNPACKQuantizer()
