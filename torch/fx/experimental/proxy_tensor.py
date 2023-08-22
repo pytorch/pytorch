@@ -870,10 +870,15 @@ def get_innermost_proxy_mode():
 
 
 @contextlib.contextmanager
-def disable_proxy_modes_tracing():
-    # Only one proxy_mode can be "active" at a time.
-    # So we simply remove our active mode.
-    maybe_old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
+def disable_proxy_modes_tracing(enable_current=False):
+    # enable_current=True is now a no-op, since only one proxy mode
+    # can live on the stack at a time.
+    # We should kill this API in a future PR.
+    maybe_old = None
+    if not enable_current:
+        # Only one proxy_mode can be "active" at a time.
+        # So we simply remove our active mode.
+        maybe_old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
     try:
         yield
     finally:
