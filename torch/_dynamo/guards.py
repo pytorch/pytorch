@@ -927,6 +927,7 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
         )
+        self._weakrefs.clear()
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
