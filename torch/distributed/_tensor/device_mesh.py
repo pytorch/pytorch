@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
+import math
 from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -102,6 +103,7 @@ class DeviceMesh:
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
+        mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -111,6 +113,7 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
+        self.mesh_dim_names = mesh_dim_names
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -269,3 +272,52 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+
+def init_device_mesh(
+    device_type: str,
+    mesh_shape: Tuple[int, ...],
+    *,
+    mesh_dim_names: Optional[Tuple[str, ...]] = None,
+) -> DeviceMesh:
+    """
+    Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
+    This creates a DeviceMesh with a mesh layout of n-d dimensional array, n being the len(mesh_shape)
+    and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
+    labeled as mesh_dim_names[i].
+
+
+    Args:
+        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
+        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
+        that describes the layout of devices.
+    Kwargs:
+        mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
+        of the multi-dimensional array that describes the layout of devices. Its length must match the length
+        of `mesh_shape`.
+
+    Returns:
+        A :class:`DeviceMesh` object
+
+    .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
+    behind the scene, which are requried for distributed communications.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
+        >>>
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+    """
+    if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
+        raise RuntimeError(
+            f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_shape)}."
+        )
+
+    mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+    device_mesh = DeviceMesh(
+        device_type=device_type,
+        mesh=mesh,
+        mesh_dim_names=mesh_dim_names,
+    )
+
+    return device_mesh
