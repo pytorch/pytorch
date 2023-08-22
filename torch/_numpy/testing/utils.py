@@ -509,9 +509,8 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
         return
     # Normalized the numbers to be in range (-10.0,10.0)
     # scale = float(pow(10,math.floor(math.log10(0.5*(abs(desired)+abs(actual))))))
-    with np.errstate(invalid="ignore"):
-        scale = 0.5 * (np.abs(desired) + np.abs(actual))
-        scale = np.power(10, np.floor(np.log10(scale)))
+    scale = 0.5 * (np.abs(desired) + np.abs(actual))
+    scale = np.power(10, np.floor(np.log10(scale)))
     try:
         sc_desired = desired / scale
     except ZeroDivisionError:
@@ -1411,8 +1410,8 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     ret = nulp_diff(a, b, dtype)
     if not np.all(ret <= maxulp):
         raise AssertionError(
-            f"Arrays are not almost equal up to {maxulp:g} "
-            f"ULP (max difference is {np.max(ret):g} ULP)"
+            "Arrays are not almost equal up to {:g} "
+            "ULP (max difference is {:g} ULP)".format(maxulp, np.max(ret))
         )
     return ret
 

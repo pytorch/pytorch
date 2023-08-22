@@ -122,7 +122,6 @@ class ModuleCallEntry:
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
     buffer_name_to_node = {}
-    print(gm.graph)
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":

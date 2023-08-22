@@ -223,7 +223,7 @@ class WeightedRandomSampler(Sampler[int]):
         weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
             raise ValueError("weights should be a 1d sequence but given "
-                             f"weights have shape {tuple(weights_tensor.shape)}")
+                             "weights have shape {}".format(tuple(weights_tensor.shape)))
 
         self.weights = weights_tensor
         self.num_samples = num_samples

@@ -201,7 +201,7 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
     quant_type = get_quant_type(qconfig)
     class_mapping = custom_module_class_mapping.get(quant_type, {})
     assert type(custom_module) in class_mapping, "did not find corresponding observed " \
-        f"module class for {type(custom_module)} in mapping: {class_mapping}"
+        "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
 
 def activation_dtype(qconfig):
@@ -298,8 +298,8 @@ def get_quant_type(qconfig):
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
 
-    raise Exception(f"Unrecognized dtype combination in get_quant_type: activation({activation.dtype}),"
-                    f"weight({weight.dtype})")
+    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
+                    "weight({})".format(activation.dtype, weight.dtype))
 
 def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     """ Checks if the given minimum and maximum values are valid, meaning that
