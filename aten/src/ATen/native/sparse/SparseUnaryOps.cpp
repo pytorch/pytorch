@@ -87,8 +87,8 @@ Tensor coalesced_unary_ufunc(const Tensor &self, const Ufunc &ufunc) {
       input.sizes(),
       input.indices().clone(),
       out_values,
-      true,
-      input.options().dtype(out_values.scalar_type()));
+      input.options().dtype(out_values.scalar_type()),
+      /*is_coalesced=*/ true);
   return result;
 }
 

@@ -185,11 +185,11 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
     c10::SymIntArrayRef size,
     const Tensor& indices,
     const Tensor& values,
-    bool is_coalesced,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> is_coalesced) {
   SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   auto impl = get_sparse_impl(self);
   impl->resize_(sparse_dim, dense_dim, size);
@@ -208,7 +208,9 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
   alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
   // alias_into_sparse overrides coalesced flag, so resetting the flag to
   // the desired state here:
-  impl->set_coalesced(is_coalesced);
+  if (is_coalesced.has_value()) {
+    impl->set_coalesced(*is_coalesced);
+  }
   // TODO: alias_into_sparse sets the coalesce flag to
   // `self._values().shape[0] < 2`. There exist methods (e.g. permute
   // on COO tensors when `dims[0] != 0` holds) that force coalesced
@@ -233,7 +235,7 @@ SparseTensor _sparse_coo_tensor_with_dims_and_tensors(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   bool is_coalesced = values.size(0) < 2;
-  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, is_coalesced, dtype, layout, device, pin_memory);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory, is_coalesced);
 }
 
 /** Public creation API that dispatch to methods above **/
@@ -442,11 +444,12 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
                                  c10::optional<Device> device,
                                  c10::optional<bool> pin_memory);
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size, bool is_coalesced,
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> is_coalesced) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   // arg checking
@@ -458,11 +461,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       indices,
       values,
       size,
-      is_coalesced,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
       options.device_opt(),
-      options.pinned_memory_opt());
+      options.pinned_memory_opt(),
+      is_coalesced);
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
@@ -471,24 +474,26 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   bool is_coalesced = values.dim() > 0 && values.size(0) < 2;
-  return at::sparse_coo_tensor(indices, values, size, is_coalesced, dtype, layout, device, pin_memory);
+  return at::sparse_coo_tensor(indices, values, size, dtype, layout, device, pin_memory, is_coalesced);
 }
 
-Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size, bool is_coalesced,
+Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
                                         c10::optional<ScalarType> dtype,
                                         c10::optional<Layout> layout,
                                         c10::optional<Device> device,
-                                        c10::optional<bool> pin_memory);
+                                        c10::optional<bool> pin_memory,
+                                        c10::optional<bool> is_coalesced);
 
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size, bool is_coalesced,
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> is_coalesced) {
   if (at::globalContext().checkSparseTensorInvariants()) {
     at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
   }
-  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), is_coalesced, dtype, layout, device, pin_memory);
+  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);
 }
 
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
@@ -497,7 +502,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   bool is_coalesced = values_.dim() > 0 && values_.size(0) < 2;
-  return _sparse_coo_tensor_unsafe(indices, values_, size, is_coalesced, dtype, layout, device, pin_memory);
+  return _sparse_coo_tensor_unsafe(indices, values_, size, dtype, layout, device, pin_memory, is_coalesced);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -506,11 +511,12 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
 // are guaranteed to be within bounds or if the caller is going to call
 // _validate_sparse_coo_tensor_args before using the tensor.
 // NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size, bool is_coalesced,
+Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> is_coalesced) {
   // See [Note: hacky wrapper removal for TensorOptions]
 
   Tensor values = expand_values_if_needed(values_);
@@ -526,8 +532,8 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
       size,
       indices,
       values,
-      is_coalesced,
-      values.options().layout(kSparse));
+      values.options().layout(kSparse),
+      is_coalesced);
 }
 
 Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
@@ -536,7 +542,7 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   bool is_coalesced = values_.dim() > 0 && values_.size(0) < 2;
-  return _sparse_coo_tensor_unsafe_symint(indices, values_, size, is_coalesced, dtype, layout, device, pin_memory);
+  return _sparse_coo_tensor_unsafe_symint(indices, values_, size, dtype, layout, device, pin_memory, is_coalesced);
 }
 
 
