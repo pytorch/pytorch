@@ -4,6 +4,7 @@ import torch
 import torch.fx
 from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name, _format_arg
+from torch.fx.graph import _parse_stack_trace
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
 from itertools import chain
@@ -67,6 +68,7 @@ if HAS_PYDOT:
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
         ):
+            # breakpoint()
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
@@ -82,6 +84,7 @@ if HAS_PYDOT:
 
                 if not isinstance(leaf_node, torch.fx.GraphModule):
                     continue
+
 
                 self._dot_graphs[f"{name}_{node.target}"] = self._to_dot(
                     leaf_node,
@@ -171,6 +174,15 @@ if HAS_PYDOT:
             # which triggers `Error: bad label format (...)` from dot
             return ret.replace("{", r"\{").replace("}", r"\}")
 
+
+        def _shorten_file_name(self, full_file_name: str) -> str:
+            splits = full_file_name.split('/')
+            # TODO: move 2 to config
+            if len(splits) >= 2:
+                return '/'.join(splits[-2:])
+            return full_file_name
+
+
         def _get_node_label(
             self,
             module: torch.fx.GraphModule,
@@ -220,6 +232,15 @@ if HAS_PYDOT:
 
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
+
+            fusion_meta = node.meta.get('fusion_meta', None)
+            if fusion_meta is not None and fusion_meta.snode.node is not None:
+                for idx, origin in enumerate(fusion_meta.snode.node.origins):
+                    if origin.stack_trace is None:
+                        continue
+                    parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
+                    fname = self._shorten_file_name(parsed_stack_trace.file)
+                    label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
 
             return label + "}"
 
@@ -293,9 +314,11 @@ if HAS_PYDOT:
             If ignore_parameters_and_buffers is True, the parameters and buffers
             created with the module will not be added as nodes and edges.
             """
+
             dot_graph = pydot.Dot(name, rankdir="TB")
 
             for node in graph_module.graph.nodes:
+                # breakpoint()
                 if ignore_getattr and node.op == "get_attr":
                     continue
 
