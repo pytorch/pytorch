@@ -82,12 +82,9 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other) -> "ValueRanges":
+    def tighten(self, other: "ValueRanges"):
         """Given two ValueRanges, returns their intersection"""
-        return self & other
-
-    # Intersection
-    def __and__(self, other) -> "ValueRanges":
+        # Some invariants
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
@@ -99,16 +96,9 @@ class ValueRanges:
             range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
         return range
 
-    # Union
-    def __or__(self, other) -> "ValueRanges":
-        if ValueRanges.unknown() in (self, other):
-            return ValueRanges.unknown()
-        assert self.is_bool == other.is_bool, (self, other)
-        if self.is_bool:
-            range = ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper))
-        else:
-            range = ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper))
-        return range
+    # Intersection
+    def __and__(self, other):
+        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
@@ -445,17 +435,6 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.sqrt)
 
-    @staticmethod
-    def where(a, b, c):
-        b = ValueRanges.wrap(b)
-        c = ValueRanges.wrap(c)
-        assert a.is_bool
-        assert b.is_bool == c.is_bool
-        if b.is_bool:
-            return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
-        else:
-            return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
-
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -548,6 +527,17 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     @classmethod
     def sub(cls, a, b):
         return cls.add(a, cls.neg(b))
+
+    @staticmethod
+    def where(a, b, c):
+        b = ValueRanges.wrap(b)
+        c = ValueRanges.wrap(c)
+        assert a.is_bool
+        assert b.is_bool == c.is_bool
+        if b.is_bool:
+            return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
+        else:
+            return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
     def __getattr__(self, name):
         log.debug("unhandled ValueRange op %s", name)
