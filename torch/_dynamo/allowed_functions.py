@@ -11,7 +11,11 @@ import warnings
 
 from typing import cast, Dict, Optional, Set
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -328,4 +332,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
+    if np is None:
+        return False
     return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids

@@ -85,7 +85,7 @@ jobs:
 
   check-api-rate:
     if: ${{ always() }}
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-latest
     continue-on-error: true
     environment: pytorchbot-env
     steps:
