@@ -293,8 +293,8 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
 
 def dynamic_dim(t: torch.Tensor, index: int):
     """
-    `dynamic_dim` constructs a `Constraint` object that describes the dynamism of
-    a dimension `index` of tensor `t`. `Constraint` objects should be passed to
+    `dynamic_dim` constructs a `_Constraint` object that describes the dynamism of
+    a dimension `index` of tensor `t`. `_Constraint` objects should be passed to
     `constraints` argument of `export()`.
 
     Specifically `dynamic_dim` can be used to express following types of dynamism.
@@ -352,7 +352,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         index (int): Index of dynamic dimension
 
     Returns:
-        A `Constraint` object that describes shape dynamism. It can be passed to `export()` so
+        A `_Constraint` object that describes shape dynamism. It can be passed to `export()` so
         that `export()` does not assume static size of specified tensor, i.e. keeping it dynamic
         as a symbolic size rather than specializing according to size of example tracing input.
 
@@ -549,7 +549,7 @@ def export(
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
          is expected to have dynamic shapes, please use `torch.export.dynamic_dim()`
-         to define `Constraint` objects that specify the dynamics and the possible
+         to define `_Constraint` objects that specify the dynamics and the possible
          range of shapes. See torch.export.dynamic_dim() docstring for examples on
          how to use it.
 
