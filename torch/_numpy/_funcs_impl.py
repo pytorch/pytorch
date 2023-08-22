@@ -1405,6 +1405,9 @@ def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
+    if a.dtype.is_complex:
+        return NotImplemented
+
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
 
