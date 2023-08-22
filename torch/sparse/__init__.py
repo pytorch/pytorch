@@ -501,9 +501,18 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
 def as_sparse_gradcheck(gradcheck):
     """Decorator for torch.autograd.gradcheck or its functools.partial
     variants that extends the gradcheck function with support to input
-    functions that operate on or/and return sparse tensors. The specified
-    gradcheck function itself is guaranteed to operate on strided
-    tensors only."""
+    functions that operate on or/and return sparse tensors.
+
+    The specified gradcheck function itself is guaranteed to operate
+    on strided tensors only.
+
+    For example:
+
+    >>> gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
+    >>> x = torch.tensor([[0, 1], [2, 3]], dtype=torch.float64).to_sparse_coo().requires_grad_(True)
+    >>> gradcheck(lambda x: x.to_sparse_csr(), x)
+    True
+    """
 
     def gradcheck_with_sparse_support(func, inputs, **kwargs):
         """Same as :func:`torch.autograd.gradcheck` but with sparse tensors
