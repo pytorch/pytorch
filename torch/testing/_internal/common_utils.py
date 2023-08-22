@@ -1187,6 +1187,25 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
 
     return decorator
 
+def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR:
+                    raise unittest.SkipTest(f"skipRocmIfTorchInductor: {msg}")
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
 
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
@@ -1280,6 +1299,7 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
     if func:
         return dec_fn(func)
     return dec_fn
+
 
 def runOnRocm(fn):
     @wraps(fn)
