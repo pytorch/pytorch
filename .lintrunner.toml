@@ -197,6 +197,7 @@ include_patterns = [
     'torch/_inductor/lowering.py',
     'torch/_inductor/metrics.py',
     'torch/_inductor/select_algorithm.py',
+    'torch/_inductor/triton_heuristics.py',
     'torch/_inductor/wrapper_benchmark.py',
     'torch/_inductor/fx_passes/post_grad.py',
     'torch/_inductor/kernel/mm_common.py',
@@ -1214,6 +1215,7 @@ exclude_patterns = [
     'test/fx/test_source_matcher_utils.py',
     'test/fx/test_subgraph_rewriter.py',
     'test/fx/test_z3_gradual_types.py',
+    'test/fx/test_fx_split.py',
     'test/jit/__init__.py',
     'test/jit/_imported_class_test/__init__.py',
     'test/jit/_imported_class_test/bar.py',
@@ -2642,7 +2644,7 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = ['**/*.py']
+include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
