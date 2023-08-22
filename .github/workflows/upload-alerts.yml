@@ -13,18 +13,22 @@ on:
 jobs:
   upload-alerts:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-22.04
+    environment: upload-stats
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 1
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - name: Install Python Packages
         run: |
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
-          pip3 install requests==2.27.1
+          pip3 install rockset==1.0.3 boto3==1.19.12 requests==2.27.1
 
       - name: Create alerts
         run: |
@@ -33,6 +37,7 @@ jobs:
           echo "$output"
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
+
       - name: Upload alerts
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
@@ -42,6 +47,7 @@ jobs:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
           repo: "pytorch"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
