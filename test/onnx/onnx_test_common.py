@@ -359,19 +359,23 @@ def run_ort(
     # with nested functions.
     # Ref: https://github.com/microsoft/onnxruntime/issues/15849
     try:
-        import onnx.inliner
+        import onnx.inliner  # type: ignore[import]
     except ImportError:
         warnings.warn("Cannot import onnx.inliner. Skip inlining model.", stacklevel=1)
     else:
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)
+            model_proto = onnx.load(buffer)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            buffer = inlined_model_proto.SerializeToString()
+            ort_model = buffer
         else:
             assert isinstance(ort_model, str)
-            buffer = ort_model
-
-        model_proto = onnx.load(buffer)
-        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
-        ort_model = inlined_model_proto.SerializeToString()
+            # NOTE: inline_local_functions doesn't work with >2GB models,
+            # so we need to load the model without external data to inline.
+            model_proto = onnx.load(ort_model, load_external_data=False)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            onnx.save(inlined_model_proto, ort_model)
 
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()

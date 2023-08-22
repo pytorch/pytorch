@@ -13,7 +13,7 @@ from tools.shared.logging_utils import duration_to_str, pluralize
 from tools.stats.export_test_times import TEST_FILE_RATINGS_FILE
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
-from tools.stats.upload_stats_lib import emit_metric
+from tools.stats.upload_metrics import emit_metric
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
