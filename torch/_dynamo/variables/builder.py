@@ -311,7 +311,7 @@ class VariableBuilder:
             ),
         ]
 
-        if np:
+        if config.trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
