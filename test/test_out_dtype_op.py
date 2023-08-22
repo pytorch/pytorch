@@ -111,6 +111,7 @@ class TestOutDtypeOp(TestCase):
         ref = torch._int_mm(x, w)
         test_out = func(x, w)
         func_comp = torch.compile(func, mode="max-autotune")
+        # func_comp = torch.compile(func, backend="eager", fullgraph=True)
         test_out_c = func_comp(x, w)
         self.assertTrue(torch.allclose(ref, test_out))
         self.assertTrue(torch.allclose(ref, test_out_c))

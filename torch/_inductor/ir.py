@@ -2977,8 +2977,6 @@ class ExternKernel(InputsKernel):
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
-            import pdb
-            pdb.set_trace()
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
@@ -2988,7 +2986,10 @@ class ExternKernel(InputsKernel):
                 else:
                     result.append(next(it_non_tensors))
             r = pytree.tree_unflatten(result, args_spec)
-            return r.get("args", []), r.get("kwargs", {})
+            kwargs = r.pop("kwargs", {})
+            args = r.pop("args", [])
+            args = [r.get(x) for x in r.keys()] + list(args)
+            return args, kwargs
 
         tensor_args = [cls.realize_input(x) for x in tensor_args]
 
@@ -3012,8 +3013,8 @@ class ExternKernel(InputsKernel):
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
-        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs) # this destroys the non tensor ops
+        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args) # this destroys the non tensor ops
+        example_output = kernel(*new_args, **new_kwargs)
 
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
@@ -3590,7 +3591,6 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(kernel, torch._ops.OpOverload)
             else kernel
         )
-
         if (
             getattr(torch.ops.aten, op_overload_packet.__name__, None)
             is op_overload_packet
@@ -3613,6 +3613,8 @@ class FallbackKernel(ExternKernelAlloc):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
             else:
+                import pdb # we end up here when using max-autotune
+                pdb.set_trace()
                 raise NotImplementedError(
                     "Unable to find HigherOrderOperator kernel name"
                 )

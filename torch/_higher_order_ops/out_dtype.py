@@ -55,8 +55,6 @@ class OutDtypeOperator(HigherOrderOperator):
         self.__module__ = "torch.ops.higher_order"
 
     def __call__(self, op, output_dtype, *args):
-        # import pdb
-        # pdb.set_trace()
         if not isinstance(op, torch._ops.OpOverload):
             raise ValueError("out_dtype's first argument must be an OpOverload")
         if op._schema.is_mutable:
@@ -89,8 +87,6 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
-    import pdb
-    pdb.set_trace()
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
@@ -112,6 +108,8 @@ def out_dtype_dense(
 ):
     if (
         len(args)==2 and
+        isinstance(args[0], torch.Tensor) and
+        isinstance(args[1], torch.Tensor) and
         args[0].dtype == torch.int8 and
         args[1].dtype == torch.int8 and
         args[0].is_cuda and
