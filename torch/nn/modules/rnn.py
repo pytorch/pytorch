@@ -34,6 +34,12 @@ class RNNBase(Module):
 
     Implements aspects of RNNs shared by the RNN, LSTM, and GRU classes, such as module initialization
     and utility methods for parameter storage management.
+
+    .. note::
+        The forward method is not implemented by the RNNBase class.
+
+    .. note::
+        LSTM and GRU classes override some methods implemented by RNNBase.
     """
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional', 'proj_size']
@@ -459,15 +465,15 @@ class RNN(RNNBase):
     """
 
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
-                 non_linearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
+                 nonlinearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, device=None, dtype=None) -> None:
-        self.nonlinearity = non_linearity
+        self.nonlinearity = nonlinearity
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
-            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'. Select from: 'tanh', 'relu'.")
+            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'. Select from 'tanh' or 'relu'.")
         super().__init__(mode, input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
                          bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
                          device=device, dtype=dtype)

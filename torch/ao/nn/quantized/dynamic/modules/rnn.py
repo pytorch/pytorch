@@ -62,7 +62,8 @@ class PackedParameter(torch.nn.Module):
 
 class RNNBase(torch.nn.Module):
 
-    _FLOAT_MODULE: Type[nn.RNNBase] = nn.RNNBase            # Annotation to ensure subclass attributes check against known type
+    # Annotation to ensure subclass attributes check against known type (and resolve mypy error)
+    _FLOAT_MODULE: Type[nn.RNNBase] = nn.RNNBase
 
     _version = 2
 
