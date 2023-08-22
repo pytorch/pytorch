@@ -1449,7 +1449,13 @@ class TorchPatcher:
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
-            opt.register_load_state_dict_pre_hook = disable(opt.register_load_state_dict_pre_hook)
+            # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
+            # through the optimizer init without failing. Otherwise we get an irrecoverable graphbreak
+            # saying "torch.* op returned non-Tensor RemovableHandle call_function <class
+            # 'torch.utils.hooks.RemovableHandle'>"
+            opt.register_load_state_dict_pre_hook = disable(
+                opt.register_load_state_dict_pre_hook
+            )
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
