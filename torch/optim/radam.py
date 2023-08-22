@@ -150,7 +150,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
-            &\hspace{15mm} \theta_t \leftarrow \theta_t - \gamma \lambda \theta_{t-1}                    \\
+            &\hspace{15mm} \theta_{t-1} \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
             &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
