@@ -264,7 +264,7 @@ inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectori
 
 
 inline at::vec::Vectorized<bfloat16> masked_load(const bfloat16* src, at::vec::Vectorized<float> mask) {
-# if defined(CPU_CAPABILITY_AVX512) 
+# if defined(CPU_CAPABILITY_AVX512)
   auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
   auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
   auto zero = _mm256_set1_epi16(0);

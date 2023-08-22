@@ -1460,7 +1460,7 @@ class CppVecKernel(CppKernel):
         tiling_var = self.itervars[self.tiling_idx]
         is_broadcast = not index.has(tiling_var)
         is_mask = dtype in [torch.bool, torch.uint8]
-        load_mask  = f"to_float_mask({self._load_mask})" if self._load_mask else None
+        load_mask = f"to_float_mask({self._load_mask})" if self._load_mask else None
         non_contiguous = (
             not is_broadcast
             and stride_at(tiling_var, index) != 1
@@ -1485,9 +1485,17 @@ class CppVecKernel(CppKernel):
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in DTYPE_LOWP_FP:
-            line =  f"masked_load({loadbuf}, {load_mask})" if load_mask else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
-            line = f"masked_load({loadbuf}, {load_mask})" if load_mask else f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            )
 
         if non_contiguous:
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
