@@ -4,6 +4,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import dynamic_dim, export
+from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -11,6 +12,7 @@ from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     deserialize,
     serialize,
+    SerializeError,
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -366,8 +368,29 @@ class TestDeserialize(TestCase):
         inputs = normalize_inputs(case.example_inputs)
         self.check_graph(model, inputs.args)
 
+    def test_constraints(self):
+        def f(x, y):
+            n = x.item()
+            constrain_as_size(n, min=2)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
+
 
 instantiate_parametrized_tests(TestDeserialize)
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSchemaVersioning(TestCase):
+    def test_error(self):
+        def f(x):
+            return x + x
+
+        ep = export(f, (torch.randn(1, 3),))
+
+        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
+        serialized_ep.schema_version = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
 
 
 class TestOpVersioning(TestCase):
