@@ -709,22 +709,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
         std::move(storage), options.computeDispatchKey(), options.dtype());
 
     auto sym_sizes = r.symintlist(1);
-    auto sym_strides = r.symintlistOptional(2);
+    auto sym_strides = r.symintlist(2);
     auto sym_storage_offset = r.toSymIntOptional(3);
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    if (sym_strides.list.has_value()) {
-      tensor_impl->set_sizes_and_strides(
-          sym_sizes, sym_strides.list.value(), sym_storage_offset.value_or(0));
-    } else {
-      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
-      if (sym_storage_offset.has_value()) {
-        // Replicating what TensorImpl does with storage_offset:
-        // https://github.com/pytorch/pytorch/blob/main/c10/core/TensorImpl.cpp#L1144
-        tensor_impl->set_storage_offset(sym_storage_offset->as_int_unchecked());
-      }
-    }
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
