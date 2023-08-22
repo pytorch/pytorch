@@ -2090,6 +2090,11 @@ class GraphModule(torch.nn.Module):
             (x1, x2)
         )
         self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {".*too many positional arguments.*": 2},
+        )
         self.assertEqual(actual, expected)
 
     def test_grad_non_tensor_input(self):
@@ -2604,7 +2609,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*too many positional arguments.*": 2},
         )
         self.assertEqual(actual, expected)
 
