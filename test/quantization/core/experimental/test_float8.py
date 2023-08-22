@@ -157,6 +157,17 @@ class TestFloat8DtypeCPUOnly(TestCase):
         mul8_simulated = (a8_simulated * b8_simulated).to(dtype)
         self.assertEqual(mul8, mul8_simulated)
 
+    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    def test_pt2_traceable_aot_eager(self, dtype):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            x = x.to(dtype)
+            x = x.float()
+            return x
+
+        x = torch.randn(1).requires_grad_()
+        f(x).sum().backward()
+
 
 instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
 
