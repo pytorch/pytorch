@@ -650,6 +650,10 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
+def cpp_wrapper_flags():
+    return "-DCPP_WRAPPER_MODULE"
+
+
 def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
     if config.is_fbcode():
@@ -1134,8 +1138,10 @@ class CppWrapperCodeCache:
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
+                    _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
+                    {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
