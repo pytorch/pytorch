@@ -294,6 +294,12 @@ class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
 
+    def _print_Where(self, expr):
+        c = self.paren(self.doprint(expr.args[0]))
+        p = self.paren(self.doprint(expr.args[1]))
+        q = self.paren(self.doprint(expr.args[2]))
+        return f"{c} ? {p} : {q}"
+
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
