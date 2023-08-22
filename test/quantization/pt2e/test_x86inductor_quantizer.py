@@ -165,10 +165,7 @@ class TestHelperModules:
         def __init__(self, use_bias, postop, inplace_postop) -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            if postop is nn.Tanh:
-                self.postop = postop()
-            else:
-                self.postop = postop(inplace=inplace_postop)
+            self.postop = postop(inplace=inplace_postop)
 
         def forward(self, x):
             return self.postop(self.linear(x))
