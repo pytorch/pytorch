@@ -651,7 +651,7 @@ def cpp_flags():
 
 
 def cpp_wrapper_flags():
-    return "-DCPP_WRAPPER_MODULE"
+    return "-DINDUCTOR_CPP_WRAPPER"
 
 
 def optimization_flags():
