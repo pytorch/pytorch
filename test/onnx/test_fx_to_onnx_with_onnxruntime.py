@@ -574,21 +574,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         model = transformers.GPT2Model(config).eval()
 
+        def input_generator(batch: int, seq: int):
+            input_ids = torch.randint(0, 8096, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+            return input_ids, attention_mask, position_ids
+
         # Encoded inputs
-        batch, seq = 2, 128
-        input_ids = torch.randint(0, 8096, (batch, seq))
-        attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-        position_ids = torch.arange(0, seq, dtype=torch.long)
-        position_ids = position_ids.unsqueeze(0).view(-1, seq)
+        input_ids, attention_mask, position_ids = input_generator(2, 128)
 
         # Another encoded inputs to test dynamic shapes
-        another_batch, another_seq = 3, 256
-        another_input_ids = torch.randint(0, 8096, (another_batch, another_seq))
-        another_attention_mask = torch.ones(
-            another_batch, another_seq, dtype=torch.bool
-        )
-        another_position_ids = torch.arange(0, another_seq, dtype=torch.long)
-        another_position_ids = another_position_ids.unsqueeze(0).view(-1, another_seq)
+        (
+            another_input_ids,
+            another_attention_mask,
+            another_position_ids,
+        ) = input_generator(3, 256)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
