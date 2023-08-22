@@ -55,7 +55,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
@@ -74,7 +74,7 @@ jobs:
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
