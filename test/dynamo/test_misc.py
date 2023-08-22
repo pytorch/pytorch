@@ -1287,7 +1287,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
 
         # The last sample from gather does not work in np.take_along_axis
-        samples = list(sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False))[:-1]
+        samples = list(
+            sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False)
+        )[:-1]
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         i = 1
@@ -1302,9 +1304,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return op(t1, t2)
 
         from torch._dynamo.variables.builtin import BuiltinVariable
+
         operators = BuiltinVariable._fx_graph_functions()
 
-        for op, t1_np, t2_np in itertools.product(operators, (True, False), (True, False)):
+        for op, t1_np, t2_np in itertools.product(
+            operators, (True, False), (True, False)
+        ):
             if op is operator.getitem:
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
@@ -1325,7 +1330,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
             self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
             torch._dynamo.reset()
-
 
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
