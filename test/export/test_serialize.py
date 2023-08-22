@@ -1,9 +1,13 @@
 # Owner(s): ["module: dynamo"]
+import io
+import pathlib
+import tempfile
 import unittest
+import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import dynamic_dim, export
+from torch._export import dynamic_dim, export, save, load
 from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
@@ -22,6 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    TemporaryFileName,
 )
 
 
@@ -424,6 +429,94 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_pytree_flatten
 )
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSaveLoad(TestCase):
+    def test_save_buffer(self):
+        inp = (torch.tensor([0.1, 0.1]),)
+        linear = torch.nn.Linear(2, 2)
+
+        def f(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
+
+        ep = export(f, inp)
+
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+
+    def test_save_file(self):
+
+        def f(x):
+            return x * x
+
+        inp = (torch.randn(2, 2),)
+        ep = export(f, inp)
+
+        with tempfile.NamedTemporaryFile() as f:
+            save(ep, f)
+            f.seek(0)
+            loaded_ep = load(f)
+
+        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+
+    def test_save_path(self):
+        def f(x, y):
+            return x + y
+
+        inp = (torch.tensor([6]), torch.tensor([7]))
+        ep = export(f, inp)
+
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            save(ep, path)
+            loaded_ep = load(path)
+
+        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+
+    def test_save_extra(self):
+        inp = (torch.tensor([0.1, 0.1]),)
+
+        def f(x):
+            return x * x + x
+
+        ep = export(f, inp)
+
+        buffer = io.BytesIO()
+        save(ep, buffer, extra_files={"extra.txt": "moo"})
+        buffer.seek(0)
+        extra_files = {"extra.txt": ""}
+        loaded_ep = load(buffer, extra_files=extra_files)
+
+        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertEqual(extra_files["extra.txt"], "moo")
+
+    def test_version_error(self):
+        def f(x):
+            return x + x
+
+        ep = export(f, (torch.randn(1, 3),))
+
+        with tempfile.NamedTemporaryFile() as f:
+            save(ep, f)
+            f.seek(0)
+
+            # Modify the version
+            with zipfile.ZipFile(f, 'a') as zipf:
+                zipf.writestr('version', "-1")
+
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+                f.seek(0)
+                loaded_ep = load(f)
+
 
 if __name__ == '__main__':
     run_tests()
