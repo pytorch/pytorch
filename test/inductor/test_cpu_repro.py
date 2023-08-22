@@ -1093,14 +1093,6 @@ class CPUReproTests(TestCase):
         x = torch.randn((10, 20))
         self.common(forward, (x,))
 
-    def test_max_pool2d_channels_last(self):
-        @torch._dynamo.optimize("inductor")
-        def forward(x):
-            return torch.ops.aten.max_pool2d_with_indices.default(x, [3, 3], [2, 2], [1, 1])
-
-        x = torch.randn(26, 15, 112, 112).bfloat16().to(memory_format=torch.channels_last)
-        self.common(forward, (x,))
-
     def test_parallel_num_threads(self):
         @torch._dynamo.optimize("inductor")
         def fn(x1, x2):
@@ -1816,7 +1808,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
-            input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+            input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
                 memory_format=torch.channels_last
             )
             maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
