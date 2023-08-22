@@ -39,11 +39,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    EqualityConstraint,
-    is_concrete_int,
-    SYMPY_INTERP,
-)
+from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -51,6 +47,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
+from .source import TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -281,11 +278,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
-        m = re.match(r"^type\((.+)\)$", guard.name)
-        if m:
+        if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
+                Guard(
+                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
+                )
             )
 
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
@@ -1015,10 +1013,11 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if is_concrete_int(dim):
-                        converted.append(int(dim))
+                    if isinstance(dim, int):
+                        converted.append(dim)
                     else:
-                        converted.append(None)
+                        assert isinstance(dim, torch.SymInt)
+                        converted.append(dim.node.maybe_as_int())
                 return converted
 
             dynamic_dims_sizes = [

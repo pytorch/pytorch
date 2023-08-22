@@ -977,8 +977,8 @@ def convert(
             assert k in convert_node_name_to_qconfig, f'Expected key {k} in convert node_name_to_qconfig'
             if convert_node_name_to_qconfig[k] is not None:
                 assert qconfig_equals(v, convert_node_name_to_qconfig[k]), \
-                    f"Expected k {k} to have the same value in prepare and convert QConfigMappings, " \
-                    f"but {v} was updated to {convert_node_name_to_qconfig[k]}"
+                    "Expected k {} to have the same value in prepare and convert QConfigMappings, " \
+                    "but {} was updated to {}".format(k, v, convert_node_name_to_qconfig[k])
         node_name_to_qconfig = convert_node_name_to_qconfig
 
     custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)

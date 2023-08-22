@@ -1593,6 +1593,8 @@ def load_inline(name,
     if use_pch is True:
         # Using PreCompile Header('torch/extension.h') to reduce compile time.
         _check_and_build_extension_h_precompiler_headers(extra_cflags, extra_include_paths)
+    else:
+        remove_extension_h_precompiler_headers()
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -1609,9 +1611,11 @@ def load_inline(name,
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append(f'm.def("{function_name}", torch::wrap_pybind_function({function_name}), "{docstring}");')
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
             else:
-                module_def.append(f'm.def("{function_name}", {function_name}, "{docstring}");')
+                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
         cpp_sources += module_def
 

@@ -122,11 +122,11 @@ class SobolEngine:
         total_n = self.num_generated + n
         if not (total_n & (total_n - 1) == 0):
             raise ValueError("The balance properties of Sobol' points require "
-                             f"n to be a power of 2. {self.num_generated} points have been "
-                             f"previously generated, then: n={self.num_generated}+2**{m}={total_n}. "
+                             "n to be a power of 2. {0} points have been "
+                             "previously generated, then: n={0}+2**{1}={2}. "
                              "If you still want to do this, please use "
                              "'SobolEngine.draw()' instead."
-                             )
+                             .format(self.num_generated, m, total_n))
         return self.draw(n=n, out=out, dtype=dtype)
 
     def reset(self):

@@ -6431,7 +6431,7 @@ class TestWhere:
         e = float("-Infinity")
         assert_equal(np.where(True, d, e).dtype, np.float32)
         # also check upcast
-        e = 1e150
+        e = float(1e150)
         assert_equal(np.where(True, d, e).dtype, np.float64)
 
     def test_ndim(self):

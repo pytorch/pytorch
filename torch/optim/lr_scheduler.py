@@ -40,7 +40,7 @@ class LRScheduler:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
-                                   f"in param_groups[{i}] when resuming an optimizer")
+                                   "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
 
@@ -645,8 +645,8 @@ class SequentialLR(LRScheduler):
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
                 "Sequential Schedulers expects number of schedulers provided to be one more "
-                f"than the number of milestone points, but got number of schedulers {len(schedulers)} and the "
-                f"number of milestones to be equal to {len(milestones)}"
+                "than the number of milestone points, but got number of schedulers {} and the "
+                "number of milestones to be equal to {}".format(len(schedulers), len(milestones))
             )
         self._schedulers = schedulers
         self._milestones = milestones
@@ -862,7 +862,7 @@ class ChainedScheduler(LRScheduler):
             if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
                 raise ValueError(
                     "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
-                    f"got schedulers at index {0} and {scheduler_idx} to be different"
+                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
                 )
         self._schedulers = list(schedulers)
         self.optimizer = schedulers[0].optimizer
