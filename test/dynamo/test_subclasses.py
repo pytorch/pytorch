@@ -119,6 +119,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             opt_f = torch.compile(f, backend=cnt, fullgraph=True)
 
             x1 = torch.rand_like(x)
+            f(x)
+            f(torch.randn([4, 3]))
             shape_env = ShapeEnv()
             with torch._subclasses.fake_tensor.FakeTensorMode(
                 shape_env=shape_env
@@ -140,16 +142,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         test_dynamic_dim(f, x, DimDynamic.STATIC, 1, 1)
 
     def test_compile_with_fake_tensor_automatic_dynamic(self):
-        x = torch.randn([3, 4])
-        x2 = torch.randn([4, 3])
-        x3 = torch.randn([5, 6])
-
         def f(x):
             return torch.sin(x)
 
-        def test_automatic_dynamic(
-            f, x, y, z, dim_dynamic, exp_frame_count, exp_op_count
-        ):
+        def test_automatic_dynamic(f, inps, dim_dynamic, exp_frame_count, exp_op_count):
             torch._dynamo.reset()
             cnt = torch._dynamo.testing.CompileCounter()
             opt_f = torch.compile(f, backend=cnt, fullgraph=True)
@@ -158,18 +154,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             with torch._subclasses.fake_tensor.FakeTensorMode(
                 shape_env=shape_env
             ) as fake_mode:
-                fake_x = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                )
-                fake_y = fake_mode.from_tensor(
-                    y, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                )
-                fake_z = fake_mode.from_tensor(
-                    z, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                )
-                opt_f(fake_x)
-                opt_f(fake_y)
-                opt_f(fake_z)
+                for inp in inps:
+                    fake_inp = fake_mode.from_tensor(
+                        inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    )
+                    opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
             self.assertEqual(cnt.op_count, exp_op_count)
 
@@ -180,11 +169,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         b = torch.randn([4, 4])
         for dim_dynamic in [DimDynamic.DYNAMIC, DimDynamic.DUCK, DimDynamic.STATIC]:
             # Recompile once, first with dim 0 and 1 become Dynamic
-            test_automatic_dynamic(f, x, y, z, dim_dynamic, 2, 2)
+            test_automatic_dynamic(f, [x, y, z], dim_dynamic, 2, 2)
             # Recompile 2 times, first with dim 1 become Dynamic, second with dim 0 becomes Dynamic.
-            test_automatic_dynamic(f, x, a, z, dim_dynamic, 3, 3)
+            test_automatic_dynamic(f, [x, a, z], dim_dynamic, 3, 3)
             # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
-            test_automatic_dynamic(f, x, b, z, dim_dynamic, 3, 3)
+            test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
 
 
 if __name__ == "__main__":
