@@ -1294,7 +1294,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             "Backwards compatibility: New undefined gradient support checking "
             "feature is enabled by default, but it may break existing callers "
             "of this function. If this is true for you, you can call this "
-            'function with "check_undefined_grad=False" to disable the feature',
+            "function with \"check_undefined_grad=False\" to disable the feature",
             stacklevel=2,
         )
 

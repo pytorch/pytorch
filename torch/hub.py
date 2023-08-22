@@ -296,7 +296,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
-                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour",
+                "confirmation if the repo is not already trusted. This will eventually be the default behaviour",
                 DeprecationWarning, stacklevel=2)
         return
 

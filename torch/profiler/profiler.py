@@ -337,10 +337,8 @@ def schedule(
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
     if warmup == 0:
-        warn(
-            "Profiler won't be using warmup, this can skew profiler results",
-            stacklevel=2,
-        )
+        warn("Profiler won't be using warmup, this can skew profiler results",
+             stacklevel=2)
     return schedule_fn
 
 
@@ -511,10 +509,8 @@ class profile(_KinetoProfile):
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
-            warn(
-                "use_cuda is deprecated, use activities argument instead",
-                DeprecationWarning, stacklevel=2
-            )
+            warn("use_cuda is deprecated, use activities argument instead",
+                 DeprecationWarning, stacklevel=2)
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:

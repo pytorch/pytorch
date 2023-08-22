@@ -633,8 +633,8 @@ class Tracer(TracerBase):
                     else:
                         warnings.warn(
                             f"Was not able to add assertion to guarantee correct input {name} to "
-                            f"specialized function. It is up to the user to make sure that your inputs match the "
-                            f"inputs you specialized the function with.", stacklevel=2
+                            "specialized function. It is up to the user to make sure that your inputs match the "
+                            "inputs you specialized the function with.", stacklevel=2
                         )
 
                     return x
