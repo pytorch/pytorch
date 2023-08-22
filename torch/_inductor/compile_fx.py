@@ -564,6 +564,9 @@ def fx_codegen_and_compile(
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
 
+            if _in_aot_compilation:
+                return compiled_fn
+
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
@@ -1143,6 +1146,10 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
+
+    if _in_aot_compilation and config.ignore_aot_autograd:
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+            return inference_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

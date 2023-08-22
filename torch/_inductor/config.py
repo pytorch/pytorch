@@ -74,6 +74,9 @@ force_mixed_mm = False
 # If not specified, a temp directory will be created under the default caching path
 aot_inductor_output_path = ""
 
+# TODO: Temporary flag: If we are passing from export, ignore aot autograd for now
+ignore_aot_autograd = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 

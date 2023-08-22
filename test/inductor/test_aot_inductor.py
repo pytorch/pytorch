@@ -43,9 +43,9 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_inductor_model_container.h>
 
-        torch::aot_inductor::AOTInductorModel model;
+        torch::aot_inductor::AOTInductorModelContainer model(1);
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,
@@ -69,12 +69,10 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs, options
         )
-        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
+        optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
