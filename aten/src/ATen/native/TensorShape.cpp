@@ -538,7 +538,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   for (int64_t j:unchanged_dims) {
     new_indices.select(0, sparse_extra_ndim + j).copy_(indices.select(0, j).repeat_interleave(nnz_factor));
   }
-  return at::sparse_coo_tensor(new_indices, new_values, size, is_coalesced);
+  return at::sparse_coo_tensor(new_indices, new_values, size, self.options(), is_coalesced);
 }
 
 Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
@@ -1283,7 +1283,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
 
-  return at::sparse_coo_tensor(new_indices, new_values, new_sizes, self.is_coalesced());
+  return at::sparse_coo_tensor(new_indices, new_values, new_sizes, self.options(), self.is_coalesced());
 }
 
 // Should just use narrow_copy_out, but this API is used internally at Meta:
@@ -1507,7 +1507,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
   const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
   // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
-      sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, is_coalesced, self.options());
+       sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
 }
 
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
