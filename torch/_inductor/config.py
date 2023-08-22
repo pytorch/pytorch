@@ -174,6 +174,8 @@ if torch.version.hip:
     else:
         gpu_name = ""
 
+    # Will replace with gcnArch number when available in device properties
+    # For now should capture MI200 devices
     if "MI2" in gpu_name:
         conv_force_channels_last = (
             os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
