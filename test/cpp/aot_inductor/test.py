@@ -8,6 +8,12 @@ class Net(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.fc = torch.nn.Linear(64, 10)
+        weights = torch.arange(640)
+        weights = torch.reshape(weights, (10, 64))
+
+        with torch.no_grad():
+            self.fc.weight.copy_(weights)
+            self.fc.bias.copy_(torch.zeros(10))
 
     def forward(self, x, y):
         return self.fc(torch.sin(x) + torch.cos(y))
