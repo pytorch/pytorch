@@ -345,7 +345,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+            len(torch._dynamo.utils.counters["graph_break"]), 0
         )
 
     @unittest.expectedFailure
