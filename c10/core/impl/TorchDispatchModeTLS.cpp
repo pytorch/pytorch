@@ -11,85 +11,70 @@ namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
-bool TorchDispatchModeTLS::any_modes_set() {
+bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())
     return true;
-  for (const auto i :
-       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-    if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
-      return true;
+  if (!skip_infra_modes) {
+    for (const auto i : c10::irange(
+             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+      if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+        return true;
+      }
     }
   }
   return false;
 }
 
-void TorchDispatchModeTLS::push_onto_stack(
-    std::shared_ptr<SafePyObject> mode,
-    c10::optional<TorchDispatchModeKey> mode_key) {
+void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   if (!any_modes_set()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, true);
   }
-  if (mode_key == c10::nullopt) {
-    torchDispatchModeState.stack_.push_back(std::move(mode));
-  } else {
-    set_mode(mode, mode_key.value());
-  }
+  torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
-const std::
-    tuple<std::shared_ptr<SafePyObject>, c10::optional<TorchDispatchModeKey>>
-    TorchDispatchModeTLS::pop_stack(
-        c10::optional<TorchDispatchModeKey> maybe_mode_key) {
-  TORCH_CHECK(any_modes_set(), "trying to pop from empty mode stack");
-
+const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
   std::shared_ptr<SafePyObject> out;
-  c10::optional<TorchDispatchModeKey> mode_key = c10::nullopt;
-
-  if (maybe_mode_key.has_value()) {
-    // Handle the case where we need to pop a *specific* mode off the stack,
-    // based on the mode key.
-    auto maybe_out =
-        torchDispatchModeState
-            .infra_modes_[static_cast<size_t>(maybe_mode_key.value())];
-    TORCH_CHECK(
-        maybe_out.has_value(),
-        "trying to pop mode with mode_key=",
-        to_string(mode_key.value()),
-        "but that mode is not currently est");
-    torchDispatchModeState
-        .infra_modes_[static_cast<size_t>(maybe_mode_key.value())] =
-        c10::nullopt;
-    out = maybe_out.value();
-    mode_key = maybe_mode_key;
+  if (!torchDispatchModeState.stack_.empty()) {
+    out = torchDispatchModeState.stack_.back();
+    torchDispatchModeState.stack_.pop_back();
   } else {
-    // Handle the general case: pop the highest priority mode.
-    if (!torchDispatchModeState.stack_.empty()) {
-      // First try to grab a mode from the stack
-      out = torchDispatchModeState.stack_.back();
-      torchDispatchModeState.stack_.pop_back();
-    } else {
-      // Otherwise, try to grab a mode from infra_modes_
-      for (const auto i : c10::irange(
-               static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-        if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
-          out = torchDispatchModeState.infra_modes_[i].value();
-          mode_key = static_cast<TorchDispatchModeKey>(i);
-          torchDispatchModeState.infra_modes_[i] = c10::nullopt;
-          break;
-        }
+    for (const auto i : c10::irange(
+             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+      if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+        out = torchDispatchModeState.infra_modes_[i].value();
+        torchDispatchModeState.infra_modes_[i] = c10::nullopt;
+        break;
       }
     }
-    TORCH_INTERNAL_ASSERT(out != nullptr);
   }
-
+  TORCH_CHECK(out, "trying to pop from empty mode stack");
   if (!any_modes_set()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, false);
   }
-  return std::make_tuple(out, mode_key);
+  return out;
+}
+const std::tuple<std::shared_ptr<SafePyObject>, TorchDispatchModeKey>
+TorchDispatchModeTLS::pop_highest_infra_mode() {
+  for (const auto i :
+       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+    if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+      auto out_mode = torchDispatchModeState.infra_modes_[i].value();
+      torchDispatchModeState.infra_modes_[i] = c10::nullopt;
+      if (!any_modes_set()) {
+        c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
+        c10::impl::tls_set_dispatch_key_included(
+            DispatchKey::PythonTLSSnapshot, false);
+      }
+      return std::make_tuple(
+          std::move(out_mode), static_cast<TorchDispatchModeKey>(i));
+    }
+  }
+  TORCH_CHECK(
+      false, "Called pop_highest_infra_mode, but no infra modes were active.")
 }
 
 const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
@@ -101,10 +86,11 @@ const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
   // not None)
 
   // idx == 0 means the "bottom" of the stack, which starts with any infra
-  // modes.
+  // modes (iterating from lowest-priority to highest-priority).
   auto curr_idx = idx;
-  for (const auto i :
-       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+  for (int64_t i = static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
+       i >= 0;
+       --i) {
     if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
       if (curr_idx == 0) {
         return torchDispatchModeState.infra_modes_[i].value();

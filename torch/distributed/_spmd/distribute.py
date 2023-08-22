@@ -18,12 +18,14 @@ from torch.distributed._tensor.dispatch import _operator_dispatch
 from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
+    DTensorSpec,
     Placement,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -117,8 +119,25 @@ def _dispatch_with_local_tensors(
         specs = {}
 
     def redistribute(arg: Any) -> Any:
+        tensor_shape, mesh, current_placement, target_placement = specs[arg]
+        tensor_meta = TensorMetadata(
+            tensor_shape,
+            dtype=arg.dtype,
+            requires_grad=arg.requires_grad,
+            stride=arg.stride(),
+            memory_format=torch.contiguous_format,
+            is_quantized=arg.is_quantized,
+            qparams={},
+        )
+        current_spec = DTensorSpec(
+            mesh, tuple(current_placement), tensor_meta=tensor_meta
+        )
+        target_spec = DTensorSpec(
+            mesh, tuple(target_placement), tensor_meta=tensor_meta
+        )
+
         return (
-            _redistribute_with_local_tensor(arg, *specs[arg])  # type: ignore[index]
+            redistribute_local_tensor(arg, current_spec, target_spec)  # type: ignore[index]
             if isinstance(arg, torch.Tensor) and arg in specs  # type: ignore[operator]
             else arg
         )
@@ -409,21 +428,21 @@ def _get_dtensor_dispatch_graph(
         )
         node_to_obj[node] = out
 
-        assert output_sharding.schema_suggestions is not None
-        target_schema = output_sharding.schema_suggestions[0]
-        redistribute = target_schema is not op_schema
+        assert output_sharding is not None
 
         # If no redistribution is needed, we don't need to replace
         # the original node.
-        if not redistribute:
-            _update_node_from_op_schema(node, target_schema)
+        if not output_sharding.needs_redistribute:
+            _update_node_from_op_schema(node, op_schema)
             return None
 
         # TODO: this is broken when kwargs contains tensors
         # or if a non-tensor kwarg was modified by the sharding propagation
         # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
+        assert output_sharding.schema_suggestions is not None
+        target_schema = output_sharding.schema_suggestions[0]
         updated_args_spec, unflattened_args = _update_specs_for_redistribute(
-            args, target_schema, redistribute
+            args, target_schema, output_sharding.needs_redistribute
         )
 
         dispatch = partial(

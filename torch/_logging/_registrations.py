@@ -9,6 +9,7 @@ register_log("distributed", "torch.distributed")
 register_log("onnx", "torch.onnx")
 
 register_artifact("guards")
+register_artifact("verbose_guards", off_by_default=True)
 register_artifact("bytecode", off_by_default=True)
 register_artifact("graph")
 register_artifact("graph_code")
