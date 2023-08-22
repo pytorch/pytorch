@@ -587,7 +587,9 @@ class SchedulerNode(BaseSchedulerNode):
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.get_aliases() or self.is_template():
             return False
-        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+        if len(self.read_writes.writes) == 1 and isinstance(
+            read_dep, dependencies.MemoryDep
+        ):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -1077,6 +1079,8 @@ class Scheduler:
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
+                    and isinstance(read_dep, dependencies.MemoryDep)
+                    and isinstance(write_dep, dependencies.MemoryDep)
                     and read_dep.index == write_dep.index
                     and read_dep.size == write_dep.size
                 ):

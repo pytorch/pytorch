@@ -1,11 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, Dict, List, Sequence, Tuple
+from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
+    DTensorSpec,
     Placement,
     Replicate,
     Shard,
@@ -72,18 +73,24 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
 
 
 # Intentionally expose this API to trace ops on local tensors
-def _redistribute_with_local_tensor(
+def redistribute_local_tensor(
     local_tensor: torch.Tensor,
-    size: torch.Size,
-    device_mesh: DeviceMesh,
-    current_placements: Sequence[Placement],
-    target_placements: Sequence[Placement],
+    current_spec: DTensorSpec,
+    target_spec: DTensorSpec,
 ) -> torch.Tensor:
+    if current_spec.mesh != target_spec.mesh:
+        # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
+        raise NotImplementedError("Cross device mesh comm not supported yet!")
+
     new_local_tensor = None
 
+    current_placements = current_spec.placements
+    target_placements = target_spec.placements
     sorted_placements = list(enumerate(zip(current_placements, target_placements)))
     sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
+
+    device_mesh = current_spec.mesh
 
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
@@ -109,7 +116,7 @@ def _redistribute_with_local_tensor(
             elif current.is_shard():
                 current_placement = cast(Shard, current)
                 new_local_tensor = current_placement._to_replicate_tensor(
-                    local_tensor, size, device_mesh, i
+                    local_tensor, current_spec.shape, device_mesh, i
                 )
             else:
                 raise RuntimeError(
@@ -166,36 +173,6 @@ def _redistribute_with_local_tensor(
     return new_local_tensor
 
 
-def redistribute_dtensor(
-    input: "dtensor.DTensor",
-    device_mesh: DeviceMesh,
-    placements: Tuple[Placement, ...],
-) -> "dtensor.DTensor":
-    if input.device_mesh != device_mesh:
-        # TODO: alltoall reshuffling to change device_mesh if they are not the same
-        raise NotImplementedError("Cross device mesh comm not supported yet!")
-
-    local_tensor = input._local_tensor
-    new_local_tensor = _redistribute_with_local_tensor(
-        local_tensor,
-        input.size(),
-        device_mesh,
-        input.placements,
-        placements,
-    )
-
-    return dtensor.DTensor(
-        new_local_tensor,
-        device_mesh,
-        placements,
-        shape=input.size(),
-        dtype=input.dtype,
-        # NB: the requires_grad on our inner tensor won't be accurate, figure this out from the spec.
-        requires_grad=input._spec.tensor_meta.requires_grad,
-        stride=input.stride(),
-    )
-
-
 class Redistribute(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -205,14 +182,28 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: List[Placement],
     ):
-        ctx.previous_placement = input.placements
-        ctx.previous_device_mesh = input.device_mesh
-        return redistribute_dtensor(input, device_mesh, tuple(placements))
+        current_spec = input._spec
+        ctx.current_spec = current_spec
+        target_spec = DTensorSpec(
+            device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta
+        )
+
+        local_tensor = input._local_tensor
+        output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+
+        return dtensor.DTensor(
+            output,
+            device_mesh,
+            target_spec.placements,
+            shape=input.shape,
+            dtype=input.dtype,
+            requires_grad=local_tensor.requires_grad,
+            stride=input.stride(),
+        )
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
-        previous_placement = ctx.previous_placement
-        previous_device_mesh = ctx.previous_device_mesh
+        previous_spec = ctx.current_spec
         # When we run backward pass of redistribute (i.e. manual redistribute from
         # user code instead of torch_dispatch), we scan first and see if we need
         # to change the target placement for one special case:
@@ -224,18 +215,31 @@ class Redistribute(torch.autograd.Function):
         # which would be more expensive than keeping it replicate! For this reason,
         # we keep the replicate grad here.
         # TODO: see if this make sense for all cases.
+        current_spec = grad_output._spec
+
         target_placements: List[Placement] = []
-        for current, target in zip(grad_output.placements, previous_placement):
+        for current, target in zip(current_spec.placements, previous_spec.placements):
             if not current.is_partial() and target.is_partial():
                 # keep target placement to replicate instead of partial in this case
                 target_placements.append(Replicate())
             else:
                 target_placements.append(target)
+        target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements))
+
+        local_tensor = grad_output._local_tensor
+        output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        output_dtensor = dtensor.DTensor(
+            output,
+            target_spec.mesh,
+            target_spec.placements,
+            shape=grad_output.shape,
+            dtype=grad_output.dtype,
+            requires_grad=local_tensor.requires_grad,
+            stride=grad_output.stride(),
+        )
 
         return (
-            redistribute_dtensor(
-                grad_output, previous_device_mesh, tuple(target_placements)
-            ),
+            output_dtensor,
             None,
             None,
         )

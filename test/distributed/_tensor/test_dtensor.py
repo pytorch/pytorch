@@ -18,7 +18,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class DummyMLP(torch.nn.Module):

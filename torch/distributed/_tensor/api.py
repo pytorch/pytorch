@@ -23,7 +23,6 @@ from torch.distributed._tensor.random import (
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.utils._pytree import tree_flatten
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -240,21 +239,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # check that we are not getting mixed vanilla and Distributed tensors
-        arg_list, _ = tree_flatten(args)
-        for arg in arg_list:
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                raise RuntimeError(
-                    f"{func}: got mixed distributed and non-distributed tensors."
-                )
-
-        if kwargs is None:
-            kwargs = {}
-
         return op_dispatch.operator_dispatch(
             func,
             args,
-            kwargs,
+            kwargs or {},
             DTensor._propagator,
         )
 
