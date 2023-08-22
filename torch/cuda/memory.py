@@ -4,6 +4,7 @@ import ctypes
 import pickle
 import sys
 import warnings
+from inspect import signature
 
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -734,6 +735,9 @@ def _record_memory_history_impl(
     _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
 
 
+_record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
+
+
 def _snapshot(device: Union[Device, int] = None):
     """Saves a snapshot of CUDA memory state at the time it was called.
     The state is represented as a dictionary with the following structure.
@@ -813,7 +817,7 @@ def _snapshot(device: Union[Device, int] = None):
 def _dump_snapshot(filename="dump_snapshot.pickle"):
     """
     Saves a pickled version of the `torch.memory._snapshot()` dictionary to a file.
-    This file can be opened by the interactive snapshot viewer at pytorch.org/memory_visualizer
+    This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".

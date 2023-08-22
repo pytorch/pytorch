@@ -5,7 +5,7 @@ Understanding CUDA Memory Usage
 To debug CUDA memory use, PyTorch provides a way to generate memory snapshots that record the state of allocated CUDA memory
 at any point in time, and optionally record the history of allocation events that led up to that snapshot.
 
-The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at `pytorch.org/memory_visualizer <pytorch.org/memory_visualizer>`_ which
+The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at `pytorch.org/memory_viz <pytorch.org/memory_viz>`_ which
 can be used to explore the snapshot.
 
 Generating a Snapshot
@@ -24,7 +24,7 @@ The common pattern for recording a snapshot is to enable memory history, run the
 Using the visualizer
 ====================
 
-Open `pytorch.org/memory_visualizer <pytorch.org/memory_visualizer>`_ and drag/drop the pickled snapshot file into the visualizer.
+Open `pytorch.org/memory_viz <pytorch.org/memory_viz>`_ and drag/drop the pickled snapshot file into the visualizer.
 The visualizer is a javascript application that runs locally on your computer. It does not upload any snapshot data.
 
 
@@ -49,8 +49,10 @@ an allocation failed even though reserved memory still exists.
 
 .. image:: _static/img/torch_cuda_memory/allocator_state_history.png
 
-The stack trace information also reports the address at which an allocation occured. The address `b7f064c000000_0` means that the (b)lock at address `7f064c000000` which is the `_0`th time this address was allocated. This unique string can be
-looked up in the Active Memory Timeline and searched in the Active State History to examine the memory state when a tensor was allocated or freed.
+The stack trace information also reports the address at which an allocation occured.
+The address b7f064c000000_0 refers to the (b)lock at address 7f064c000000 which is the "_0"th time this address was allocated.
+This unique string can be looked up in the Active Memory Timeline and searched
+in the Active State History to examine the memory state when a tensor was allocated or freed.
 
 Snapshot API Reference
 ======================

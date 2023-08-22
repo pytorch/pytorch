@@ -427,12 +427,6 @@ Available options:
   set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
-* ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
-  for allocation requests larger than the threshold value (in MB). This can help
-  reduce the memory footprint when making large allocations that are expected to
-  be persistent or have a large lifetime.
-  ``roundup_bypass_threshold_mb`` is only meaningful with ``backend:native``.
-  With ``backend:cudaMallocAsync``, ``roundup_bypass_threshold_mb`` is ignored.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
