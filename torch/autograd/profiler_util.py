@@ -246,20 +246,14 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        '{{"name": "{}", '
+                        f'{{"name": "{evt.trace_name}", '
                         '"ph": "s", '
-                        '"ts": {}, '
-                        '"tid": {}, '
+                        f'"ts": {evt.time_range.start}, '
+                        f'"tid": {evt.thread}, '
                         '"pid": "CPU functions", '
-                        '"id": {}, '
-                        '"cat": "cpu_to_{}", '
-                        '"args": {{}}}}, '.format(
-                            evt.trace_name,
-                            evt.time_range.start,
-                            evt.thread,
-                            next_id,
-                            device_name,
-                        )
+                        f'"id": {next_id}, '
+                        f'"cat": "cpu_to_{device_name}", '
+                        '"args": {{}}}}, '
                     )
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
