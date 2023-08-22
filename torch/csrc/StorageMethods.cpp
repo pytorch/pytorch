@@ -122,7 +122,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       storage.device_type() != c10::DeviceType::Meta &&
       storage.sym_nbytes() != 0;
   TORCH_CHECK(
-      !invalid, "Attempted to call resize() on an invalid python storage.")
+      !invalid, "Attempted to call resize_() on an invalid python storage.")
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
@@ -192,7 +192,7 @@ static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
       storage.device_type() != c10::DeviceType::Meta &&
       storage.sym_nbytes() != 0;
   TORCH_CHECK(
-      !invalid, "Attempted to call fill() on an invalid python storage.")
+      !invalid, "Attempted to call fill_() on an invalid python storage.")
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
       "fill_ expects int, "
