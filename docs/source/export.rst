@@ -8,6 +8,7 @@ torch.export
 
 .. automodule:: torch.export
 .. autofunction:: export
+.. autofunction:: dynamic_dim
 
 .. toctree::
    :glob:

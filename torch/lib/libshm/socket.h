@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <iostream>
+#include <sstream>
 #include <string>
 
 #include <libshm/alloc_info.h>
