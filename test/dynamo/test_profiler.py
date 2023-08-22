@@ -91,6 +91,22 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with torch.profiler.profile(record_shapes=True):
             opt_fn(*inputs)
 
+    def test_profiler_cache_lookup_profiler_step(self):
+        def fn(x, y, z):
+            return torch.add(torch.sub(x, y), z)
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+
+        x, y, z, = [torch.rand(4, 4) for _ in range(3)]
+
+        prof = torch.profiler.profile(schedule=torch.profiler.schedule(wait=2, warmup=2, active=2, repeat=1))
+
+        for _ in range(10):
+            opt_fn(x, y, z)
+            prof.step()
+
+        self.assertTrue(any(e.name == "TorchDynamo Cache Lookup" for e in prof.events()))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
