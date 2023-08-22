@@ -448,13 +448,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       is_coalesced);
 }
 
-Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
-                                        c10::optional<ScalarType> dtype,
-                                        c10::optional<Layout> layout,
-                                        c10::optional<Device> device,
-                                        c10::optional<bool> pin_memory,
-                                        c10::optional<bool> is_coalesced);
-
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -496,15 +489,6 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
       values,
       values.options().layout(kSparse),
       is_coalesced);
-}
-
-Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  bool is_coalesced = values_.dim() > 0 && values_.size(0) < 2;
-  return _sparse_coo_tensor_unsafe_symint(indices, values_, size, dtype, layout, device, pin_memory, is_coalesced);
 }
 
 // NB: Deleted newWithSizeNd variants
