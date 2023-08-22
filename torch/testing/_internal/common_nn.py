@@ -2314,6 +2314,7 @@ new_module_tests = [
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
         pickle=False,
+        default_dtype=torch.double,
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
