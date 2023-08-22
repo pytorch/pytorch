@@ -31,6 +31,7 @@ from ..utils import (
     guard_if_dyn,
     is_utils_checkpoint,
     istype,
+    numpy_operator_wrapper,
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
@@ -512,6 +513,15 @@ class BuiltinVariable(VariableTracker):
                         args[1],
                     ]
 
+                if check_numpy_ndarray_args(args, kwargs):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        numpy_operator_wrapper(self.fn),
+                        *proxy_args_kwargs(args, kwargs),
+                    )
+
+                    return variables.NumpyNdarrayVariable.create(tx, proxy, **options)
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -551,11 +561,7 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    if check_numpy_ndarray_args(args, kwargs):
-                        cls = variables.NumpyNdarrayVariable
-                    else:
-                        cls = variables.TensorVariable
-                    return wrap_fx_proxy_cls(cls, tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
