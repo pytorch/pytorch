@@ -602,13 +602,11 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
-        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
