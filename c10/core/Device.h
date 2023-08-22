@@ -116,6 +116,11 @@ struct C10_API Device final {
     return type_ == DeviceType::XLA;
   }
 
+  /// Return true if the device is of MTIA type.
+  bool is_mtia() const noexcept {
+    return type_ == DeviceType::MTIA;
+  }
+
   /// Return true if the device is of HPU type.
   bool is_hpu() const noexcept {
     return type_ == DeviceType::HPU;
@@ -149,11 +154,6 @@ struct C10_API Device final {
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
-  }
-
-  /// Return true if the device is of PrivateUse1 type.
-  bool is_privateuse1() const noexcept {
-    return type_ == DeviceType::PrivateUse1;
   }
 
   /// Return true if the device supports arbitrary strides.

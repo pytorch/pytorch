@@ -3,7 +3,7 @@ import dataclasses
 import enum
 from typing import Any, Optional, Union
 
-from torch._guards import GuardSource, Source
+from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
@@ -80,6 +80,7 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
+    cell_or_freevar: bool = False
 
     def reconstruct(self, codegen):
         return [codegen.create_load(self.local_name)]
@@ -141,6 +142,18 @@ class GlobalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
+
+
+@dataclasses.dataclass(frozen=True)
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -158,8 +171,7 @@ class GlobalWeakRefSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class AttrSource(Source):
-    base: Source
+class AttrSource(ChainedSource):
     member: str
 
     def __post_init__(self):
@@ -204,8 +216,7 @@ class TensorProperty(enum.Enum):
 
 
 @dataclasses.dataclass(frozen=True)
-class TensorPropertySource(Source):
-    base: Source
+class TensorPropertySource(ChainedSource):
     prop: TensorProperty
     idx: Optional[int] = None  # None for STORAGE_OFFSET
 
@@ -244,9 +255,7 @@ class TensorPropertySource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class NegateSource(Source):
-    base: Source
-
+class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 
@@ -262,8 +271,7 @@ class NegateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class DefaultsSource(Source):
-    base: Source
+class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False
     field: str = dataclasses.field(init=False, repr=False, compare=False)
@@ -305,8 +313,7 @@ class DefaultsSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class GetItemSource(Source):
-    base: Source
+class GetItemSource(ChainedSource):
     index: Any
     index_is_slice: bool = False
 
@@ -358,9 +365,7 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class TypeSource(Source):
-    base: Source
-
+class TypeSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 
@@ -375,33 +380,38 @@ class TypeSource(Source):
         return f"type({self.base.name()})"
 
 
+# NB - SuperSource is a weird one.
+# it is our only source with 2 bases, so we use the objec
+# as the base, rather than the type, since an invocation
+# like super(Foo, foo) is represented here, the source object base is more spiritually
+# aligned with the instance, rather than the type.
+# This whole construction is questionable tho, and we should probably find a way to
+# avoid this exception to our otherwise nice source parentage invariant.
 @dataclasses.dataclass(frozen=True)
-class SuperSource(Source):
+class SuperSource(ChainedSource):
     type: Source
-    obj: Source
 
     def __post_init__(self):
         assert self.type is not None
-        assert self.obj is not None
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "super")
         return (
             self.type.reconstruct(codegen)
-            + self.obj.reconstruct(codegen)
+            + self.base.reconstruct(codegen)
             + create_call_function(2, True)
         )
 
     def guard_source(self):
-        return self.obj.guard_source()
+        return self.base.guard_source()
 
     def name(self):
-        return f"super({self.type.name()}, {self.obj.name()})"
+        return f"super({self.type.name()}, {self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)
-class ODictGetItemSource(Source):
-    base: Source
+class ODictGetItemSource(ChainedSource):
     index: Any
 
     def __post_init__(self):
@@ -428,51 +438,31 @@ class ODictGetItemSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class NNModuleSource(Source):
-    inner: Source
-
+class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen):
-        return self.inner.reconstruct(codegen)
+        return self.base.reconstruct(codegen)
 
     def guard_source(self):
-        return _GUARD_SOURCE_NN_MODULE[self.inner.guard_source()]
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
     def name(self):
-        return self.inner.name()
+        return self.base.name()
 
 
 @dataclasses.dataclass(frozen=True)
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
+        return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_FSDP_MODULE[self.inner.guard_source()]
+        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)
-class DeterministicAlgorithmsSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
-class GradModeSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
-class DefaultDeviceSource(Source):
+class GlobalStateSource(Source):
     def name(self):
         return ""
 
@@ -497,6 +487,19 @@ class ConstantSource(Source):
         raise NotImplementedError()
 
 
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"__as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "as_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -507,3 +510,15 @@ class ShapeEnvSource(Source):
 
     def guard_source(self):
         return GuardSource.SHAPE_ENV
+
+
+def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
+    if isinstance(source, ChainedSource):
+        return is_from_local_source(
+            source.base, allow_cell_or_freevar=allow_cell_or_freevar
+        )
+    if not isinstance(source, LocalSource):
+        return False
+    if not allow_cell_or_freevar and source.cell_or_freevar:
+        return False
+    return True

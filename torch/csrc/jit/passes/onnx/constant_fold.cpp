@@ -535,6 +535,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       total_size *= size;
     }
     return c10::optional<at::Tensor>(IntToTensor(total_size));
+  } else if (node->kind() == onnx::Softmax) {
+    int64_t axis = node->hasAttributeS("axis") ? node->i(attr::axis) : -1;
+    updated_val = at::softmax(inputTensorValues[0], axis);
+    return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }

@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo)
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -700,7 +700,6 @@ class TestIndexing(TestCase):
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")  # TODO: Remove me once #103355 is closed
             self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
             self.assertEqual(v[boolIndices], v[uint8Indices])
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
@@ -1328,6 +1327,48 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
+
+    @onlyCUDA
+    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+        with DeterministicGuard(True):
+            idx1 = torch.tensor([0])
+            idx2 = torch.tensor([2, 6])
+            idx3 = torch.tensor([1, 5, 7])
+
+            tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx1] = 1.0
+            tensor_a[idx1, :, idx2, idx2, :] = 2.0
+            tensor_a[:, idx1, idx3, :, idx3] = 3.0
+            tensor_b[idx1] = 1.0
+            tensor_b[idx1, :, idx2, idx2, :] = 2.0
+            tensor_b[:, idx1, idx3, :, idx3] = 3.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 11).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx3] = 1.0
+            tensor_a[idx2, :] = 2.0
+            tensor_a[:, idx2] = 3.0
+            tensor_a[:, idx1] = 4.0
+            tensor_b[idx3] = 1.0
+            tensor_b[idx2, :] = 2.0
+            tensor_b[:, idx2] = 3.0
+            tensor_b[:, idx1] = 4.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[[8]] = 1.0
+            tensor_b[[8]] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[6] = 1.0
+            tensor_b[6] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:

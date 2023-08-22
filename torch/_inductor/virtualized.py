@@ -11,7 +11,7 @@ from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import sympy_str, sympy_symbol
+from .utils import reduction_num_outputs, sympy_str, sympy_symbol
 
 threadlocal = local()
 
@@ -139,6 +139,13 @@ class KernelFormatterHandler:
 
         return inner
 
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
+        num_values = reduction_num_outputs(reduction_type)
+        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
+        self.output.writeline(f"{','.join(varnames)} = {line}")
+        return tuple(varnames) if num_values > 1 else varnames[0]
+
     def getvalue(self, result):
         self.output.writeline(f"return {result}")
         return self.output.getvalue()
@@ -156,6 +163,7 @@ MockHandler._init_cls()
 
 _ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
+_real_inputs = Virtualized("real_inputs", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
@@ -221,15 +229,23 @@ class OpsWrapper:
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
             new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsValue(getattr(_ops, name)(*new_args, **new_kwargs))
+            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
         return inner
 
     @staticmethod
     def _unwrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsWrapper._unwrap(v) for v in x)
         if isinstance(x, OpsValue):
             return x.value
         return x
+
+    @staticmethod
+    def _wrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsValue(v) for v in x)
+        return OpsValue(x)
 
     @staticmethod
     def indirect_indexing(index, size, check=True):
@@ -249,6 +265,8 @@ class _V:
     set_ops_handler = _ops._set_handler
     get_ops_handler = _ops._get_handler
     set_graph_handler = _graph._set_handler
+    set_real_inputs = _real_inputs._set_handler
+    get_real_inputs = _real_inputs._get_handler
     set_fake_mode = _fake_mode._set_handler
     get_fake_mode = _fake_mode._get_handler
     set_kernel_handler = _kernel._set_handler
@@ -264,6 +282,11 @@ class _V:
     def graph(self):
         """The graph currently being generated"""
         return _graph._get_handler()
+
+    @property
+    def real_inputs(self):
+        """non-fake example inputs"""
+        return _real_inputs._get_handler()
 
     @property
     def fake_mode(self):

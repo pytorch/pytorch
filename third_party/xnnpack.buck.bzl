@@ -1365,7 +1365,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "arm",
+                "armv7",
                 [
                     "-mfpu=neon-vfpv4",
                 ],
@@ -1403,7 +1403,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "arm",
+                "armv7",
                 [
                     "-mfpu=neon-fp16",
                 ],
@@ -1443,7 +1443,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "(aarch64|arm64)",
                 [
                     "-march=armv8-a",
-                    "-mfpu=neon-fp-armv8",
                 ],
             ),
             (
@@ -1544,14 +1543,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_INTERNAL=",
         ],
         labels = labels,
-        platform_compiler_flags = [
-            (
-                "(aarch64|arm64)",
-                [
-                    "-mfpu=neon-vfpv4",
-                ],
-            ),
-        ],
         preferred_linkage = "static",
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
@@ -1666,8 +1657,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "^(android-armv8|iphoneos-armv8)$",
                 [
                     "-march=armv8-a",
-                    "-mfpu=neon-fp-armv8",
-                    "-mfloat-abi=softfp",
                 ],
             ),
         ],

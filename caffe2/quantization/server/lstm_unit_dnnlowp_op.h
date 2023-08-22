@@ -14,7 +14,7 @@ class LSTMUnitDNNLowPOp final : public LSTMUnitOp<CPUContext> {
 
  public:
   LSTMUnitDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
-  ~LSTMUnitDNNLowPOp();
+  ~LSTMUnitDNNLowPOp() override;
   bool RunOnDevice() override;
 
  private:

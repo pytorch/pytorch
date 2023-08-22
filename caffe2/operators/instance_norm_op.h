@@ -27,7 +27,7 @@ class InstanceNormOp final : public Operator<Context> {
         "order should be either \"NCHW\" or \"NHWC\".");
   }
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(INPUT);
     const auto& gamma = Input(SCALE);
     const auto& beta = Input(BIAS);
@@ -144,7 +144,7 @@ class InstanceNormGradientOp final : public Operator<Context> {
         "order should be either \"NCHW\" or \"NHWC\".");
   }
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(INPUT);
     const auto& gamma = Input(SCALE);
     const auto& dY = Input(OUTPUT_GRAD);

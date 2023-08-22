@@ -29,7 +29,7 @@ class _EvalCacheLoader:
         self.eval_cache = {}
         self.next_id = 0
 
-    def cache(self, src: str, globals: Dict[str, Any]):
+    def cache(self, src: str, globals: Dict[str, Any], co_fields=None):
         """Store the source in a private cache, and add a lazy entry in linecache
         that allows the source to be retrieved by 'filename'.
 
@@ -42,6 +42,8 @@ class _EvalCacheLoader:
         """
 
         key = self._get_key()
+        if co_fields:
+            key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
         # Don't mutate globals so that this loader is only used
@@ -70,15 +72,15 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
-def _exec_with_source(src: str, globals: Dict[str, Any]):
-    key = _loader.cache(src, globals)
+def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
+    key = _loader.cache(src, globals, co_fields)
     exec(compile(src, key, 'exec'), globals)
 
 
-def _forward_from_src(src: str, globals: Dict[str, Any]):
+def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
-    _exec_with_source(src, globals_copy)
+    _exec_with_source(src, globals_copy, co_fields)
     forward_fn = globals_copy['forward']
     del globals_copy['forward']
     return forward_fn
@@ -127,6 +129,13 @@ def reduce_deploy_graph_module(
     forward = _forward_from_src(import_block + fn_src, ns)
     return _deserialize_graph_module(forward, body)
 
+# We create a dummy class here because symbolic_trace pulls the forward()
+# function off of the class, rather than the instance. This class is used
+# in _deserialize_graph_module() below.
+class _CodeOnlyModule(torch.nn.Module):
+    def __init__(self, body):
+        super().__init__()
+        self.__dict__ = body
 
 def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     """
@@ -135,15 +144,9 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     saving the dictionary so that changes to the in-memory graph format do not
     get serialized.
     """
-    # We create a dummy class here because symbolic_trace pulls the forward()
-    # function off of the class, rather than the instance
-    class CodeOnlyModule(torch.nn.Module):
-        def __init__(self, body):
-            super().__init__()
-            self.__dict__ = body
 
     # Try to retrieve the forward source in a backward-compatible way
-    CodeOnlyModule.forward = forward
+    _CodeOnlyModule.forward = forward
 
     tracer_cls = body.get('_tracer_cls')
     if tracer_cls is None:
@@ -162,7 +165,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
-    com = CodeOnlyModule(body)
+    com = _CodeOnlyModule(body)
 
     tracer_extras = body.get('_tracer_extras', {})
     graph = KeepModules().trace(com, **tracer_extras)
@@ -342,6 +345,18 @@ class GraphModule(torch.nn.Module):
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
+
+            # When we pickle/unpickle graph module, we don't want to drop any module or attributes.
+            if isinstance(root, _CodeOnlyModule):
+                for k, _ in root.named_children():
+                    _copy_attr(root, self, k)
+
+                for k, _ in root.named_buffers():
+                    _copy_attr(root, self, k)
+
+                for k, _ in root.named_parameters():
+                    _copy_attr(root, self, k)
+
             for node in graph.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
@@ -645,7 +660,8 @@ class {module_name}(torch.nn.Module):
         self._code = python_code.src
 
         cls = type(self)
-        cls.forward = _forward_from_src(self._code, python_code.globals)
+        co_fields = self._graph._co_fields if hasattr(self._graph, '_co_fields') else {}
+        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.

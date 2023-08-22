@@ -12,9 +12,7 @@
 
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-namespace torch {
-namespace cuda {
-namespace python {
+namespace torch::cuda::python {
 void initCommMethods(PyObject* module) {
   auto m = py::cast<py::module>(module);
   m.def(
@@ -107,6 +105,4 @@ void initCommMethods(PyObject* module) {
           py::arg("dim"),
           py::call_guard<py::gil_scoped_release>());
 }
-} // namespace python
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::python

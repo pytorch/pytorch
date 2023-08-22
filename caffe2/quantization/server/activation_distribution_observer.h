@@ -14,7 +14,7 @@ namespace caffe2 {
 class OutputMinMaxObserver final : public ObserverBase<OperatorBase> {
  public:
   explicit OutputMinMaxObserver(OperatorBase* op);
-  ~OutputMinMaxObserver();
+  ~OutputMinMaxObserver() override;
 
   struct TensorInfo {
     explicit TensorInfo(const std::string& name)
@@ -65,7 +65,7 @@ class OutputMinMaxNetObserver final : public NetObserver {
       const std::string& out_file_name,
       int dump_freq = -1,
       string delimiter = " ");
-  ~OutputMinMaxNetObserver();
+  ~OutputMinMaxNetObserver() override;
 
  private:
   void Stop() override;
@@ -140,7 +140,7 @@ class HistogramNetObserver final : public NetObserver {
       bool mul_nets = false,
       string op_filter = "",
       string delimiter = " ");
-  ~HistogramNetObserver();
+  ~HistogramNetObserver() override;
   void DumpHistogramFile() {
     DumpAndReset_(out_file_name_, false);
   }
@@ -174,7 +174,7 @@ class OutputColumnMaxHistogramNetObserver final : public NetObserver {
       int dump_freq = -1,
       bool mul_nets = false,
       string delimiter = " ");
-  ~OutputColumnMaxHistogramNetObserver();
+  ~OutputColumnMaxHistogramNetObserver() override;
   void DumpOutputColumnMaxHistogramFile() {
     DumpAndReset_(out_file_name_, false);
   }

@@ -21,7 +21,6 @@
 #include <functional>
 #include <cmath>
 #include <type_traits>
-#include <bitset>
 #include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
@@ -72,7 +71,9 @@ struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
       std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value> {
+      std::is_same<T, at::BFloat16>::value ||
+      std::is_same<T, at::Float8_e5m2>::value ||
+      std::is_same<T, at::Float8_e4m3fn>::value> {
 };
 
 template<typename T>

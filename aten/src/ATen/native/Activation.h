@@ -14,10 +14,10 @@ struct TensorIteratorBase;
 class TensorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 // These constants control the approximation behavior of gelu function.
-enum GeluType {
+enum class GeluType {
   None,             // Baseline Gelu
   Tanh,             // Tahn Gelu Approximation
   END
@@ -30,6 +30,14 @@ static GeluType get_gelutype_enum(const c10::string_view approximate) {
     return GeluType::Tanh;
   } else {
     TORCH_CHECK(false, "approximate argument must be either none or tanh.");
+  }
+}
+
+static std::string gelutype_to_string(const GeluType type) {
+  switch(type) {
+    case GeluType::None: return "none";
+    case GeluType::Tanh: return "tanh";
+    default: TORCH_CHECK(false, "unknown GELU type: ", static_cast<int>(type));
   }
 }
 
@@ -87,6 +95,4 @@ DECLARE_DISPATCH(activation_backward_fn, mish_backward_stub);
 DECLARE_DISPATCH(activation_fn, prelu_stub);
 DECLARE_DISPATCH(activation_backward_fn, prelu_backward_stub);
 
-} // namespace native
-
-} // namespace at
+} // namespace at::native

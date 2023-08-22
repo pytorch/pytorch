@@ -154,9 +154,9 @@ struct CUDAValueSelectionIntersectionKernel {
     const auto lhs_nnz_stride = lhs_values.stride(0);
     const auto rhs_nnz_stride = rhs_values.stride(0);
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, res_values.scalar_type(),
-        "binary_op_intersection_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, at::ScalarType::ComplexHalf, res_values.scalar_type(),
+        "binary_op_intersection_cuda", [&] {
           // COO indices are only 64-bit for now.
           using index_t = int64_t;
           binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
@@ -194,10 +194,11 @@ void sparse_mask_projection_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
+    const OptTensor& x_hash_opt,
+    bool accumulate_matches) {
   using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, /*accumulate_matches=*/false
+      result, x, y, x_hash_opt, c10::nullopt, accumulate_matches
   );
 }
 

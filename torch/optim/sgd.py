@@ -11,11 +11,11 @@ class SGD(Optimizer):
                  weight_decay=0, nesterov=False, *, maximize: bool = False, foreach: Optional[bool] = None,
                  differentiable: bool = False):
         if lr is not required and lr < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
+            raise ValueError(f"Invalid momentum value: {momentum}")
         if weight_decay < 0.0:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
@@ -127,7 +127,7 @@ SGD.__doc__ = r"""\
 
     Nesterov momentum is based on the formula from
     `On the importance of initialization and momentum in deep learning`__.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -136,10 +136,10 @@ SGD.__doc__ = r"""\
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
-        {maximize}
-        {foreach}
-        {differentiable}
-    """.format(maximize=_maximize_doc, foreach=_foreach_doc, differentiable=_differentiable_doc) + r"""
+        {_maximize_doc}
+        {_foreach_doc}
+        {_differentiable_doc}
+    """ + r"""
 
     Example:
         >>> # xdoctest: +SKIP
@@ -280,14 +280,18 @@ def _multi_tensor_sgd(params: List[Tensor],
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
-    for device_params, device_grads, device_momentum_buffer_list, indices in grouped_tensors.values():
+    for ((device_params, device_grads, device_momentum_buffer_list), indices) in grouped_tensors.values():
         device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 
         if maximize:
-            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
-            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         if momentum != 0:
             bufs = []

@@ -10,8 +10,6 @@
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 
-#include <ATen/core/VariableHooksInterface.h>
-
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/MemoryOverlap.h>
@@ -365,6 +363,19 @@ void clear_hooks(const at::TensorBase& self) {
   materialize_autograd_meta(self)->hooks_.clear();
 }
 
+void set_post_acc_grad_hooks(
+    const at::TensorBase& self,
+    std::unique_ptr<PostAccumulateGradHook> dict) {
+  AutogradMeta* meta = materialize_autograd_meta(self);
+  meta->post_acc_grad_hooks_ = std::move(dict);
+}
+
+std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable& self) {
+  TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
+  return get_autograd_meta(self)->post_acc_grad_hooks_;
+}
+
 void set_name(const Variable& self, const std::string& name) {
   materialize_autograd_meta(self)->name_ = name;
 }
@@ -393,36 +404,6 @@ DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase& self) {
 } // namespace impl
 
 using at::Tensor;
-
-struct VariableHooks final : at::impl::VariableHooksInterface {
-  at::TensorBase tensor_data(const at::TensorBase&) const override;
-  at::TensorBase variable_data(const at::TensorBase&) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(
-      const at::TensorBase&) const override;
-  unsigned _register_hook(
-      const at::TensorBase&,
-      std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
-  void remove_hook(const at::TensorBase&, unsigned pos) const override;
-  bool is_view(const at::TensorBase&) const override;
-  const at::TensorBase& base(const at::TensorBase&) const override;
-  const std::string& name(const at::TensorBase&) const override;
-  bool is_leaf(const at::TensorBase&) const override;
-  int64_t output_nr(const at::TensorBase&) const override;
-  void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
-      const override;
-  at::TensorBase data(const at::TensorBase& self) const override;
-  int64_t _version(const at::TensorBase& self) const override;
-  void retain_grad(const at::TensorBase& self) const override;
-  bool retains_grad(const at::TensorBase& self) const override;
-  void _backward(
-      const Tensor& self,
-      at::TensorList inputs,
-      const c10::optional<Tensor>& gradient,
-      c10::optional<bool> keep_graph,
-      bool create_graph) const override;
-  void requires_grad_(const at::TensorBase& self, bool _requires_grad)
-      const override;
-};
 
 VariableHooks variableHooks;
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
