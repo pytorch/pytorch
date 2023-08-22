@@ -137,6 +137,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.embedding_bag",
         "nn.functional.max_pool1d",
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
@@ -560,6 +561,19 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.cross_entropy",
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
+    ),
+    xfail(
+        "nn.functional.embedding_bag",
+        matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
+        reason="Torchlib does not support aten::embedding_renorm, emitted when 'max_norm' is not None",
+    ),
+    xfail(
+        "nn.functional.embedding_bag",
+        matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
+        reason=(
+            "Torchlib does not support 'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
+            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided."
+        ),
     ),
     skip(
         "nn.functional.max_pool3d",
