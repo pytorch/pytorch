@@ -58,13 +58,16 @@ class Layer(nn.Module):
 
 
 def _create_model(compute_cycles, has_params: bool):
+    # Use `limit_all_gathers=False` since the timing being tested relies on the
+    # CPU running ahead of the GPU
     model = FSDP(
         nn.Sequential(
-            FSDP(Layer(compute_cycles, has_params)),
-            FSDP(Layer(compute_cycles, has_params)),
-            FSDP(Layer(compute_cycles, has_params)),
-            FSDP(Layer(compute_cycles, has_params)),
-        )
+            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+        ),
+        limit_all_gathers=False,
     ).cuda()
     return model
 

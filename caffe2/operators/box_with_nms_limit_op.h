@@ -58,7 +58,7 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
     input_scores_fg_cls_starting_id_ = (int)input_boxes_include_bg_cls_;
   }
 
-  ~BoxWithNMSLimitOp() {}
+  ~BoxWithNMSLimitOp() override {}
 
   bool RunOnDevice() override {
     if (InputSize() > 2) {

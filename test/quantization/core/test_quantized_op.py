@@ -223,9 +223,7 @@ class TestQuantizedOps(TestCase):
                     # Finds qY using in-place or non-in-place quantized operators.
                     qY = q_op(qX, **extra_kwargs)
 
-                    self.assertEqual(qY, qY_hat, msg='{} - {} failed: ({} vs. {})'.format(
-                        fn_name, q_op, qY, qY_hat
-                    ))
+                    self.assertEqual(qY, qY_hat, msg=f'{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
@@ -329,7 +327,6 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ao.nn.quantized.functional.hardsigmoid,
-                    torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
@@ -337,7 +334,6 @@ class TestQuantizedOps(TestCase):
             },
             {
                 'quantized_fn': [
-                    torch.ao.nn.quantized.functional.hardsigmoid,
                     torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
@@ -398,7 +394,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = op(qX, negative_slope=alpha)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+                             msg=f"F.leaky_relu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::elu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -423,7 +419,7 @@ class TestQuantizedOps(TestCase):
 
         qY = torch.ao.nn.quantized.functional.elu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg="F.elu failed ({} vs {})".format(qY, qY_hat))
+                         msg=f"F.elu failed ({qY} vs {qY_hat})")
 
 
     """Tests the correctness of the quantized::celu op."""
@@ -449,7 +445,7 @@ class TestQuantizedOps(TestCase):
         # test regular
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg="F.celu failed ({} vs {})".format(qY, qY_hat))
+                         msg=f"F.celu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::gelu op."""
     def test_qgelu(self):
@@ -478,7 +474,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
                 qY_hat = op(qX)
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
+                                 msg=f"F.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -512,7 +508,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = qop(qX, qW, scale, zero_point)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg="F.prelu failed ({} vs {})".format(qY, qY_hat))
+                             msg=f"F.prelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -636,7 +632,7 @@ class TestQuantizedOps(TestCase):
                                        dtype=torch_type)
         qY_hat = torch.tanh(qX)
         self.assertEqual(qY, qY_hat,
-                         msg="TanH failed: {} vs. {}".format(qY, qY_hat))
+                         msg=f"TanH failed: {qY} vs. {qY_hat}")
 
     """Tests the correctness of the quantized::threshold op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -660,13 +656,12 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             'native': torch.threshold,
             'nn.functional': torch.nn.functional.threshold,
-            'nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
             'ao.nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
         }
 
         for name, op in ops_under_test.items():
             qY = op(qX, threshold, value)
-            self.assertEqual(qY, qY_hat, msg="{} qthreshold failed".format(name))
+            self.assertEqual(qY, qY_hat, msg=f"{name} qthreshold failed")
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
@@ -691,7 +686,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_clamp_hat = op(qX, min=min_val, max=max_val)
-            self.assertEqual(qY_clamp, qY_clamp_hat, msg="{} qclamp failed".format(name))
+            self.assertEqual(qY_clamp, qY_clamp_hat, msg=f"{name} qclamp failed")
 
         if torch.backends.quantized.engine == 'fbgemm':
             with override_quantized_engine('fbgemm'):
@@ -706,9 +701,9 @@ class TestQuantizedOps(TestCase):
 
                 for name, op in ops_under_test.items():
                     qY_min_clamp_hat = op(qX, min=min_val)
-                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
+                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg=f"{name} qclamp failed")
                     qY_max_clamp_hat = op(qX, max=max_val)
-                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
+                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg=f"{name} qclamp failed")
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
@@ -732,19 +727,15 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
 
             ops_under_test = {
-                'nn.quantized.functional.hardtanh':
-                    torch.ao.nn.quantized.functional.hardtanh,
                 'ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
 
             for name, op in ops_under_test.items():
                 qY_hat = op(qX, min_val, max_val)
-                self.assertEqual(qY, qY_hat, msg="{} hardtanh failed".format(name))
+                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
 
             ops_under_test_inplace = {
-                'inplace nn.quantized.functional.hardtanh':
-                    torch.ao.nn.quantized.functional.hardtanh,
                 'inplace ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
@@ -752,7 +743,7 @@ class TestQuantizedOps(TestCase):
             for name, op_ in ops_under_test_inplace.items():
                 qY_hat = qX.clone()
                 op_(qY_hat, min_val, max_val, inplace=True)
-                self.assertEqual(qY, qY_hat, msg="{} hardtanh failed".format(name))
+                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
 
     """Tests the correctness of the quantized::hardswish op."""
     @override_qengines
@@ -789,7 +780,7 @@ class TestQuantizedOps(TestCase):
                     qX, scale=Y_scale, zero_point=Y_zero_point)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
+                    msg=f"Hardswish failed: {qY} vs {qY_hat}, {torch.backends.quantized.engine}")
 
     """Tests the correctness of the binary op + scalar."""
     def _test_binary_op_scalar_relu(self, A, b, binary_op_name, binary_op, quantized_op, quantized_op_relu):
@@ -815,11 +806,11 @@ class TestQuantizedOps(TestCase):
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg="{}_scalar results don't match: "
-                         "{} vs {}".format(binary_op_name, C_ref.dequantize(), C_hat.dequantize()))
+                         msg=f"{binary_op_name}_scalar results don't match: "
+                         f"{C_ref.dequantize()} vs {C_hat.dequantize()}")
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg="{}_scalar_relu results don't match: "
-                         "{} vs {}".format(binary_op_name, C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+                         msg=f"{binary_op_name}_scalar_relu results don't match: "
+                         f"{C_relu_ref.dequantize()} vs {C_relu_hat.dequantize()}")
 
     @unittest.skipIf(IS_MACOS, "skipping macos test")
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
@@ -1345,7 +1336,6 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool1d,
             "nn.functional": torch.nn.functional.max_pool1d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
         }
 
@@ -1353,7 +1343,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg="{} results are off".format(name))
+                             msg=f"{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool1d(
             qa, kernel_size=_single(kernel),
@@ -1442,7 +1432,6 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1450,7 +1439,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg="{} results are off".format(name))
+                             msg=f"{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1503,7 +1492,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg="{} results are off".format(name))
+                                 msg=f"{name} results are off")
 
     """Tests max pool operation on NHWC quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -1547,7 +1536,6 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1556,7 +1544,7 @@ class TestQuantizedOps(TestCase):
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg="{} results are off".format(name))
+                             msg=f"{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1612,7 +1600,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg="{} results are off".format(name))
+                                 msg=f"{name} results are off")
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1646,7 +1634,6 @@ class TestQuantizedOps(TestCase):
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1708,7 +1695,6 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1763,7 +1749,6 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1826,7 +1811,6 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1895,8 +1879,6 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
-                "nn.quantized.functional":
-                    torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
             }
@@ -1960,16 +1942,16 @@ class TestQuantizedOps(TestCase):
                         output_size = (output_size_d, output_size_h, output_size_w)
 
                 # Run reference on int_repr + round to avoid double rounding error.
-                ref_op = getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim))
+                ref_op = getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d')
                 X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
 
                 ops_under_test = {
                     "nn.functional":
-                        getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim)),
+                        getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d'),
                     "nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim)),
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d'),
                     "ao.nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim))
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d')
                 }
 
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -2045,8 +2027,6 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
-                "nn.quantized.functional":
-                    torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
             }
@@ -2194,7 +2174,6 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -2202,8 +2181,7 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg="{} results are off: qX_hat={} X_ref={}"
-                             .format(name, qX_hat.int_repr(), X_ref),
+                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
                              exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
@@ -2248,7 +2226,6 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
 
@@ -2257,8 +2234,7 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg="{} results are off: qX_hat={}, X_ref={}"
-                             .format(name, qX_hat.int_repr(), X_ref), exact_dtype=False)
+                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -2678,7 +2654,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(
                     qy.int_repr().numpy(),
                     quantize_ref.int_repr().numpy(),
-                    msg="{} vs {}".format(qy, quantize_ref))
+                    msg=f"{qy} vs {quantize_ref}")
 
     @skipIfNoFBGEMM
     def test_batch_norm(self):
@@ -2723,7 +2699,7 @@ class TestQuantizedOps(TestCase):
                 quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
                 self.assertEqual(
                     qy.int_repr().numpy(), quantize_ref.int_repr().numpy(),
-                    msg="{} vs {}".format(qy, quantize_ref))
+                    msg=f"{qy} vs {quantize_ref}")
 
     @override_qengines
     def test_empty_batch(self):
@@ -3840,9 +3816,9 @@ class TestQuantizedLinear(TestCase):
             # xnnpack forces W_zp to 0 when using symmetric quantization
             # ONEDNN only supports symmetric quantization of weight
             if dtype == torch.qint8 or qengine_is_onednn():
-                W_zps = np.zeros(output_channels).astype(np.int)
+                W_zps = np.zeros(output_channels).astype(int)
             else:
-                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
+                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(int)
             # when using symmetric quantization
             # special restriction for xnnpack fully connected op weight
             # [-127, 127] instead of [-128, 127]
@@ -6477,10 +6453,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.tanh(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg="QNNPACK TanH failed (FP ref), memory_format {}".format(memory_format))
+                    msg=f"QNNPACK TanH failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg="QNNPACK TanH failed (FBGEMM ref), memory_format {}".format(memory_format))
+                    msg=f"QNNPACK TanH failed (FBGEMM ref), memory_format {memory_format}")
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @skipIfNoFBGEMM
@@ -6509,10 +6485,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.sigmoid(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg="QNNPACK Sigmoid failed (FP ref), memory_format {}".format(memory_format))
+                    msg=f"QNNPACK Sigmoid failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg="QNNPACK Sigmoid failed (FBGEMM ref), memory_format {}".format(memory_format))
+                    msg=f"QNNPACK Sigmoid failed (FBGEMM ref), memory_format {memory_format}")
 
     @skipIfNoFBGEMM
     def test_qnnpack_sigmoid_sweep(self):
@@ -6904,7 +6880,7 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.ao.nn.quantized.functional.hardtanh(qX, min_val, max_val)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg="hardtanh failed:\nactual {}\nexpected {}\nmemory_format {}".format(qY_hat, qY, memory_format))
+                    msg=f"hardtanh failed:\nactual {qY_hat}\nexpected {qY}\nmemory_format {memory_format}")
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
@@ -6933,12 +6909,12 @@ class TestComparatorOps(TestCase):
             result_ref = getattr(dqA, op)(dqB)
             result = getattr(qA, op)(qB)
             self.assertEqual(result_ref, result,
-                             msg="'tensor.{}(tensor)'' failed".format(op))
+                             msg=f"'tensor.{op}(tensor)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(dqB, op)(dqA)
             result = getattr(qB, op)(qA)
             self.assertEqual(result_ref, result,
-                             msg="'tensor.{}(tensor)'' failed".format(op))
+                             msg=f"'tensor.{op}(tensor)'' failed")
 
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
@@ -6958,22 +6934,22 @@ class TestComparatorOps(TestCase):
         for op in ops_under_test_reversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
-            note("result_ref 1: {}".format(result_ref))
-            note("result 1: {}".format(result))
+            note(f"result_ref 1: {result_ref}")
+            note(f"result 1: {result}")
             self.assertEqual(result_ref, result,
-                             msg="'tensor.{}(scalar)'' failed".format(op))
+                             msg=f"'tensor.{op}(scalar)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
-            note("result_ref 2: {}".format(result_ref))
-            note("result 2: {}".format(result))
+            note(f"result_ref 2: {result_ref}")
+            note(f"result 2: {result}")
             self.assertEqual(result_ref, result,
-                             msg="'scalar.{}(tensor)'' failed".format(op))
+                             msg=f"'scalar.{op}(tensor)'' failed")
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
-            note("result_ref 3: {}".format(result_ref))
-            note("result 3: {}".format(result))
+            note(f"result_ref 3: {result_ref}")
+            note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
-                             msg="'tensor.{}(scalar)'' failed".format(op))
+                             msg=f"'tensor.{op}(scalar)'' failed")

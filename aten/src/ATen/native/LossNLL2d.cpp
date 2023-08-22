@@ -332,7 +332,7 @@ static void nll_loss2d_backward_out_frame(
   const auto target_contiguous = target.contiguous();
   const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
 
-  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   const int64_t batch_size = input.size(0);
   const int64_t n_classes = input.size(1);

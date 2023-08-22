@@ -1,6 +1,7 @@
+import itertools
 import logging
 import operator
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Sequence, Tuple, Union
 
 import numpy
 
@@ -116,12 +117,22 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     if tensors is None or cat_dim is None:
         log.info("couldn't find cat args")
         return
-    if "example_value" not in cat_node.meta:
-        log.warning("example value absent for node: %s", cat_node)
-        return
+    assert isinstance(tensors, (list, tuple))
+    for tensor in itertools.chain([cat_node], tensors):
+        if "example_value" not in tensor.meta:
+            log.warning("example value absent for node: %s", tensor)
+            return
 
-    ndim = tensors[0].meta["example_value"].dim()
-    assert all(ndim == x.meta["example_value"].dim() for x in tensors)
+    ndim = cat_node.meta["example_value"].dim()
+
+    def is_empty_tensor(x):
+        # special case where torch.cat supports cat'ing with an empty tensor
+        x_shape = x.meta["example_value"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(
+        ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
+    )
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
@@ -155,7 +166,24 @@ def find_next_users(split_node):
 def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_node = match.nodes[0]
     squeeze_input = get_arg_value(squeeze_node, 0)
-    dim = get_arg_value(squeeze_node, 1, "dim")
+
+    if "dim" in squeeze_node.kwargs:
+        assert len(squeeze_node.args) == 1
+        dim = squeeze_node.kwargs["dim"]
+    elif len(squeeze_node.args) == 1:
+        # squeeze(Tensor)
+        dim = None
+    elif len(squeeze_node.args) == 2:
+        # squeeze(Tensor self, int dim)
+        # squeeze(Tensor self, int[] dim)
+        dim = squeeze_node.args[1]
+    else:
+        # squeeze(Tensor self, int[] dim) (called with varargs)
+        dim = squeeze_node.args[1:]
+
+    if isinstance(dim, Sequence) and len(dim) == 1:
+        dim = dim[0]
+
     with match.graph.inserting_after(squeeze_node):
         if dim is None:
             new_squeeze_node = match.graph.call_function(
@@ -378,7 +406,7 @@ class SplitCatSimplifier:
         """
         node_input = []
         split_users = set(split_node.users.keys())
-        for node_arg in (*node.args, *node.kwargs.values()):
+        for node_arg in node.all_input_nodes:
             if node_arg in split_users:
                 getitem_num = get_arg_value(node_arg, 1)
                 node_input.append((getitem_num, getitem_num))
@@ -591,17 +619,11 @@ class SplitCatSimplifier:
                 # Change the args and kwargs of non-cat/stack nodes. Replace old getitems (belonging to
                 # the original split node) with the newer getitems
                 next_cat_input = 0
-                new_args = []
-                for arg_num, arg in enumerate(user_node.args):
-                    if arg in split_users:
-                        new_args.append(user_inputs_new[next_cat_input])
-                        next_cat_input += 1
-                    else:
-                        new_args.append(arg)
-                user_node.args = tuple(new_args)
-                for key, arg in user_node.kwargs.items():
-                    if arg in split_users:
-                        user_node.kwargs[key] = user_inputs_new[next_cat_input]
+                for input_node in user_node.all_input_nodes:
+                    if input_node in split_users:
+                        user_node.replace_input_with(
+                            input_node, user_inputs_new[next_cat_input]
+                        )
                         next_cat_input += 1
                 continue
 
@@ -845,6 +867,8 @@ def merge_split_squeeze(
     graph = match.graph
     split = next(node for node in match.nodes if node.target == torch.split)
     if not all(s == 1 for s in split_sizes):
+        return
+    if isinstance(dim, Sequence):
         return
     next_users = find_next_users(split)
     if not all(node.target == torch.squeeze for node in next_users):

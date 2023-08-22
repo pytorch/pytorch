@@ -135,9 +135,11 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
+// A PythonArgParser contains a list of valid signatures. Instances are
+// typically global variables and should be immutable.
 struct PYBIND11_EXPORT PythonArgParser {
   explicit PythonArgParser(
-      std::vector<std::string> fmts,
+      const std::vector<std::string>& fmts,
       bool traceable = false);
 
   // meant only for `torch` functions.
@@ -179,7 +181,10 @@ struct PYBIND11_EXPORT PythonArgParser {
   bool traceable;
 };
 
-struct PYBIND11_EXPORT FunctionSignature {
+// FunctionSignature represents a single valid signature for a Python function.
+// It is immutable once constructed. The contained data can be concurrently
+// accessed by multiple calls.
+struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -188,36 +193,40 @@ struct PYBIND11_EXPORT FunctionSignature {
       PyObject* args,
       PyObject* kwargs,
       PyObject* dst[],
+      std::vector<PyObject*>& overloaded_args,
       bool raise_exception);
 
   std::string toString() const;
 
   std::string name;
   std::vector<FunctionParameter> params;
-  std::vector<py::handle> overloaded_args;
   size_t min_args;
   size_t max_args;
   size_t max_pos_args;
   int index;
   bool hidden;
   bool deprecated;
-  bool disable_torch_function;
 };
 
+// PythonArgs contains bound Python arguments for an actual invocation
+// along with references to the matched signature.
 struct PythonArgs {
   PythonArgs(
       bool traceable,
       const FunctionSignature& signature,
-      PyObject** args)
+      PyObject** args,
+      std::vector<PyObject*> overloaded_args)
       : idx(signature.index),
         traceable(traceable),
         signature(signature),
-        args(args) {}
+        args(args),
+        overloaded_args(std::move(overloaded_args)) {}
 
   int idx;
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
+  std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -298,12 +307,14 @@ struct PythonArgs {
   at::Scalar scalar_slow(PyObject* arg);
 };
 
+// FunctionParameter is a single formal parameter of a Python function.
+// It is immutable once constructed.
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
   bool check(
       PyObject* obj,
-      std::vector<py::handle>& overloaded_args,
+      std::vector<PyObject*>& overloaded_args,
       int argnum,
       int64_t* failed_idx = nullptr);
 
@@ -365,8 +376,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function() {
-  return !this->signature.overloaded_args.empty() ||
-      at::impl::torch_function_mode_enabled();
+  return !overloaded_args.empty() || at::impl::torch_function_mode_enabled();
 }
 
 inline std::string PythonArgs::get_func_name() {
@@ -495,12 +505,13 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline PyObject* toPyObject(c10::SymInt symint) {
-  if (auto m = symint.maybe_as_int()) {
-    return THPUtils_packInt64(*m);
-  } else {
+  if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
+  } else {
+    auto m = symint.maybe_as_int();
+    return THPUtils_packInt64(*m);
   }
 }
 
@@ -534,6 +545,16 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
     auto si = py::handle(args[i]).cast<c10::SymInt>();
     return std::vector<c10::SymInt>(size1, si);
+  }
+
+  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
+    }
   }
 
   PyObject* arg = args[i];
@@ -780,7 +801,7 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
+    return at::Device(c10::DeviceType::CUDA, device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -923,6 +944,7 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
+  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -931,6 +953,28 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
+  }
+
+  // convert FakeTensor to SymInt
+  // expect empty sizes, numel = 1
+  // and ScalarType::Int
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+
+    if (var.numel() != 1 || !var.sizes().empty() ||
+        !at::isIntegralType(
+            var.dtype().toScalarType(), /*include_bool*/ true)) {
+      throw TypeError(
+          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
+          Py_TYPE(obj)->tp_name,
+          var.sizes().empty());
+    }
+    auto scalar = var.item();
+    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));
@@ -1066,7 +1110,7 @@ inline at::Storage PythonArgs::storage(
 inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
-        c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
+        c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
   if (!THPStream_Check(args[i])) {
     throw TypeError(
         "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
@@ -1074,7 +1118,7 @@ inline c10::Stream PythonArgs::stream(int i) {
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       ((THPStream*)args[i])->device_index,
-      static_cast<DeviceType>(((THPStream*)args[i])->device_type));
+      static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
@@ -1168,7 +1212,7 @@ auto handle_torch_function(
 enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
 auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
-    at::ArrayRef<py::handle> overloaded_args,
+    at::ArrayRef<PyObject*> overloaded_args,
     PyObject* args,
     PyObject* kwargs,
     const char* func_name,
@@ -1205,7 +1249,7 @@ auto handle_torch_function_indexing(
  */
 bool is_tensor_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args);
+    std::vector<PyObject*>* overloaded_args);
 
 /*
  * Check if the input obj is Tensor List or Tensor Tuple type. First check
@@ -1221,7 +1265,7 @@ bool is_tensor_and_append_overloaded(
  */
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     int argnum,
     bool throw_error);
 
@@ -1234,7 +1278,7 @@ bool is_tensor_list_and_append_overloaded(
  * 'obj': the input tensor that is overloaded
  */
 void append_overloaded_tensor(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj);
 
 /* Given an argument that is definitely a type and is definitely overloaded,
@@ -1246,7 +1290,7 @@ void append_overloaded_tensor(
  * 'obj': the input class that has a __torch_dispatch__ classmethod.
  */
 void append_overloaded_type(
-    std::vector<py::handle>* overloaded_args,
+    std::vector<PyObject*>* overloaded_args,
     PyObject* obj);
 
 } // namespace torch

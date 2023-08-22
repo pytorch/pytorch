@@ -27,9 +27,10 @@ import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
-from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -551,6 +552,23 @@ def forward(self, primals_1, primals_2, primals_3):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    def test_input_output_aliase_custom_autograd_function(self):
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx * 0.5
+
+        def f(x):
+            return Foo.apply(x)
+
+        inp = [torch.ones(2, 2, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=False)
+
     def test_input_mutation_requires_grad_detach(self):
         # Here, "a" requires grad, and gets mutated, so we append a copy_() to the end of the graph.
         # Its mutation doesn't take part in autograd though, because we mutated a detach'd view.
@@ -799,8 +817,23 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
-    return [_unsafe_view]""")
+    return [view]""")
+
+    def test_output_aliases_intermediate_mutation_linear(self):
+        def f(x):
+            return (x + 1).view(-1)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        # use inductor's decomps (which will e.g. turn _unsafe_view() into view())
+        from torch._inductor.decomposition import decompositions
+        f_compiled = aot_function(f, nop, decompositions=decompositions)
+
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+
+        out_ref.mul_(2)
+        out_test.mul_(2)
+        self.assertEqual(out_ref, out_test)
 
     def test_output_aliases_intermediate_no_grad(self):
         def f(a, b):
@@ -958,8 +991,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
-    return [view, _unsafe_view, transpose_1, mul]""")
+    return [view, transpose, transpose_1, mul]""")
 
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
@@ -1078,11 +1110,125 @@ def forward(self, primals_1, primals_2):
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+    # https://github.com/pytorch/pytorch/issues/106456
+    def test_input_mutation_noncontiguous(self):
+        def f(a):
+            a.mul_(2)
+            return a + 1
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            # create a non-contiguous view to pass as an input to the compiler
+            inp = x[:, 0]
+            return [base], [inp]
+
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+    # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    def test_input_mutation_false_aliasing(self):
+        def f(a, b):
+            a.mul_(3)
+            b.mul_(2)
+            return a + b
+
+        # No overlap, contiguous
+        def inp_callable1(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            # create two non-contiguous views that share storage, but are actually non-overlapping
+            a = x[0:2]
+            b = x[2:4]
+            return [base], [a, b]
+
+        fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
+
+        # Important characteristic: the graph takes in 2 inputs!
+        # That shows that we didn't try to run our complicated synthetic base logic,
+        # because we successfully detected false aliasing across the two inputs.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    return (mul, mul_1, add)""")
+
+        # No overlap, non-contiguous: first tensor ends before second tensor start
+        def inp_callable2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (8, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (8, 1), storage_offset=28)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous: tensors are perfectly interleaved
+        def inp_callable3(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            a = x[:, 0:2]
+            b = x[:, 2:4]
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable4(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=22)
+            return [base], [a, b]
+
+        # No overlap, non-contiguous
+        def inp_callable5(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=23)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap1(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=24)
+            return [base], [a, b]
+
+        # overlap! non-contiguous
+        def inp_callable_overlap2(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            a = x.as_strided((4, 4), (9, 1), storage_offset=0)
+            b = x.as_strided((4, 4), (9, 1), storage_offset=25)
+            return [base], [a, b]
+
+        fw_graph2 = self.verify_aot_autograd(f, partial(inp_callable2, req_grad=False), test_mutation=True)
+        fw_graph3 = self.verify_aot_autograd(f, partial(inp_callable3, req_grad=False), test_mutation=True)
+        fw_graph4 = self.verify_aot_autograd(f, partial(inp_callable4, req_grad=False), test_mutation=True)
+        fw_graph5 = self.verify_aot_autograd(f, partial(inp_callable5, req_grad=False), test_mutation=True)
+
+        fw_graph_overlap1 = self.verify_aot_autograd(f, partial(inp_callable_overlap2, req_grad=False), test_mutation=True)
+        fw_graph_overlap2 = self.verify_aot_autograd(f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True)
+
+        # All non-overlap graphs should be the same since we detected false aliasing
+        self.assertEqual(str(fw_graph.code), str(fw_graph2.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
+
+        # All overlap graphs should be the same since we detected real aliasing
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
+        self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap2.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap1.code))
+        self.assertTrue('as_strided_scatter' in str(fw_graph_overlap2.code))
+
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
@@ -1135,11 +1281,11 @@ def forward(self, primals_1, primals_2):
             return a + b
 
         def inp_callable(req_grad):
-            base = torch.ones(2, 2, requires_grad=req_grad)
+            base = torch.ones(4, 2, requires_grad=req_grad)
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
@@ -1155,7 +1301,7 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
@@ -1550,7 +1696,7 @@ def forward(self, tangents_1):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
+        self.assertExpectedInline(str(count), """[(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)]""")
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -1790,8 +1936,8 @@ def forward(self, tangents_1):
         device = "cuda"
         input_dtype = torch.float16
         param_dtype = torch.float32
-        weight, bias = [torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2)]
-        running_mean, running_var = [torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)]
+        weight, bias = (torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2))
+        running_mean, running_var = (torch.ones(64, device=device, dtype=param_dtype) for _ in range(2))
 
         def bn(x):
             return torch.ops.aten.cudnn_batch_norm(
@@ -2706,7 +2852,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            TypeError, "FakeTensor"
+            AssertionError, "Unexpected fake"
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
@@ -2716,50 +2862,24 @@ class TestAOTModuleSimplified(AOTTestCase):
 aot_autograd_failures = {
     # data-dependent control flow
     xfail('cov'),
-    xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
     xfail('narrow'),
-    xfail('index_reduce'),
     xfail('istft'),
     xfail('linalg.eig'),
-    xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
-
-    # Too annoying to generate random inputs
-    xfail('cholesky'),
-    xfail('linalg.cholesky'),
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
     # Worked with real but not with fake
-    xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
-
-    # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
-
-    xfail('stft', ''),
 
     # Misc
     xfail('to_sparse'),
@@ -2778,16 +2898,14 @@ aot_autograd_failures = {
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
     decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
+    # conv2d sometimes nondeterministic in this config?
+    decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cholesky_inverse', ''),  # could not find kernel
-    xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
-    xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -2799,157 +2917,81 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
-    xfail('median', ''),  # could not find kernel
-    xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
-    xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
-    xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
-    xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail('nn.functional.cosine_similarity', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.ctc_loss', ''),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
     xfail('nn.functional.embedding_bag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
-    xfail('nn.functional.grid_sample', ''),  # RuntimeError: aten.grid_sampler_3d.default - couldn't find sym ...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
-    xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic m...
-    xfail('nn.functional.max_unpool1d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool2d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool2d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool3d', ''),  # aten.max_unpool3d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
-    xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
-    xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
-    xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_1'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_2'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
-    xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
-    xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
+
+    # many complex operators incorrect striding, metadata
+    xfail('fft.fft', ''),
+    xfail('fft.hfft2', ''),
+    xfail('fft.hfft', ''),
+    xfail('fft.hfftn', ''),
+    xfail('fft.ifft', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.ihfft', ''),
+    xfail('fft.ihfftn', ''),
+    xfail('fft.irfft2', ''),
+    xfail('fft.irfft', ''),
+    xfail('fft.irfftn', ''),
+    xfail('fft.rfft2', ''),
+    xfail('fft.rfft', ''),
+    xfail('fft.rfftn', ''),
+
+    xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
-
-def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
-    # Verify grads are equal between compiled and non-compiled versions of f.
-
-    def call_forwards_backwards(f):
-        out = wrapper_set_seed(f, args)
-        if not isinstance(out, torch.Tensor):
-            flat_out, _ = pytree.tree_flatten(out)
-            sm = 0
-            for i in flat_out:
-                sm += i.sum().abs()
-            sm.backward()
-        else:
-            out.sum().abs().backward()
-
-    def reset_grads():
-        def f(x):
-            x.grad = None
-        pytree.tree_map(f, args)
-
-    def get_grads(args):
-        return pytree.tree_map(lambda x: x.grad, args)
-
-    try:
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-
-        reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
-
-        def create_new_arg(x):
-            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
-                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
-            return x
-
-        args = pytree.tree_map(create_new_arg, args)
-
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-
-        reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
-    except DynamicOutputShapeException:
-        self.skipTest("Dynamic output shape operation in trace")
 
 def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
+    # aot_autograd_check is able to check data specialization by
+    # randomizing the inputs. Here's a list of ops that really do not
+    # like random inputs for which we want to disable that.
+    cant_check_data_specialization = set({
+        'nn.functional.max_unpool1d',
+        'nn.functional.max_unpool2d',
+        'nn.functional.max_unpool3d',
+    })
+    try_check_data_specialization = op.name not in cant_check_data_specialization
+
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
     for sample_input in sample_inputs_itr:
         t_args = [sample_input.input] + list(sample_input.args)
         t_kwargs = sample_input.kwargs
-        flat_args, args_spec = pytree.tree_flatten((t_args, t_kwargs))
-        sentinel_val = -42
-        is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor) else arg for arg in flat_args]
-        args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
-
-        def f(args):
-            cur_flat_args = list(is_tensor_spec)
-            args = iter(args)
-            for idx, v in enumerate(cur_flat_args):
-                if v == sentinel_val:
-                    cur_flat_args[idx] = next(args)
-            c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
-            return op.op(*c_args, **c_kwargs)
-
-        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
         try:
-            _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+            aot_autograd_check(
+                op.op, t_args, t_kwargs, dynamic,
+                self.assertRaisesRegex, self.assertEqual,
+                check_gradients=True,
+                try_check_data_specialization=try_check_data_specialization)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
         except GuardOnDataDependentSymNode:
             # Carveout for getitem; I don't want to xfail the entire test
             # because that will reject known to be good tests see
@@ -3006,7 +3048,9 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
         num_params_buffers = len(named_params) + len(named_buffers)
         compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers, dynamic=dynamic)
         params_buffers_args = [named_params, named_buffers, args]
-        _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, params_buffers_args)
+        _test_aot_autograd_forwards_backwards_helper(
+            f, compiled_f, params_buffers_args,
+            self.assertRaisesRegex, self.assertEqual, True)
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
@@ -3028,7 +3072,7 @@ aot_autograd_module_failures = set({
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
                                # control flow or similar.
-    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
                                   # to a causal mask tensor, to see if Boolean is_causal should be set
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
@@ -3041,26 +3085,12 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReplicationPad2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
-                                 # DispatchKey.Meta
-    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.LocalResponseNorm,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.AvgPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                         # aten.max_pool3d_with_indices.default
 }
 
 

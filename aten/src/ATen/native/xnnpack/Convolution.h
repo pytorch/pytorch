@@ -6,11 +6,8 @@
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace convolution2d {
+namespace at::native::xnnpack {
+namespace internal::convolution2d {
 
 c10::intrusive_ptr<xnnpack::Conv2dOpContext>
     createConv2dClampPrePackOpContext(
@@ -60,10 +57,16 @@ ContextConv2D create(
 
 Tensor run(ContextConv2D& context, const Tensor& input);
 
-} // namespace convolution2d
-} // namespace internal
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace internal::convolution2d
+
+Tensor convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups);
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

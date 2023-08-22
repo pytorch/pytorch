@@ -35,6 +35,8 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten.copy_.default,
+    _ops.aten.sym_constrain_range.default,
+    _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}
@@ -81,7 +83,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     # torch.Tensor.{fn}
-    if isinstance(func, types.MethodDescriptorType) and func is getattr(torch.Tensor, func.__name__, None):
+    if (isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
+       and func is getattr(torch.Tensor, func.__name__, None)):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     module = _find_module_of_method(func)
@@ -197,7 +200,7 @@ class Node:
         # would appear once here, but represents two uses.
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
-        self.users : Dict['Node', None] = {}
+        self.users : Dict[Node, None] = {}
         # Type expression representing the output value of this node.
         # This should contain the same class of Type objects that would appear
         # as type annotations for function inputs/outputs.
@@ -472,10 +475,10 @@ class Node:
                 return None
             maybe_typename = f'{_type_repr(self.type)} ' if self.type else ''
             default_val = '(default=' + str(self.args[0]) + ')' if self.args else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
         elif self.op == 'get_attr':
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}]'
         elif self.op == 'output':
             if self.type and maybe_return_typename:
@@ -483,7 +486,7 @@ class Node:
             return f'return {self.args[0]}'
         else:
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial
 import warnings
 import unittest
+import inspect
 import itertools
 import torch
 import contextlib
@@ -77,8 +78,7 @@ from torch.testing._internal import composite_compliance
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
+assert torch.get_default_dtype() == torch.float32
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -101,6 +101,16 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+
+def reduction_dtype_filter(op):
+    if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
+       or torch.int16 not in op.dtypes):
+        return False
+
+    argspec = inspect.getfullargspec(op.op)
+    if 'dtype' not in argspec.kwonlyargs:
+        return False
+    return True
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
@@ -147,7 +157,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all((t.device == cuda_device for t in result)))
+                self.assertTrue(all(t.device == cuda_device for t in result))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -209,7 +219,7 @@ class TestCommon(TestCase):
             self.assertTrue(False)
 
         for file_name in files:
-            with open(os.path.join(pytorch_dir, file_name), "r") as f:
+            with open(os.path.join(pytorch_dir, file_name)) as f:
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
@@ -243,7 +253,6 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -289,7 +298,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -452,7 +460,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -465,7 +472,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -478,26 +484,9 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize('executor', ['aten', 'nvfuser'])
+    @parametrize('executor', ['aten',])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        # TODO: Not all dtypes are supported with nvfuser
-        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
-        if executor == "nvfuser" and dtype not in _torch_dtype_to_nvfuser_dtype_map:
-            raise unittest.SkipTest(f"nvfuser doesn't support dtype {dtype}")
-
-        # nvFuser tests are rather slow so we only run int32 and float32 types
-        if executor == "nvfuser" and dtype not in [torch.int32, torch.float32]:
-            raise unittest.SkipTest("skipped for speed")
-
-        if executor == "nvfuser" and not op.supports_nvfuser:
-            raise unittest.SkipTest(f"{op.name} doesn't support nvfuser")
-
-        # nvFuser doesn't support reduction operations on 0-dim tensors yet
-        skip_zero_dim = False
-        if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
-            skip_zero_dim = True
-
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
             "_refs.logsumexp",
@@ -507,25 +496,16 @@ class TestCommon(TestCase):
             "_refs.sum_to_size",
             "ops.nvprims.view",
         ]
-        if executor == "nvfuser" and op.name in skip_zero_dim_ops:
-            skip_zero_dim = True
 
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
-        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
-            skip_zero_dim=skip_zero_dim,
-            skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
-            # # nvfuser doesn't support view consistency
-            # https://github.com/pytorch/pytorch/issues/84863
-            skip_view_consistency=("nvfuser" in executor),
         )
 
     @skipMeta
@@ -576,7 +556,6 @@ class TestCommon(TestCase):
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
@@ -718,7 +697,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -731,7 +710,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -746,7 +725,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -838,7 +817,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -851,7 +830,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
@@ -864,7 +843,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -981,6 +960,39 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+
+    @ops(filter(reduction_dtype_filter, _ops_and_refs), dtypes=(torch.int16,))
+    def test_out_integral_dtype(self, device, dtype, op):
+        def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
+            out = None
+            try:
+                if with_out:
+                    out = torch.empty(0, dtype=torch.int32, device=device)
+                    op_to_test(inputs, out=out, *args, **kwargs)
+                else:
+                    out = op_to_test(inputs, *args, **kwargs)
+                self.assertFalse(expectFail)
+            except RuntimeError as err:
+                self.assertEqual(
+                    str(err), "dtype argument and out dtype must match in reduction")
+                self.assertTrue(expectFail)
+            return out
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            if 'dtype' not in sample.kwargs:
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
+                sample.kwargs['dtype'] = torch.int16
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, True, op, sample.input, *sample.args, **sample.kwargs)
+                sample.kwargs['dtype'] = torch.int32
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
+            else:
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, sample.kwargs['dtype'] != torch.int32, op, sample.input,
+                       *sample.args, **sample.kwargs)
+
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
@@ -1086,10 +1098,8 @@ class TestCommon(TestCase):
                             RuntimeError,
                             msg=(
                                 "inplace variant either incorrectly allowed "
-                                "resizing or you have marked the sample {}"
-                                " incorrectly with `broadcasts_self=True".format(
-                                    sample.summary()
-                                )
+                                f"resizing or you have marked the sample {sample.summary()}"
+                                " incorrectly with `broadcasts_self=True"
                             ),
                         ):
                             variant_forward = variant(
@@ -1226,7 +1236,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
@@ -1288,7 +1297,7 @@ class TestCommon(TestCase):
                 # one or more tensors requiring grad
                 def _tensor_requires_grad(x):
                     if isinstance(x, dict):
-                        for k, v in x.items():
+                        for v in x.values():
                             if _tensor_requires_grad(v):
                                 return True
                     if isinstance(x, (list, tuple)):
@@ -1353,20 +1362,18 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {0} on device type {1} are only partially supported!\n".format(
-                op.name, device_type
-            )
+            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
                         partially_supported_forward
                     )
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
                         partially_supported_backward
                     )
                 )
@@ -1389,34 +1396,32 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {0} on device type {1} are incorrect!\n".format(
-            op.name, device_type
-        )
+        msg = f"The supported dtypes for {op.name} on device type {device_type} are incorrect!\n"
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_forward
                 )
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_backward
                 )
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_forward
                 )
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_backward
                 )
             )
@@ -1739,6 +1744,7 @@ class TestRefsOpsInfo(TestCase):
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
+        '_refs.alias',
         '_refs.bitwise_right_shift',
         '_refs.copy_to',
         '_refs.empty_permuted',
@@ -1747,6 +1753,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.to',
+        '_refs.mvlgamma',
         '_refs.ones',
         '_refs.ones_like',
         '_refs.special.expit',
@@ -1755,6 +1762,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.uniform',
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
+        '_refs.zero',
         '_refs.zeros',
         '_refs.zeros_like',
         '_refs.rfloordiv',
@@ -1793,6 +1801,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs._conversions.cdouble',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
+        '_refs.mvlgamma',
+        '_refs.nn.functional.layer_norm',
         '_refs.nn.functional.tanhshrink',
         '_refs.nn.functional.triplet_margin_loss',
         '_refs.rfloordiv',
@@ -1810,6 +1820,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.dsplit',
         '_refs.dstack',
         '_refs.fill',
+        '_refs.fill_',
         '_refs.flatten',
         '_refs.fliplr',
         '_refs.flipud',
@@ -1819,6 +1830,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isclose',
         '_refs.isfinite',
         '_refs.isreal',
+        '_refs.istft',
         '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
@@ -1836,6 +1848,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.special.log_softmax',
         '_refs.special.softmax',
         '_refs.square',
+        '_refs.stft',
         '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
@@ -1863,6 +1876,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
         '_refs.imag',
+        '_refs.reshape_as',
+        '_refs.view_as',
     }
 
     @parametrize("op", ref_ops_names)
@@ -1894,8 +1909,6 @@ class TestRefsOpsInfo(TestCase):
 
 fake_skips = (
     "aminmax",  # failing input
-    "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
-    "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
     "istft",  # window overlap add min: 0
     "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -1918,7 +1931,7 @@ fake_skips = (
     "nn.functional.embedding_bag",  # sometimes errors
     "nn.functional.nll_loss",  # sometimes errors
     "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
-    "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
+    "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
     "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
@@ -1963,32 +1976,6 @@ aliasing_failures = (
     "histogramdd",
 )
 
-# tests which have inconsistent fake tensor stride propagation
-# XXX: no new tests should be added to this list as a result of a
-# decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = {
-    "fft.fft2",
-    "fft.fft",
-    "fft.fftn",
-    "fft.hfft2",
-    "fft.hfft",
-    "fft.hfftn",
-    "fft.ifft2",
-    "fft.ifft",
-    "fft.ifftn",
-    "fft.ihfft2",
-    "fft.ihfft",
-    "fft.ihfftn",
-    "fft.irfft2",
-    "fft.irfft",
-    "fft.irfftn",
-    "fft.rfft2",
-    "fft.rfft",
-    "fft.rfftn",
-    "svd",
-    "linalg.svd",
-}
-
 fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
@@ -1999,13 +1986,14 @@ fake_backward_skips = {
     "roll",
     "svd_lowrank",
     "sgn",
-    "cholesky",
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
+    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
+    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip('nn.functional.ctc_loss'),
-} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
+}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2061,11 +2049,9 @@ class TestFakeTensor(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
 
-                    check_strides = name not in fake_tensor_stride_failing_ops
-
                     # prims/decomps must correctly model strides,
                     # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
+                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                     if name not in aliasing_failures:
                         fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)

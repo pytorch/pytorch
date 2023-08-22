@@ -143,9 +143,32 @@ function install_torchtext() {
 }
 
 function install_torchvision() {
+  local orig_preload
   local commit
   commit=$(get_pinned_commit vision)
+  orig_preload=${LD_PRELOAD}
+  if [ -n "${LD_PRELOAD}" ]; then
+    # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
+    echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
+    LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
+  fi
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+  if [ -n "${LD_PRELOAD}" ]; then
+    LD_PRELOAD=${orig_preload}
+  fi
+}
+
+function install_torchrec_and_fbgemm() {
+  local torchrec_commit
+  torchrec_commit=$(get_pinned_commit torchrec)
+  local fbgemm_commit
+  fbgemm_commit=$(get_pinned_commit fbgemm)
+  pip_uninstall torchrec-nightly
+  pip_uninstall fbgemm-gpu-nightly
+  pip_install setuptools-git-versioning scikit-build pyre-extensions
+  # See https://github.com/pytorch/pytorch/issues/106971
+  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }
 
 function install_numpy_pytorch_interop() {
@@ -175,7 +198,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--cudatests"
+  BUILD_CUDA_TESTS=1 pip install -e .
   popd
   popd
 }
@@ -194,6 +217,7 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "transformers==${version}"
 }
 
@@ -202,6 +226,7 @@ function install_timm() {
   commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 

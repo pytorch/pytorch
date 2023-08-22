@@ -190,18 +190,43 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-pyop_namespace = {}
+_global_higher_order_ops = {}
+_higher_order_ops = {}
 
 
 class HigherOrderOperator(OperatorBase):
-    def __init__(self, name):
+    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
+    # (True) torch.ops.{name}
+    # (False) torch.ops.higher_order.{name}
+    #
+    # If you're creating a new HigherOrderOperator, please do not change the
+    # default. Adding operators to the global torch.ops namespace is a bad
+    # practice due to name collisions.
+    def __init__(self, name, *, _deprecated_global_ns=False):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        pyop_namespace[name] = self
+        if _deprecated_global_ns:
+            _global_higher_order_ops[name] = self
+            self._ns = None
+        else:
+            _higher_order_ops[name] = self
+            self._ns = "higher_order"
+
+        # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
+        # torch._ops.higher_order.
+        # For an instance of subclass of HigherOrderOperator (e.g. customized higher order op),
+        # the __module__ attribute will be kept unchanged.
+        if self.__class__ is HigherOrderOperator:
+            self_name_space = "." + self.namespace if self.namespace else ""
+            self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+    @property
+    def namespace(self):
+        return self._ns
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -242,14 +267,25 @@ class HigherOrderOperator(OperatorBase):
         return kernel(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        flat_args = _to_flat_tuple(args, kwargs)
-        if torch.overrides.has_torch_function(flat_args):
-            return torch.overrides.handle_torch_function(
-                self, flat_args, *args, **kwargs
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            flat_args = _to_flat_tuple(args, kwargs)
+            if torch.overrides.has_torch_function(flat_args):
+                return torch.overrides.handle_torch_function(
+                    self, flat_args, *args, **kwargs
+                )
+
+            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            return self.dispatch(
+                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
-        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
+        return wrapper()
 
     def __str__(self):
         return f"{self.name()}"
@@ -367,9 +403,7 @@ class OpOverload(OperatorBase):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.__name__ = "{}.{}".format(
-            self._schema.name.split("::")[1], self._overloadname
-        )
+        self.__name__ = f"{self._schema.name.split('::')[1]}.{self._overloadname}"
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
@@ -612,10 +646,8 @@ class OpOverloadPacket:
             # an object name different from the one the attribute
             # query was performed on.
             raise AttributeError(
-                "'{}' can't have an overload name beginning with '__' and the "
-                "underlying op {} has no attribute {} either.".format(
-                    str(self), str(self._op), key
-                )
+                f"'{str(self)}' can't have an overload name beginning with '__' and the "
+                f"underlying op {str(self._op)} has no attribute {key} either."
             ) from None
 
         try:
@@ -633,9 +665,7 @@ class OpOverloadPacket:
             return overload
         except RuntimeError:
             raise AttributeError(
-                "The underlying op of '{}' has no overload name '{}'".format(
-                    str(self), key
-                )
+                f"The underlying op of '{str(self)}' has no overload name '{key}'"
             ) from None
 
     def __iter__(self):
@@ -701,13 +731,15 @@ class _OpNamespace(types.ModuleType):
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
-        elif op_name == "__origin__":
-            raise AttributeError()
+        elif op_name in ["__origin__", "__self__"]:
+            raise AttributeError(
+                f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
+            )
 
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
-        qualified_op_name = "{}::{}".format(namespace_name, op_name)
+        qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
         except RuntimeError as e:
@@ -733,9 +765,19 @@ class _OpNamespace(types.ModuleType):
 
 
 class _PyOpNamespace(_OpNamespace):
-    def __init__(self):
-        super().__init__("torch.ops")
-        self.pyop_namespace = pyop_namespace
+    def __init__(self, name, ops):
+        super().__init__(name)
+        self._ops = ops
+
+    def __getattr__(self, name):
+        # Following _OpNamespace.__getattr__, we cache the op on the _PyOpNamespace object.
+        op = self._ops.get(name, None)
+        if op is None:
+            raise AttributeError(
+                f"'_PyOpNamespace' '{self.name}' object has no attribute '{name}'"
+            )
+        setattr(self, name, op)
+        return op
 
 
 class _Ops(types.ModuleType):
@@ -744,13 +786,20 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self.pyops = _PyOpNamespace()
+        self._global_higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops", _global_higher_order_ops
+        )
+        self._higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops.higher_order", _higher_order_ops
+        )
         self._dir = []
 
     def __getattr__(self, name):
-        # Check if the name is a pyop
-        if name in self.pyops.pyop_namespace:
-            return self.pyops.pyop_namespace[name]
+        # Check if the name is a HigherOrderOperator
+        if name in self._global_higher_order_op_namespace._ops:
+            return getattr(self._global_higher_order_op_namespace, name)
+        if name == "higher_order":
+            return self._higher_order_op_namespace
 
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)

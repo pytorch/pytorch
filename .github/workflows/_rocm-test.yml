@@ -33,14 +33,6 @@ on:
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
 
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
-        required: true
-        description: access key id for test stats upload
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
-        required: true
-        description: secret acess key for test stats upload
-
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -65,10 +57,9 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -93,10 +84,10 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -130,7 +121,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -147,20 +138,6 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
-
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -184,8 +161,7 @@ jobs:
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PR_BODY \
-            -e COMMIT_MESSAGES \
+            -e REENABLED_ISSUES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \
