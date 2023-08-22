@@ -1453,7 +1453,11 @@ class TorchPatcher:
         ]
 
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
-        excluded_optimizer_classes = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
+        excluded_optimizer_classes = {
+            torch.optim.SparseAdam,
+            torch.optim.RAdam,
+            torch.optim.LBFGS,
+        }
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
