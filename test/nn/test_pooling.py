@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
-    TEST_WITH_ROCM, expectedFailureCUDA
+    TEST_WITH_ROCM
 from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
