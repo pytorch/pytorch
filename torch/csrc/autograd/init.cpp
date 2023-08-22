@@ -956,11 +956,14 @@ static PyObject* push_on_torch_dispatch_stack(
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
       mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+      c10::impl::TorchDispatchModeTLS::set_mode(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+          mode_key.value());
+    } else {
+      c10::impl::TorchDispatchModeTLS::push_onto_stack(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
     }
-
     Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::push_onto_stack(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()), mode_key);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -971,14 +974,22 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
   c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  PyObject* r;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
+    auto maybe_mode =
+        c10::impl::TorchDispatchModeTLS::unset_mode(mode_key.value());
+    TORCH_CHECK(
+        maybe_mode.has_value(),
+        "Attempted to unset ",
+        c10::impl::to_string(mode_key.value()),
+        ", but there wasn't one active.");
+    auto mode = maybe_mode.value();
+    r = mode->ptr(getPyInterpreter());
+  } else {
+    auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
+    r = mode->ptr(getPyInterpreter());
   }
-
-  const auto& mode_and_maybe_key =
-      c10::impl::TorchDispatchModeTLS::pop_stack(mode_key);
-  auto mode = std::move(std::get<0>(mode_and_maybe_key));
-  auto* r = mode->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
   END_HANDLE_TH_ERRORS
