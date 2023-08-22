@@ -1,16 +1,18 @@
+import collections
 import functools
 import itertools
 import logging
 import os
 import random
 import types
+import typing
 import weakref
-from typing import Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch._logging
-from torch._guards import tracing
-from torch._utils_internal import signpost_event
+from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -24,6 +26,7 @@ from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
+    Instruction,
     is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
@@ -45,9 +48,11 @@ from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
     CleanupManager,
+    CompilationMetrics,
     counters,
     dynamo_timed,
     format_bytecode,
+    frame_phase_timing,
     gen_record_file_name,
     guard_failures,
     increment_frame,
@@ -63,7 +68,6 @@ from .utils import (
 )
 
 log = logging.getLogger(__name__)
-guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
@@ -214,7 +218,23 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
+def is_recompilation(cache_size):
+    # cache_size here refers to the number of total cached entries on the code
+    # object.
+    return cache_size >= 1
+
+
+def compute_cache_size(cache_entry):
+    # Walk the linked list to calculate the cache size
+    running_cache_size = 0
+    while cache_entry:
+        running_cache_size += 1
+        cache_entry = cache_entry.next
+    return running_cache_size
+
+
 FRAME_COUNTER = 0
+FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
 
 def convert_frame_assert(
@@ -227,17 +247,14 @@ def convert_frame_assert(
     reset_graph_break_dup_checker()
 
     def _convert_frame_assert(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
         increment_frame()
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
 
         code = frame.f_code
 
-        if code in input_codes and (
+        cache_size = compute_cache_size(cache_entry)
+        if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
@@ -347,6 +364,17 @@ def convert_frame_assert(
         global initial_torch_function_state
         initial_torch_function_state = torch._C._is_torch_function_enabled()
 
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+        frame_id = frame_state["_id"]
+
+        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+        FRAME_COMPILE_COUNTER[frame_id] += 1
+
+        compile_id = CompileId(frame_id, frame_compile_id)
+
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",
@@ -368,15 +396,16 @@ def convert_frame_assert(
             export,
             export_constraints,
             hooks,
+            cache_size,
             frame,
             frame_state=frame_state,
+            compile_id=compile_id,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
-@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -387,14 +416,20 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
+    cache_size: int,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
+    compile_id=None,
 ) -> Optional[GuardedCode]:
+    from torch.fx.experimental.validator import (
+        translation_validation_enabled,
+        ValidationException,
+    )
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
-
-    # from .utils import print_once;  print_once(code.co_filename)
+    fail_reason: Optional[str] = None
 
     def transform(instructions, code_options):
         nonlocal output
@@ -412,8 +447,21 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
         )
-        with tracing(tracer.output.tracing_context):
-            tracer.run()
+
+        try:
+            with tracing(tracer.output.tracing_context):
+                tracer.run()
+        except (exc.RestartAnalysis, exc.SkipFrame):
+            raise
+        except Exception:
+            if translation_validation_enabled():
+                fakes = tracer.output.tracked_fakes
+                tracer.output.shape_env.produce_guards(
+                    [a.fake for a in fakes],
+                    [a.source for a in fakes],
+                )
+            raise
+
         output = tracer.output
         assert output is not None
         assert output.output_instructions
@@ -425,7 +473,14 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    try:
+    @dynamo_timed(phase_name="entire_frame_compile")
+    def compile_inner(
+        code: types.CodeType,
+        one_graph: bool,
+        hooks: Hooks,
+        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+    ) -> Optional[GuardedCode]:
+        nonlocal output
         for attempt in itertools.count():
             try:
                 out_code = transform_code_object(code, transform)
@@ -493,18 +548,6 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        if guards_log.isEnabledFor(logging.DEBUG):
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [
-                    f"  {code}"
-                    for guard in sorted(output.guards)
-                    if guard.code_list is not None
-                    for code in guard.code_list
-                ]
-            )
-            guards_log.debug(guard_str)
-
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
             # generate any graph. This can happen in export when TorchDynamo
@@ -515,19 +558,70 @@ def _compile(
 
         output.local_scope.clear()
         return guarded_code
-    except (
-        Unsupported,
-        TorchRuntimeError,
-        BackendCompilerFailed,
-        AssertionError,
-        ConstraintViolationError,
-        GuardOnDataDependentSymNode,
-    ) as e:
-        exception_handler(e, code, frame, export=export)
-        raise
-    except Exception as e:
-        exception_handler(e, code, frame, export=export)
-        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
+
+    with compile_context(CompileContext(compile_id)):
+        try:
+            guarded_code = compile_inner(code, one_graph, hooks, transform)
+            return guarded_code
+        except (
+            Unsupported,
+            TorchRuntimeError,
+            BackendCompilerFailed,
+            AssertionError,
+            ConstraintViolationError,
+            GuardOnDataDependentSymNode,
+            ValidationException,
+        ) as e:
+            fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            raise
+        except Exception as e:
+            fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            raise InternalTorchDynamoError(str(e)).with_traceback(
+                e.__traceback__
+            ) from None
+        finally:
+            from .utils import curr_frame
+
+            frame_key = str(curr_frame)
+            if (
+                fail_reason is None
+                and output is not None
+                and frame_key in frame_phase_timing
+            ):
+                guard_count = len(output.guards)
+                graph_op_count = output.count_calls()
+                graph_node_count = len(output.graph.nodes)
+                graph_input_count = len(output.placeholders)
+                entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                    "entire_frame_compile", None
+                )
+                backend_compile_time = frame_phase_timing[frame_key].get(
+                    "backend_compile", None
+                )
+            else:
+                guard_count = None
+                graph_op_count = None
+                graph_node_count = None
+                graph_input_count = None
+                entire_frame_compile_time = None
+                backend_compile_time = None
+            metrics = CompilationMetrics(
+                frame_key,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                cache_size,
+                guard_count,
+                graph_op_count,
+                graph_node_count,
+                graph_input_count,
+                entire_frame_compile_time,
+                backend_compile_time,
+                fail_reason,
+            )
+            log_compilation_event(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
@@ -596,7 +690,9 @@ def replay(filename):
             compiler_fn=eager,
             one_graph=False,
             export=False,
+            export_constraints=None,
             hooks=Hooks(),
+            cache_size=0,
             frame=None,
         )
     except Exception:

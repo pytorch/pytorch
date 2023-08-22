@@ -142,6 +142,18 @@ class GlobalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
+
+
+@dataclasses.dataclass(frozen=True)
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -473,6 +485,19 @@ class ConstantSource(Source):
 
     def make_guard(self, fn, is_volatile=False):
         raise NotImplementedError()
+
+
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"__as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "as_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
 
 
 # This is a synthetic source that is associated with the singleton

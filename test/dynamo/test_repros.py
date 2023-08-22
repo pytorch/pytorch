@@ -1859,8 +1859,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.sorted = torch.nn.Buffer(torch.ones(4, 4))
-                self.indices = torch.nn.Buffer(torch.ones(4, 4, dtype=torch.long))
+                self.register_buffer("sorted", torch.ones(4, 4))
+                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
 
             def forward(self, x):
                 torch.sort(x, out=(self.sorted, self.indices))
@@ -1891,7 +1891,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.base = torch.nn.Buffer(torch.ones(4, 4))
+                self.register_buffer("base", torch.ones(4, 4))
 
             def forward(self, x):
                 torch.sigmoid(x, out=self.base)
@@ -2174,8 +2174,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.x = torch.nn.Buffer(torch.ones(3))
-                self.y = torch.nn.Buffer(torch.ones(3))
+                self.register_buffer("x", torch.ones(3))
+                self.register_buffer("y", torch.ones(3))
 
             def forward(self, inp):
                 res = 0
@@ -2653,9 +2653,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
-        with self.assertRaisesRegex(RuntimeError, "First dim need to be 3"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
-
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
@@ -2690,7 +2687,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+            exported(torch.Tensor([5, 6, 7]))
 
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):

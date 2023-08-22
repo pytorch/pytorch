@@ -269,15 +269,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (dummy_input,),
         )
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.mean.dim"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : "
+        "Got invalid dimensions for input: arg0 for the following indices index: 0 Got: 3 Expected: 1"
     )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         # TODO(bowbao): see Note [training vs eval in dynamo_export]
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False).eval()
-        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
-        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=False)
+        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=False)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
@@ -374,11 +375,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail("torch._dynamo.exc.TorchRuntimeError")
+    @pytorch_test_common.xfail(
+        "torch._dynamo.exc.Unsupported: guard on data-dependent symbolic int/float"
+    )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
-                t = torch.zeros(d1[0], d2[0])
+                t = torch.zeros(d1[0], d2[0])  # problematic user code for dynamo
                 return t.squeeze(0)
 
         d1 = torch.tensor([1])
@@ -435,8 +438,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
-        "aten._local_scalar_dense.default"
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. Name:'n13__5' Status Message:"
+        "slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_zero(self):
         class Model(torch.nn.Module):
@@ -453,7 +456,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.lift_fresh_copy.default"
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
+        "of node (n0__4) does not match expected type (tensor(int64))"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -470,7 +474,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "Unknown call_function target: aten.lift_fresh_copy.default"
+        "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
+        "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
@@ -657,7 +662,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     export_options=export_options,
                 )
-
                 onnx_model = export_output.model_proto
 
             onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
@@ -991,6 +995,39 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.xfail(
+        "Constant tensor is not supported in FakeTensorMode export."
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
+    )
+    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
+        "HF Bloom model does not need `model.load_state_dict` to work."
+    )
+    def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
+        model_name = "bigscience/bloom-560m"
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs(model_name=model_name):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            return tokenizer("Hello world!", return_tensors="pt")
+
+        def create_model():
+            return AutoModel.from_pretrained(model_name)
+
+        self._test_fake_tensor_mode_exporter(
+            model_name.replace("/", "_"),
             create_model,
             create_args,
             create_kwargs,
