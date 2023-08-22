@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import dis
 import enum
+import itertools
 import logging
 import math
 import operator
@@ -55,6 +56,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
+from torch.testing._internal.common_methods_invocations import sample_inputs_gather
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1275,6 +1277,55 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_numpy_take_along_axis(self):
+        def fn(x, a, i):
+            return np.take_along_axis(x, i, a)
+
+        def sample_to_args(s):
+            args = (s.input, *sample.args)
+            return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
+
+        # The last sample from gather does not work in np.take_along_axis
+        samples = list(sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False))[:-1]
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        i = 1
+        for sample in samples:
+            args = sample_to_args(sample)
+            self.assertEqual(fn(*args), opt_fn(*args))
+            self.assertEqual(cnts.frame_count, i)
+            i += 1
+
+    def test_numpy_torch_operators(self):
+        def fn(op, t1, t2):
+            return op(t1, t2)
+
+        from torch._dynamo.variables.builtin import BuiltinVariable
+        operators = BuiltinVariable._fx_graph_functions()
+
+        for op, t1_np, t2_np in itertools.product(operators, (True, False), (True, False)):
+            if op is operator.getitem:
+                # skip
+                # Did you know that tensor[ndarray_of_floats] works?
+                continue
+            t1 = torch.rand(5)
+            if t1_np:
+                t1 = t1.numpy()
+            t2 = torch.rand(5)
+            if t2_np:
+                t2 = t2.numpy()
+            try:
+                # TODO try a bit harder
+                result = op(t1, t2)
+            except (RuntimeError, TypeError, IndexError):
+                continue
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
+            self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
+            torch._dynamo.reset()
+
 
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
