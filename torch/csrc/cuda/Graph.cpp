@@ -27,8 +27,6 @@ void THCPGraph_init(PyObject* module) {
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
       .def(py::init<>())
-      // I'm not sure this is the correct order of all the arguments. Pybind11
-      // docs aren't clear. But it works.
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
@@ -52,8 +50,8 @@ void THCPGraph_init(PyObject* module) {
             }
             return self.capture_begin(pool, capture_mode);
           },
-          py::arg("pool") = (c10::optional<c10::cuda::MempoolId_t>)c10::nullopt,
-          py::arg("capture_error_mode") = "global",
+          py::arg("pool"),
+          py::arg("capture_error_mode"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",

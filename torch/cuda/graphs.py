@@ -71,7 +71,7 @@ class CUDAGraph(torch._C._CUDAGraph):
             capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
                 Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
-                actions in the current thread, and "relaxed" will not error on these actions.
+                actions in the current thread, and "relaxed" will not error on these actions. See docs on `cudaStreamCaptureMode`.
 
         """
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
@@ -142,7 +142,7 @@ class graph:
         capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
             Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
-            actions in the current thread, and "relaxed" will not error on actions.
+            actions in the current thread, and "relaxed" will not error on actions. See docs on `cudaStreamCaptureMode`.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
