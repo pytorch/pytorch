@@ -865,15 +865,6 @@ class HasDecompTest(TestCase):
                 return False
             raise
 
-    def test_decomps_include_composite_implicit(self):
-        # conv2d.default has no python decomp, but has a C++ CompositeImplicitAutograd decomp,
-        # which we expect to show up in the decomp table.
-        decomps1 = torch._decomp.get_decompositions([torch.ops.aten.conv2d.default])
-        self.assertEqual(len(decomps1), 1)
-        # Should work for overload packets too.
-        decomps2 = torch._decomp.get_decompositions([torch.ops.aten.conv2d])
-        self.assertEqual(len(decomps2), 2)
-
     def test_has_decomposition(self):
 
         def all_aten_overloads():

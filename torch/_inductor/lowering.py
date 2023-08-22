@@ -12,7 +12,6 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._ops import has_composite_implicit_kernel
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -1388,22 +1387,6 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(kernel, layout_constraint=None, warn=True):
-    # OpOverloadPacket resolution is slow, so here we directly register fallbacks
-    # for every OpOverload
-    if isinstance(kernel, torch._ops.OpOverloadPacket):
-        for overload_name in kernel._overload_names:
-            overload = getattr(kernel, overload_name)
-            make_fallback(overload, layout_constraint=layout_constraint, warn=warn)
-        return
-
-    if has_composite_implicit_kernel(kernel):
-        # For ops with CompositeImplicitAutograd decomps in C++, don't bother creating a fallback.
-        # We're *guaranteed* that these decomps will have run in AOTAutograd before hitting inductor.
-        # A skip instead of an error here makes it convenient to register fallbacks
-        # for OpOverloadPackets like aten.sort,
-        # which has a large number of overloads (some of which are CompositeImplicitAutograd)
-        return
-
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -1717,6 +1700,8 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1729,7 +1714,7 @@ make_fallback(aten._scaled_dot_product_efficient_attention)
 make_fallback(aten._scaled_dot_product_efficient_attention_backward)
 make_fallback(aten._scaled_dot_product_flash_attention)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
-make_fallback(aten.sort.default)
+make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
@@ -1748,11 +1733,15 @@ make_fallback(aten._adaptive_avg_pool3d)
 make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
+make_fallback(aten.addmv, warn=False)
+make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
+make_fallback(aten.cumprod, warn=False)
+make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
@@ -1763,6 +1752,8 @@ make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
 make_fallback(aten.i0)
+make_fallback(aten.igamma, warn=False)
+make_fallback(aten.igammac, warn=False)
 make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
@@ -1803,21 +1794,32 @@ make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
 make_fallback(aten.special_airy_ai)
+make_fallback(aten.special_bessel_j0, warn=False)
+make_fallback(aten.special_bessel_j1, warn=False)
 make_fallback(aten.special_bessel_y0, warn=False)
 make_fallback(aten.special_bessel_y1)
 make_fallback(aten.special_chebyshev_polynomial_t)
 make_fallback(aten.special_chebyshev_polynomial_u)
+make_fallback(aten.special_erfcx, warn=False)
 make_fallback(aten.special_hermite_polynomial_h)
 make_fallback(aten.special_hermite_polynomial_he)
+make_fallback(aten.special_i0e, warn=False)
+make_fallback(aten.special_i1, warn=False)
+make_fallback(aten.special_i1e, warn=False)
 make_fallback(aten.special_laguerre_polynomial_l)
 make_fallback(aten.special_modified_bessel_i0)
 make_fallback(aten.special_modified_bessel_i1)
 make_fallback(aten.special_modified_bessel_k0)
 make_fallback(aten.special_modified_bessel_k1)
+make_fallback(aten.special_ndtri, warn=False)
 make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
+make_fallback(aten.special_spherical_bessel_j0, warn=False)
+make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten.take)
 make_fallback(aten._trilinear)
+make_fallback(aten.uniform, warn=False)
+make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
@@ -1832,9 +1834,11 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
+make_fallback(aten.angle)
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
 make_fallback(aten._fft_r2c)

@@ -840,17 +840,5 @@ class _Ops(types.ModuleType):
         self.loaded_libraries.add(path)
 
 
-def has_composite_implicit_kernel(op):
-    if not isinstance(op, torch._ops.OpOverload):
-        return False
-    if not torch._C._dispatch_has_kernel(op.name()):
-        return False
-    if not torch._C._dispatch_has_kernel_for_dispatch_key(
-        op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-    ):
-        return False
-    return True
-
-
 # The ops "namespace"
 ops = _Ops()
