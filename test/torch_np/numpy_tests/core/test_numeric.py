@@ -552,27 +552,25 @@ class TestSeterr:
         )
 
     def test_set(self):
-        with np.errstate():
-            err = np.seterr()
-            old = np.seterr(divide="print")
-            assert_(err == old)
-            new = np.seterr()
-            assert_(new["divide"] == "print")
-            np.seterr(over="raise")
-            assert_(np.geterr()["over"] == "raise")
-            assert_(new["divide"] == "print")
-            np.seterr(**old)
-            assert_(np.geterr() == old)
+        err = np.seterr()
+        old = np.seterr(divide="print")
+        assert_(err == old)
+        new = np.seterr()
+        assert_(new["divide"] == "print")
+        np.seterr(over="raise")
+        assert_(np.geterr()["over"] == "raise")
+        assert_(new["divide"] == "print")
+        np.seterr(**old)
+        assert_(np.geterr() == old)
 
     @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     @pytest.mark.skipif(platform.machine() == "armv5tel", reason="See gh-413.")
     def test_divide_err(self):
-        with np.errstate(divide="raise"):
-            with assert_raises(FloatingPointError):
-                np.array([1.0]) / np.array([0.0])
-
-            np.seterr(divide="ignore")
+        with assert_raises(FloatingPointError):
             np.array([1.0]) / np.array([0.0])
+
+        np.seterr(divide="ignore")
+        np.array([1.0]) / np.array([0.0])
 
     @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     def test_errobj(self):
@@ -581,10 +579,9 @@ class TestSeterr:
         try:
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
-                with np.errstate(divide="warn"):
-                    np.seterrobj([20000, 1, None])
-                    np.array([1.0]) / np.array([0.0])
-                    assert_equal(len(w), 1)
+                np.seterrobj([20000, 1, None])
+                np.array([1.0]) / np.array([0.0])
+                assert_equal(len(w), 1)
 
             def log_err(*args):
                 self.called += 1
@@ -592,14 +589,12 @@ class TestSeterr:
                 assert_(len(extobj_err) == 2)
                 assert_("divide" in extobj_err[0])
 
-            with np.errstate(divide="ignore"):
-                np.seterrobj([20000, 3, log_err])
-                np.array([1.0]) / np.array([0.0])
+            np.seterrobj([20000, 3, log_err])
+            np.array([1.0]) / np.array([0.0])
             assert_equal(self.called, 1)
 
             np.seterrobj(olderrobj)
-            with np.errstate(divide="ignore"):
-                np.divide(1.0, 0.0, extobj=[20000, 3, log_err])
+            np.divide(1.0, 0.0, extobj=[20000, 3, log_err])
             assert_equal(self.called, 2)
         finally:
             np.seterrobj(olderrobj)
@@ -652,74 +647,68 @@ class TestFloatExceptions:
     @pytest.mark.parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
-        with np.errstate(all="raise"):
-            ftype = np.obj2sctype(typecode)
-            if np.dtype(ftype).kind == "f":
-                # Get some extreme values for the type
-                fi = np.finfo(ftype)
-                ft_tiny = fi._machar.tiny
-                ft_max = fi.max
-                ft_eps = fi.eps
-                underflow = "underflow"
-                divbyzero = "divide by zero"
-            else:
-                # 'c', complex, corresponding real dtype
-                rtype = type(ftype(0).real)
-                fi = np.finfo(rtype)
-                ft_tiny = ftype(fi._machar.tiny)
-                ft_max = ftype(fi.max)
-                ft_eps = ftype(fi.eps)
-                # The complex types raise different exceptions
-                underflow = ""
-                divbyzero = ""
-            overflow = "overflow"
-            invalid = "invalid"
+        ftype = np.obj2sctype(typecode)
+        if np.dtype(ftype).kind == "f":
+            # Get some extreme values for the type
+            fi = np.finfo(ftype)
+            ft_tiny = fi._machar.tiny
+            ft_max = fi.max
+            ft_eps = fi.eps
+            underflow = "underflow"
+            divbyzero = "divide by zero"
+        else:
+            # 'c', complex, corresponding real dtype
+            rtype = type(ftype(0).real)
+            fi = np.finfo(rtype)
+            ft_tiny = ftype(fi._machar.tiny)
+            ft_max = ftype(fi.max)
+            ft_eps = ftype(fi.eps)
+            # The complex types raise different exceptions
+            underflow = ""
+            divbyzero = ""
+        overflow = "overflow"
+        invalid = "invalid"
 
-            # The value of tiny for double double is NaN, so we need to
-            # pass the assert
-            if not np.isnan(ft_tiny):
-                self.assert_raises_fpe(underflow, lambda a, b: a / b, ft_tiny, ft_max)
-                self.assert_raises_fpe(underflow, lambda a, b: a * b, ft_tiny, ft_tiny)
-            self.assert_raises_fpe(overflow, lambda a, b: a * b, ft_max, ftype(2))
-            self.assert_raises_fpe(overflow, lambda a, b: a / b, ft_max, ftype(0.5))
-            self.assert_raises_fpe(
-                overflow, lambda a, b: a + b, ft_max, ft_max * ft_eps
-            )
-            self.assert_raises_fpe(
-                overflow, lambda a, b: a - b, -ft_max, ft_max * ft_eps
-            )
-            self.assert_raises_fpe(overflow, np.power, ftype(2), ftype(2**fi.nexp))
-            self.assert_raises_fpe(divbyzero, lambda a, b: a / b, ftype(1), ftype(0))
-            self.assert_raises_fpe(
-                invalid, lambda a, b: a / b, ftype(np.inf), ftype(np.inf)
-            )
-            self.assert_raises_fpe(invalid, lambda a, b: a / b, ftype(0), ftype(0))
-            self.assert_raises_fpe(
-                invalid, lambda a, b: a - b, ftype(np.inf), ftype(np.inf)
-            )
-            self.assert_raises_fpe(
-                invalid, lambda a, b: a + b, ftype(np.inf), ftype(-np.inf)
-            )
-            self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
+        # The value of tiny for double double is NaN, so we need to
+        # pass the assert
+        if not np.isnan(ft_tiny):
+            self.assert_raises_fpe(underflow, lambda a, b: a / b, ft_tiny, ft_max)
+            self.assert_raises_fpe(underflow, lambda a, b: a * b, ft_tiny, ft_tiny)
+        self.assert_raises_fpe(overflow, lambda a, b: a * b, ft_max, ftype(2))
+        self.assert_raises_fpe(overflow, lambda a, b: a / b, ft_max, ftype(0.5))
+        self.assert_raises_fpe(overflow, lambda a, b: a + b, ft_max, ft_max * ft_eps)
+        self.assert_raises_fpe(overflow, lambda a, b: a - b, -ft_max, ft_max * ft_eps)
+        self.assert_raises_fpe(overflow, np.power, ftype(2), ftype(2**fi.nexp))
+        self.assert_raises_fpe(divbyzero, lambda a, b: a / b, ftype(1), ftype(0))
+        self.assert_raises_fpe(
+            invalid, lambda a, b: a / b, ftype(np.inf), ftype(np.inf)
+        )
+        self.assert_raises_fpe(invalid, lambda a, b: a / b, ftype(0), ftype(0))
+        self.assert_raises_fpe(
+            invalid, lambda a, b: a - b, ftype(np.inf), ftype(np.inf)
+        )
+        self.assert_raises_fpe(
+            invalid, lambda a, b: a + b, ftype(np.inf), ftype(-np.inf)
+        )
+        self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
 
     @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     def test_warnings(self):
         # test warning code path
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            with np.errstate(all="warn"):
-                np.divide(1, 0.0)
-                assert_equal(len(w), 1)
-                assert_("divide by zero" in str(w[0].message))
-                np.array(1e300) * np.array(1e300)
-                assert_equal(len(w), 2)
-                assert_("overflow" in str(w[-1].message))
-                np.array(np.inf) - np.array(np.inf)
-                assert_equal(len(w), 3)
-                assert_("invalid value" in str(w[-1].message))
-                np.array(1e-300) * np.array(1e-300)
-                assert_equal(len(w), 4)
-                assert_("underflow" in str(w[-1].message))
+            np.divide(1, 0.0)
+            assert_equal(len(w), 1)
+            assert_("divide by zero" in str(w[0].message))
+            np.array(1e300) * np.array(1e300)
+            assert_equal(len(w), 2)
+            assert_("overflow" in str(w[-1].message))
+            np.array(np.inf) - np.array(np.inf)
+            assert_equal(len(w), 3)
+            assert_("invalid value" in str(w[-1].message))
+            np.array(1e-300) * np.array(1e-300)
+            assert_equal(len(w), 4)
+            assert_("underflow" in str(w[-1].message))
 
 
 class TestTypes:
@@ -2315,8 +2304,7 @@ class TestLikeFuncs:
         self.check_like_function(np.full_like, 1000, True)
         self.check_like_function(np.full_like, 123.456, True)
         # Inf to integer casts cause invalid-value errors: ignore them.
-        with np.errstate(invalid="ignore"):
-            self.check_like_function(np.full_like, np.inf, True)
+        self.check_like_function(np.full_like, np.inf, True)
 
     @pytest.mark.parametrize(
         "likefunc", [np.empty_like, np.full_like, np.zeros_like, np.ones_like]
