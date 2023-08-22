@@ -11,7 +11,11 @@ import warnings
 
 from typing import cast, Dict, Optional, Set
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -112,6 +116,7 @@ def _disallowed_function_ids():
         torch.set_autocast_gpu_dtype,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
+        torch.Tensor.__init__,
     ]
     if torch.distributed.is_available():
         from torch.distributed import _functional_collectives
@@ -224,7 +229,9 @@ def _allowed_function_ids():
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(method, types.MethodDescriptorType):
+        if isinstance(
+            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
     for idx in _disallowed_function_ids():
@@ -235,6 +242,12 @@ def _allowed_function_ids():
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
+
+
+@make_function_id_set
+def _allowed_user_defined_function_ids():
+    rv = {}
+    return rv
 
 
 @make_function_id_set
@@ -301,6 +314,10 @@ def is_allowed(obj):
     )
 
 
+def is_user_defined_allowed(obj):
+    return id(obj) in _allowed_user_defined_function_ids
+
+
 def torch_get_name(obj, default):
     """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
@@ -315,4 +332,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
+    if np is None:
+        return False
     return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
