@@ -38,6 +38,7 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ env.ROCKSET_API_KEY != '' }}
         with:
           timeout_minutes: 10
           max_attempts: 10
