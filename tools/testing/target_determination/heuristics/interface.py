@@ -32,15 +32,21 @@ class TestPrioritizations:
 
     @staticmethod
     def _merge_tests(
-        current_tests: List[str], new_tests: List[str], exclude_tests: List[str], orig_tests: List[str]
+        current_tests: List[str],
+        new_tests: List[str],
+        exclude_tests: List[str],
+        orig_tests: List[str],
     ) -> List[str]:
         """
         We append all new tests to the current tests, while preserving the sorting on the new_tests
-        However, exclude any specified tests which have now moved to a higher priority list or tests that weren't originally in the self's TestPrioritizations
+        However, exclude any specified tests which have now moved to a higher priority list or tests
+        that weren't originally in the self's TestPrioritizations
         """
         current_tests.extend(new_tests)
         current_tests = [
-            test for test in current_tests if test not in exclude_tests and test in orig_tests
+            test
+            for test in current_tests
+            if test not in exclude_tests and test in orig_tests
         ]  # skip the excluded tests
         current_tests = list(dict.fromkeys(current_tests))  # remove dupes
 
@@ -54,11 +60,16 @@ class TestPrioritizations:
         If there are tests mentioned in `other` which are not in `self`, those tests are ignored.
         (For example, that can happen if a heuristic reports tests that are not run in the current job)
         """
-        orig_tests = set(self.highly_relevant + self.probably_relevant + self.unranked_relevance)
+        orig_tests = (
+            self.highly_relevant + self.probably_relevant + self.unranked_relevance
+        )
 
         # only add new tests to the list, while preserving the sorting
         self.highly_relevant = TestPrioritizations._merge_tests(
-            self.highly_relevant, other.highly_relevant, exclude_tests=[], orig_tests=orig_tests
+            self.highly_relevant,
+            other.highly_relevant,
+            exclude_tests=[],
+            orig_tests=orig_tests,
         )
 
         self.probably_relevant = TestPrioritizations._merge_tests(
@@ -73,7 +84,7 @@ class TestPrioritizations:
             self.unranked_relevance,
             new_tests=[],
             exclude_tests=(self.highly_relevant + self.probably_relevant),
-            orig_tests=orig_tests
+            orig_tests=orig_tests,
         )
 
     def find_conflicts(self) -> List[str]:
