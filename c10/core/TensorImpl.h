@@ -1558,7 +1558,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
+        "This generally means that you are passing a FakeTensor or a meta "
+        "Tensor into a kernel that does not support it. "
+        "If you're using Caffe2: Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
@@ -1613,6 +1615,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+    if (C10_UNLIKELY(data_throws_if_uninitialized_)) {
+      TORCH_CHECK(
+          storage_initialized(),
+          "Attempted to access mutable_data() on a Tensor with no data allocated. "
+          "It is likely that we are directly passing a FakeTensor "
+          "to a kernel that does not support it");
+    }
     auto* data = get_data();
     static_assert(
         sizeof(*data) == 1, "get_data must return a byte-addressed pointer.");
@@ -2839,6 +2848,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_layout_policy();
   }
 
+  void set_data_throws_if_uninitialized(bool should_throw) {
+    data_throws_if_uninitialized_ = should_throw;
+  }
+
  protected:
   void refresh_sizes_strides_policy() {
     if (has_symbolic_sizes_strides_) {
@@ -2945,6 +2958,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     layout_policy_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
+    data_throws_if_uninitialized_ = false;
   }
 
   // Tensor is contiguous
@@ -3035,6 +3049,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call into Python for layout()
   bool python_custom_layout_ : 1;
+
+  // .mutable_data() does not throw by default because caffe2 has a lazy
+  // allocation scheme and relies on .mutable_data() to allocate data.
+  // For PyTorch tensors, where there is no such lazy scheme, we do want
+  // mutable_data() to throw if the storage is uninitialized. In particular,
+  // this happens in the FakeTensor case: FakeTensors have uninitialized
+  // storages and we want to prevent crashes when people send them into kernels
+  // that dereference the mutable_data().
+  bool data_throws_if_uninitialized_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

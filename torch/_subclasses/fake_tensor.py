@@ -978,6 +978,7 @@ class FakeTensor(torch.Tensor):
             elem.requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
+            data_throws_if_uninitialized=True,
         )
 
         assert elem.device.type == "meta", elem.device.type
