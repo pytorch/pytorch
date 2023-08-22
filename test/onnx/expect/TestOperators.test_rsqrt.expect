@@ -28,7 +28,7 @@ graph {
     name: "Div_2"
     op_type: "Div"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Sqrt_0"
     type {
