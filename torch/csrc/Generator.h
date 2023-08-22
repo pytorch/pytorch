@@ -4,7 +4,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPGenerator {
   PyObject_HEAD at::Generator cdata;
 };
