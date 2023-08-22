@@ -226,14 +226,11 @@ def export(
             )
         f = f.module()
 
-    safe = False
-
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
-                safe = True
                 if len(constraints) > 0:
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
