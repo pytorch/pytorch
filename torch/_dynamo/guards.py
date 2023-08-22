@@ -948,6 +948,7 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
         )
+        self._weakrefs.clear()
         self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
