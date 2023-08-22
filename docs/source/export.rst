@@ -12,6 +12,18 @@ torch.export
 .. autofunction:: constrain_as_size
 .. autofunction:: constrain_as_value
 .. autoclass:: Constraint
+.. autoclass:: ExportedProgram
+
+    .. automethod:: transform
+    .. automethod:: validate
+    .. automethod:: module
+
+.. autoclass:: ExportBackwardSignature
+.. autoclass:: ExportGraphSignature
+.. autoclass:: ArgumentKind
+.. autoclass:: ArgumentSpec
+.. autoclass:: ModuleCallSignature
+.. autoclass:: ModuleCallEntry
 
 
 .. toctree::
