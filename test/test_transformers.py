@@ -24,7 +24,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     slowTest,
     set_default_dtype,
-    gradcheck
+    gradcheck,
+    make_tensor,
 )
 
 
@@ -219,7 +220,8 @@ class TestTransformers(NNTestCase):
 
     @parametrize("attn_mask_dim", [2, 3, None])
     @parametrize("key_padding_mask_dim", [2, None])
-    def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim):
+    @parametrize("mask_dtype", [torch.bool, torch.float32])
+    def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim, mask_dtype):
         with torch.no_grad():
             B = 2
             L = 4
@@ -227,14 +229,14 @@ class TestTransformers(NNTestCase):
             H = 4
 
             if attn_mask_dim == 2:
-                attn_mask = torch.randn(L, L, device=device) > 0
+                attn_mask = make_tensor((L, L), dtype=mask_dtype, device=device)
             elif attn_mask_dim == 3:
-                attn_mask = torch.randn(B * H, L, L, device=device) > 0
+                attn_mask = make_tensor((B * H, L, L), dtype=mask_dtype, device=device)
             elif attn_mask_dim is None:
                 attn_mask = None
 
             if key_padding_mask_dim == 2:
-                key_padding_mask = torch.randn(B, L, device=device) > 0
+                key_padding_mask = make_tensor((B, L), dtype=mask_dtype, device=device) > 0
             elif key_padding_mask_dim is None:
                 key_padding_mask = None
 
@@ -244,7 +246,8 @@ class TestTransformers(NNTestCase):
             mha.train()  # disable fast path
             out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             mha.eval()  # enable fast path
-            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+            out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+            self.assertEqual(out, out_fp)
 
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):

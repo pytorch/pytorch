@@ -1109,10 +1109,8 @@ class MultiheadAttention(Module):
         """
 
         why_not_fast_path = ''
-
-        # only check attn_mask's dtype as attn_mask and key_padding_mask's dtype should match
-        # this is checked below in _canonical_mask
-        if (attn_mask is not None) and torch.is_floating_point(attn_mask):
+        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
+           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
             why_not_fast_path = "floating-point masks are not supported for fast path."
 
         is_batched = query.dim() == 3
