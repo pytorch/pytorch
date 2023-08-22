@@ -276,7 +276,7 @@ def _rebuild_sparse_tensor(layout, data):
         else:
             indices, values, size, is_coalesced = data
         result = torch.sparse_coo_tensor(
-            indices, values, size, is_coalesced, check_invariants=False
+            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
         )
         _sparse_tensors_to_validate.append(result)
         return result

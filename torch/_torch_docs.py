@@ -10515,8 +10515,8 @@ Example::
 
 add_docstr(
     torch.sparse_coo_tensor,
-    r"""sparse_coo_tensor(indices, values, size=None, is_coalesced=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""sparse_coo_tensor(indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10541,13 +10541,6 @@ Args:
     size (list, tuple, or :class:`torch.Size`, optional): Size of the sparse tensor. If not
         provided the size will be inferred as the minimum size big enough to hold all non-zero
         elements.
-    is_coalesced (bool, optional): When specified, set the coalesced
-        flag to :attr:`is_coalesced`. If ``True``, the caller is
-        responsible for providing tensor indices that correspond to a
-        coalesced tensor that is a prerequisite for various algoritms
-        that process tensor indices to produce expected results.
-        Default: if None, the coalesced flag may be estimated using
-        the conservative value ``False`` as an initial state.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -10558,6 +10551,13 @@ Keyword args:
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
+    is_coalesced (bool, optional): When specified, set the coalesced
+        flag to :attr:`is_coalesced`. If ``True``, the caller is
+        responsible for providing tensor indices that correspond to a
+        coalesced tensor that is a prerequisite for various algoritms
+        that process tensor indices to produce expected results.
+        Default: if None, the coalesced flag may be estimated using
+        the conservative value ``False`` as an initial state.
 
 Example::
 

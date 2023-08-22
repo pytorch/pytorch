@@ -489,7 +489,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.is_coalesced(), coalesced)
 
             def func(indices, values, shape, is_coalesced):
-                s = torch.sparse_coo_tensor(indices, values, shape, is_coalesced, check_invariants=True)
+                s = torch.sparse_coo_tensor(indices, values, shape, check_invariants=True, is_coalesced=is_coalesced)
                 self.assertEqual(s.is_coalesced(), is_coalesced)
                 return s.to_dense(masked_grad=False)
 
