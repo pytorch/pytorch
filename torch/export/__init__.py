@@ -35,6 +35,7 @@ class _ConstraintTarget:
 @dataclasses.dataclass
 class Constraint(_ConstraintTarget):
     """
+<<<<<<< HEAD
 
     .. warning::
         Do not construct `Constraint` directly, use :func:`torch.export.dynamic_dim` instead.
@@ -42,6 +43,11 @@ class Constraint(_ConstraintTarget):
     This represents constraints on input tensor dimensions, e.g., requiring
     them to be fully polymorphic or within some range.
 
+=======
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch.export.dynamic_dim`.
+>>>>>>> Move `Constraint` class to torch.export
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]

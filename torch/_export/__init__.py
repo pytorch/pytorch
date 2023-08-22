@@ -109,7 +109,7 @@ def capture_pre_autograd_graph(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
+    constraints: Optional[List[_Constraint]] = None,
     decomp_table: Dict[OpOverload, Callable] = core_aten_decompositions(),
 ) -> torch.nn.Module:
     """
@@ -185,7 +185,7 @@ def export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
+    constraints: Optional[List[_Constraint]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -577,7 +577,7 @@ def aot_compile(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
+    constraints: Optional[List[_Constraint]] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ExportedProgram]:
     """
