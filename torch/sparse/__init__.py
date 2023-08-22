@@ -598,13 +598,14 @@ def as_sparse_gradcheck(gradcheck):
             representation.
             """
             if d['layout'] is torch.sparse_coo:
-                return torch.sparse_coo_tensor(d['indices'], values, d['shape'], d['is_coalesced'])
+                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape'], is_coalesced=d['is_coalesced'])
             elif d['layout'] in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
                 dense_dim = d['original'].dense_dim()
                 batch_dim = d['compressed_indices'].ndim - 1
                 if batch_dim == 0 and dense_dim > 0:
                     # TODO: remove this if-block after gh-107373 is fixed
-                    r = torch.sparse_coo_tensor(d['indices'], values, size=d['shape']).to_sparse(layout=d['layout'])
+                    r = torch.sparse_coo_tensor(
+                        d['indices'], values, size=d['shape'], is_coalesced=True).to_sparse(layout=d['layout'])
                     # TODO: use to_sparse(..., dense_dim=dense_dim)
                     # and remove the assert below after gh-107451 is
                     # fixed.
