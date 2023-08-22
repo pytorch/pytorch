@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -11,7 +11,6 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
     _flatten_tensor,
     _pre_load_state_dict,
     _unflatten_tensor,
-    _STShardingInfo,
 )
 
 __all__ = ["enable_2d_with_fsdp"]
@@ -40,11 +39,11 @@ def enable_2d_with_fsdp() -> bool:
             def pre_flatten_transform(
                 self,
                 tensor: torch.Tensor,
-            ) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
+            ) -> Tuple[torch.Tensor, Optional[Any]]:
                 return _flatten_tensor(tensor)
 
             def post_unflatten_transform(
-                self, tensor: torch.Tensor, param_extension: _STShardingInfo
+                self, tensor: torch.Tensor, param_extension: Any
             ) -> torch.Tensor:
                 return _unflatten_tensor(tensor, param_extension)
 
