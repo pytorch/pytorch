@@ -284,29 +284,6 @@ static py::object dispatch_on_subclass(
       continue;
     }
 
-    // _mode_key logic is only relevant to __torch_dispatch__
-    if (!is_torch_function) {
-      py::object maybe_mode_key_obj =
-          PyObject_FastGetAttrString(arg, "_mode_key");
-      if (maybe_mode_key.has_value()) {
-        if (!maybe_mode_key_obj ||
-            py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj) !=
-                maybe_mode_key.value()) {
-          // When maybe_mode_key is set to TorchDispatchModeKey.FAKE,
-          // we only consider arguments that have a ._mode_key =
-          // TorchDispatchModeKey.FAKE in dispatch.
-          continue;
-        }
-      } else {
-        if (maybe_mode_key_obj) {
-          // When maybe_mode_key is not set,
-          // we only consider arguments that do *not* have a ._mode_key in
-          // dispatch.
-          continue;
-        }
-      }
-    }
-
     // See https://github.com/pytorch/pytorch/issues/63767
     if (is_torch_function &&
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
@@ -516,31 +493,6 @@ auto handle_torch_function_no_python_arg_parser(
         torch_function_name_str);
     if (curr_ret.ptr() != nullptr) {
       ret = curr_ret;
-    }
-  }
-
-  // Step 3: Try to dispatch based on any infra subclasses,
-  // by dispatching on any args that have a _mode_key field
-  // (in practice, this is only FakeTensor)
-  // Also, we only do this for __torch_dispatch__ dispatching
-  if ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
-      !is_torch_function) {
-    for (const auto i : c10::irange(static_cast<size_t>(
-             c10::impl::TorchDispatchModeKey::NUM_MODE_KEYS))) {
-      auto mode_key = static_cast<c10::impl::TorchDispatchModeKey>(i);
-      auto curr_ret = dispatch_on_subclass(
-          args,
-          kwargs,
-          overloaded_args,
-          py_types,
-          torch_api_function,
-          /*is_torch_function=*/false,
-          torch_function_name_str,
-          /*maybe_mode_key=*/mode_key);
-      if (curr_ret.ptr() != nullptr) {
-        ret = curr_ret;
-        break;
-      }
     }
   }
 
