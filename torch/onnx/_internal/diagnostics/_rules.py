@@ -123,247 +123,64 @@ class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
         )
 
 
-class _FxTracerSuccess(infra.Rule):
-    """FX Tracer succeeded."""
+class _FxGraphToOnnx(infra.Rule):
+    """Transforms graph from FX IR to ONNX IR."""
 
-    def format_message(self, fn_name, tracer_name) -> str:  # type: ignore[override]
+    def format_message(self, graph_name) -> str:  # type: ignore[override]
         """Returns the formatted default message of this Rule.
 
-        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        Message template: 'Transforming FX graph {graph_name} to ONNX graph.'
         """
-        return self.message_default_template.format(
-            fn_name=fn_name, tracer_name=tracer_name
-        )
+        return self.message_default_template.format(graph_name=graph_name)
 
     def format(  # type: ignore[override]
-        self, level: infra.Level, fn_name, tracer_name
+        self, level: infra.Level, graph_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
-        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        Message template: 'Transforming FX graph {graph_name} to ONNX graph.'
         """
-        return (
-            self,
-            level,
-            self.format_message(fn_name=fn_name, tracer_name=tracer_name),
-        )
-
-
-class _FxTracerFailure(infra.Rule):
-    """FX Tracer failed."""
-
-    def format_message(  # type: ignore[override]
-        self, fn_name, tracer_name, explanation
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
-        """
-        return self.message_default_template.format(
-            fn_name=fn_name, tracer_name=tracer_name, explanation=explanation
-        )
-
-    def format(  # type: ignore[override]
-        self, level: infra.Level, fn_name, tracer_name, explanation
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
-        """
-        return (
-            self,
-            level,
-            self.format_message(
-                fn_name=fn_name, tracer_name=tracer_name, explanation=explanation
-            ),
-        )
-
-
-class _FxFrontendAotautograd(infra.Rule):
-    """FX Tracer succeeded."""
-
-    def format_message(self, fn_name, tracer_name) -> str:  # type: ignore[override]
-        """Returns the formatted default message of this Rule.
-
-        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-        """
-        return self.message_default_template.format(
-            fn_name=fn_name, tracer_name=tracer_name
-        )
-
-    def format(  # type: ignore[override]
-        self, level: infra.Level, fn_name, tracer_name
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-        """
-        return (
-            self,
-            level,
-            self.format_message(fn_name=fn_name, tracer_name=tracer_name),
-        )
-
-
-class _FxPassConvertNegToSigmoid(infra.Rule):
-    """FX pass converting torch.neg to torch.sigmoid."""
-
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
-        """
-        return self.message_default_template.format()
-
-    def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
-        """
-        return self, level, self.format_message()
-
-
-class _FxIrAddNode(infra.Rule):
-    """ToDo, experimenting diagnostics, placeholder text."""
-
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self.message_default_template.format()
-
-    def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self, level, self.format_message()
-
-
-class _AtenlibSymbolicFunction(infra.Rule):
-    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
-
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self.message_default_template.format()
-
-    def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self, level, self.format_message()
-
-
-class _AtenlibFxToOnnx(infra.Rule):
-    """Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."""
-
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self.message_default_template.format()
-
-    def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self, level, self.format_message()
+        return self, level, self.format_message(graph_name=graph_name)
 
 
 class _FxNodeToOnnx(infra.Rule):
-    """Node level tracking. ToDo, experimenting diagnostics, placeholder text."""
+    """Transforms an FX node to an ONNX node."""
 
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
+    def format_message(self, node_repr) -> str:  # type: ignore[override]
         """Returns the formatted default message of this Rule.
 
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        Message template: 'Transforming FX node {node_repr} to ONNX node.'
         """
-        return self.message_default_template.format()
+        return self.message_default_template.format(node_repr=node_repr)
 
     def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
+        self, level: infra.Level, node_repr
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        Message template: 'Transforming FX node {node_repr} to ONNX node.'
         """
-        return self, level, self.format_message()
-
-
-class _FxFrontendDynamoMakeFx(infra.Rule):
-    """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
-
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self.message_default_template.format()
-
-    def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
-        """
-        return self, level, self.format_message()
+        return self, level, self.format_message(node_repr=node_repr)
 
 
 class _FxPass(infra.Rule):
-    """FX graph transformation before ONNX export."""
+    """FX graph transformation during ONNX export before converting from FX IR to ONNX IR."""
 
-    def format_message(  # type: ignore[override]
-        self,
-    ) -> str:
+    def format_message(self, pass_name) -> str:  # type: ignore[override]
         """Returns the formatted default message of this Rule.
 
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        Message template: 'Running {pass_name} pass.'
         """
-        return self.message_default_template.format()
+        return self.message_default_template.format(pass_name=pass_name)
 
     def format(  # type: ignore[override]
-        self,
-        level: infra.Level,
+        self, level: infra.Level, pass_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
-        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        Message template: 'Running {pass_name} pass.'
         """
-        return self, level, self.format_message()
+        return self, level, self.format_message(pass_name=pass_name)
 
 
 class _NoSymbolicFunctionForCallFunction(infra.Rule):
@@ -494,42 +311,6 @@ class _FindOperatorOverloadsInOnnxRegistry(infra.Rule):
         return self, level, self.format_message(node=node)
 
 
-class _ArgFormatTooVerbose(infra.Rule):
-    """The formatted str for argument to display is too verbose."""
-
-    def format_message(  # type: ignore[override]
-        self, length, length_limit, argument_type, formatter_type
-    ) -> str:
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
-        """
-        return self.message_default_template.format(
-            length=length,
-            length_limit=length_limit,
-            argument_type=argument_type,
-            formatter_type=formatter_type,
-        )
-
-    def format(  # type: ignore[override]
-        self, level: infra.Level, length, length_limit, argument_type, formatter_type
-    ) -> Tuple[infra.Rule, infra.Level, str]:
-        """Returns a tuple of (Rule, Level, message) for this Rule.
-
-        Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
-        """
-        return (
-            self,
-            level,
-            self.format_message(
-                length=length,
-                length_limit=length_limit,
-                argument_type=argument_type,
-                formatter_type=formatter_type,
-            ),
-        )
-
-
 @dataclasses.dataclass
 class _POERules(infra.RuleCollection):
     node_missing_onnx_shape_inference: _NodeMissingOnnxShapeInference = dataclasses.field(
@@ -630,165 +411,21 @@ class _POERules(infra.RuleCollection):
     )
     """Operator is supported in newer opset version."""
 
-    fx_tracer_success: _FxTracerSuccess = dataclasses.field(
-        default=_FxTracerSuccess.from_sarif(
-            **{
-                "id": "FXE0001",
-                "name": "fx-tracer-success",
-                "short_description": {"text": "FX Tracer succeeded."},
-                "full_description": {
-                    "text": "FX Tracer succeeded. The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.",
-                    "markdown": "FX Tracer succeeded.\nThe callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """FX Tracer succeeded."""
-
-    fx_tracer_failure: _FxTracerFailure = dataclasses.field(
-        default=_FxTracerFailure.from_sarif(
-            **{
-                "id": "FXE0002",
-                "name": "fx-tracer-failure",
-                "short_description": {"text": "FX Tracer failed."},
-                "full_description": {
-                    "text": "FX Tracer failed. The callable is not successfully traced as a 'torch.fx.GraphModule'.",
-                    "markdown": "FX Tracer failed.\nThe callable is not successfully traced as a 'torch.fx.GraphModule'.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """FX Tracer failed."""
-
-    fx_frontend_aotautograd: _FxFrontendAotautograd = dataclasses.field(
-        default=_FxFrontendAotautograd.from_sarif(
-            **{
-                "id": "FXE0003",
-                "name": "fx-frontend-aotautograd",
-                "short_description": {"text": "FX Tracer succeeded."},
-                "full_description": {
-                    "text": "FX Tracer succeeded. The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.",
-                    "markdown": "FX Tracer succeeded.\nThe callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """FX Tracer succeeded."""
-
-    fx_pass_convert_neg_to_sigmoid: _FxPassConvertNegToSigmoid = dataclasses.field(
-        default=_FxPassConvertNegToSigmoid.from_sarif(
-            **{
-                "id": "FXE0004",
-                "name": "fx-pass-convert-neg-to-sigmoid",
-                "short_description": {
-                    "text": "FX pass converting torch.neg to torch.sigmoid."
-                },
-                "full_description": {
-                    "text": "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for a given 'torch.fx.GraphModule' object.",
-                    "markdown": "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for\na given 'torch.fx.GraphModule' object.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """FX pass converting torch.neg to torch.sigmoid."""
-
-    fx_ir_add_node: _FxIrAddNode = dataclasses.field(
-        default=_FxIrAddNode.from_sarif(
-            **{
-                "id": "FXE0005",
-                "name": "fx-ir-add-node",
-                "short_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text."
-                },
-                "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """ToDo, experimenting diagnostics, placeholder text."""
-
-    atenlib_symbolic_function: _AtenlibSymbolicFunction = dataclasses.field(
-        default=_AtenlibSymbolicFunction.from_sarif(
-            **{
-                "id": "FXE0006",
-                "name": "atenlib-symbolic-function",
-                "short_description": {
-                    "text": "Op level tracking. ToDo, experimenting diagnostics, placeholder text."
-                },
-                "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
-
-    atenlib_fx_to_onnx: _AtenlibFxToOnnx = dataclasses.field(
-        default=_AtenlibFxToOnnx.from_sarif(
+    fx_graph_to_onnx: _FxGraphToOnnx = dataclasses.field(
+        default=_FxGraphToOnnx.from_sarif(
             **{
                 "id": "FXE0007",
-                "name": "atenlib-fx-to-onnx",
+                "name": "fx-graph-to-onnx",
                 "short_description": {
-                    "text": "Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."
+                    "text": "Transforms graph from FX IR to ONNX IR."
                 },
                 "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                    "text": "Transforms graph from FX IR to ONNX IR.",
+                    "markdown": "This diagnostic tracks the transformation process from an FX Graph (in FX IR) to an ONNX Graph (in ONNX IR).\n\n#### Key Representations:\n\n- **FX Graph**: The graph in FX IR produced by dynamo or symbolic tracing.\n- **ONNX Graph**: The graph in ONNX IR and [operators](https://onnx.ai/onnx/operators/).\n\n#### Additional Notes:\n\n- Prior to this transformation step, the FX graph undergoes preprocessing through multiple FX passes.\n  To gain insight into these transformations, refer to diagnostic `FXE0010`.\n- To enable a detailed view of the graph transformation in progress within this diagnostic, switch to the DEBUG mode.\n\n  - Set DiagnosticOptions.verbosity_level to logging.DEBUG.\n  - Activate the environment variable TORCH_LOGS='onnx_diagnostics'.\n\n- For specific information related to node-level FX to ONNX transformations, explore the diagnostic `FXE0008`.\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                        "text": "Transforming FX graph {graph_name} to ONNX graph."
                     }
                 },
                 "help_uri": None,
@@ -797,23 +434,21 @@ class _POERules(infra.RuleCollection):
         ),
         init=False,
     )
-    """Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."""
+    """Transforms graph from FX IR to ONNX IR."""
 
     fx_node_to_onnx: _FxNodeToOnnx = dataclasses.field(
         default=_FxNodeToOnnx.from_sarif(
             **{
                 "id": "FXE0008",
                 "name": "fx-node-to-onnx",
-                "short_description": {
-                    "text": "Node level tracking. ToDo, experimenting diagnostics, placeholder text."
-                },
+                "short_description": {"text": "Transforms an FX node to an ONNX node."},
                 "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                    "text": "Transforms an FX node to an ONNX node.",
+                    "markdown": "This diagnostic tracks the transformation process from an FX Node to ONNX [Operators](https://onnx.ai/onnx/operators/).\n\nThe process of converting FX Node to ONNX Node involves dealing with six distinct node types:\n  1. `placeholder`: Represents a module input, maps to an ONNX graph input.\n  2. `call_module`: Symbolizes a call to a submodule, maps to an ONNX\n  3. `call_method`: Symbolizes a method call. Not yet implemented.\n  4. `call_function`: Symbolizes a function call. [Core ATen](https://pytorch.org/docs/stable/ir.html#core-aten-ir) is expected\n    as the function call target. The mapping from ATen to ONNX is implemented by [ONNXScript torchlib](https://github.com/microsoft/onnxscript/tree/main/onnxscript/function_libs/torch_lib/ops).\n    This [guide](https://pytorch.org/docs/stable/onnx.html#onnx-script-functions) shows how to write and register a custom symbolic function for call_function FX node.\n  5. `get_attr`: Indicates an attribute access within the current module. Maps to an ONNX graph initializer.\n  6. `output`: Represents the module's output. Maps to an ONNX graph output.\n\nFor a granular understanding of how each node type is transformed, refer to the implementation details in `FxOnnxInterpreter`.\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                        "text": "Transforming FX node {node_repr} to ONNX node."
                     }
                 },
                 "help_uri": None,
@@ -822,32 +457,7 @@ class _POERules(infra.RuleCollection):
         ),
         init=False,
     )
-    """Node level tracking. ToDo, experimenting diagnostics, placeholder text."""
-
-    fx_frontend_dynamo_make_fx: _FxFrontendDynamoMakeFx = dataclasses.field(
-        default=_FxFrontendDynamoMakeFx.from_sarif(
-            **{
-                "id": "FXE0009",
-                "name": "fx-frontend-dynamo-make-fx",
-                "short_description": {
-                    "text": "The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."
-                },
-                "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
+    """Transforms an FX node to an ONNX node."""
 
     fx_pass: _FxPass = dataclasses.field(
         default=_FxPass.from_sarif(
@@ -855,24 +465,20 @@ class _POERules(infra.RuleCollection):
                 "id": "FXE0010",
                 "name": "fx-pass",
                 "short_description": {
-                    "text": "FX graph transformation before ONNX export."
+                    "text": "FX graph transformation during ONNX export before converting from FX IR to ONNX IR."
                 },
                 "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                    "text": "FX graph transformation during ONNX export before converting from FX IR to ONNX IR.",
+                    "markdown": "This diagnostic tracks the FX passes executed during the ONNX export process prior\nto converting from FX IR (Intermediate Representation) to ONNX IR.\n\nUnder the scope of ONNX export, an FX pass refers to a specific transformation applied to the FX GraphModule.\nThe primary aim of these passes is to streamline the graph into a format that aligns more with the ONNX IR.\nMoreover, these passes work to substitute unsupported FX IR features with those recognized and endorsed by\nONNX IR. Common transformations include, but aren't limited to, decomposition, functionalization and\ntype promotion.\n\nFor those who are interested in a comprehensive log detailing the modifications made during these passes,\nthere are a couple of options:\n\n- Set DiagnosticOptions.verbosity_level to logging.DEBUG.\n- Activate the environment variable TORCH_LOGS='onnx_diagnostics'.\n\nHowever, it's noteworthy that by default, such detailed logging is turned off. The primary reason being\nits considerable impact on performance.\n\nFor an in-depth understanding of each specific pass, please refer to the directory: torch/onnx/_internal/fx/passes.\n",
                 },
-                "message_strings": {
-                    "default": {
-                        "text": "ToDo, experimenting diagnostics, placeholder text."
-                    }
-                },
+                "message_strings": {"default": {"text": "Running {pass_name} pass."}},
                 "help_uri": None,
                 "properties": {"deprecated": False, "tags": []},
             }
         ),
         init=False,
     )
-    """FX graph transformation before ONNX export."""
+    """FX graph transformation during ONNX export before converting from FX IR to ONNX IR."""
 
     no_symbolic_function_for_call_function: _NoSymbolicFunctionForCallFunction = dataclasses.field(
         default=_NoSymbolicFunctionForCallFunction.from_sarif(
@@ -1023,31 +629,6 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Find the list of OnnxFunction of the PyTorch operator in onnx registry."""
-
-    arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
-        default=_ArgFormatTooVerbose.from_sarif(
-            **{
-                "id": "DIAGSYS0001",
-                "name": "arg-format-too-verbose",
-                "short_description": {
-                    "text": "The formatted str for argument to display is too verbose."
-                },
-                "full_description": {
-                    "text": "ToDo, experimenting diagnostics, placeholder text.",
-                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
-                },
-                "message_strings": {
-                    "default": {
-                        "text": "Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}."
-                    }
-                },
-                "help_uri": None,
-                "properties": {"deprecated": False, "tags": []},
-            }
-        ),
-        init=False,
-    )
-    """The formatted str for argument to display is too verbose."""
 
 
 rules = _POERules()

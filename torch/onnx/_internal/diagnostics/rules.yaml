@@ -1,10 +1,6 @@
 # PyTorch ONNX Exporter (POE) Rules are based on sarif ReportingDescriptor format.
 
-# TODO: Define additional format requirements on top of sarif for our usage.
-#       For example: pre defined keys for message_strings for logging on different levels.
-# TODO: Based on above, create helper script to generate new rules.
-# TODO: Separate rules into individual files.
-# TODO: These rules are for demonstration purposes only. They are not complete.
+## Rules for PyTorch (TorchScript based) ONNX Exporter (POE)
 
 - id: POE0001
   name: node-missing-onnx-shape-inference
@@ -83,130 +79,35 @@
     deprecated: false
     tags: []
 
-
-
-- id: FXE0001
-  name: fx-tracer-success
-  short_description:
-    text: FX Tracer succeeded.
-  full_description:
-    text: "FX Tracer succeeded.
-      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers."
-    markdown: |
-      FX Tracer succeeded.
-      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.
-  message_strings:
-    default:
-      text: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-- id: FXE0002
-  name: fx-tracer-failure
-  short_description:
-    text: FX Tracer failed.
-  full_description:
-    text: "FX Tracer failed.
-      The callable is not successfully traced as a 'torch.fx.GraphModule'."
-    markdown: |
-      FX Tracer failed.
-      The callable is not successfully traced as a 'torch.fx.GraphModule'.
-  message_strings:
-    default:
-      text: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.
-
-      {explanation}"
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-
-- id: FXE0003
-  name: fx-frontend-aotautograd
-  short_description:
-    text: FX Tracer succeeded.
-  full_description:
-    text: "FX Tracer succeeded.
-      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers."
-    markdown: |
-      FX Tracer succeeded.
-      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.
-  message_strings:
-    default:
-      text: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-
-- id: FXE0004
-  name: fx-pass-convert-neg-to-sigmoid
-  short_description:
-    text: FX pass converting torch.neg to torch.sigmoid.
-  full_description:
-    text: "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for
-      a given 'torch.fx.GraphModule' object."
-    markdown: |
-      A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for
-      a given 'torch.fx.GraphModule' object.
-  message_strings:
-    default:
-      text: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-
-- id: FXE0005
-  name: fx-ir-add-node
-  short_description:
-    text: ToDo, experimenting diagnostics, placeholder text.
-  full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
-    markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
-  message_strings:
-    default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-
-- id: FXE0006
-  name: atenlib-symbolic-function
-  short_description:
-    text: Op level tracking. ToDo, experimenting diagnostics, placeholder text.
-  full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
-    markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
-  message_strings:
-    default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
+## Rules for PyTorch (dynamo fx based) ONNX Exporter (FXE)
 
 - id: FXE0007
-  name: atenlib-fx-to-onnx
+  name: fx-graph-to-onnx
   short_description:
-    text: Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text.
+    text: Transforms graph from FX IR to ONNX IR.
   full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
+    text: "Transforms graph from FX IR to ONNX IR."
     markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
+      This diagnostic tracks the transformation process from an FX Graph (in FX IR) to an ONNX Graph (in ONNX IR).
+
+      #### Key Representations:
+
+      - **FX Graph**: The graph in FX IR produced by dynamo or symbolic tracing.
+      - **ONNX Graph**: The graph in ONNX IR and [operators](https://onnx.ai/onnx/operators/).
+
+      #### Additional Notes:
+
+      - Prior to this transformation step, the FX graph undergoes preprocessing through multiple FX passes.
+        To gain insight into these transformations, refer to diagnostic `FXE0010`.
+      - To enable a detailed view of the graph transformation in progress within this diagnostic, switch to the DEBUG mode.
+
+        - Set DiagnosticOptions.verbosity_level to logging.DEBUG.
+        - Activate the environment variable TORCH_LOGS='onnx_diagnostics'.
+
+      - For specific information related to node-level FX to ONNX transformations, explore the diagnostic `FXE0008`.
   message_strings:
     default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
+      text: "Transforming FX graph {graph_name} to ONNX graph."
   help_uri:
   properties:
     deprecated: false
@@ -215,30 +116,26 @@
 - id: FXE0008
   name: fx-node-to-onnx
   short_description:
-    text: Node level tracking. ToDo, experimenting diagnostics, placeholder text.
+    text: Transforms an FX node to an ONNX node.
   full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
+    text: "Transforms an FX node to an ONNX node."
     markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
-  message_strings:
-    default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
+      This diagnostic tracks the transformation process from an FX Node to ONNX [Operators](https://onnx.ai/onnx/operators/).
 
-- id: FXE0009
-  name: fx-frontend-dynamo-make-fx
-  short_description:
-    text: The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export.
-  full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
-    markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
+      The process of converting FX Node to ONNX Node involves dealing with six distinct node types:
+        1. `placeholder`: Represents a module input, maps to an ONNX graph input.
+        2. `call_module`: Symbolizes a call to a submodule, maps to an ONNX
+        3. `call_method`: Symbolizes a method call. Not yet implemented.
+        4. `call_function`: Symbolizes a function call. [Core ATen](https://pytorch.org/docs/stable/ir.html#core-aten-ir) is expected
+          as the function call target. The mapping from ATen to ONNX is implemented by [ONNXScript torchlib](https://github.com/microsoft/onnxscript/tree/main/onnxscript/function_libs/torch_lib/ops).
+          This [guide](https://pytorch.org/docs/stable/onnx.html#onnx-script-functions) shows how to write and register a custom symbolic function for call_function FX node.
+        5. `get_attr`: Indicates an attribute access within the current module. Maps to an ONNX graph initializer.
+        6. `output`: Represents the module's output. Maps to an ONNX graph output.
+
+      For a granular understanding of how each node type is transformed, refer to the implementation details in `FxOnnxInterpreter`.
   message_strings:
     default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
+      text: "Transforming FX node {node_repr} to ONNX node."
   help_uri:
   properties:
     deprecated: false
@@ -247,14 +144,33 @@
 - id: FXE0010
   name: fx-pass
   short_description:
-    text: FX graph transformation before ONNX export.
+    text: FX graph transformation during ONNX export before converting from FX IR to ONNX IR.
   full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
+    text: "FX graph transformation during ONNX export before converting from FX IR to ONNX IR."
     markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
+      This diagnostic tracks the FX passes executed during the ONNX export process prior
+      to converting from FX IR (Intermediate Representation) to ONNX IR.
+
+      Under the scope of ONNX export, an FX pass refers to a specific transformation applied to the FX GraphModule.
+      The primary aim of these passes is to streamline the graph into a format that aligns more with the ONNX IR.
+      Moreover, these passes work to substitute unsupported FX IR features with those recognized and endorsed by
+      ONNX IR. Common transformations include, but aren't limited to, decomposition, functionalization and
+      type promotion.
+
+      For those who are interested in a comprehensive log detailing the modifications made during these passes,
+      there are a couple of options:
+
+      - Set DiagnosticOptions.verbosity_level to logging.DEBUG.
+      - Activate the environment variable TORCH_LOGS='onnx_diagnostics'.
+
+      However, it's noteworthy that by default, such detailed logging is turned off. The primary reason being
+      its considerable impact on performance.
+
+      For an in-depth understanding of each specific pass, please refer to the directory: torch/onnx/_internal/fx/passes.
+
   message_strings:
     default:
-      text: "ToDo, experimenting diagnostics, placeholder text."
+      text: "Running {pass_name} pass."
   help_uri:
   properties:
     deprecated: false
@@ -449,22 +365,6 @@
   message_strings:
     default:
       text: "Checking if the FX node: {node} is supported in onnx registry."
-  help_uri:
-  properties:
-    deprecated: false
-    tags: []
-
-- id: DIAGSYS0001
-  name: arg-format-too-verbose
-  short_description:
-    text: The formatted str for argument to display is too verbose.
-  full_description:
-    text: "ToDo, experimenting diagnostics, placeholder text."
-    markdown: |
-      ToDo, experimenting diagnostics, placeholder text.
-  message_strings:
-    default:
-      text: "Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}."
   help_uri:
   properties:
     deprecated: false

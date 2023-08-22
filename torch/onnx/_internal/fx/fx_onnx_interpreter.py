@@ -440,7 +440,7 @@ class FxOnnxInterpreter:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
+    @diagnostics.diagnose_call(diagnostics.rules.fx_graph_to_onnx)
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
