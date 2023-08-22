@@ -1136,8 +1136,7 @@ class CheckFunctionManager:
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._weakrefs:
-                self._weakrefs[id(obj)] = weakref.ref(obj)
-                weakref.finalize(obj, self.invalidate)  # type: ignore[call-arg]
+                self._weakrefs[id(obj)] = weakref.ref(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
