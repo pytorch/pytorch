@@ -17,7 +17,8 @@ concurrency:
 jobs:
 
   upload-stats-to-rockset:
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-22.04
+    environment: upload-stats
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -25,16 +26,20 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - run: |
-          pip3 install requests==2.26
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
+          pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
 
       - name: Upload external contribution stats
         uses: nick-fields/retry@v2.8.2
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ env.ROCKSET_API_KEY != '' }}
         with:
           timeout_minutes: 10
           max_attempts: 10

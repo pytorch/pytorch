@@ -11,7 +11,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import List, Set
+from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -75,6 +75,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
+    xyz_options: Tuple[Tuple[Any, ...], ...]
     configs = []
 
     for hint in hints:
@@ -91,7 +92,7 @@ def autotune_hints_to_configs(
                 )
             for xyz in xyz_options:
                 configs.append(
-                    triton_config(
+                    triton_config(  # type: ignore[misc]
                         size_hints,
                         *xyz,
                         num_elements_per_warp=32,
@@ -163,7 +164,7 @@ class CachingAutotuner(KernelInterface):
             ]
             self.configs = None
 
-    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: int):
+    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.meta)
         for k, v in cfg.kwargs.items():
@@ -251,7 +252,7 @@ class CachingAutotuner(KernelInterface):
         def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
-                    {**zip(self.arg_names, args), **launcher.config.kwargs}
+                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
             cloned_args = self.clone_args(*args)
@@ -396,7 +397,7 @@ class CachingAutotuner(KernelInterface):
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
-                {**zip(self.arg_names, args), **launcher.config.kwargs}
+                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
         return launcher(
             *args,
@@ -410,7 +411,7 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):
+    for frame in iter(lambda: frame.f_back, None):  # type: ignore[union-attr]
         frame.f_locals
     obj_names = []
     for referrer in gc.get_referrers(obj):
@@ -421,7 +422,7 @@ def _find_names(obj):
     return obj_names
 
 
-collected_calls = []
+collected_calls: List[Any] = []
 
 
 def start_graph():
@@ -469,7 +470,7 @@ class DebugAutotuner(CachingAutotuner):
             self.cached = (ms, num_gb, gb_per_s, kernel_name)
         else:
             ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
         )
@@ -522,7 +523,7 @@ def load_cached_autotuning(
 
 
 def cached_autotune(
-    size_hints: List[int],
+    size_hints: Optional[List[int]],
     configs: List[Config],
     meta,
     heuristic_type,
@@ -534,6 +535,7 @@ def cached_autotune(
     """
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
+    save_cache_hook: Optional[Callable[[Any, Any], Any]]
 
     # on disk caching logic
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):

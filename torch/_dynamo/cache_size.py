@@ -36,20 +36,33 @@ many recompilations for the same code object because the ID_MATCH guard fails
 for different instances of the nn module. This is a common pattern in how models
 are authored. Therefore, this requires us to keep the cache_size_limit high.
 
-
 We resolve this by introducing these two limits. The first limit (1) limits the
-number of cache entries that have a ID_MATCH'd guard for a particular nn module
-instance. And, (2)nd limit just becomes a safeguard mechanism to have a maximum
-compilations for a code object. One way to reason about this is thinking of
-TorchDynamo cache as 2 level cache where first level is code -> id_matched_objs
-and the second level is id_matched_obj -> linked_list_per_id_matched_obj. Note
-that this is only for logical reasoning, our cache is still a linked list.
+number of cache entries that have an ID_MATCH'd guard for an nn module instance.
+And, (2)nd limit becomes a safeguard mechanism to have a maximum compilations
+for a code object. One important question is - what is the limit for the code
+object that does not have any ID_MATCH guard? For such code objects, we choose
+(1) as the cache size limit.
 
-One important question is - what is the limit the check_fn does not have
-ID_MATCH'd object? In that case, we choose the lower of the 2 limits - which is
-(1). By doing this, we limit the number of recompilations for functions that do
-not have ID_MATCH'd guards but still unsuitable for compilation. In this way,
-the two limits resolve the tension mentioned earlier.
+Lets take an example to understand how these limits help. Suppose, we have 16
+instances of a nn module and we ID_MATCH on the self object. Further, suppose
+the inputs to these functions have varying batch size, leading to one
+recompilation. In total, there will be 32 recompilations, and therefore 32 cache
+entries on the forward code object. In the older case when we had only 1 limit,
+our cache size limit must be >= 32 to capture all these recompilations. Now,
+suppose there is a separate function in the same program which is very dynamic
+and unsuitable for compilation. Such a function will need to undergo 32
+compilations to burst the cache and fallback to eager. These 32 recompilations
+are too many and we want to fallback for these compilation-unfriendly functions
+sooner.
+
+In the new scenario, we can have (1) cache_size_limit = 32, (2)
+accumulated_cache_size_limit = 32. This means that each ID_MATCH'd object can
+have maximum of two cache entries, and the maximum number of cache entries
+(irrespective of ID_MATCH obj) is 32. This covers the case of forward code
+object which has 32 recompilations. For the other function, the one unsuitable
+for recompilation, our limit is 2. So, we will burst the cache in just 2
+recompilations. In this manner, these 2 limits help us resolve the tension
+mentioned earlier.
 """
 
 
@@ -69,7 +82,7 @@ class CacheSize:
     )
 
     # Sources of objects with ID_MATCH guards
-    id_guarded_sources: Set[ReferenceType] = field(default_factory=set)
+    id_guarded_sources: Set[str] = field(default_factory=set)
 
     def __str__(self):
         return f"CacheSize(total={self.total}, per_guarded_obj={tuple(self.per_id_guarded_obj.values())})"

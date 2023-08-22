@@ -18,6 +18,11 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
@@ -34,11 +39,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    EqualityConstraint,
-    is_concrete_int,
-    SYMPY_INTERP,
-)
+from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -55,7 +56,6 @@ from .utils import (
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
-    np,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -320,19 +320,22 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        np_types = (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-            np.float16,
-            np.float32,
-            np.float64,
-        )
+        if np:
+            np_types = (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
+            )
+        else:
+            np_types = ()  # type: ignore[assignment]
         ok_types = (
             int,
             float,
@@ -1031,10 +1034,11 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if is_concrete_int(dim):
-                        converted.append(int(dim))
+                    if isinstance(dim, int):
+                        converted.append(dim)
                     else:
-                        converted.append(None)
+                        assert isinstance(dim, torch.SymInt)
+                        converted.append(dim.node.maybe_as_int())
                 return converted
 
             dynamic_dims_sizes = [
