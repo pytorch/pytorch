@@ -1172,7 +1172,35 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
-                graph_captured_result = graph(*graph_inputs)
+
+                named_parameters = dict(graph.named_parameters(remove_duplicate=False))
+                named_buffers = dict(graph.named_buffers(remove_duplicate=False))
+
+                ambient_fake_mode = (
+                    _guards.detect_fake_mode(graph_inputs)
+                    if _guards.detect_fake_mode(graph_inputs) is not None
+                    else fake_mode
+                )
+
+                with ambient_fake_mode, enable_python_dispatcher():
+                    params_and_buffers = {
+                        **dict(named_parameters),
+                        **dict(named_buffers),
+                    }
+                    fake_params_buffers = dict()
+
+                    for name, value in params_and_buffers.items():
+                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(
+                            value, static_shapes=True
+                        )
+
+                    fake_graph_inputs = pytree.tree_map(
+                        ambient_fake_mode.from_tensor, graph_inputs
+                    )
+                    graph_captured_result = torch.func.functional_call(
+                        graph, fake_params_buffers, fake_graph_inputs
+                    )
+
                 return graph_captured_result
 
             return result_capturing_wrapper
