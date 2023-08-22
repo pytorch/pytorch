@@ -105,7 +105,7 @@ def is_acceptable(tensor):
         warnings.warn(
             "PyTorch was compiled without cuDNN/MIOpen support. To use cuDNN/MIOpen, rebuild "
             "PyTorch making sure the library is visible to the build system.",
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
         return False
     if not _init():
@@ -115,7 +115,7 @@ def is_acceptable(tensor):
                     sys.platform, "LD_LIBRARY_PATH"
                 )
             ),
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
         return False
     return True

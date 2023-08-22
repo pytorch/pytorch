@@ -35,7 +35,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         warnings.warn(
             f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
         return False
 

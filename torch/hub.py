@@ -245,7 +245,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
                     f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
                     "Torchhub will now assume that it's a branch. "
                     "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
-                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.", stacklevel=TO_BE_DETERMINED
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.", stacklevel=2
                 )
                 disambiguated_branch_ref = f"refs/heads/{ref}"
                 url = _git_archive_link(repo_owner, repo_name, ref=disambiguated_branch_ref)
@@ -296,7 +296,8 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
-                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour", stacklevel=TO_BE_DETERMINED)
+                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour",
+                DeprecationWarning, stacklevel=2)
         return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
@@ -361,7 +362,8 @@ def get_dir():
     """
     # Issue warning to move data if old env is set
     if os.getenv('TORCH_HUB'):
-        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead', stacklevel=TO_BE_DETERMINED)
+        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead',
+                      DeprecationWarning, stacklevel=2)
 
     if _hub_dir is not None:
         return _hub_dir
@@ -671,7 +673,8 @@ def _is_legacy_zip_format(filename: str) -> bool:
 def _legacy_zip_load(filename: str, model_dir: str, map_location: MAP_LOCATION, weights_only: bool) -> Dict[str, Any]:
     warnings.warn('Falling back to the old format < 1.6. This support will be '
                   'deprecated in favor of default zipfile format introduced in 1.6. '
-                  'Please redo torch.save() to save it in the new zipfile format.', stacklevel=TO_BE_DETERMINED)
+                  'Please redo torch.save() to save it in the new zipfile format.',
+                  DeprecationWarning, stacklevel=2)
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.
@@ -726,7 +729,8 @@ def load_state_dict_from_url(
     """
     # Issue warning to move data if old env is set
     if os.getenv('TORCH_MODEL_ZOO'):
-        warnings.warn('TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead', stacklevel=TO_BE_DETERMINED)
+        warnings.warn('TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead',
+                      DeprecationWarning, stacklevel=2)
 
     if model_dir is None:
         hub_dir = get_dir()

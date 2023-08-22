@@ -127,7 +127,8 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
         if isinstance(weight, nn.Module):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead", stacklevel=TO_BE_DETERMINED)
+        warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead",
+                      DeprecationWarning, stacklevel=2)
         return super().__new__(cls, activation, weight)
 
 
@@ -251,7 +252,7 @@ def get_default_qconfig(backend='x86', version=0):
             if not torch.cpu._is_cpu_support_vnni():
                 warnings.warn(
                     "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
-                    "on CPU without Vector Neural Network Instruction support.", stacklevel=TO_BE_DETERMINED)
+                    "on CPU without Vector Neural Network Instruction support.", stacklevel=2)
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
@@ -425,13 +426,15 @@ _default_quint8_placeholder_qconfig = QConfig(
 def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
-        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.", stacklevel=TO_BE_DETERMINED)
+        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.",
+        DeprecationWarning, stacklevel=2)
     return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
 def get_default_qat_qconfig_dict(backend='x86', version=1):
     warnings.warn(
         "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
-        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.", stacklevel=TO_BE_DETERMINED)
+        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.",
+        DeprecationWarning, stacklevel=2)
     return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def _assert_valid_qconfig(qconfig: Optional[QConfig],

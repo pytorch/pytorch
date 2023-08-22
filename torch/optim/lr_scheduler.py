@@ -129,7 +129,7 @@ class LRScheduler:
                 warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
                               "initialization. Please, make sure to call `optimizer.step()` before "
                               "`lr_scheduler.step()`. See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning, stacklevel=TO_BE_DETERMINED)
+                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning, stacklevel=2)
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
             elif self.optimizer._step_count < 1:
@@ -138,7 +138,7 @@ class LRScheduler:
                               "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
                               "will result in PyTorch skipping the first value of the learning rate schedule. "
                               "See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning, stacklevel=TO_BE_DETERMINED)
+                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning, stacklevel=2)
         self._step_count += 1
 
         with _enable_get_lr_call(self):
@@ -146,7 +146,7 @@ class LRScheduler:
                 self.last_epoch += 1
                 values = self.get_lr()
             else:
-                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=TO_BE_DETERMINED)
+                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = self._get_closed_form_lr()
@@ -259,7 +259,7 @@ class LambdaLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", stacklevel=2)
 
         return [base_lr * lmbda(self.last_epoch)
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
@@ -336,7 +336,7 @@ class MultiplicativeLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch > 0:
             return [group['lr'] * lmbda(self.last_epoch)
@@ -382,7 +382,7 @@ class StepLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -430,7 +430,7 @@ class MultiStepLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch not in self.milestones:
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -484,7 +484,7 @@ class ConstantLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch == 0:
             return [group['lr'] * self.factor for group in self.optimizer.param_groups]
@@ -551,7 +551,7 @@ class LinearLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch == 0:
             return [group['lr'] * self.start_factor for group in self.optimizer.param_groups]
@@ -588,7 +588,7 @@ class ExponentialLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch == 0:
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -742,7 +742,7 @@ class PolynomialLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch == 0 or self.last_epoch > self.total_iters:
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -807,7 +807,7 @@ class CosineAnnealingLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         if self.last_epoch == 0:
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -1003,7 +1003,7 @@ class ReduceLROnPlateau:
         if epoch is None:
             epoch = self.last_epoch + 1
         else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=TO_BE_DETERMINED)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
@@ -1281,7 +1281,7 @@ class CyclicLR(LRScheduler):
 
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         cycle = math.floor(1 + self.last_epoch / self.total_size)
         x = 1. + self.last_epoch / self.total_size - cycle
@@ -1371,7 +1371,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                 for base_lr in self.base_lrs]
@@ -1692,7 +1692,7 @@ class OneCycleLR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
 
         lrs = []
         step_num = self.last_epoch

@@ -363,7 +363,7 @@ class SWALR(LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "please use `get_last_lr()`.", UserWarning, stacklevel=2)
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)

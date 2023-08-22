@@ -1657,7 +1657,7 @@ def check(
     """
     warnings.warn(
         "'torch._prims_common.check' will be removed in the future. Please use "
-        "'torch._check*' functions instead", FutureWarning, stacklevel=2,
+        "'torch._check*' functions instead", DeprecationWarning, stacklevel=2,
     )
     torch._check_with(exc_type, b, s)
 

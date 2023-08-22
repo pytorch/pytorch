@@ -36,7 +36,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
             except TypeError:
                 warnings.warn(
                     "The input sequence can not be deepcopied, "
-                    "please be aware of in-place modification would affect source data", stacklevel=TO_BE_DETERMINED
+                    "please be aware of in-place modification would affect source data", stacklevel=2
                 )
                 self.sequence = sequence
         else:

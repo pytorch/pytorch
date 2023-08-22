@@ -140,7 +140,7 @@ def _check_unpickable_fn(fn: Callable):
     if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
             "Local function is not supported by pickle, please use "
-            "regular python function or functools.partial instead.", stacklevel=TO_BE_DETERMINED
+            "regular python function or functools.partial instead.", stacklevel=2
         )
         return
 
@@ -148,7 +148,7 @@ def _check_unpickable_fn(fn: Callable):
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
         warnings.warn(
             "Lambda function is not supported by pickle, please use "
-            "regular python function or functools.partial instead.", stacklevel=TO_BE_DETERMINED
+            "regular python function or functools.partial instead.", stacklevel=2
         )
         return
 
@@ -176,7 +176,7 @@ def get_file_pathnames_from_root(
 
     # print out an error message and raise the error out
     def onerror(err : OSError):
-        warnings.warn(err.filename + " : " + err.strerror, stacklevel=TO_BE_DETERMINED)
+        warnings.warn(err.filename + " : " + err.strerror, stacklevel=2)
         raise err
 
     if os.path.isfile(root):
@@ -283,7 +283,7 @@ def _deprecation_warning(
     if new_argument_name:
         msg = f"{msg}\nPlease use `{old_class_name}({new_argument_name}=)` instead."
 
-    warnings.warn(msg, FutureWarning, stacklevel=TO_BE_DETERMINED)
+    warnings.warn(msg, FutureWarning, stacklevel=2)
 
 
 class StreamWrapper:

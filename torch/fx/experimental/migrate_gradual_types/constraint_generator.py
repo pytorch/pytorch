@@ -565,7 +565,7 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
         elif isinstance(e1, TVar) and isinstance(e2, int):
             # then we made the wrong assumption about the argument being a tensor
             # so we should fix the assumption
-            warnings.warn(f'Made the wrong assumption for node {n}. Correctness not guaranteed.', stacklevel=TO_BE_DETERMINED)
+            warnings.warn(f'Made the wrong assumption for node {n}. Correctness not guaranteed.', stacklevel=2)
 
             new_e1, counter = gen_dvar(counter)
             symbols[n.args[0]] = new_e1

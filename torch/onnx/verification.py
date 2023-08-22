@@ -271,13 +271,13 @@ def _compare_onnx_pytorch_outputs_in_np(
                         f"Suppressed AssertionError:\n{e}.\n"
                         f"Error percentage {error_percentage} "
                         f"within acceptable range {acceptable_error_percentage}.",
-                        stacklevel=TO_BE_DETERMINED,
+                        stacklevel=2,
                     )
                     continue
             if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
-                warnings.warn("ONNX output is quantized", stacklevel=TO_BE_DETERMINED)
+                warnings.warn("ONNX output is quantized", stacklevel=2)
             if pt_out.dtype == np.uint8 or pt_out.dtype == np.int8:
-                warnings.warn("PyTorch output is quantized", stacklevel=TO_BE_DETERMINED)
+                warnings.warn("PyTorch output is quantized", stacklevel=2)
             raise
 
 
@@ -400,7 +400,7 @@ def _try_clone_model(model):
     except Exception:
         warnings.warn(
             "Failed to clone model. Model state might be mutated during verification.",
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
         return model
 

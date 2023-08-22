@@ -127,7 +127,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     "for features requests and see our documentation on the torch.sparse "
                     "module for further information about the project."
                 ),
-                UserWarning, stacklevel=TO_BE_DETERMINED
+                UserWarning, stacklevel=2
             )
             _WARNING_SHOWN = True
 

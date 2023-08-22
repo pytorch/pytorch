@@ -156,10 +156,10 @@ class MaskedTensor(torch.Tensor):
         warnings.warn(("The PyTorch API of MaskedTensors is in prototype stage "
                        "and will change in the near future. Please open a Github issue "
                        "for features requests and see our documentation on the torch.masked "
-                       "module for further information about the project."), UserWarning, stacklevel=TO_BE_DETERMINED)
+                       "module for further information about the project."), UserWarning, stacklevel=2)
         if data.requires_grad:
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
-                          "To avoid this, you can use data.clone().detach()", UserWarning, stacklevel=TO_BE_DETERMINED)
+                          "To avoid this, you can use data.clone().detach()", UserWarning, stacklevel=2)
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 
     def _preprocess_data(self, data, mask):
@@ -296,7 +296,7 @@ class MaskedTensor(torch.Tensor):
             "In the case that the semantics for the operator are not trivial, it would be appreciated "
             "to also include a proposal for the semantics."
         )
-        warnings.warn(msg, stacklevel=TO_BE_DETERMINED)
+        warnings.warn(msg, stacklevel=2)
         return NotImplemented
 
     def __lt__(self, other):

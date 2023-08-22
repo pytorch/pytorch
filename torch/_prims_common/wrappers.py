@@ -153,7 +153,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
             "This behavior is deprecated, and in a future PyTorch release outputs will not "
             "be resized unless they have zero elements. "
             "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).",
-            FutureWarning, stacklevel=2)
+            DeprecationWarning, stacklevel=2)
     return True
 
 

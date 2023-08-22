@@ -166,7 +166,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn(
-            "SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=TO_BE_DETERMINED
+            "SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=2
         )
         super().__init__(processes, error_queues)
 
@@ -244,5 +244,5 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method="spawn"):
             "To use a different start_method use:\n\t\t"
             " torch.multiprocessing.start_processes(...)" % start_method
         )
-        warnings.warn(msg, stacklevel=TO_BE_DETERMINED)
+        warnings.warn(msg, stacklevel=2)
     return start_processes(fn, args, nprocs, join, daemon, start_method="spawn")

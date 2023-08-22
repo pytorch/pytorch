@@ -335,7 +335,7 @@ def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:
         "torch.cuda.reset_max_memory_allocated now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
         FutureWarning,
-        stacklevel=TO_BE_DETERMINED,
+        stacklevel=2,
     )
     return reset_peak_memory_stats(device=device)
 
@@ -363,7 +363,7 @@ def reset_max_memory_cached(device: Union[Device, int] = None) -> None:
         "torch.cuda.reset_max_memory_cached now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
         FutureWarning,
-        stacklevel=TO_BE_DETERMINED,
+        stacklevel=2,
     )
     return reset_peak_memory_stats(device=device)
 
@@ -451,7 +451,7 @@ def memory_cached(device: Union[Device, int] = None) -> int:
     warnings.warn(
         "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
         FutureWarning,
-        stacklevel=TO_BE_DETERMINED,
+        stacklevel=2,
     )
     return memory_reserved(device=device)
 
@@ -461,7 +461,7 @@ def max_memory_cached(device: Union[Device, int] = None) -> int:
     warnings.warn(
         "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
         FutureWarning,
-        stacklevel=TO_BE_DETERMINED,
+        stacklevel=2,
     )
     return max_memory_reserved(device=device)
 

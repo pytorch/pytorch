@@ -86,7 +86,7 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             warnings.warn(
                 "Since we pass in param_groups, we will use param_groups to "
-                "initialize the optimizer, not all parameters of the module.", stacklevel=TO_BE_DETERMINED
+                "initialize the optimizer, not all parameters of the module.", stacklevel=2
             )
             param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
             ordered_param_keys = []

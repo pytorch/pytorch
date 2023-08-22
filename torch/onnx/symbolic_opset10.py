@@ -522,7 +522,7 @@ def embedding_bag(
     warnings.warn(
         "Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
         "Please use opset 11 or higher to export model for dynamic input shape.'",
-        stacklevel=TO_BE_DETERMINED,
+        stacklevel=2,
     )
     offsets_dim_0 = symbolic_helper._get_tensor_dim_size(offsets, 0)
     if offsets_dim_0 is not None:

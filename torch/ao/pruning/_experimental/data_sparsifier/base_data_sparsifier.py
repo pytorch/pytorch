@@ -100,7 +100,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
         if name in self.state:
             # If the named data already exists - replace
-            warnings.warn("Replacing existing data of the same name. - Did you mean a different name?", stacklevel=TO_BE_DETERMINED)
+            warnings.warn("Replacing existing data of the same name. - Did you mean a different name?", stacklevel=2)
 
             # reuse old config
             old_args = self.data_groups[name]

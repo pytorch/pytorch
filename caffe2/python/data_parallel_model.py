@@ -786,11 +786,11 @@ def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
 # DEPRECATED: See warnings below.
 def Synchronize(model, timeout_sec=_DEFAULT_BARRIER_NET_TIMEOUT_SEC):
     warnings.warn("The Synchronize API has been deprecated.  We now have a "
-            "barrier net which runs before training to ensure all hosts wait "
-            "before training starts.  The default timeout for the barrier is "
-            "300s and it can be overridden using the barrier_net_timeout_sec "
-            "parameter when calling Parallelize.",
-            category=DeprecationWarning, stacklevel=2)
+                  "barrier net which runs before training to ensure all hosts wait "
+                  "before training starts.  The default timeout for the barrier is "
+                  "300s and it can be overridden using the barrier_net_timeout_sec "
+                  "parameter when calling Parallelize.",
+                  DeprecationWarning, stacklevel=2)
     if model._rendezvous is None or model._rendezvous['num_shards'] <= 1:
         # Single host case
         return

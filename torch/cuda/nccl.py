@@ -12,7 +12,7 @@ SUM = 0  # ncclRedOp_t
 
 def is_available(tensors):
     if not hasattr(torch._C, "_nccl_all_reduce"):
-        warnings.warn("PyTorch is not compiled with NCCL support", stacklevel=TO_BE_DETERMINED)
+        warnings.warn("PyTorch is not compiled with NCCL support", stacklevel=2)
         return False
 
     devices = set()
@@ -87,7 +87,7 @@ def reduce(
             warnings.warn(
                 "nccl.reduce with an output tensor list is deprecated. "
                 "Please specify a single output tensor with argument 'output' instead instead.",
-                stacklevel=TO_BE_DETERMINED,
+                DeprecationWarning, stacklevel=2,
             )
             _output = outputs[root]
     elif not isinstance(output, torch.Tensor) and isinstance(
@@ -97,7 +97,7 @@ def reduce(
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "
             "Please specify a single output tensor.",
-            stacklevel=TO_BE_DETERMINED,
+            DeprecationWarning, stacklevel=2,
         )
         _output = output[root]
     else:

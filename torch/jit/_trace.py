@@ -779,7 +779,7 @@ def trace(
     if optimize is not None:
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead",
-            stacklevel=TO_BE_DETERMINED,
+            DeprecationWarning, stacklevel=2,
         )
 
     if isinstance(func, torch.jit.ScriptModule):
@@ -787,7 +787,7 @@ def trace(
         # would result in an error.
         warnings.warn(
             "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.",
-            stacklevel=TO_BE_DETERMINED,
+            DeprecationWarning, stacklevel=2,
         )
         return func
 
@@ -1005,7 +1005,7 @@ def trace_module(
     if optimize is not None:
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead",
-            stacklevel=TO_BE_DETERMINED,
+            DeprecationWarning, stacklevel=2,
         )
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)

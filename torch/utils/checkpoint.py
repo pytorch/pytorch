@@ -432,7 +432,7 @@ def checkpoint(
             "will be updated to be False in the future. To maintain current "
             "behavior, pass use_reentrant=True. It is recommended that you use "
             "use_reentrant=False. Refer to docs for more details on the "
-            "differences between the two variants.", stacklevel=TO_BE_DETERMINED
+            "differences between the two variants.", stacklevel=2
         )
         use_reentrant = True
     # Hack to mix *args with **kwargs in a python 2.7-compliant way

@@ -88,7 +88,7 @@ class BaseScheduler:
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`.", stacklevel=TO_BE_DETERMINED)
+                "please use `get_last_sl()`.", stacklevel=2)
         raise NotImplementedError
 
     def print_sl(self, is_verbose, group, sl, epoch=None):
@@ -115,13 +115,13 @@ class BaseScheduler:
             if not hasattr(self.sparsifier.step, "_with_counter"):
                 warnings.warn("Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
                               "initialization. Please, make sure to call `sparsifier.step()` before "
-                              "`scheduler.step()`.", UserWarning, stacklevel=TO_BE_DETERMINED)
+                              "`scheduler.step()`.", UserWarning, stacklevel=2)
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
             elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
                               "You have to make sure you run the sparsifier.step() BEFORE any "
-                              "calls to the scheduler.step().", UserWarning, stacklevel=TO_BE_DETERMINED)
+                              "calls to the scheduler.step().", UserWarning, stacklevel=2)
         self._step_count += 1
 
         class _enable_get_sl_call:

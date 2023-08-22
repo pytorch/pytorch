@@ -178,7 +178,7 @@ class LazyModuleMixin:
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters)
         warnings.warn('Lazy modules are a new feature under heavy development '
-                      'so changes to the API or functionality can happen at any moment.', stacklevel=TO_BE_DETERMINED)
+                      'so changes to the API or functionality can happen at any moment.', stacklevel=2)
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
         # This should be ideally implemented as a hook,

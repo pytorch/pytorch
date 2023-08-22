@@ -39,7 +39,7 @@ def _apply_docstring_templates(func):
         warnings.warn(
             f"No documentation string available for {func.__name__}."
             " PyTorch team should run `python tools/update_masked_docs.py`"
-            " to generate the missing docstrings.", stacklevel=TO_BE_DETERMINED
+            " to generate the missing docstrings.", stacklevel=2
         )
     else:
         func.__doc__ = doc_string

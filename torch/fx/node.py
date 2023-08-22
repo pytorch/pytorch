@@ -260,7 +260,7 @@ class Node:
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         if self == x:
-            warnings.warn("Trying to prepend a node to itself. This behavior has no effect on the graph.", stacklevel=TO_BE_DETERMINED)
+            warnings.warn("Trying to prepend a node to itself. This behavior has no effect on the graph.", stacklevel=2)
             return
         x._remove_from_list()
         p = self._prev

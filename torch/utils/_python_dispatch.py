@@ -60,7 +60,7 @@ class TorchDispatchMode:
 
     @classmethod
     def push(cls, *args, **kwargs):
-        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`", stacklevel=TO_BE_DETERMINED)
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`", stacklevel=2)
         instance = cls(*args, **kwargs)
         return instance
 

@@ -34,7 +34,8 @@ class Container(Module):
         super().__init__()
         # DeprecationWarning is ignored by default <sigh>
         warnings.warn("nn.Container is deprecated. All of it's functionality "
-                      "is now implemented in nn.Module. Subclass that instead.", stacklevel=TO_BE_DETERMINED)
+                      "is now implemented in nn.Module. Subclass that instead.",
+                      DeprecationWarning, stacklevel=2)
         for key, value in kwargs.items():
             self.add_module(key, value)
 

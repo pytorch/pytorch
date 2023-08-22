@@ -94,7 +94,7 @@ def _register_tensor_wrapper(tensor) -> None:
     wait_reg = data_ptr_to_work.get(data_ptr, None)
     if wait_reg is None:
         warnings.warn(
-            "Trying to register finalizer to AsyncCollectiveTensor but the inner tensor is already gone", stacklevel=TO_BE_DETERMINED
+            "Trying to register finalizer to AsyncCollectiveTensor but the inner tensor is already gone", stacklevel=2
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.

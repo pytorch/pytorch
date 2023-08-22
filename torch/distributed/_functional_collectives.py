@@ -20,7 +20,7 @@ else:
         from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
-            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly", stacklevel=TO_BE_DETERMINED
+            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly", stacklevel=2
         )
 
         def is_torchdynamo_compiling():
@@ -525,7 +525,7 @@ if not torch._running_with_deploy():
     c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
 else:
-    warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.", stacklevel=TO_BE_DETERMINED)
+    warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.", stacklevel=2)
 
 
 """

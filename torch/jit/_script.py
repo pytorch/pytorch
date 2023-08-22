@@ -1276,7 +1276,7 @@ def script(
     if optimize is not None:
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead",
-            stacklevel=TO_BE_DETERMINED,
+            DeprecationWarning, stacklevel=2,
         )
 
     # No-op for modules, functions, class instances that are already scripted
@@ -1318,7 +1318,7 @@ def script(
                 "Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                 "to enable Profile-Directed Typing in TorchScript. Refer to "
                 "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ",
-                stacklevel=TO_BE_DETERMINED,
+                stacklevel=2,
             )
 
     if isinstance(obj, torch.nn.Module):

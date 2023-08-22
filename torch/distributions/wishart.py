@@ -119,7 +119,7 @@ class Wishart(ExponentialFamily):
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
                 "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.",
-                stacklevel=TO_BE_DETERMINED,
+                stacklevel=2,
             )
 
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -269,7 +269,7 @@ class Wishart(ExponentialFamily):
         else:
             # More optimized version with data-dependent control flow.
             if is_singular.any():
-                warnings.warn("Singular sample detected.", stacklevel=TO_BE_DETERMINED)
+                warnings.warn("Singular sample detected.", stacklevel=2)
 
                 for _ in range(max_try_correction):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)

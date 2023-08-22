@@ -130,7 +130,7 @@ class OnnxRegistry:
         warnings.warn(
             f"torch.onnx.dynamo_export only implements opset version {self._opset_version} for now. If you need to use a "
             "different opset version, please register them with register_custom_op.",
-            stacklevel=TO_BE_DETERMINED,
+            stacklevel=2,
         )
 
         # Initialize registry from torchlib

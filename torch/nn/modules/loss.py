@@ -221,7 +221,8 @@ class NLLLoss2d(NLLLoss):
                  reduce=None, reduction: str = 'mean') -> None:
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
-                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.", stacklevel=TO_BE_DETERMINED)
+                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.",
+                      DeprecationWarning, stacklevel=2)
         super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 

@@ -333,7 +333,7 @@ def _get_param_to_fqns(
                         "FlatParameter is being traversed more than once. "
                         "This case should only happen when using "
                         "DistributedModelParallel with FullyShardedDataParallel.",
-                        stacklevel=TO_BE_DETERMINED,
+                        stacklevel=2,
                     )
                     param_to_fqns[param] = global_fqns
                 elif not dedup_shared_params:
@@ -402,7 +402,7 @@ def _apply_to_modules(
                                 " should only happen when using DMP with FSDP. "
                                 f"prefix = {prefix}, "
                                 f"submodule_name = {submodule_name}",
-                                stacklevel=TO_BE_DETERMINED,
+                                stacklevel=2,
                             )
                         new_prefix = prefix
                     elif submodule_name == "module":
@@ -412,7 +412,7 @@ def _apply_to_modules(
                             " modules while FSDP wraps the inner ones."
                             f"prefix = {prefix}, "
                             f"submodule_name = {submodule_name}",
-                            stacklevel=TO_BE_DETERMINED,
+                            stacklevel=2,
                         )
                         new_prefix = prefix
             f(submodule, new_prefix, new_tree_level, *args, **kwargs)

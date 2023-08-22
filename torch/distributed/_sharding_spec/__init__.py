@@ -7,7 +7,7 @@ import warnings
 from torch.distributed._shard.sharding_spec import *  # noqa: F403
 warnings.warn(
     "torch.distributed._sharding_spec will be deprecated, use torch.distributed._shard.sharding_spec instead",
-    DeprecationWarning, stacklevel=TO_BE_DETERMINED
+    DeprecationWarning, stacklevel=2
 )
 
 import torch.distributed._shard.sharding_spec as _sharding_spec
