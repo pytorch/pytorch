@@ -31,10 +31,18 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(
-        kHalf, kBool, kBFloat16, kComplexHalf, kFloat8_e4m3fn, kFloat8_e5m2, dtype, "copy_", [&] {
-          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-    });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(
+        kHalf,
+        kBool,
+        kBFloat16,
+        kComplexHalf,
+        kFloat8_e4m3fn,
+        kFloat8_e4m3fnuz,
+        kFloat8_e5m2,
+        kFloat8_e5m2fnuz,
+        dtype,
+        "copy_",
+        [&] { gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; }); });
   }
 }
 
