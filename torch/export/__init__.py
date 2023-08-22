@@ -31,7 +31,6 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
             else:
                 return x * 2
 
-
     `export()` would give following error::
 
         torch._dynamo.exc.UserError: Consider annotating your code using
