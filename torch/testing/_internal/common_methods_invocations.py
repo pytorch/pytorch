@@ -19162,15 +19162,15 @@ python_ref_db = [
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                 'test_reference_numerics_extremal',
-                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                 'test_reference_numerics_large',
-                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                 'test_reference_numerics_small',
-                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
