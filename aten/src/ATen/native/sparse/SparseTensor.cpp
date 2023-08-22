@@ -223,21 +223,6 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
   return self;
 }
 
-
-SparseTensor _sparse_coo_tensor_with_dims_and_tensors(
-    int64_t sparse_dim,
-    int64_t dense_dim,
-    IntArrayRef size,
-    const Tensor& indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  bool is_coalesced = values.size(0) < 2;
-  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory, is_coalesced);
-}
-
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
@@ -286,7 +271,8 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> is_coalesced) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -358,7 +344,8 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
       computed_sizes,
       indices,
       values,
-      values.options().layout(kSparse));
+      values.options().layout(kSparse),
+      is_coalesced);
 }
 
 void _validate_sparse_coo_tensor_args(
@@ -437,13 +424,6 @@ void _validate_sparse_coo_tensor_args(
 }
 
 // NB: Got rid of the sizes == NULL case
-
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size, bool is_coalesced,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory);
-
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -468,15 +448,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       is_coalesced);
 }
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  bool is_coalesced = values.dim() > 0 && values.size(0) < 2;
-  return at::sparse_coo_tensor(indices, values, size, dtype, layout, device, pin_memory, is_coalesced);
-}
-
 Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
                                         c10::optional<ScalarType> dtype,
                                         c10::optional<Layout> layout,
@@ -494,15 +465,6 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
   }
   return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);
-}
-
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  bool is_coalesced = values_.dim() > 0 && values_.size(0) < 2;
-  return _sparse_coo_tensor_unsafe(indices, values_, size, dtype, layout, device, pin_memory, is_coalesced);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -544,7 +506,6 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
   bool is_coalesced = values_.dim() > 0 && values_.size(0) < 2;
   return _sparse_coo_tensor_unsafe_symint(indices, values_, size, dtype, layout, device, pin_memory, is_coalesced);
 }
-
 
 // NB: Deleted newWithSizeNd variants
 
