@@ -260,6 +260,7 @@ def mark_static_address(t, guard=True):
 # compatible with torch.compile.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
+    return
     try:
         import einops
 
