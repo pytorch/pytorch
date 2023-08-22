@@ -211,9 +211,11 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode():
             x = torch.rand([4, 4], device="cpu", dtype=torch.float)
         with self.assertRaisesRegex(RuntimeError, "FakeTensor"):
-            torch._C._test_dereference_float_data(x)
+            torch._C._test_dereference_data(x)
         with self.assertRaisesRegex(RuntimeError, "FakeTensor"):
-            torch._C._test_dereference_float_data_ptr(x)
+            torch._C._test_dereference_data_ptr(x)
+        with self.assertRaisesRegex(RuntimeError, "FakeTensor"):
+            torch._C._test_dereference_templated_data_ptr(x)
 
     def test_mode(self):
         with FakeTensorMode():

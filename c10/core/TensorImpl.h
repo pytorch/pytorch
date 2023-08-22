@@ -2849,7 +2849,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_data_throws_if_uninitialized(bool should_throw) {
-    data_throws_if_uninitialized_ = true;
+    data_throws_if_uninitialized_ = should_throw;
   }
 
  protected:
@@ -3054,10 +3054,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // allocation scheme and relies on .mutable_data() to allocate data.
   // For PyTorch tensors, where there is no such lazy scheme, we do want
   // mutable_data() to throw if the storage is uninitialized. In particular,
-  // this happens in the FakeTensor case: FakeTensors have uninitialized storages
-  // and we want to prevent crashes when people send them into kernels that
-  // dereference the mutable_data().
-  bool data_throws_if_uninitialized_: 1;
+  // this happens in the FakeTensor case: FakeTensors have uninitialized
+  // storages and we want to prevent crashes when people send them into kernels
+  // that dereference the mutable_data().
+  bool data_throws_if_uninitialized_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
