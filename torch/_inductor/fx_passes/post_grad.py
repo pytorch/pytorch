@@ -28,7 +28,6 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    remove_noop_ops,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -48,15 +47,6 @@ pass_patterns = [
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
 
-def hash_node(node):
-    return (node, node.target, node.args, node.kwargs)
-
-def create_hash(graph):
-    old_hash = set()
-    for node in graph.nodes:
-        old_hash.add(hash_node(node))
-    return old_hash
-
 def get_storage(t):
     return t.untyped_storage()._cdata
 
@@ -67,59 +57,71 @@ def get_node_storage(node):
         return None
     return get_storage(node.meta["val"])
 
-def incremental_fake_tensor_update(graph: torch.fx.Graph, old_hash):
-    """
-    Not fully featured yet. Mainly added to ensure that reinplacing pass is
-    sound.
+class FakeTensorUpdater:
+    def __init__(self, graph):
+        self.processed_hashes = set()
+        self.graph = graph
 
-    Todo things:
-    1. We probably want to persist this across more passes.
-    """
-    processed = set()
-    existing_tensors = defaultdict(int)
-    for node in graph.nodes:
-        existing_tensors[get_node_storage(node)] += 1
+        for node in self.graph.nodes:
+            self.processed_hashes.add(self.hash_node(node))
 
-    def is_fake_tensor_same(new, old):
-        if (
-            new.shape != old.shape
-            or new.stride() != old.stride()
-        ):
+    def hash_node(self, node):
+        return (node, node.target, node.args, node.kwargs)
+
+    def incremental_update(self):
+        """
+        Not fully featured yet. Mainly added to ensure that reinplacing pass is
+        sound.
+
+        Todo things:
+        1. We probably want to persist this across more passes.
+        """
+        return
+        processed = set()
+        existing_tensors = defaultdict(int)
+        for node in self.graph.nodes:
+            existing_tensors[get_node_storage(node)] += 1
+
+        def is_fake_tensor_same(new, old):
+            if (
+                new.shape != old.shape
+                or new.stride() != old.stride()
+            ):
+                return False
+            if get_storage(new) == get_storage(old):
+                return True
+            if existing_tensors[get_storage(old)] == 1 and get_storage(new) not in existing_tensors:
+                return True
             return False
-        if get_storage(new) == get_storage(old):
-            return True
-        if existing_tensors[get_storage(old)] == 1 and get_storage(new) not in existing_tensors:
-            return True
-        return False
 
-    for node in graph.nodes:
-        if hash_node(node) in old_hash:
-            continue
+        for node in self.graph.nodes:
+            if self.hash_node(node) in old_hash:
+                continue
 
-        def get_fake_tensor(x):
-            if isinstance(x, torch.fx.Node):
-                return x.meta['val']
-            return x
+            def get_fake_tensor(x):
+                if isinstance(x, torch.fx.Node):
+                    return x.meta['val']
+                return x
 
-        if node.op == 'call_function' and isinstance(node.target, torch._ops.OpOverload):
-            processing = [node]
-            while len(processing) > 0:
-                updating_node = processing.pop()
-                if updating_node in processed:
-                    continue
-                if node.op != 'call_function' or not isinstance(node.target, torch._ops.OpOverload):
-                    continue
+            if node.op == 'call_function' and isinstance(node.target, torch._ops.OpOverload):
+                processing = [node]
+                while len(processing) > 0:
+                    updating_node = processing.pop()
+                    if updating_node in processed:
+                        continue
+                    if node.op != 'call_function' or not isinstance(node.target, torch._ops.OpOverload):
+                        continue
 
-                args, kwargs = tree_map(get_fake_tensor, (updating_node.args, updating_node.kwargs))
-                new_fake_tensor = updating_node.target(*args, **kwargs)
-                if is_fake_tensor_same(new_fake_tensor, updating_node.meta['val']):
-                    continue
-                updating_node.meta['val'] = new_fake_tensor
-                processed.add(updating_node)
-                for user in updating_node.users:
-                    processing.append(user)
+                    args, kwargs = tree_map(get_fake_tensor, (updating_node.args, updating_node.kwargs))
+                    new_fake_tensor = updating_node.target(*args, **kwargs)
+                    if is_fake_tensor_same(new_fake_tensor, updating_node.meta['val']):
+                        continue
+                    updating_node.meta['val'] = new_fake_tensor
+                    processed.add(updating_node)
+                    for user in updating_node.users:
+                        processing.append(user)
 
-            old_hash.add(hash_node(updating_node))
+                old_hash.add(self.hash_node(updating_node))
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -136,7 +138,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if is_inference and config.reordering:
         reorder_for_locality(gm.graph)
 
-    # old_hash = create_hash(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm.graph)
     if config.pattern_matcher:
         lazy_init()
 
@@ -152,7 +154,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Keep this last, since it introduces
     # mutation.
-    # incremental_fake_tensor_update(gm.graph, old_hash)
+    fake_tensor_updater.incremental_update()
     reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
@@ -563,6 +565,63 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same size/strides"""
+    val1 = node1.meta.get("val")
+    val2 = node2.meta.get("val")
+    return (
+        val1 is not None
+        and val2 is not None
+        and val1.size() == val2.size()
+        and val1.stride() == val2.stride()
+    )
+
+def remove_noop_ops(graph: torch.fx.Graph):
+    def true(*args, **kwargs):
+        return True
+
+    def slice_scatter_cond(self, src, dim=0, start=None, end=None, step=1):
+        if start is None or end is None:
+            return False
+        if start == 0 and end >= 2**63 - 1 and step == 1:
+            return True
+        return False
+
+    def slice_cond(self, dim=0, start=None, end=None, step=1):
+        if start is None or end is None:
+            return False
+        if start == 0 and end >= 2**63 - 1 and step == 1:
+            return True
+        return False
+
+    input_storages = set()
+    output_storages = set()
+    for node in graph.nodes:
+        if node.op == 'placeholder':
+            input_storages.add(get_node_storage(node))
+        else:
+            break
+
+    for out in tuple(graph.nodes)[-1].args[0]:
+        if isinstance(out, torch.fx.Node):
+            output_storages.add(get_node_storage(out))
+
+    noop_conditions = {
+        aten.slice.Tensor: (0, slice_cond),
+        aten.clone.default: (0, true),
+        aten.slice_scatter.default: (1, slice_scatter_cond)
+    }
+
+    for node in graph.nodes:
+        if node.target in noop_conditions:
+            cloned_arg_index, cond = noop_conditions[node.target]
+            src = node.args[cloned_arg_index]
+            if get_node_storage(node) in output_storages and get_node_storage(src) in input_storages:
+                continue
+            if same_layout(node, src) and cond(*node.args, **node.kwargs):
+                node.replace_all_uses_with(src)
+                graph.erase_node(node)
 
 
 def reinplace_scatters(graph):
