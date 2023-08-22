@@ -315,6 +315,7 @@ class BaseSchedulerNode:
                             V.kernel.inplace_update_buffers[
                                 self.get_name()
                             ] = input_node.get_name()
+                        break
 
     def allocate(self):
         if not self.node.should_allocate():
