@@ -4087,7 +4087,6 @@
     CUDA: batch_norm_cuda
     MPS: batch_norm_mps
     MkldnnCPU: mkldnn_batch_norm
-  tags: core
 
 - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
@@ -4103,6 +4102,7 @@
     MPS: _batch_norm_legit_mps
     MkldnnCPU: _mkldnn_batch_norm_legit
   autogen: _native_batch_norm_legit_functional
+  tags: core
 
 # HACK: identical to _native_batch_norm_legit, but training is known to be False,
 # So we known that running stats will not be mutated.
@@ -4111,6 +4111,7 @@
   dispatch:
     CompositeExplicitAutograd: _batch_norm_legit_no_training
   autogen: _native_batch_norm_legit_no_training.out
+  tags: core
 
 - func: _native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
   dispatch:
