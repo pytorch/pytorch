@@ -1733,8 +1733,8 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError(f"The runtime module of '{device_type}' has already "
-                           f"been registered with '{getattr(m, device_type)}'")
+        raise RuntimeError("The runtime module of '{}' has already "
+                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module

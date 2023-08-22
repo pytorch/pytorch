@@ -582,7 +582,7 @@ class TestOptimizer(TestCase):
         self.assertTrue(
             cloned.qualified_name.startswith('__torch__.'),
             ("Expected the cloned module's name to start with the string "
-             f"'__torch__.', but got: {cloned.qualified_name}"),
+             "'__torch__.', but got: {}").format(cloned.qualified_name),
         )
 
 

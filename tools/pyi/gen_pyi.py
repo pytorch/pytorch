@@ -462,7 +462,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "pdist",
         "cosine_similarity",
     ]
-    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
+    imported_hints = ["from .. import {0} as {0}".format(_) for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
@@ -479,7 +479,9 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
+    imported_hints += [
+        "from .._C._nn import {0} as {0}".format(_) for _ in c_nn_imports
+    ]
     # This is from `torch._C._nn` but renamed
     imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
 
@@ -873,13 +875,15 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, out: Optional[Tensor] = None) -> Tensor: ..."
+            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
+                binop
+            )
         )
 
     native_functions = parse_native_yaml(
@@ -1082,8 +1086,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
-                " -> Tensor: ..."
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
+                " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
@@ -1092,9 +1096,9 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number] = 1{out_suffix})"
-                " -> Tensor: ..."
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
+                "*, alpha: Optional[Number] = 1{})"
+                " -> Tensor: ...".format(binop, out_suffix)
             )
     simple_conversions = [
         "byte",
