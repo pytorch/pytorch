@@ -26,6 +26,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
+from ..stream import StreamAPIContainer
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
@@ -565,7 +566,9 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif hasattr(value, 'stream_id'):
+        elif any([isinstance(value, stream_instance) for stream_instance in 
+            StreamAPIContainer().get_all_create_stream_method()]
+        ):
             return StreamVariable(
                 None,
                 value,
@@ -1333,7 +1336,8 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif hasattr(proxy.node.target(), 'stream_id'):
+    elif proxy.node.target in StreamAPIContainer().get_all_create_stream_method() or \
+        proxy.node.target in StreamAPIContainer().get_all_current_stream_method():
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(proxy, example_value, example_value.device.type, **options)
     elif isinstance(example_value, int) and proxy.node.target in [

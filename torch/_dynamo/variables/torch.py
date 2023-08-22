@@ -13,6 +13,7 @@ import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
+from ..stream import StreamAPIContainer
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..source import GeneratorStateSource
@@ -329,19 +330,24 @@ class TorchVariable(VariableTracker):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
-        elif hasattr(self.value, '__name__') and self.value.__name__ == 'stream':
+        elif any(
+            [self.value is method for method in StreamAPIContainer().get_all_create_stream_context_method()]
+        ):
             log.warning(
-                "torch." + args[0].device + ".stream() not fully supported, streams may be ignored"
+                str(StreamAPIContainer().get_create_stream_context_method(args[0].device)) + 
+                "not fully supported, streams may be ignored"
             )
             assert len(args) == 1
             return StreamContextVariable.create(tx, args[0], **options)
-        elif hasattr(self.value, 'stream_id'):
+        elif any(
+            [self.value is method for method in StreamAPIContainer().get_all_create_stream_method()]
+        ):
             return wrap_fx_proxy_cls(
                 StreamVariable,
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    self.value,
+                    StreamAPIContainer().get_create_stream_method(self.value.device.type),
                     (),
                     {},
                 ),

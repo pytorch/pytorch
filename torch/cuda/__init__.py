@@ -20,6 +20,7 @@ from typing import Any, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
+from torch._dynamo.stream import StreamAPIContainer
 from torch.types import Device
 from .. import device as _device
 from .._utils import classproperty
@@ -534,13 +535,13 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def _set_stream(stream_id, device_index, device_type):
-    r"""Native set stream specified by the stream id, device index and
+def set_stream_by_id(stream_id, device_index, device_type):
+    r"""set stream specified by the stream id, device index and
         device type
 
-    Args: stream_id (int): specific stream id
-          device_index (int): specific device id
-          device_type (string): specific device type
+    Args: stream_id (int): stream id in stream pool
+          device_index (int): device index in topo
+          device_type (int): enum device type
     """
     torch._C._cuda_setStream(
         stream_id=stream_id,
@@ -1285,6 +1286,15 @@ def _register_triton_kernels():
 
 
 _lazy_call(_register_triton_kernels)
+
+
+# register stream API for dynamo stream capture
+StreamAPIObject = StreamAPIContainer()
+StreamAPIObject.register_create_stream_method('cuda', torch.cuda.streams.Stream)
+StreamAPIObject.register_create_stream_context_method('cuda', torch.cuda.stream)
+StreamAPIObject.register_current_stream_method('cuda', torch.cuda.current_stream)
+StreamAPIObject.register_set_stream_method('cuda', torch.cuda.set_stream)
+StreamAPIObject.register_set_stream_by_id_method('cuda', torch.cuda.set_stream_by_id)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse
