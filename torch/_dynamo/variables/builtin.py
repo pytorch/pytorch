@@ -516,7 +516,7 @@ class BuiltinVariable(VariableTracker):
                 # Interaction between ndarray and tensors:
                 #   We prefer the tensor op whenever there are tensors involved
                 if check_numpy_ndarray_args(args, kwargs) and not any(
-                    isinstance(arg, variables.TensorVariable) for arg in args
+                    type(arg) == variables.TensorVariable for arg in args
                 ):
                     proxy = tx.output.create_proxy(
                         "call_function",
@@ -524,7 +524,7 @@ class BuiltinVariable(VariableTracker):
                         *proxy_args_kwargs(args, kwargs),
                     )
 
-                    return variables.NumpyNdarrayVariable.create(tx, proxy, **options)
+                    return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy, **options)
 
                 proxy = tx.output.create_proxy(
                     "call_function",
