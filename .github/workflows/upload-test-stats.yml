@@ -27,7 +27,7 @@ jobs:
     if:
       github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
       needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-22.04
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
 
     steps:
@@ -39,10 +39,13 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - run: |
-          pip3 install requests==2.26
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
+          pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
 
       - name: Upload test stats
         env:
