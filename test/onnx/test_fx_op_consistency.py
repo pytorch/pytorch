@@ -494,12 +494,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
     xfail(
-        "div",
-        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None
-        and sample.input.dtype in onnx_test_common.INT_TYPES,
-        reason="rounding_mode is not yet supported",
-    ),
-    xfail(
         "index_put",
         matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
         and (sample.kwargs.get("accumulate") is False),
