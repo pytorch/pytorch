@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipLazy, skipMeta)
+    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipLazy, skipMeta, skipXLA)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types_and,
 )
@@ -764,6 +764,7 @@ class TestViewOps(TestCase):
     # This test use as_strided to construct a tensor with overlapping memory,
     # which is not handled by the functionalization pass.
     @skipLazy
+    @skipXLA
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim
