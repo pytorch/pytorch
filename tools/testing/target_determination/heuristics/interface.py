@@ -87,21 +87,7 @@ class TestPrioritizations:
             orig_tests=orig_tests,
         )
 
-    def find_conflicts(self) -> List[str]:
-        """
-        Returns a list of tests which are in multiple lists.
-        """
-        tests = self.highly_relevant + self.probably_relevant + self.unranked_relevance
-        return [test for test in tests if tests.count(test) > 1]
-
-    def get_unexpected_tests(self, expected: List[str]) -> List[str]:
-        """
-        Returns a list of tests which are not in the expected list.
-        """
-        tests = self.highly_relevant + self.probably_relevant + self.unranked_relevance
-        return [test for test in tests if test not in expected]
-
-    def print_info(self, expected: List[str]) -> None:
+    def print_info(self) -> None:
         def _print_tests(label: str, tests: List[str]) -> None:
             if not tests:
                 return
@@ -114,26 +100,6 @@ class TestPrioritizations:
         _print_tests("Highly relevant", self.highly_relevant)
         _print_tests("Probably relevant", self.probably_relevant)
         _print_tests("Unranked relevance", self.unranked_relevance)
-
-        conflicts = self.find_conflicts()
-        if conflicts:
-            print(f"WARNING: {len(conflicts)} tests are in multiple lists:")
-            for test in conflicts:
-                lists = []
-                for list_name in ["highly_relevant", "probably_relevant", "unranked"]:
-                    if test in getattr(self, list_name):
-                        lists.append(list_name)
-                print(f"  {test} is in {' ,'.join(lists)}")
-        else:
-            print("No conflicts found")
-
-        unexpected = self.get_unexpected_tests(expected)
-        if unexpected:
-            print(f"WARNING: {len(unexpected)} tests are not in the expected list:")
-            for test in unexpected:
-                print(f"  {test}")
-        else:
-            print("No unexpected tests found")
 
 
 class HeuristicInterface:

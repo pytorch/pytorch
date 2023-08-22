@@ -8,16 +8,6 @@ from tools.testing.target_determination.heuristics import (
 )
 
 
-def _print_tests(label: str, tests: List[str]) -> None:
-    if not tests:
-        return
-
-    print(f"{label} tests ({len(tests)}):")
-    for test in tests:
-        if test in tests:
-            print(f"  {test}")
-
-
 def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
     rankings = TestPrioritizations(unranked_relevance=tests.copy())
     print(f"Received {len(tests)} tests to prioritize")
@@ -37,12 +27,7 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         )
 
         if num_tests_found:
-            _print_tests("Highly relevant", new_rankings.highly_relevant)
-            _print_tests("Probably relevant", new_rankings.probably_relevant)
-            _print_tests("Unranked relevance", new_rankings.unranked_relevance)
-
-        print("Aggregated results across all heuristics:")
-        rankings.print_info(tests)
+            new_rankings.print_info()
 
     num_tests_analyzed = (
         len(rankings.highly_relevant)

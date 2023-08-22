@@ -99,7 +99,7 @@ class TypePromotionRule(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         ...
 
     def is_valid(self) -> bool:

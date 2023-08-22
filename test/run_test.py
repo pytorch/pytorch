@@ -37,37 +37,25 @@ from torch.utils import cpp_extension
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-try:
-    # using tools/ to optimize test run.
-    sys.path.insert(0, str(REPO_ROOT))
-    from tools.stats.export_test_times import TEST_TIMES_FILE
-    from tools.stats.upload_metrics import emit_metric
-    from tools.testing.target_determination.determinator import (
-        get_test_prioritizations,
-        TestPrioritizations,
-    )
-    from tools.testing.test_selections import (
-        calculate_shards,
-        get_test_case_configs,
-        NUM_PROCS,
-        ShardedTest,
-        THRESHOLD,
-    )
+# using tools/ to optimize test run.
+sys.path.insert(0, str(REPO_ROOT))
+from tools.stats.export_test_times import TEST_TIMES_FILE
+from tools.stats.upload_metrics import emit_metric
+from tools.testing.target_determination.determinator import (
+    get_test_prioritizations,
+    TestPrioritizations,
+)
+from tools.testing.test_selections import (
+    calculate_shards,
+    get_test_case_configs,
+    NUM_PROCS,
+    ShardedTest,
+    THRESHOLD,
+)
 
-    HAVE_TEST_SELECTION_TOOLS = True
-except ImportError as e:
-
-    class ShardedTest:
-        pass
-
-    NUM_PROCS = 2
-    HAVE_TEST_SELECTION_TOOLS = False
-    print(
-        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
-    )
-finally:
-    # Make sure to remove REPO_ROOT after import is done
-    sys.path.remove(str(REPO_ROOT))
+HAVE_TEST_SELECTION_TOOLS = True
+# Make sure to remove REPO_ROOT after import is done
+sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -990,7 +978,7 @@ def get_pytest_args(
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error and IS_CI and HAVE_TEST_SELECTION_TOOLS:
+        if not options.continue_through_error and IS_CI:
             pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
@@ -1421,21 +1409,30 @@ def get_selected_tests(options) -> List[ShardedTest]:
 
 def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
-    path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
-    if os.path.exists(path):
-        with open(path) as f:
-            test_file_times = cast(Dict[str, Any], json.load(f))
-    else:
-        test_file_times = {}
-    test_config = os.environ.get("TEST_CONFIG")
-    if test_config not in test_file_times:
-        print(
-            "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
-        )
+    path = os.path.join(str(REPO_ROOT), file)
+    if not os.path.exists(path):
+        print("::warning:: Failed to find test times file. Using round robin sharding.")
         return {}
+
+    with open(path) as f:
+        test_times_file = cast(Dict[str, Any], json.load(f))
+    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    test_config = os.environ.get("TEST_CONFIG")
+    if test_config in test_times_file.get(build_environment, {}):
+        print("Found test times from artifacts")
+        return test_times_file[build_environment][test_config]
+    elif test_config in test_times_file["default"]:
+        print(
+            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
+            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+        )
+        return test_times_file["default"][test_config]
     else:
-        print("Found test time stats from artifacts")
-        return test_file_times[test_config]
+        print(
+            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
+            f" and {test_config} test config. Using default build env and default test config instead."
+        )
+        return test_times_file["default"]["default"]
 
 
 def do_sharding(
@@ -1453,17 +1450,16 @@ def do_sharding(
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
 
-    if HAVE_TEST_SELECTION_TOOLS:
-        # Do sharding
-        shards = calculate_shards(
-            num_shards,
-            selected_tests,
-            test_file_times,
-            must_serial=must_serial,
-            sort_by_time=sort_by_time,
-        )
-        _, tests_from_shard = shards[which_shard - 1]
-        selected_tests = tests_from_shard
+    # Do sharding
+    shards = calculate_shards(
+        num_shards,
+        selected_tests,
+        test_file_times,
+        must_serial=must_serial,
+        sort_by_time=sort_by_time,
+    )
+    _, tests_from_shard = shards[which_shard - 1]
+    selected_tests = tests_from_shard
 
     return selected_tests
 
@@ -1623,10 +1619,9 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    test_prioritization: TestPrioritizations = TestPrioritizations()
-    test_prioritization.unranked_relevance = selected_tests
+    test_prioritization: TestPrioritizations = TestPrioritizations(unranked_relevance = selected_tests.copy())
     metrics_dict = {}
-    if IS_CI and HAVE_TEST_SELECTION_TOOLS:
+    if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
         test_prioritization = get_test_prioritizations(selected_tests)
@@ -1701,7 +1696,7 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-        if IS_CI and HAVE_TEST_SELECTION_TOOLS:
+        if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
     all_failures = [failure for batch in test_batches for failure in batch.failures]
