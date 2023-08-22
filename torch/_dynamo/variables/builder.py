@@ -965,8 +965,8 @@ class VariableBuilder:
                 functools.partial(
                     GuardBuilder.TENSOR_MATCH,
                     value=value
-                    # Need to hold a reference to FakeTensor otherwise it gets garbage collected
-                    if isinstance(source, NumpyTensorSource) else TensorWeakRef(value),
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value),
                 )
             ),
             should_specialize=self.tensor_should_specialize(),
