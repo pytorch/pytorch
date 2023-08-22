@@ -119,8 +119,10 @@ class ModuleCallEntry:
     signature: Optional[ModuleCallSignature] = None
 
 
-def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
+def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
+    buffer_name_to_node = {}
+    print(gm.graph)
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -133,9 +135,32 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                     metadata = node.meta
                     gm.graph.erase_node(node)
                     getattr_node.meta = metadata
-            count += 1
+                    buffer_name_to_node[inp_pos_to_param_buffer_name[count]] = getattr_node
 
-    # Step 2: Fix the input/output of the graph now that we deleted
+            count += 1
+        # Step 2: Find the all the buffers that were mutated and update them
+        if node.op == "output":
+            user_output_nodes = []
+            for return_node in node.all_input_nodes:
+                return_node_name = return_node.name
+                # we found a param/buffer mutation
+                if return_node_name in buffers_to_mutate:
+                    buffer_node_name = buffers_to_mutate[return_node_name]
+                    assert buffer_node_name in buffer_name_to_node
+                    buffer_node = buffer_name_to_node[buffer_node_name]
+                    with gm.graph.inserting_before(node):
+                        buffer_update_node = gm.graph.call_function(
+                            torch.ops.aten.copy_.default, (buffer_node, return_node)
+                        )
+                else:
+                    user_output_nodes.append(return_node)
+            with gm.graph.inserting_before(node):
+                # Only return user outputs
+                new_output = gm.graph.output(tuple(user_output_nodes))
+                node.replace_all_uses_with(new_output)
+                gm.graph.erase_node(node)
+
+    # Step 3: Fix the input/output of the graph now that we deleted
     # some args.
     gm.graph.lint()
     names = [f"arg_{i}" for i in range(len(in_spec.children_specs))]
@@ -148,7 +173,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
     )
     gm.recompile()
 
-    # Step 3: Find state references in HigherOrderOps and recursively
+    # Step 4: Find state references in HigherOrderOps and recursively
     # fix them.
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.ops.cond:
@@ -174,6 +199,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
             _unlift(
                 false_gm,
@@ -181,6 +208,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
         if node.op == "call_function" and node.target.__name__ == "map_impl":
             body_graph, num_mapped, *operands = node.args
@@ -198,7 +227,13 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
             _, in_spec = pytree.tree_flatten(real_operands)
 
             _unlift(
-                body_gm, inp_pos_to_buffer_name_for_submod, in_spec, None, state_dict
+                body_gm,
+                inp_pos_to_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
@@ -254,6 +289,8 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
+        ep.graph_signature.buffers_to_mutate,
+        ep.graph_signature.user_outputs,
     )
     return new_gm
 
