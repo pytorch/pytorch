@@ -33,7 +33,7 @@ jobs:
         device: ["cuda", "rocm"]
         include:
           - device: "rocm"
-            rocm_version: ["5.6"]
+            rocm_version: "5.6"
         
     timeout-minutes: 40
     env:
