@@ -249,6 +249,11 @@ def export(
     # We convert to nn.Module because __call__ of ExportedProgram
     # is untracable right now.
     if isinstance(f, ExportedProgram):
+        if len(constraints) > 0:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "Cannot provide constraints for already exported program."
+            )
         f = f.module()
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
@@ -256,6 +261,11 @@ def export(
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                if len(constraints) > 0:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        "Cannot provide constraints for already exported program."
+                    )
                 gm_torch_level = f
             else:
                 with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):

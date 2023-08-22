@@ -848,6 +848,53 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
+    def test_retracable_ep(self):
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x.sum() + self.buf.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.buf.add_(1)
+                bar = self.bar(x)
+                self.bar.buf.add_(2)
+                return bar.sum() + self.buf.sum()
+
+        inp = torch.ones(5, 5)
+        exported = torch._export.export(Foo(), (inp,))
+        reexported = torch._export.export(exported, (inp,))
+
+        self.assertTrue(torch.allclose(exported(inp), reexported(inp)))
+
+        inp = torch.ones(5, 5)
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
+        reexported = torch._export.export(exported, (inp,))
+
+        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
+
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
+        # This seems fine because the exported program is generalized to work for dynamic shapes.
+        reexported = torch._export.export(exported, (inp,))
+        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
+
+        exported = torch._export.export(Foo(), (inp,))
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, 'Cannot provide constraints for already exported program.'):
+            _ = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
+        # Reexported program should still work for dynamic shapes.
+        rexported = torch._export.export(exported, (inp,))
+        self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
+
 
 if __name__ == '__main__':
     run_tests()
