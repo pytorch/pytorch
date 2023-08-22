@@ -236,7 +236,7 @@ class TestTransformers(NNTestCase):
                 attn_mask = None
 
             if key_padding_mask_dim == 2:
-                key_padding_mask = make_tensor((B, L), dtype=mask_dtype, device=device) > 0
+                key_padding_mask = make_tensor((B, L), dtype=mask_dtype, device=device)
             elif key_padding_mask_dim is None:
                 key_padding_mask = None
 
