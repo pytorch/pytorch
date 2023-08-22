@@ -8,24 +8,33 @@ namespace torch_dispatch_mode {
 struct StashTorchDispatchModeGuard {
  public:
   StashTorchDispatchModeGuard() {
-    saved_mode_and_key_ = c10::impl::TorchDispatchModeTLS::pop_stack();
+    if (c10::impl::TorchDispatchModeTLS::any_modes_set(
+            /*skip_infra_modes=*/true)) {
+      saved_mode_ = c10::impl::TorchDispatchModeTLS::pop_stack();
+    } else {
+      auto mode_and_key =
+          c10::impl::TorchDispatchModeTLS::pop_highest_infra_mode();
+      saved_mode_ = std::move(std::get<0>(mode_and_key));
+      saved_mode_key_ = std::get<1>(mode_and_key);
+    }
   }
 
   ~StashTorchDispatchModeGuard() {
-    c10::impl::TorchDispatchModeTLS::push_onto_stack(
-        std::move(std::get<0>(saved_mode_and_key_)),
-        std::get<1>(saved_mode_and_key_));
+    if (saved_mode_key_ != c10::nullopt) {
+      c10::impl::TorchDispatchModeTLS::set_mode(
+          std::move(saved_mode_), saved_mode_key_.value());
+    } else {
+      c10::impl::TorchDispatchModeTLS::push_onto_stack(std::move(saved_mode_));
+    }
   }
 
   const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
-    return std::get<0>(saved_mode_and_key_);
+    return saved_mode_;
   }
 
  private:
-  std::tuple<
-      std::shared_ptr<at::SafePyObject>,
-      c10::optional<c10::impl::TorchDispatchModeKey>>
-      saved_mode_and_key_;
+  std::shared_ptr<at::SafePyObject> saved_mode_;
+  c10::optional<c10::impl::TorchDispatchModeKey> saved_mode_key_;
 };
 
 struct StashTorchDispatchStackGuard {
