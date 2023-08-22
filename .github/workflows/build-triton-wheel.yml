@@ -34,7 +34,7 @@ jobs:
         rocm_version: ["5.6"]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && 'pytorch/manylinux-builder:rocm_' + matrix.rocm_version || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm_{0}', matrix.nightly_rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
