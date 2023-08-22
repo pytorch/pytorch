@@ -572,3 +572,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
+
+
+class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def is_matching_object(obj):
+        try:
+            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+        except (ImportError, AttributeError):
+            return False
+        else:
+            return type(obj) is KeyedJaggedTensor
+
+    def __init__(self, value, **kwargs):
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert type(value) is KeyedJaggedTensor
+        super().__init__(value, **kwargs)
+
+    # TODO Handle getattr for _length_per_key and _offset_per_key properly.
