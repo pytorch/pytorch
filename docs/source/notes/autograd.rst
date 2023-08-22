@@ -869,9 +869,9 @@ are executed after the gradients have been accumulated for that Tensor, meaning 
 Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.Tensor.register_hook`
 are run as gradients are being computed, hooks registered via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
 are only triggered once the Tensor's grad field is updated by autograd at the end of
-the backward pass. Thus, post-accumulate-grad hooks are only fired for leaf Tensors.
-Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook` on a
-non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
+the backward pass. Thus, post-accumulate-grad hooks can only be registered for leaf
+Tensors. Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+on a non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
