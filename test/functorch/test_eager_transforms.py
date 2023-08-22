@@ -3466,8 +3466,8 @@ class TestMakeFunctional(TestCase):
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
-                self.buffer = nn.Buffer(torch.randn(3))
-                self.buffer_tied = self.buffer
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_tied', self.buffer)
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3497,7 +3497,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.buffer = nn.Buffer(torch.randn(3))
+                self.register_buffer('buffer', torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3517,7 +3517,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.buffer = nn.Buffer(torch.randn(3))
+                self.register_buffer('buffer', torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3573,8 +3573,8 @@ class TestMakeFunctional(TestCase):
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
                 self.bias = self.linear.bias
-                self.buffer = nn.Buffer(torch.randn(3))
-                self.buffer_tied = self.buffer
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_tied', self.buffer)
 
             def forward(self, x):
                 x = self.linear(x)
@@ -4769,6 +4769,7 @@ class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows
     @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)

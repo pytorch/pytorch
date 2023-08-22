@@ -428,10 +428,7 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-# Many of these operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration.
-# TODO: fix registrations, add all existing impls that are correct
-def unsupported_complex_op(op):
+def stride_incorrect_op(op):
     if op.namespace not in ("aten", "prims"):
         return False
     if op is aten._fft_c2c.default:
@@ -443,10 +440,26 @@ def unsupported_complex_op(op):
     return False
 
 
-# These operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration
-@register_op_impl(unsupported_complex_op)
-def unsupported_fft(fake_mode, func, *args, **kwargs):
+# These operators have meta implementations with incorrect strides
+@register_op_impl(stride_incorrect_op)
+def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
+    # This is a workaround for meta implmentations with incorrect strides
+
+    def is_symbolic(x):
+        if isinstance(x, FakeTensor):
+            return x._has_symbolic_sizes_strides
+        if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return True
+        return False
+
+    # For static shapes, we can fall back to eager for the real strides
+    if fake_mode.allow_fallback_kernels:
+        require_dynamic = any(
+            is_symbolic(x) for x in itertools.chain(args, kwargs.values())
+        )
+        if not require_dynamic:
+            return run_fallback_kernel(fake_mode, func, args, kwargs, None)
+
     raise UnsupportedOperatorException(func)
 
 
@@ -466,7 +479,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
-    lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+    lambda func: torch.Tag.dynamic_output_shape in func.tags
     and func
     not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
@@ -527,7 +540,8 @@ def nonzero(fake_mode, func, arg):
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
             if arg.numel() >= 2:
-                maxval = arg.numel()
+                maxval = int(arg.numel())
+
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
@@ -537,9 +551,7 @@ def nonzero(fake_mode, func, arg):
 
 
 # NB: this must be ordered after local_scalar_dense
-@register_op_impl(
-    lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
-)
+@register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
 def data_dep(fake_mode, func, *args, **kwargs):
     raise DataDependentOutputException(func)
 
@@ -1359,8 +1371,8 @@ class FakeTensorMode(TorchDispatchMode):
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
-            torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
-            and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
+            torch.Tag.nondeterministic_seeded not in func.tags
+            and torch.Tag.inplace_view not in func.tags
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
@@ -1436,7 +1448,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             "prims::" in func._schema.name
             and hasattr(func, "prim_meta_impl")
-            and not unsupported_complex_op(func)
+            and not stride_incorrect_op(func)
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
@@ -1531,7 +1543,6 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
-                and type(x) is not torch.nn.Buffer
             )
 
         return [
@@ -1549,7 +1560,7 @@ class FakeTensorMode(TorchDispatchMode):
         def validate(x):
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
-                if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
+                if torch.Tag.inplace_view in func.tags:
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
@@ -1625,7 +1636,7 @@ class FakeTensorMode(TorchDispatchMode):
         return wrap
 
     def cpp_meta_supports_symint(self, func):
-        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
+        if torch.Tag.view_copy in func.tags:
             return True
         return func in [
             aten.empty.memory_format,
@@ -1707,7 +1718,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # these should all be supported, just to be safe
     # avoid fallback for operators which inplace modify metadata
     # because the input fake tensors would be umodified
-    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
+    if torch.Tag.inplace_view in func.tags:
         raise orig_not_implemented_exception
 
     inp_impls = {}
