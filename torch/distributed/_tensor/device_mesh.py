@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
-from typing import List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -97,6 +97,8 @@ class DeviceMesh:
 
     device_type: str
     mesh: torch.Tensor
+    mesh_dim_names: Optional[Tuple[str, ...]]
+    _parent_device_mesh: Any
 
     def __init__(
         self,
@@ -114,6 +116,7 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self.mesh_dim_names = mesh_dim_names
+        self._parent_device_mesh = None
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -240,6 +243,72 @@ class DeviceMesh:
         if id(self) == id(other):
             return True
         return self.mesh.equal(other.mesh)
+
+    def _create_child_mesh(self, mesh_dim: int) -> "DeviceMesh":
+        # swap the current dim to the last dim then reshape to flatten out other
+        # dims, so we can just extract the list of ranks which contains cur_rank.
+        cur_rank = self.get_rank()
+        pg_ranks_by_dim = self.mesh.swapdims(-1, mesh_dim).reshape(
+            -1, self.mesh.size(mesh_dim)
+        )
+
+        for mesh_1d in pg_ranks_by_dim:
+            sub_mesh = DeviceMesh(self.device_type, mesh_1d, _init_process_groups=False)
+            if cur_rank in mesh_1d:
+                res_sub_mesh = sub_mesh
+
+        res_sub_mesh._dim_group_infos = [self._dim_group_infos[mesh_dim]]
+        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+        res_sub_mesh._parent_device_mesh = self
+        return res_sub_mesh
+
+    def __getitem__(self, mesh_dim_name):
+        """
+        Slice the current DeviceMesh based on the mesh_dim_name given to create a child
+        DeviceMesh.
+
+        Args:
+            mesh_dim_name (int): the name of the mesh dimension of the parent DeviceMesh
+            to create a child DeviceMesh for.
+        Returns:
+            A :class:`DeviceMesh` object
+
+        Example (2 host with 4 GPUs each):
+        ```
+        # Below is a DeviceMesh with mesh_shape of (2, 4) and mesh_dim_name of ("dp", "tp")
+        mesh = DeviceMesh(device_type="cuda",
+                          mesh=[
+                            [0, 1, 2, 3],
+                            [4, 5, 6, 7]
+                          ],
+                          mesh_dim_names=["dp", "tp"])
+                          )
+        ```
+        Calling mesh["dp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
+        Calling mesh["dp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
+        Calling mesh["tp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
+        Calling mesh["tp"] on rank 1, 3 would return a 1D child DeviceMesh:([1, 3]).
+        Calling mesh["tp"] on rank 2, 5 would return a 1D child DeviceMesh:([2, 5]).
+        Calling mesh["tp"] on rank 4, 7 would return a 1D child DeviceMesh:([4, 7]).
+        """
+        if self.mesh.ndim <= 1:
+            raise RuntimeError(
+                f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
+            )
+        if self.mesh_dim_names is None:
+            raise KeyError(
+                "No `mesh_dim_names` found.",
+                "`mesh_dim_names` is required prior to calling `__getitem__`.",
+            )
+        if mesh_dim_name not in self.mesh_dim_names:
+            raise KeyError(
+                f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                f"Available mesh dimensions are: {self.mesh_dim_names}",
+            )
+        mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+        submesh = self._create_child_mesh(mesh_dim)
+
+        return submesh
 
     def get_dim_groups(
         self, mesh_dim: Optional[int] = None
