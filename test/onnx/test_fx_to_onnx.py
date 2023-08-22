@@ -407,6 +407,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     fake_model, real_x, export_options=export_options
                 )
 
+    # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
+    # 1. Pre-trained model is too big for CI
+    # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
+
     # TODO: Unsupported constant tensor in fakemode blocks moving this test to runtime
     def test_fake_tensor_mode_huggingface_bigscience_bloom(self):
         config = transformers.BloomConfig()
@@ -452,10 +456,12 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     # TODO: From Config/Model
     @pytorch_test_common.skip_in_ci(
-        "Skip this test in CI because of memory issue."
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
         "SymFloat in OnnxFUnction attribute is not supported yet."
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
+        # TODO: Make this test work with config
+        # Dolly has no config on transformers
         model_name = "databricks/dolly-v2-3b"
         device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
@@ -471,9 +477,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
         "AssertionError: Mutating module attribute seq_len_cached during export."
         "self.seq_len_cached = seq_len"
-        "Skip this test in CI because of memory issue."
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
         config = transformers.FalconConfig()
@@ -495,11 +501,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     @pytorch_test_common.skip_in_ci(
-        "Skip this test in CI because of memory issue."
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
         "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment. "
         "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow"
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
+        # TODO: Make this test work with config
+        # mpt-7b has no config on transformers
         model_name = "mosaicml/mpt-7b"
         device = "cpu"
         with torch.onnx.enable_fake_mode() as fake_context:
