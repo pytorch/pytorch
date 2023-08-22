@@ -168,7 +168,6 @@ debug_index_asserts = False
 # Provides a way to toggle the enforcement of NHWC fallbacks for convolutions
 # this is necessary if they are less performant
 if torch.version.hip:
-
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
     else:
