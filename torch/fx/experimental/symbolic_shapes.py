@@ -8,7 +8,6 @@ import math
 import operator
 import re
 import sys
-import textwrap
 import threading
 import traceback
 from collections import defaultdict
@@ -36,7 +35,7 @@ from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
-from torch.utils._traceback import format_frame
+from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
 InputList = List
@@ -1059,11 +1058,6 @@ def error():
     raise AssertionError("shouldn't be hit")
 
 
-def get_debugging_stack(num_frames_to_cut=2):
-    # cut this frame and the caller's frame by default
-    return ''.join(traceback.format_list(traceback.extract_stack()[:-num_frames_to_cut]))
-
-
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
         aa = a.args
@@ -1702,9 +1696,11 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
-    def add(self, expr):
+    def add(self, expr) -> bool:
+        # Add an expression to the set of constraints.
+        # Return whether the expression is a trivial constraint (i.e., an obvious tautology).
         if expr == sympy.true:
-            return
+            return True
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
@@ -1724,17 +1720,19 @@ class DimConstraints:
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
             expr = self.rewrite_with_congruences(s, expr)
-            if expr != sympy.true:
-                reduced = expr.subs(self._var_to_val)
-                if reduced == sympy.false:
-                    self._inconsistencies.append(
-                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
-                        "is inconsistent!"
-                    )
-                if isinstance(expr, sympy.Eq):
-                    # special status for symbols that have equalities (see `solve` below)
-                    self._symbols_with_equalities.add(s)
-                self._univariate_inequalities[s].add(expr)
+            if expr == sympy.true:
+                return True
+            reduced = expr.subs(self._var_to_val)
+            if reduced == sympy.false:
+                self._inconsistencies.append(
+                    f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                    "is inconsistent!"
+                )
+            if isinstance(expr, sympy.Eq):
+                # special status for symbols that have equalities (see `solve` below)
+                self._symbols_with_equalities.add(s)
+            self._univariate_inequalities[s].add(expr)
+        return False
 
     def add_equality(self, source, expr):
         if expr.free_symbols:
@@ -1984,15 +1982,6 @@ class DimConstraints:
 TLS = threading.local()
 
 
-class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
-        # TODO: Maybe suppress the envid if not DEBUG?
-        return f"{self.extra['envid']}: {msg}", kwargs
-
-
-ENV_COUNTER = collections.Counter()
-
-
 class ShapeEnv:
     def __init__(
         self, *,
@@ -2018,7 +2007,6 @@ class ShapeEnv:
         # symbolically equal.
         duck_shape=True,
         # For debugging
-        frame_id=None,
         co_fields=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
@@ -2038,7 +2026,7 @@ class ShapeEnv:
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
         self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
-        self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
+        self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
@@ -2091,13 +2079,7 @@ class ShapeEnv:
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
-        per_frame_id = ENV_COUNTER[frame_id]
-        ENV_COUNTER[frame_id] += 1
-        if frame_id is None:
-            env_id = per_frame_id
-        else:
-            env_id = f"{frame_id}.{per_frame_id}"
-        self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
+        self.log = log
         self.log.info("create_env")
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
@@ -2389,7 +2371,7 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges.unknown()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2400,7 +2382,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = self._default_unspecified_value_range()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2411,7 +2393,7 @@ class ShapeEnv:
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges(0, 1)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2808,14 +2790,15 @@ class ShapeEnv:
             issued.add(expr)
 
             try:
+                is_trivial = False
                 if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(expr)
+                    is_trivial = self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
-                if len(expr.free_symbols) == 1:
+                if len(expr.free_symbols) == 1 and not is_trivial:
                     symbol = list(expr.free_symbols)[0]
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
@@ -2835,7 +2818,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                self.log.warning("Failing guard allocated at: \n%s", guard.stack)
+                self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
         # First, issue all the non-trivial guards.
@@ -2862,7 +2845,9 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
-                r = self.var_to_range[symbol]
+                r = self.runtime_var_to_range.get(symbol)
+                if r is None:
+                    r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:
                     if isinstance(c, StrictMinMaxConstraint):
@@ -2944,6 +2929,9 @@ class ShapeEnv:
             # Add value range bound guards for all symbols with no trivial bounds.
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
+            #
+            # NB: do NOT use runtime var ranges, they're unsound!  You will
+            # only get correct TV with the compile-time ranges.
             for sym, vr in self.var_to_range.items():
                 if vr.lower != -sympy.oo:
                     self._add_target_expr(sympy.Le(vr.lower, sym))
@@ -3021,7 +3009,7 @@ class ShapeEnv:
         def format_tb(tb):
             if not verbose:
                 return ""
-            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
+            return f"\n   Guarded at:\n{''.join('   ' + l for l in tb.format())}"
 
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
@@ -3196,7 +3184,7 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            stacktrace = ''.join(traceback.format_list(self.var_to_stack[s]))
+            stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
@@ -3338,11 +3326,22 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
-    def _log_guard(self, prefix: str, g, tb):
+    def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
-            for frame in reversed(tb):
-                if frame.filename not in uninteresting_files():
-                    break
+            fsummary = None
+            frame = inspect.currentframe()
+            try:
+                while frame is not None:
+                    if frame.f_code.co_filename not in uninteresting_files():
+                        fsummary = traceback.FrameSummary(
+                            frame.f_code.co_filename,
+                            frame.f_lineno,
+                            frame.f_code.co_name,
+                        )
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame
 
             # NB: this stack is truncated, but it's fine because the main
             # stack_info will give you the rest of the info you need
@@ -3363,7 +3362,7 @@ class ShapeEnv:
                 "eval %s [guard added]%s (%s)%s",
                 g,
                 maybe_user_loc,
-                format_frame(frame),
+                format_frame(fsummary),
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
@@ -3466,8 +3465,7 @@ class ShapeEnv:
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if not self._suppress_guards_tls():
-                tb = traceback.extract_stack()[:-1]
-                stack = ''.join(traceback.format_list(tb))
+                stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
         except Exception:
@@ -3476,15 +3474,26 @@ class ShapeEnv:
         else:
             if not self._suppress_guards_tls():
                 assert guard is not None
-                assert tb is not None
 
                 self.refine_ranges(guard)
 
-                self._log_guard("eval", g, tb)
+                self._log_guard("eval", g)
             else:
                 self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
+
+    def cleanup(self):
+        # Break reference cycles.
+        # This destroys the stacks. If you really want to keep them, we
+        # just need some way to break references on code objects.
+        for g in self.guards:
+            g.stack.cleanup()
+        for s in self.var_to_stack.values():
+            s.cleanup()
+        for ras in self.deferred_runtime_asserts.values():
+            for ra in ras:
+                ra.stack.cleanup()
 
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         expr = orig_expr
@@ -3517,8 +3526,7 @@ class ShapeEnv:
         # here)
 
         if not self._suppress_guards_tls():
-            tb = traceback.extract_stack()[:-1]
-            stack = ''.join(traceback.format_list(tb))
+            stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
@@ -3530,7 +3538,7 @@ class ShapeEnv:
             # in ranges.  For example, i0 <= s0 is un-rangeable, because
             # we can't put s0 in the range.  So this is not very high
             # priority at the moment.
-            self._log_guard("runtime_assert", expr, tb)
+            self._log_guard("runtime_assert", expr)
         else:
             self.log.debug("runtime_assert %s [guard suppressed]", expr)
 
