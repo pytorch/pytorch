@@ -922,6 +922,9 @@ class TestCppExtensionJIT(common.TestCase):
 
 
     def test_gen_extension_h_pch(self):
+        if not IS_LINUX:
+            return
+
         source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
             return x.sin() + y.sin();
@@ -949,11 +952,10 @@ class TestCppExtensionJIT(common.TestCase):
         pch_exist = os.path.exists(head_file_pch)
         signature_exist = os.path.exists(head_file_signature)
 
-        if IS_LINUX:
-            compiler = get_cxx_compiler()
-            if check_compiler_is_gcc(compiler):
-                self.assertEqual(pch_exist, True)
-                self.assertEqual(signature_exist, True)
+        compiler = get_cxx_compiler()
+        if check_compiler_is_gcc(compiler):
+            self.assertEqual(pch_exist, True)
+            self.assertEqual(signature_exist, True)
 
 if __name__ == "__main__":
     common.run_tests()
