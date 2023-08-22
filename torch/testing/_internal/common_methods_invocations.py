@@ -8624,36 +8624,12 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
-                    }
-                ),
-                'TestForeach',
-                'test_unary_op',
-                device_type='cuda'
-            ),
-        ),
     ),
     ForeachFuncInfo(
         'asin',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
-                    }
-                ),
-                'TestForeach',
-                'test_unary_op',
-                device_type='cuda'
-            ),
-        ),
     ),
     ForeachFuncInfo(
         'atan',
@@ -9452,10 +9428,7 @@ op_db: List[OpInfo] = [
                    domain=(1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),
-                               DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                                            'TestUnaryUfuncs',
-                                            device_type='cuda'),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10060,10 +10033,6 @@ op_db: List[OpInfo] = [
                            toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
                            'TestUnaryUfuncs', device_type='cuda'),
                        precisionOverride({torch.bfloat16: 1e-2}),
-                       DecorateInfo(
-                           toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
-                           'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                           device_type='cuda'),
                    ],
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -10085,21 +10054,7 @@ op_db: List[OpInfo] = [
                    ref=np.arcsinh,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),
-                               DecorateInfo(
-                                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
-                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                   device_type='cuda'),
-                               DecorateInfo(
-                                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
-                                   'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                   device_type='cuda'),
-                               DecorateInfo(
-                                   toleranceOverride({torch.complex32: tol(atol=1e-02, rtol=8e-03),
-                                                      torch.complex64: tol(atol=1e-02, rtol=8e-03),
-                                                      torch.complex128: tol(atol=1e-02, rtol=8e-03)}),
-                                   'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                   device_type='cuda'),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10125,16 +10080,7 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   ),
-                   # libstdc++ impl of asin will return incorrect or inf or nan values above these thresholds
-                   reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: (torch.tensor(torch.abs(x.real) > 1e4, dtype=torch.bool) |
-                                            torch.tensor(torch.abs(x.imag) > 1e4, dtype=torch.bool) |
-                                            (torch.tensor(torch.abs(x.imag) > 5e2, dtype=torch.bool) &
-                                             torch.tensor(torch.abs(x.imag) > 5e2, dtype=torch.bool))
-                                            if x.is_complex() else torch.zeros_like(x, dtype=torch.bool)),
-                       safe_val=5)
-                   ),
+                   )),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
                    ref=np.arctan,

@@ -12,14 +12,15 @@
 
 namespace at::native {
 
-#if AT_USE_JITERATOR()
+#if 0 && AT_USE_JITERATOR()
 CONSTEXPR_EXCEPT_WIN_CUDA char asin_name[] = "asin_impl";
 #endif
 
 void asin_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR()
+    // Disabled due to accuracy issues
+#if 0 && AT_USE_JITERATOR()
     static const auto asin_string = jiterator_stringify(
         template <typename T> T asin_impl(T a) { return std::asin(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
