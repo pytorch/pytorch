@@ -3518,7 +3518,8 @@ class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
         if not x.is_extern() and all(
-            (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
+            (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
+            for r in x.get_reads()
         ):
             return x.constant_to_device(device)
 
