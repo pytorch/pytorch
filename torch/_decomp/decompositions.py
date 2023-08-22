@@ -3595,7 +3595,11 @@ def matmul(tensor1, tensor2):
         torch._check(False, lambda: "both arguments to matmul need to be at least 1D")
 
 
+# TODO: We should implement a backward decomp instead of forcing forward to be
+# decomposed via registering an Autograd key, otherwise we can't use inductor's
+# lowering which is much faster
 @register_decomposition(aten.upsample_bicubic2d.default)
+@aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     a: Tensor,

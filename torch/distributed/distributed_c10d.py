@@ -1123,9 +1123,9 @@ def init_process_group(
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
-                "For MPI backend, world_size ({}) and rank ({}) "
+                f"For MPI backend, world_size ({world_size}) and rank ({rank}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank)
+                "MPI runtime."
             )
 
         default_pg, _ = _new_process_group_helper(
