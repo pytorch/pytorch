@@ -59,6 +59,11 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
+# TODO(ycao): This is added to avoid breaking existing code temporarily.
+# Remove when migration is done.
+from torch.export import ExportedProgram, ExportBackwardSignature, ExportGraphSignature
+
+
 def dynamic_dim(t: torch.Tensor, index: int):
     if not isinstance(t, torch.Tensor):
         raise UserError(
