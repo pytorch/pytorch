@@ -9,37 +9,22 @@
 #include <stdexcept>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+
+#define C10D_THROW_ERROR(err_type, msg) \
+  throw ::c10d::err_type(               \
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 namespace c10d {
 
-class TORCH_API C10dError : public std::runtime_error {
- public:
-  using std::runtime_error::runtime_error;
+using c10::DistBackendError;
 
-  C10dError(const C10dError&) = default;
-
-  C10dError& operator=(const C10dError&) = default;
-
-  C10dError(C10dError&&) = default;
-
-  C10dError& operator=(C10dError&&) = default;
-
-  ~C10dError() override;
+class TORCH_API SocketError : public DistBackendError {
+  using DistBackendError::DistBackendError;
 };
 
-class TORCH_API TimeoutError : public C10dError {
- public:
-  using C10dError::C10dError;
-
-  TimeoutError(const TimeoutError&) = default;
-
-  TimeoutError& operator=(const TimeoutError&) = default;
-
-  TimeoutError(TimeoutError&&) = default;
-
-  TimeoutError& operator=(TimeoutError&&) = default;
-
-  ~TimeoutError() override;
+class TORCH_API TimeoutError : public DistBackendError {
+  using DistBackendError::DistBackendError;
 };
 
 } // namespace c10d

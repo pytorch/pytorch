@@ -39,7 +39,7 @@ void testGetSet(std::string prefix = "") {
     EXPECT_FALSE(delFailure);
     auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
     store.setTimeout(timeout);
-    EXPECT_THROW(store.get("key0"), std::runtime_error);
+    EXPECT_THROW(store.get("key0"), c10::DistBackendError);
   }
 
   // get() waits up to timeout_.
