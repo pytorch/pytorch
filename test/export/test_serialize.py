@@ -68,7 +68,7 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, *_ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
@@ -93,7 +93,7 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,))
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, *_ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
@@ -136,7 +136,7 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, *_ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
@@ -160,7 +160,7 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,))
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, *_ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
@@ -180,8 +180,8 @@ class TestDeserialize(TestCase):
         ep = export(fn, inputs, {}, constraints)
         ep.graph.eliminate_dead_code()
 
-        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
-        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        serialized_struct, state_dict, orig_args = serialize(ep, opset_version={"aten": 0})
+        deserialized_ep = deserialize(serialized_struct, state_dict, orig_args, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
