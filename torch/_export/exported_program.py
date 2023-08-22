@@ -122,6 +122,7 @@ class ModuleCallEntry:
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
     buffer_name_to_node = {}
+    print(gm.graph)
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -143,7 +144,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
             for return_node in node.all_input_nodes:
                 return_node_name = return_node.name
                 # we found a param/buffer mutation
-                if return_node_name not in user_outputs:
+                if return_node_name in buffers_to_mutate:
                     buffer_node_name = buffers_to_mutate[return_node_name]
                     assert buffer_node_name in buffer_name_to_node
                     buffer_node = buffer_name_to_node[buffer_node_name]
