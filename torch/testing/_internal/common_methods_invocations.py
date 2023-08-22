@@ -8404,6 +8404,8 @@ class foreach_inputs_sample_func:
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        if "foreach_abs" in opinfo.name and dtype in complex_types():
+            return True
         if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
         if "foreach_pow" in opinfo.name and dtype in integral_types():

@@ -409,8 +409,8 @@ class TestForeach(TestCase):
     def test_unary_op(self, device, dtype, op, is_fastpath):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
         samples = op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
-        disable_fastpath = op.name == "_foreach_abs" and dtype in complex_types()
         for sample in samples:
+            disable_fastpath = sample.kwargs.pop("disable_fastpath")
             zero_size = sample.kwargs.pop('zero_size')
             inputs = [sample.input]
             if zero_size:
@@ -419,9 +419,6 @@ class TestForeach(TestCase):
                 inplace_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
                 continue
             inputs = [sample.input]
-            disable_fastpath = (op.name == "_foreach_abs" and dtype in complex_types()) or sample.kwargs.pop(
-                "disable_fastpath"
-            )
             if not op.has_no_out_of_place:
                 self.assertEqual(
                     ref(inputs),
