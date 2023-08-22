@@ -1003,11 +1003,19 @@ static at::Tensor linear_int8_with_onednn_weight(
   tensor dst_scales_t = tensor(ideep::scale_t(1, output_scale));
   tensor src_zp_t = tensor(ideep::zero_point_t(1, input_zero_point));
   tensor dst_zp_t = tensor(ideep::zero_point_t(1, output_zero_point));
-  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  if (input_scale != 1.0f) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  }
+  if (output_scale != 1.0f) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
+  }
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
-  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
-  args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_t});
-  args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
+  if (input_zero_point != 0) {
+    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_t});
+  }
+  if (output_zero_point != 0) {
+    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
+  }
   primitive.execute(ideep::stream::default_stream(), args);
   return output;
 }
