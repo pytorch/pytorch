@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 0
+SCHEMA_VERSION = 1
 
 # TODO (zhxchen17) Move to a separate file.
 class _Union:
