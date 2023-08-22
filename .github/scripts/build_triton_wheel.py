@@ -160,7 +160,7 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
-    parser.add_argument("--rocm_version", action="store_true")
+    parser.add_argument("--rocm_version", type=str)
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
