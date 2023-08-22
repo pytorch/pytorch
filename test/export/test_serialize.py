@@ -14,12 +14,14 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
+    GraphModuleSerializer,
     deserialize,
     serialize,
     SerializeError,
 )
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -27,6 +29,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
     TemporaryFileName,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    find_library_location,
 )
 
 
@@ -516,6 +523,49 @@ class TestSaveLoad(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
                 loaded_ep = load(f)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSerializeCustomClass(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        if IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
+        torch.ops.load_library(str(lib_file_path))
+
+    def test_custom_class(self):
+        custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        def f(x):
+            return x + x
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                arg0, arg1 = node.args
+                node.args = (arg0, custom_obj)
+
+        # Since the exported program is not runnable with our custom obj, we
+        # cannot deserialize the exported program fully since deserializing
+        # requires it to be runnable.
+        serialized_graph = GraphModuleSerializer(
+            ep.graph_signature, ep.call_spec, ep.module_call_graph,
+        ).serialize_graph(ep.graph_module)
+
+        deserializer = GraphModuleDeserializer()
+        deserializer.fake_tensor_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserializer.deserialize_graph(serialized_graph)
+
+        for node in deserializer.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                arg0, arg1 = node.args
+                self.assertTrue(isinstance(arg1, torch._C.ScriptObject))
+                self.assertEqual(arg1.__getstate__(), custom_obj.__getstate__())
 
 
 if __name__ == '__main__':

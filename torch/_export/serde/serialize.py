@@ -1,9 +1,11 @@
+import base64
 import dataclasses
 import io
 import json
 import logging
 import math
 import operator
+import pickle
 import typing
 
 from contextlib import contextmanager
@@ -24,6 +26,7 @@ from .schema import (  # type: ignore[attr-defined]
     Argument,
     BackwardSignature,
     CallSpec,
+    CustomObjArgument,
     Device,
     ExportedProgram,
     Graph,
@@ -582,6 +585,14 @@ class GraphModuleSerializer:
             return Argument.create(as_memory_format=_TORCH_TO_SERIALIZE_MEMORY_FORMAT[arg])
         elif isinstance(arg, torch.layout):
             return Argument.create(as_layout=_TORCH_TO_SERIALIZE_LAYOUT[arg])
+        elif hasattr(type(arg), "__getstate__") and hasattr(type(arg), "__setstate__"):
+            # Custom objects serializable through pickle, such as objects
+            # created through torchbind with a .def_pickle implementation,
+            # contain a __getstate__ and __setstate__ serialize/deserialize
+            # function.
+            blob = pickle.dumps(arg)
+            blob = base64.b64encode(blob).decode('utf-8')
+            return Argument.create(as_custom_obj=CustomObjArgument(blob))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
 
@@ -1030,6 +1041,13 @@ class GraphModuleDeserializer:
                 return list(map(deserialize_optional_tensor_args, value))
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
+        elif isinstance(value, CustomObjArgument):
+            # Custom objects created through torchbind are serialized through
+            # implementing the .def_pickle function. This creates a __getstate__
+            # function which is used to serialize the object, and __setstate__
+            # function which is used to deserialize the object.
+            blob = base64.b64decode(value.blob)
+            return pickle.loads(blob)
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
