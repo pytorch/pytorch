@@ -9,7 +9,7 @@ graph {
     name: "Equal_0"
     op_type: "Equal"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Equal_0"
     type {
