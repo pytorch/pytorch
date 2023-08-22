@@ -722,6 +722,22 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
 
+  m.def("_test_dereference_data", [](const at::Tensor& x) {
+    const void* data_ptr = x.unsafeGetTensorImpl()->data();
+    float a = *((const float*)data_ptr);
+    return a;
+  });
+  m.def("_test_dereference_data_ptr", [](const at::Tensor& x) {
+    const void* data_ptr = x.data_ptr();
+    float a = *((const float*)data_ptr);
+    return a;
+  });
+  m.def("_test_dereference_templated_data_ptr", [](const at::Tensor& x) {
+    const float* data_ptr = x.data_ptr<float>();
+    float a = *data_ptr;
+    return a;
+  });
+
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
   });

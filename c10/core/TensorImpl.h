@@ -486,7 +486,7 @@ struct C10_API TensorImpl;
  *
  *    In practice, tensors which are storage-UNINITIALIZED and
  *    dtype-UNINITIALIZED are *extremely* ephemeral: essentially,
- *    after you do a Resize(), you basically always call mutable_data()
+ *    after you do a Resize(), you basically always call mutable_data<T>()
  *    immediately afterwards.  Most functions are not designed to
  *    work if given a storage-UNINITIALIZED, dtype-UNINITIALIZED tensor.
  *
@@ -1558,8 +1558,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+        "This generally means that you are passing a FakeTensor or a meta "
+        "Tensor into a kernel that does not support it. "
+        "If you're using Caffe2: Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data<T>() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
     // (for example if created as `torch.empty(5)[10:]`) that triggers
@@ -1622,6 +1624,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (is_empty()) {
       return nullptr;
     }
+    TORCH_CHECK(
+        data != nullptr,
+        "The tensor has a non-zero number of elements, but its data was not allocated. "
+        "This generally means that you are passing a FakeTensor or a meta Tensor "
+        "into a kernel that does not support it.");
     return data + data_type_.itemsize() * storage_offset_;
   }
 
