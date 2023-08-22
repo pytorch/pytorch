@@ -23,7 +23,6 @@ from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
-from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 
 
