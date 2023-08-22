@@ -78,10 +78,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
