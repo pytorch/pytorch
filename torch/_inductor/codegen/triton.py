@@ -65,6 +65,12 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
+    def _print_Where(self, expr):
+        c = self.doprint(expr.args[0])
+        p = self.doprint(expr.args[1])
+        q = self.doprint(expr.args[2])
+        return f"tl.where({c}, {p}, {q})"
+
     def _print_Min(self, expr):
         nargs = len(expr.args)
         if len(expr.args) == 1:
@@ -259,11 +265,14 @@ class TritonOverrides(OpOverrides):
     def libdevice_sin(x):
         return f"tl.math.sin({x})"
 
-    @staticmethod
-    def index_expr(expr, dtype):
+    @classmethod
+    def index_expr(cls, expr, dtype):
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
         # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
+
+        if dtype not in {torch.int32, torch.int64}:
+            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
         var.mask_vars = mask_vars
         return var
 
@@ -1183,6 +1192,8 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def indirect_indexing(self, var, size, check=True):
+        # TODO(lezcano) This code should be lifted to codegen/common.py.
+        # This should be easy, as now CSE variables carry bounds info
         class IndirectAssertLine(DeferredLineBase):
             def __init__(self, line, var, mask, size_map):
                 self.var = var
@@ -1219,6 +1230,28 @@ class TritonKernel(Kernel):
 
             def _new_line(self, line):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+
+        if var.bounds.lower < 0:
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg = var.bounds & ValueRanges(-sympy.oo, -1)
+                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:
+                    pos = var.bounds & ValueRanges(0, sympy.oo)
+                    new_bounds = new_bounds | pos
+
+            stm = f"{var} + {self.index_to_str(size)}"
+            # Mixed negative and non-negative
+            if var.bounds.upper >= 0:
+                stm = f"tl.where({var} < 0, {stm}, {var})"
+            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+            new_var.update_on_args("index_wrap", (var,), {})
+            var = new_var
 
         generate_assert = (
             (check or config.debug_index_asserts)
