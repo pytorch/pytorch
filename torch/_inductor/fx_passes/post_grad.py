@@ -47,15 +47,18 @@ pass_patterns = [
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
 
+
 def get_storage(t):
     return t.untyped_storage()._cdata
 
+
 def get_node_storage(node):
-    if not isinstance(node.meta['val'], torch.Tensor):
+    if not isinstance(node.meta["val"], torch.Tensor):
         return None
-    if not torch._C._has_storage(node.meta['val']):
+    if not torch._C._has_storage(node.meta["val"]):
         return None
     return get_storage(node.meta["val"])
+
 
 class FakeTensorUpdater:
     def __init__(self, graph):
@@ -83,14 +86,14 @@ class FakeTensorUpdater:
             existing_tensors[get_node_storage(node)] += 1
 
         def is_fake_tensor_same(new, old):
-            if (
-                new.shape != old.shape
-                or new.stride() != old.stride()
-            ):
+            if new.shape != old.shape or new.stride() != old.stride():
                 return False
             if get_storage(new) == get_storage(old):
                 return True
-            if existing_tensors[get_storage(old)] == 1 and get_storage(new) not in existing_tensors:
+            if (
+                existing_tensors[get_storage(old)] == 1
+                and get_storage(new) not in existing_tensors
+            ):
                 return True
             return False
 
@@ -100,23 +103,29 @@ class FakeTensorUpdater:
 
             def get_fake_tensor(x):
                 if isinstance(x, torch.fx.Node):
-                    return x.meta['val']
+                    return x.meta["val"]
                 return x
 
-            if node.op == 'call_function' and isinstance(node.target, torch._ops.OpOverload):
+            if node.op == "call_function" and isinstance(
+                node.target, torch._ops.OpOverload
+            ):
                 processing = [node]
                 while len(processing) > 0:
                     updating_node = processing.pop()
                     if updating_node in processed:
                         continue
-                    if node.op != 'call_function' or not isinstance(node.target, torch._ops.OpOverload):
+                    if node.op != "call_function" or not isinstance(
+                        node.target, torch._ops.OpOverload
+                    ):
                         continue
 
-                    args, kwargs = tree_map(get_fake_tensor, (updating_node.args, updating_node.kwargs))
+                    args, kwargs = tree_map(
+                        get_fake_tensor, (updating_node.args, updating_node.kwargs)
+                    )
                     new_fake_tensor = updating_node.target(*args, **kwargs)
-                    if is_fake_tensor_same(new_fake_tensor, updating_node.meta['val']):
+                    if is_fake_tensor_same(new_fake_tensor, updating_node.meta["val"]):
                         continue
-                    updating_node.meta['val'] = new_fake_tensor
+                    updating_node.meta["val"] = new_fake_tensor
                     processed.add(updating_node)
                     for user in updating_node.users:
                         processing.append(user)
@@ -566,6 +575,7 @@ def is_valid_splitwithsizes_cat(match):
 
     return True
 
+
 def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
     """True if two nodes have the same size/strides"""
     val1 = node1.meta.get("val")
@@ -576,6 +586,7 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val1.size() == val2.size()
         and val1.stride() == val2.stride()
     )
+
 
 def remove_noop_ops(graph: torch.fx.Graph):
     def true(*args, **kwargs):
@@ -598,7 +609,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
     input_storages = set()
     output_storages = set()
     for node in graph.nodes:
-        if node.op == 'placeholder':
+        if node.op == "placeholder":
             input_storages.add(get_node_storage(node))
         else:
             break
@@ -610,14 +621,17 @@ def remove_noop_ops(graph: torch.fx.Graph):
     noop_conditions = {
         aten.slice.Tensor: (0, slice_cond),
         aten.clone.default: (0, true),
-        aten.slice_scatter.default: (1, slice_scatter_cond)
+        aten.slice_scatter.default: (1, slice_scatter_cond),
     }
 
     for node in graph.nodes:
         if node.target in noop_conditions:
             cloned_arg_index, cond = noop_conditions[node.target]
             src = node.args[cloned_arg_index]
-            if get_node_storage(node) in output_storages and get_node_storage(src) in input_storages:
+            if (
+                get_node_storage(node) in output_storages
+                and get_node_storage(src) in input_storages
+            ):
                 continue
             if same_layout(node, src) and cond(*node.args, **node.kwargs):
                 node.replace_all_uses_with(src)

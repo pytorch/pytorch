@@ -358,6 +358,7 @@ class SchedulerFusionTests(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
+    @patch.object(config, "pattern_matcher", False)
     def test_fusion_choice1(self):
         # Doesn't matter where we break fusion group here
         def f(a):
@@ -369,6 +370,7 @@ class SchedulerFusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """700""")
 
+    @patch.object(config, "pattern_matcher", False)
     def test_fusion_choice2(self):
         # We should materialize e (it's smaller!)
         # [c, e]: 210, [f]: 210, [d]: 200
@@ -382,6 +384,7 @@ class SchedulerFusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """620""")
 
+    @patch.object(config, "pattern_matcher", False)
     def test_fusion_choice3(self):
         # We should materialize e.
         # [c, e]: 300, [f]: 300, [d]: 200
@@ -449,6 +452,7 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(10, 10, grad=True),)
         self.assertExpectedInline(count_numel_train(f, *inp), """1300""")
 
+    @patch.object(config, "pattern_matcher", False)
     def test_partitioning_unremat_bw2(self):
         def f(a):
             a = torch.mm(a, a)
@@ -485,7 +489,6 @@ class InplacingTests(TestCase):
 
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
-
 
 
 # Test cases where we don't do the right thing yet.
