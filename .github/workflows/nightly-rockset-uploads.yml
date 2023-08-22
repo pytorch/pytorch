@@ -18,6 +18,7 @@ jobs:
 
   upload-stats-to-rockset:
     runs-on: ubuntu-22.04
+    environment: upload-stats
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
