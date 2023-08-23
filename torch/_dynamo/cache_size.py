@@ -85,9 +85,6 @@ class CacheSize:
     # Sources of objects with ID_MATCH guards
     id_guarded_sources: Set[str] = field(default_factory=set)
 
-    def __str__(self):
-        return f"CacheSize(total={self.total}, per_guarded_obj={tuple(self.per_id_guarded_obj.values())})"
-
 
 def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
     # Walk the linked list to calculate the cache size
