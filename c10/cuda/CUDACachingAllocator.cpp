@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/static_tracepoint.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -32,6 +33,9 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+TORCH_SDT_DEFINE_SEMAPHORE(malloc)
+TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
@@ -3306,6 +3310,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
+      if (TORCH_SDT_IS_ENABLED(malloc)) {
+        TORCH_SDT_WITH_SEMAPHORE(malloc, &r, device, size, 0);
+      }
+
       // Allocator declars allocate const!?
       const_cast<NativeCachingAllocator*>(this)->malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
@@ -3483,6 +3491,10 @@ class NativeCachingAllocator : public CUDAAllocator {
 NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
+  if (TORCH_SDT_IS_ENABLED(free)) {
+    TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+  }
+
   allocator.free(ptr);
 }
 
