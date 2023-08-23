@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
-        self.child_to_parent_mapping = {}
+        self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
 
     def get_current_mesh(self) -> "DeviceMesh":
         if len(self.mesh_stack) == 0:
@@ -63,7 +63,7 @@ class _MeshEnv:
         self.child_to_parent_mapping[res_sub_mesh] = device_mesh
         return res_sub_mesh
 
-    def get_parent_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+    def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
         return self.child_to_parent_mapping.get(device_mesh, None)
 
 
@@ -268,13 +268,13 @@ class DeviceMesh:
             return True
         return self.mesh.equal(other.mesh)
 
-    def __getitem__(self, mesh_dim_name):
+    def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """
         Slice the current DeviceMesh based on the mesh_dim_name given to create a child
         DeviceMesh.
 
         Args:
-            mesh_dim_name (int): the name of the mesh dimension of the parent DeviceMesh
+            mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
             to create a child DeviceMesh for.
         Returns:
             A :class:`DeviceMesh` object
@@ -304,7 +304,7 @@ class DeviceMesh:
         if self.mesh_dim_names is None:
             raise KeyError(
                 "No `mesh_dim_names` found.",
-                "`mesh_dim_names` is required prior to calling `__getitem__`.",
+                "To slice the device mesh, please call `init_device_mesh` with `mesh_dim_names`.",
             )
         if mesh_dim_name not in self.mesh_dim_names:
             raise KeyError(
