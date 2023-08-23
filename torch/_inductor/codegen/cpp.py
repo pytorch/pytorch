@@ -27,6 +27,7 @@ from ..scheduler import BaseScheduling, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
+    is_welford_reduction,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -95,7 +96,8 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
-    "var_unnormalized": "welford",
+    "welford_reduce": "welford",
+    "welford_combine": "welford",
 }
 VECTORIZABLE_RTYPES = {
     "max",
@@ -103,7 +105,8 @@ VECTORIZABLE_RTYPES = {
     "sum",
     "prod",
     "xor_sum",
-    "var_unnormalized",
+    "welford_reduce",
+    "welford_combine",
 }
 
 PYTHON_TO_CPP = {
@@ -145,7 +148,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
     raise AssertionError(reduction_type)
 
@@ -154,7 +157,7 @@ def reduction_init_vec(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
 
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{vec_type}>()"
 
     scalar_init = reduction_init(reduction_type, dtype)
@@ -164,7 +167,7 @@ def reduction_init_vec(reduction_type, dtype):
 def reduction_acc_type(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
 
     return scalar_type
@@ -174,7 +177,7 @@ def reduction_acc_type_vec(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{vec_type}>"
 
     return vec_type
@@ -191,8 +194,14 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
-    if reduction_type == "var_unnormalized":
+    if reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
+    if reduction_type == "welford_combine":
+        if isinstance(next_value, tuple):
+            mean, m2, weight = next_value
+        else:
+            mean, m2, weight = reduction_project(reduction_type, next_value)
+        return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     raise AssertionError(reduction_type)
 
 
@@ -207,15 +216,23 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
         return f"{var} ^ {next_value}"
-    elif reduction_type == "var_unnormalized":
+    elif reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
+    elif reduction_type == "welford_combine":
+        if isinstance(next_value, tuple):
+            # When reading a value from Inductor IR we have a tuple of variable names
+            mean, m2, weight = next_value
+        else:
+            # When combining intermediate accumulators we have a Welford<T> struct
+            mean, m2, weight = reduction_project(reduction_type, next_value)
+        return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     else:
         raise NotImplementedError()
 
 
 def reduction_project(reduction_type, acc):
-    if reduction_type == "var_unnormalized":
-        return f"{acc}.m2"
+    if is_welford_reduction(reduction_type):
+        return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
@@ -1246,9 +1263,7 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
 
-        result = self.cse.generate(
-            self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
-        )
+        result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
@@ -1519,7 +1534,8 @@ class CppVecKernel(CppKernel):
             "sum",
             "prod",
             "xor_sum",
-            "var_unnormalized",
+            "welford_reduce",
+            "welford_combine",
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
@@ -1579,7 +1595,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            if reduction_type == "var_unnormalized":
+            if is_welford_reduction(reduction_type):
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -1597,9 +1613,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         else:
             tmpvar = acc_vec
 
-        result = self.cse.generate(
-            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
-        )
+        result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
@@ -2000,6 +2014,8 @@ class CppVecKernelChecker(CppVecKernel):
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
+        if is_welford_reduction(reduction_type):
+            return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
     def store_reduction(self, name, index, value):
@@ -2633,14 +2649,19 @@ class CppKernelProxy(CppKernel):
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
-                with CppVecKernelChecker(
-                    deepcopy(self.kernel_group.args),
-                    parallel_num_threads(),
-                    tiling_factor,
-                    tiling_indices[-1],
-                ) as vec_checker:
-                    run(vec_checker)
-                if vec_checker.simd_vec:
+                could_vec = True
+                for tiling_indice in tiling_indices:
+                    with CppVecKernelChecker(
+                        deepcopy(self.kernel_group.args),
+                        parallel_num_threads(),
+                        tiling_factor,
+                        tiling_indice,
+                    ) as vec_checker:
+                        run(vec_checker)
+                        could_vec = could_vec and vec_checker.simd_vec
+                        if not could_vec:
+                            break
+                if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2:

@@ -198,7 +198,6 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f32, f64},
@@ -228,7 +227,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
-    ("scatter_reduce", "prod"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
@@ -239,7 +237,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
@@ -285,7 +282,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
-    "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm": {f16},
     ("nn.functional.batch_norm", "without_cudnn"): {f16},
     "nn.functional.cosine_similarity": {f16},
@@ -306,10 +302,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     ("round", "decimals_3"): {f16},
-    ("scatter_reduce", "prod"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
-    "tanh": {f16},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
@@ -324,7 +318,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "cumprod": {f16},
     "kron": {f16},
     "nanquantile": {f32, f64},
-    "nn.functional.avg_pool2d": {f16, f32, f64},
     ("nn.functional.batch_norm", "without_cudnn"): {f16},
     "nn.functional.batch_norm": {f16},
     "nn.functional.cosine_similarity": {f16},
@@ -337,14 +330,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
-else:
-    # aten.miopen_batch_norm is unsupported for lowering
-    inductor_expected_failures_single_sample["cuda"].update(
-        {
-            "nn.functional.batch_norm": {f16, f32},
-            "nn.functional.instance_norm": {f16, f32},
-        }
-    )
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update(

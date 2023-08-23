@@ -119,8 +119,9 @@ class ModuleCallEntry:
     signature: Optional[ModuleCallSignature] = None
 
 
-def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
+def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
+    buffer_name_to_node = {}
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -133,9 +134,32 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                     metadata = node.meta
                     gm.graph.erase_node(node)
                     getattr_node.meta = metadata
-            count += 1
+                    buffer_name_to_node[inp_pos_to_param_buffer_name[count]] = getattr_node
 
-    # Step 2: Fix the input/output of the graph now that we deleted
+            count += 1
+        # Step 2: Find the all the buffers that were mutated and update them
+        if node.op == "output":
+            user_output_nodes = []
+            for return_node in node.all_input_nodes:
+                return_node_name = return_node.name
+                # we found a param/buffer mutation
+                if return_node_name in buffers_to_mutate:
+                    buffer_node_name = buffers_to_mutate[return_node_name]
+                    assert buffer_node_name in buffer_name_to_node
+                    buffer_node = buffer_name_to_node[buffer_node_name]
+                    with gm.graph.inserting_before(node):
+                        buffer_update_node = gm.graph.call_function(
+                            torch.ops.aten.copy_.default, (buffer_node, return_node)
+                        )
+                else:
+                    user_output_nodes.append(return_node)
+            with gm.graph.inserting_before(node):
+                # Only return user outputs
+                new_output = gm.graph.output(tuple(user_output_nodes))
+                node.replace_all_uses_with(new_output)
+                gm.graph.erase_node(node)
+
+    # Step 3: Fix the input/output of the graph now that we deleted
     # some args.
     gm.graph.lint()
     names = [f"arg_{i}" for i in range(len(in_spec.children_specs))]
@@ -148,7 +172,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
     )
     gm.recompile()
 
-    # Step 3: Find state references in HigherOrderOps and recursively
+    # Step 4: Find state references in HigherOrderOps and recursively
     # fix them.
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.ops.cond:
@@ -174,6 +198,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
             _unlift(
                 false_gm,
@@ -181,6 +207,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
         if node.op == "call_function" and node.target.__name__ == "map_impl":
             body_graph, num_mapped, *operands = node.args
@@ -198,7 +226,13 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
             _, in_spec = pytree.tree_flatten(real_operands)
 
             _unlift(
-                body_gm, inp_pos_to_buffer_name_for_submod, in_spec, None, state_dict
+                body_gm,
+                inp_pos_to_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
@@ -254,7 +288,10 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
+        ep.graph_signature.buffers_to_mutate,
+        ep.graph_signature.user_outputs,
     )
+    new_gm.meta.update(ep.graph_module.meta)
     return new_gm
 
 
@@ -273,6 +310,8 @@ class ExportedProgram:
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         self._graph_module = torch.fx.GraphModule(root, graph)
+        if isinstance(root, torch.fx.GraphModule):
+            self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._call_spec: CallSpec = call_spec
@@ -285,14 +324,6 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=True)
     def graph_module(self):
         return self._graph_module
-
-    @graph_module.setter
-    def graph_module(self, gm: torch.fx.GraphModule) -> None:
-        """
-        Set the underlying ``GraphModule`` for this ``ExportedProgram``.
-        """
-        assert isinstance(gm, torch.fx.GraphModule), f'Expected a GraphModule instance, but got {type(gm)}'
-        self._graph_module = gm
 
     @property
     @compatibility(is_backward_compatible=True)
@@ -409,13 +440,39 @@ class ExportedProgram:
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
+
+        def _get_updated_range_constraints(
+            gm: torch.fx.GraphModule,
+        ) -> Dict[sympy.Symbol, RangeConstraint]:
+            def get_shape_env(gm):
+                vals = [
+                    node.meta["val"]
+                    for node in gm.graph.nodes
+                    if node.meta.get("val", None) is not None
+                ]
+                from torch._guards import detect_fake_mode
+                fake_mode = detect_fake_mode(vals)
+                if fake_mode is not None:
+                    return fake_mode.shape_env
+                for v in vals:
+                    if isinstance(v, torch.SymInt):
+                        return v.node.shape_env
+
+            shape_env = get_shape_env(gm)
+            if shape_env is None:
+                return {}
+            range_constraints = {
+                k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+            }
+            return range_constraints
+
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
             copy.deepcopy(self.graph_signature),
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            copy.deepcopy(self.range_constraints),
+            _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
         )
