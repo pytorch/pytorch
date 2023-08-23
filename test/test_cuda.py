@@ -168,7 +168,7 @@ class TestCuda(TestCase):
     def test_set_per_process_memory_fraction(self):
         # test invalid fraction value.
         with self.assertRaisesRegex(TypeError, "Invalid type"):
-            torch.cuda.set_per_process_memory_fraction(int(1))
+            torch.cuda.set_per_process_memory_fraction(1)
         with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
             torch.cuda.set_per_process_memory_fraction(-0.1)
         with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
@@ -1765,7 +1765,7 @@ torch.cuda.synchronize()
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = compare(output, output_method)
-                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match Tensor.{op} result")
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.

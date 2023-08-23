@@ -295,7 +295,7 @@ def _init_streams(
         for fsdp_state in state._all_fsdp_states
     )
     # Prioritize all-gathers/reduce-scatters over async all-reduce for HSDP and
-    # preserve the default priority otherwise
+    # preserve the default priority of 0 otherwise
     high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
@@ -778,13 +778,9 @@ def _post_backward_hook(
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
             if handle.uses_sharded_strategy:
-                grad_to_offload = _reduce_grad(state, handle)
+                _reduce_grad(state, handle)
             else:
-                grad_to_offload = _reduce_grad_no_shard(state, handle)
-            already_ran_post_reduction_logic = grad_to_offload is None
-            if not already_ran_post_reduction_logic:
-                _offload_grad(state, handle, grad_to_offload)
-                _post_backward_use_sharded_grad_views(handle)
+                _reduce_grad_no_shard(state, handle)
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
@@ -847,11 +843,10 @@ def _should_free_in_backward(
 
 
 @no_type_check
-def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.Tensor]:
+def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
     """
-    Returns ``None`` if running async all-reduce for HSDP since then the
-    post-reduction logic runs in this function in the all-reduce stream.
-    Otherwise, returns the gradient to offload (if offloading).
+    For sharded strategies, this runs gradient reduction, sharded gradient
+    accumulation if needed, and the post-reduction callback.
     """
     flat_param = handle.flat_param
     uses_hybrid_sharded_strategy = handle._sharding_strategy in (
@@ -887,9 +882,8 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.T
                 grad_to_offload = _accumulate_sharded_grad(
                     state, handle, new_sharded_grad
                 )
-                _offload_grad(state, handle, grad_to_offload)
-                _post_backward_use_sharded_grad_views(handle)
-                return None
+                _post_reduce_grad_callback(state, handle, grad_to_offload)
+                return
         _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
     else:
         state._comm_hook(
@@ -897,13 +891,16 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.T
         )
         # NOTE: HSDP variants do not support communication hook.
     grad_to_offload = _accumulate_sharded_grad(state, handle, new_sharded_grad)
-    return grad_to_offload
+    _post_reduce_grad_callback(state, handle, grad_to_offload)
 
 
 @no_type_check
 def _get_reduce_scatter_tensors(
     state: _FSDPState, unsharded_grad: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns the input and output tensors to reduce-scatter, respectively.
+    """
     chunks = list(unsharded_grad.chunk(state.world_size))
     numel_to_pad = state.world_size * chunks[0].numel() - unsharded_grad.numel()
     padded_unsharded_grad = (
@@ -919,6 +916,11 @@ def _accumulate_sharded_grad(
     handle: FlatParamHandle,
     sharded_grad: torch.Tensor,
 ) -> torch.Tensor:
+    """
+    Accumulates the reduce-scattered sharded gradient with any existing sharded
+    gradient if needed, returning the gradient to offload (if CPU offloading is
+    enabled).
+    """
     flat_param = handle.flat_param
     _cast_grad_to_param_dtype(state, sharded_grad, flat_param)
     # Save the sharded gradient in `_saved_grad_shard` to support gradient
@@ -935,7 +937,11 @@ def _accumulate_sharded_grad(
 
 
 @no_type_check
-def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.Tensor:
+def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
+    """
+    For no-shard, this runs gradient reduction (which directly covers any
+    gradient accumulation implicitly) and the post-reduction callback.
+    """
     flat_param = handle.flat_param
     if state._comm_hook is None:  # default path
         _div_if_needed(flat_param.grad, state._gradient_predivide_factor)
@@ -948,7 +954,23 @@ def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.T
     if not handle._keep_low_precision_grads:
         _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
     grad_to_offload = flat_param.grad.data
-    return grad_to_offload
+    _post_reduce_grad_callback(state, handle, grad_to_offload)
+
+
+@no_type_check
+def _post_reduce_grad_callback(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    # Additional arguments needed for the callback logic
+    grad_to_offload: torch.Tensor,
+):
+    """
+    This callback captures any logic to run after the gradient reduction
+    finishes. Currently, this offloads the gradient to CPU if CPU offloading is
+    enabled and uses sharded gradient views if ``use_orig_params=True``.
+    """
+    _offload_grad(state, handle, grad_to_offload)
+    _post_backward_use_sharded_grad_views(handle)
 
 
 @no_type_check
