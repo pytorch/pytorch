@@ -75,12 +75,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-jammy-py3_9-clang12-asan-build:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-focal-py3_9-clang7-asan-build:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.4xlarge" },
@@ -92,14 +92,14 @@ jobs:
         ]}
       sync-tag: asan-build
 
-  linux-jammy-py3_9-clang12-asan-test:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-focal-py3_9-clang7-asan-test:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_9-clang12-asan-build
+    needs: linux-focal-py3_9-clang7-asan-build
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
 
   linux-focal-py3_8-clang10-onnx-build:
@@ -224,12 +224,12 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
-  linux-jammy-py3-clang12-mobile-build:
-    name: linux-jammy-py3-clang12-mobile-build
+  linux-focal-py3-clang7-mobile-build:
+    name: linux-focal-py3-clang7-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3-clang12-mobile-build
-      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+      build-environment: linux-focal-py3-clang7-mobile-build
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
       build-generates-artifacts: false
       test-matrix: |
         { include: [
@@ -264,7 +264,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-py3_8-clang8-xla
-      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.0
+      docker-image-name: xla_base
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
@@ -305,12 +305,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
         ]}
 
-  linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
-    name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
+  linux-bionic-cuda12_1-py3_10-gcc9-bazel-test:
+    name: linux-bionic-cuda12.1-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
       cuda-version: "12.1"
       test-matrix: |
         { include: [
@@ -351,13 +351,13 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-rocm5_6-py3_8-build:
+  linux-focal-rocm5_4_2-py3_8-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.6-py3.8
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
+      build-environment: linux-focal-rocm5.4.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |

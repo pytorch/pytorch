@@ -1,14 +1,14 @@
-import cmath
 import math
+import cmath
 import warnings
-
-from collections import OrderedDict
-from typing import Dict, Optional
 
 import torch
 import torch.backends.cudnn as cudnn
 
-from ..nn.modules.utils import _list_with_default, _pair, _quadruple, _single, _triple
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple, _list_with_default
+
+from collections import OrderedDict
+from typing import Dict, Optional
 
 _builtin_table: Optional[Dict[int, str]] = None
 
@@ -112,31 +112,18 @@ _builtin_ops = [
 # in these cases, we want to resolve the function to their python implementation
 # instead looking up a builtin "aten::" schema
 
-
 def _gen_torch_functional_registered_ops():
     # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__)
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = [
-        "stft",
-        "istft",
-        "lu",
-        "cdist",
-        "norm",
-        "unique",
-        "unique_consecutive",
-        "tensordot",
-    ]
+    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
     return {getattr(torch.functional, name) for name in ops}
-
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 
-
 def _is_special_functional_bound_op(fn):
     return fn in _functional_registered_ops
-
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
@@ -148,17 +135,11 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if (
-                callable(v)
-                and not _is_special_functional_bound_op(v)
-                and v is not torch.no_grad
-                and v is not torch.autocast
-            ):
+            if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad and v is not torch.autocast:
                 # Fixup inconsistency in segment_reduce
                 if name == "_segment_reduce":
                     name = name[1:]
                 _builtin_ops.append((v, "aten::" + name))
-
     for mod in _modules_containing_builtins:
         register_all(mod)
 
@@ -167,7 +148,6 @@ def _get_builtin_table():
     _builtin_ops.append((math.remainder, "aten::mathremainder"))  # type: ignore[attr-defined]
 
     import torch.distributed.autograd as dist_autograd
-
     if dist_autograd.is_available():
         _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
         _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))

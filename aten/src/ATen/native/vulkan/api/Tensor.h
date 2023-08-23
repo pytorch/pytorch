@@ -32,7 +32,6 @@ class vTensorStorage final {
   vTensorStorage(
       api::Context* context,
       const api::StorageType storage_type,
-      const api::GPUMemoryLayout gpu_memory_layout,
       const IntArrayRef sizes,
       const at::ScalarType dtype);
 
@@ -88,29 +87,11 @@ class vTensor final {
   vTensor(
       api::Context* context,
       IntArrayRef sizes,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
-
-  // Default constructor for quantized vTensor
-  vTensor(
-      api::Context* const context,
-      const IntArrayRef sizes,
-      double q_scale,
-      int64_t q_zero_point,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
-
-  // Allows construction of vTensor from aten Tensor params
-  vTensor(
-      api::Context* context,
-      IntArrayRef sizes,
       const c10::ScalarType dtype = c10::kFloat,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
-  // Allows construction of quantized vTensor from aten Tensor params
+  // Default constructor with quantization parameters
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
@@ -141,9 +122,7 @@ class vTensor final {
  private:
   // Tensor Options
   c10::ScalarType dtype_;
-
-  // GPU specific memory layout qualifier
-  api::GPUMemoryLayout memory_layout_;
+  c10::MemoryFormat memory_format_;
 
   // Sizes and Strides
   c10::SmallVector<int64_t, 6u> sizes_;
@@ -230,12 +209,8 @@ class vTensor final {
     return api::c10_scalartype(view_->texture_format());
   }
 
-  inline api::GPUMemoryLayout gpu_memory_layout() const {
-    return memory_layout_;
-  }
-
-  inline uint32_t gpu_memory_layout_as_uint() const {
-    return static_cast<uint32_t>(memory_layout_);
+  inline c10::MemoryFormat memory_format() const {
+    return memory_format_;
   }
 
   inline IntArrayRef sizes() const {

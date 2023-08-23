@@ -59,7 +59,7 @@ def _frames_fmt(frames, full_filename=False, reverse=False):
         frames = reversed(frames)
     return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f['name'], f['filename'])]
 
-def _block_extra_legacy(b):
+def _block_extra(b):
     if 'history' in b:
         frames = b['history'][0].get('frames', [])
         real_size = b['history'][0]['real_size']
@@ -67,12 +67,6 @@ def _block_extra_legacy(b):
         real_size = b.get('requested_size', b['size'])
         frames = []
     return frames, real_size
-
-def _block_extra(b):
-    if 'frames' not in b:
-        # old snapshot format made it more complicated to get frames/allocated size
-        return _block_extra_legacy(b)
-    return b['frames'], b['requested_size']
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
@@ -96,24 +90,23 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     return result
 
 def _write_blocks(f, prefix, blocks):
-    def frames_fragment(frames):
-        if not frames:
-            return "<non-python>"
-        return ';'.join(_frames_fmt(frames, reverse=True))
     for b in blocks:
         if 'history' not in b:
-            frames, accounted_for_size = _block_extra(b)
-            f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {accounted_for_size}\n')
-        else:
-            accounted_for_size = 0
-            for h in b['history']:
-                sz = h['real_size']
-                accounted_for_size += sz
-                if 'frames' in h:
-                    frames = h['frames']
-                    f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {sz}\n')
+            f.write(f'{prefix};{b["state"]} {b["size"]}\n')
+            continue
+        accounted_for_size = 0
+        for h in b['history']:
+            sz = h['real_size']
+            accounted_for_size += sz
+            if 'frames' in h:
+                frames = h['frames']
+                if frames:
+                    frame_s = ';'.join(_frames_fmt(frames, reverse=True))
                 else:
-                    f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
+                    frame_s = "<non-python>"
+                f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
+            else:
+                f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
         gaps = b['size'] - accounted_for_size
         if gaps:
             f.write(f'{prefix};{b["state"]};<gaps> {gaps}\n')
@@ -225,12 +218,19 @@ def segsum(data):
         boffset = 0
         for b in seg['blocks']:
             active = b['state'] == 'active_allocated'
-            if active:
-                _, allocated_size = _block_extra(b)
-                all_ranges.append((boffset, allocated_size, True))
-                seg_allocated += allocated_size
-                seg_free_internal += b['size'] - allocated_size
+            if 'history' in b:
+                # use the more accurate real_size to account for internal fragmentation if we have it
+                for h in b['history']:
+                    if active:
+                        all_ranges.append((h['addr'] - seg['address'], h['real_size'], active))
+                        seg_allocated += h['real_size']
+                        assert len(b['history']) == 1
+                        seg_free_internal += b['size'] - h['real_size']
             else:
+                if active:
+                    all_ranges.append((boffset, b['size'], True))
+                    seg_allocated += b['size']
+            if not active:
                 seg_free_external += b['size']
 
             boffset += b['size']
@@ -248,7 +248,7 @@ def segsum(data):
             finish_ = (start_ + size)
             start = start_ // PAGE_SIZE
             finish = (finish_ - 1) // PAGE_SIZE + 1
-            m = chr(ord('a' if active else 'A') + (i % 26))
+            m = chr((ord('a' if active else 'A') + (i % 26)))
             for j in range(start, finish):
                 s = max(start_, j * PAGE_SIZE)
                 e = min(finish_, (j + 1) * PAGE_SIZE)
@@ -366,6 +366,15 @@ _memory_viz_template = r"""
 <!DOCTYPE html>
 <html>
 <head>
+<style>
+pre {
+    margin: 0px;
+}
+html, body {
+    height: 100%;
+    overflow: clip;
+}
+</style>
 </head>
 <body>
 <script type="module">
@@ -446,7 +455,7 @@ def _profile_to_snapshot(profile):
         device = to_device(tensor_key.device)
         addr = tensor_key.storage.ptr
 
-        seg = snapshot['segments'][device]  # type: ignore[index]
+        seg = snapshot['segments'][device]
         if seg['address'] is None or seg['address'] > addr:
             seg['address'] = addr
         seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
@@ -456,12 +465,12 @@ def _profile_to_snapshot(profile):
         stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
         r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
         if during_trace:
-            snapshot['device_traces'][device].append(r)  # type: ignore[index]
+            snapshot['device_traces'][device].append(r)
         return r
 
     def free(alloc, device):
         for e in ('free_requested', 'free_completed'):
-            snapshot['device_traces'][device].append({'action': e,  # type: ignore[index]
+            snapshot['device_traces'][device].append({'action': e,
                                                       'addr': alloc['addr'],
                                                       'size': alloc['size'],
                                                       'stream': 0,
@@ -490,18 +499,19 @@ def _profile_to_snapshot(profile):
     blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
                      for (tensor_key, version), event in kv_to_elem.items()]
     for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
-        seg = snapshot['segments'][device]  # type: ignore[index]
+        seg = snapshot['segments'][device]
         last_addr = seg['address']
         for _, addr, size, frames in blocks:
             if last_addr < addr:
                 seg['blocks'].append({'size': addr - last_addr, 'state': 'inactive'})
-            seg['blocks'].append({'size': size, 'state': 'active_allocated', 'requested_size': size, 'frames': frames})
+            seg['blocks'].append({'size': size, 'state': 'active_allocated',
+                                  'history': [{'addr': addr, 'frames': frames, 'real_size': size}]})
             last_addr = addr + size
         if last_addr < seg['total_size']:
             seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
 
-    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]  # type: ignore[attr-defined]
-    for seg in snapshot['segments']:  # type: ignore[attr-defined, name-defined, no-redef]
+    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]
+    for seg in snapshot['segments']:
         seg['total_size'] -= seg['address']
         if not seg['blocks']:
             seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})

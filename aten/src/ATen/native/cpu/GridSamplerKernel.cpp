@@ -505,7 +505,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto s = Vec(1) - n;
 
     // get interpolation weights for each neighbor
-    // e.g., for the nw corner, the weight is `dist_to_south * dist_to_east`.
+    // e.g., for the nw corder, the weight is `dist_to_south * dist_to_east`.
     auto nw = s * e;
     auto ne = s * w;
     auto sw = n * e;
@@ -1157,16 +1157,13 @@ void grid_sampler_2d_cpu_kernel_impl(
   auto spatial_size = H * W;
   auto grain_size = spatial_size == 0 ? (N + 1)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 4 /* 2d * 2 tensors*/);
-  if (output.numel() == 0) {
-         return;
-  }
 
 #define HANDLE_CASE(interp, padding, align_corners)                            \
   case padding: {                                                              \
     ApplyGridSample<scalar_t, 2, interp, padding, align_corners>               \
     grid_sample(inp_acc);                                                      \
     parallel_for(0, N, grain_size, [&](int64_t begin, int64_t end) {           \
-      for (const auto n : c10::irange(begin, end)) {                           \
+      for (const auto n : c10::irange(begin, end)) {                                  \
         auto out_slice = out_acc[n];                                           \
         auto inp_slice = inp_acc[n];                                           \
         grid_sample_2d_grid_slice_iterator(                                    \
@@ -1223,10 +1220,6 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool,2> output_mask) {
-  if (grad_output_.numel() == 0) {
-    grad_grid.zero_();
-    return;
-  }
   // grad_output should be contiguous most of time. Ensuring that it is
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();

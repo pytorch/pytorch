@@ -637,7 +637,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # 4. go through the ops mapped to each QuantizeHandler type, and verify
         # correctness.
         def _op_in_base_sets_of_related_ops(op):
-            for ops in base_name_to_sets_of_related_ops.values():
+            for name, ops in base_name_to_sets_of_related_ops.items():
                 if op in ops:
                     return True
             return False
@@ -1829,7 +1829,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results, 'fp32', 'int8', compute_cosine_similarity,
             'cosine_similarity_int8_vs_fp32')
 
-        for layer_results in results.values():
+        for layer_name, layer_results in results.items():
             assert 'sqnr_int8_vs_fp32' in \
                 layer_results['weight']['int8'][0].keys()
             assert 'l2_error_int8_vs_fp32' in \

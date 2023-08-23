@@ -637,7 +637,7 @@ class TestSaveLoad(JitTestCase):
         # Validate that with no input specified the traced inputs are stored
         traced_module = torch.jit.trace(module, input_tensor)
         traced_inputs = list(traced_module.graph.inputs())
-        self.assertEqual(traced_module._c._retrieve_traced_inputs()['forward'], [input_tensor])
+        self.assertEquals(traced_module._c._retrieve_traced_inputs()['forward'], [input_tensor])
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
             traced_module.save(path)
@@ -653,7 +653,7 @@ class TestSaveLoad(JitTestCase):
         # Validate that inputs aren't saved when requested not to
         traced_module = torch.jit.trace(module, input_tensor, _store_inputs=False)
         traced_inputs = list(traced_module.graph.inputs())
-        self.assertEqual(len(traced_module._c._retrieve_traced_inputs()), 0)
+        self.assertEquals(len(traced_module._c._retrieve_traced_inputs()), 0)
 
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
@@ -720,7 +720,7 @@ class TestSaveLoad(JitTestCase):
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(Model, self).__init__()
                 self.x = "x" * (2 ** 32 + 1)
 
             def forward(self, i) -> int:

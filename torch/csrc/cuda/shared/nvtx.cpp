@@ -4,7 +4,9 @@
 #include <nvToolsExt.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::cuda::shared {
+namespace torch {
+namespace cuda {
+namespace shared {
 
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -17,4 +19,6 @@ void initNvtxBindings(PyObject* module) {
   nvtx.def("markA", nvtxMarkA);
 }
 
-} // namespace torch::cuda::shared
+} // namespace shared
+} // namespace cuda
+} // namespace torch

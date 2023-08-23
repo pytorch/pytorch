@@ -4,7 +4,6 @@ import os
 import contextlib
 import torch._logging
 import torch._logging._internal
-from torch._dynamo.utils import LazyString
 import logging
 
 @contextlib.contextmanager
@@ -76,12 +75,8 @@ def make_logging_test(**kwargs):
             torch._dynamo.reset()
             records = []
             # run with env var
-            if len(kwargs) == 0:
-                with self._handler_watcher(records):
-                    fn(self, records)
-            else:
-                with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
-                    fn(self, records)
+            with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
+                fn(self, records)
 
             # run with API
             torch._dynamo.reset()
@@ -117,32 +112,12 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         cls._exit_stack.enter_context(
             unittest.mock.patch("torch._dynamo.config.suppress_errors", True)
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch("torch._dynamo.config.verbose", False)
-        )
 
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
-
-    def getRecord(self, records, m):
-        record = None
-        for r in records:
-            # NB: not r.msg because it looks like 3.11 changed how they
-            # structure log records
-            if m in r.getMessage():
-                self.assertIsNone(
-                    record,
-                    msg=LazyString(
-                        lambda: f"multiple matching records: {record} and {r} among {records}"
-                    ),
-                )
-                record = r
-        if record is None:
-            self.fail(f"did not find record with {m} among {records}")
-        return record
 
     # This patches the emit method of each handler to gather records
     # as they are emitted

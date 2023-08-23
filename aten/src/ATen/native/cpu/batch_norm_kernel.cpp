@@ -1236,7 +1236,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
             save_mean, save_invstd, running_mean, running_var, train, eps);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
       batch_norm_cpu_channels_last_impl<scalar_t>(output, input, weight, bias,
           save_mean, save_invstd, running_mean, running_var, train, eps);
@@ -1257,7 +1257,7 @@ void batch_norm_cpu_collect_stats_kernel(
         batch_norm_cpu_collect_stats_contiguous_impl<scalar_t>(mean, var_sum, input);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
       batch_norm_cpu_collect_stats_channels_last_impl<scalar_t>(mean, var_sum, input);
     });
@@ -1281,7 +1281,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
             grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
       batch_norm_cpu_backward_channels_last_impl<scalar_t>(grad_input, grad_weight, grad_bias,
           grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);

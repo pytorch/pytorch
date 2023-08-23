@@ -1,16 +1,15 @@
 import timeit
-
-import torch
-import torch.nn as nn
 from functorch.compile import compiled_module, tvm_compile
+import torch.nn as nn
+import torch
 
 
 def nop(f, _):
     return f
 
 
-fw_compiler = tvm_compile(target="llvm", tuning_logfile="fw_keops")
-bw_compiler = tvm_compile(target="llvm", tuning_logfile="bw_keops")
+fw_compiler = tvm_compile(target='llvm', tuning_logfile='fw_keops')
+bw_compiler = tvm_compile(target='llvm', tuning_logfile='bw_keops')
 fw_compiler = nop
 bw_compiler = nop
 

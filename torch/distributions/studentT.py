@@ -6,8 +6,7 @@ from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 
-__all__ = ["StudentT"]
-
+__all__ = ['StudentT']
 
 class StudentT(Distribution):
     r"""
@@ -26,11 +25,7 @@ class StudentT(Distribution):
         loc (float or Tensor): mean of the distribution
         scale (float or Tensor): scale of the distribution
     """
-    arg_constraints = {
-        "df": constraints.positive,
-        "loc": constraints.real,
-        "scale": constraints.positive,
-    }
+    arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
 
@@ -47,16 +42,12 @@ class StudentT(Distribution):
     @property
     def variance(self):
         m = self.df.clone(memory_format=torch.contiguous_format)
-        m[self.df > 2] = (
-            self.scale[self.df > 2].pow(2)
-            * self.df[self.df > 2]
-            / (self.df[self.df > 2] - 2)
-        )
+        m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
         m[(self.df <= 2) & (self.df > 1)] = inf
         m[self.df <= 1] = nan
         return m
 
-    def __init__(self, df, loc=0.0, scale=1.0, validate_args=None):
+    def __init__(self, df, loc=0., scale=1., validate_args=None):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
@@ -91,26 +82,16 @@ class StudentT(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         y = (value - self.loc) / self.scale
-        Z = (
-            self.scale.log()
-            + 0.5 * self.df.log()
-            + 0.5 * math.log(math.pi)
-            + torch.lgamma(0.5 * self.df)
-            - torch.lgamma(0.5 * (self.df + 1.0))
-        )
-        return -0.5 * (self.df + 1.0) * torch.log1p(y**2.0 / self.df) - Z
+        Z = (self.scale.log() +
+             0.5 * self.df.log() +
+             0.5 * math.log(math.pi) +
+             torch.lgamma(0.5 * self.df) -
+             torch.lgamma(0.5 * (self.df + 1.)))
+        return -0.5 * (self.df + 1.) * torch.log1p(y**2. / self.df) - Z
 
     def entropy(self):
-        lbeta = (
-            torch.lgamma(0.5 * self.df)
-            + math.lgamma(0.5)
-            - torch.lgamma(0.5 * (self.df + 1))
-        )
-        return (
-            self.scale.log()
-            + 0.5
-            * (self.df + 1)
-            * (torch.digamma(0.5 * (self.df + 1)) - torch.digamma(0.5 * self.df))
-            + 0.5 * self.df.log()
-            + lbeta
-        )
+        lbeta = torch.lgamma(0.5 * self.df) + math.lgamma(0.5) - torch.lgamma(0.5 * (self.df + 1))
+        return (self.scale.log() +
+                0.5 * (self.df + 1) *
+                (torch.digamma(0.5 * (self.df + 1)) - torch.digamma(0.5 * self.df)) +
+                0.5 * self.df.log() + lbeta)

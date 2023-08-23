@@ -399,22 +399,12 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
-  try {
-    for (const auto i : c10::irange(devices_.size())) {
-      // Checking the work's corresponding CUDA events' status
-      if (!(*ncclStartEvents_)[i].query()) {
-        return false;
-      }
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclStartEvents_)[i].query()) {
+      return false;
     }
-  } catch (const std::exception& e) {
-    if (std::string(e.what()).find("driver shutting down") ==
-        std::string::npos) {
-      throw;
-    }
-    LOG(INFO) << "[Rank " << rank_
-              << "] Event query failed with exception: " << e.what();
   }
-
   return true;
 }
 
@@ -672,21 +662,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options:"
-            << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TIMEOUT(ms): " << options_->timeout.count()
-            << ", USE_HIGH_PRIORITY_STREAM: "
+  LOG(INFO) << "[Rank " << rank_
+            << "] ProcessGroupNCCL initialized with following options:"
+            << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
+            << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
+            << "\nTIMEOUT(ms): " << options_->timeout.count()
+            << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
-            << ", TORCH_DISTRIBUTED_DEBUG: "
+            << "\n TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
-            << ", NCCL_DEBUG: " << std::string(nccl_debug)
-            << ", ID=" << this->getID();
+            << "\n NCCL_DEBUG: " << std::string(nccl_debug);
 
   RECORD_PARAM_COMMS(
       0, // seq
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       rank, // rank
       "init", // colName
       0, // inSize
@@ -834,10 +824,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     workCleanupLoop();
-    VLOG(2) << "[Rank " << rank_
-            << "] NCCL watchdog thread terminated normally";
+    LOG(INFO) << "[Rank " << rank_
+              << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     // Append error message reported from workCleanupLoop
     const auto exitMsg = c10::str(
@@ -1464,7 +1454,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevices(devices);
   auto& ncclStreams = ncclStreams_[key];
-  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   for (const auto i : c10::irange(devices.size())) {
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
@@ -1475,11 +1464,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
-  if (avoidRecordStreams_) {
-    // other functions expect an initialized ptr if avoidRecordStreams_ is set
-    work->stashed_for_allocator_safety_ =
-        std::make_shared<std::vector<at::Tensor>>();
-  }
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
@@ -1978,7 +1963,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2002,7 +1987,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2029,7 +2014,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2088,7 +2073,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       static_cast<int>(
           this->getSequenceNumberForGroup() +
           1), // seq + 1 to match collective increment.
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -2129,7 +2114,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this),
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2192,7 +2177,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -2248,7 +2233,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensors, // inputTensors
         outputTensors, // outputTensors
         rank_, // rank
@@ -2389,7 +2374,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensors, // inputTensors
         outputTensors, // outputTensors
         rank_, // rank
@@ -2508,7 +2493,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensor, // inputTensor
       outputTensor, // outputTensor
       rank_, // rank
@@ -2587,7 +2572,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       rank_, // rank
       "barrier", // colName
       0, // inSize
@@ -2665,7 +2650,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -2706,7 +2691,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -2970,7 +2955,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -3056,7 +3041,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank

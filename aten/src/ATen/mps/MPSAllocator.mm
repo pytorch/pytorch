@@ -3,8 +3,6 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
-#include <ATen/ops/_pin_memory_native.h>
-#include <ATen/ops/is_pinned_native.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 #include <iostream>

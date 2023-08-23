@@ -80,4 +80,4 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
         if isinstance(self.source_datapipe, Sized):
             return len(self.source_datapipe) // self.num_of_instances +\
                 (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
-        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

@@ -92,7 +92,7 @@ kernel void bitwise_not(constant uint& length [[buffer(0)]],
 }}
 )METAL";
 
-static const std::string& getMetalType(const c10::ScalarType& t) {
+const std::string& getMetalType(const c10::ScalarType& t) {
   // Mapping from c10::ScalarType to integral type that can be used for bitwise ops
   // As bitwise ops sign-agnostic map signed/unsigned char and boolean to the same type
   static std::unordered_map<c10::ScalarType, std::string> scalar_to_metal_type = {
@@ -109,11 +109,11 @@ static const std::string& getMetalType(const c10::ScalarType& t) {
   return it->second;
 }
 
-static const std::string& getMetalType(const Tensor& t) {
+const std::string& getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-static const std::string& getMetalType(const c10::Scalar& s) {
+const std::string& getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
 
@@ -161,19 +161,17 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
-static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
-                          id<MTLComputePipelineState> cplState,
-                          uint32_t length) {
+void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length) {
   uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
   [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-static void handle_tensor_tensor_binary_op(const Tensor& self,
-                                           const Tensor& other,
-                                           Tensor& output,
-                                           const std::string& kernel_name) {
+void handle_tensor_tensor_binary_op(const Tensor& self,
+                                    const Tensor& other,
+                                    Tensor& output,
+                                    const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(
@@ -205,10 +203,10 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
   });
 }
 
-static void handle_tensor_scalar_binary_op(const Tensor& self,
-                                           const Scalar& other,
-                                           Tensor& output,
-                                           const std::string& kernel_name) {
+void handle_tensor_scalar_binary_op(const Tensor& self,
+                                    const Scalar& other,
+                                    Tensor& output,
+                                    const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(
@@ -239,10 +237,7 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
   });
 }
 
-static void _bitwise_op_out_mps(const Tensor& self,
-                                const Tensor& other,
-                                const Tensor& output_,
-                                const std::string& op_name) {
+void _bitwise_op_out_mps(const Tensor& self, const Tensor& other, const Tensor& output_, const std::string& op_name) {
   using namespace at::mps;
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
@@ -282,7 +277,7 @@ static void _bitwise_op_out_mps(const Tensor& self,
   return;
 }
 
-static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
+void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   // Handle boolean tensor using logical not
   if (self.scalar_type() == c10::ScalarType::Bool) {
     logical_not_out_mps(self, const_cast<Tensor&>(output_));

@@ -7,11 +7,7 @@ apply the gradients on each worker.
 """
 import torch
 from torch import optim
-
-from .apply_optimizer_in_backward import (
-    _apply_optimizer_in_backward,
-    _get_in_backward_optimizers,
-)
+from .apply_optimizer_in_backward import _apply_optimizer_in_backward
 from .functional_adadelta import _FunctionalAdadelta
 
 from .functional_adagrad import _FunctionalAdagrad

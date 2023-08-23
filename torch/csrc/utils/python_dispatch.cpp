@@ -22,7 +22,6 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
-#include <utility>
 
 namespace py = pybind11;
 
@@ -120,11 +119,11 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // to double dispatch
 
     // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
-    if (mode_stack_len > 0) {
-      const auto& cur_torch_dispatch_mode_state =
-          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()
+    const auto maybe_mode =
+        c10::impl::TorchDispatchModeTLS::maybe_highest_mode();
+    if (maybe_mode != c10::nullopt) {
+      (*maybe_mode)
+          ->pyinterpreter()
           ->python_op_registration_trampoline(op, dispatch_key_, stack);
       return;
     }
@@ -193,10 +192,10 @@ static torch::_RegisterOrVerify register_or_verify() {
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     py::args args,
-    const py::kwargs& kwargs) {
+    py::kwargs kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      std::move(args),
+      args,
       kwargs,
       /*self=*/c10::nullopt);
   {
@@ -307,33 +306,24 @@ void initDispatchBindings(PyObject* module) {
           py::arg("debug") = "impl_t_t")
       .def(
           "impl",
-          [](const py::object& self,
+          [](py::object self,
              const char* name,
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (func.is(py::module::import("torch.library")
-                            .attr("fallthrough_kernel"))) {
-              lib.impl(
-                  name,
-                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
-                  register_or_verify());
-            } else {
-              lib.impl(
-                  name,
-                  torch::dispatch(
-                      dispatch,
-                      CppFunction::makeFromBoxedFunctor(
-                          std::make_unique<PythonKernelHolder>(
-                              func, dispatch))),
-                  register_or_verify());
-              python_registrations_[lib._resolve(name)].insert_or_assign(
-                  dispatch,
-                  std::make_shared<c10::SafePyObject>(
-                      func.release().ptr(), getPyInterpreter()));
-            }
+            lib.impl(
+                name,
+                torch::dispatch(
+                    dispatch,
+                    CppFunction::makeFromBoxedFunctor(
+                        std::make_unique<PythonKernelHolder>(func, dispatch))),
+                register_or_verify());
+            python_registrations_[lib._resolve(name)].insert_or_assign(
+                dispatch,
+                std::make_shared<c10::SafePyObject>(
+                    func.release().ptr(), getPyInterpreter()));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
@@ -342,9 +332,7 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"))
       .def(
           "define",
-          [](const py::object& self,
-             const char* schema,
-             const char* alias_analysis) {
+          [](py::object self, const char* schema, const char* alias_analysis) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(

@@ -61,34 +61,6 @@ void atan2_kernel(TensorIteratorBase& iter) {
   });
 }
 
-#if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...)                         \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
-#define _AT_DISPATCH_ALL_TYPES_NO_BOOL(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(                           \
-            kComplexHalf, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
-#define _AT_DISPATCH_MUL_TYPES(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
-            TYPE, NAME, __VA_ARGS__)
-#else
-#define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...)  \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(           \
-            kComplexHalf, kHalf, kBool, kBFloat16,        \
-            TYPE, NAME, __VA_ARGS__)
-#define _AT_DISPATCH_ALL_TYPES_NO_BOOL(TYPE, NAME, ...)  \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(          \
-            kComplexHalf, kHalf, kBFloat16,              \
-            TYPE, NAME, __VA_ARGS__)
-#define _AT_DISPATCH_MUL_TYPES(TYPE, NAME, ...)          \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
-            kHalf, kBFloat16,                            \
-            TYPE, NAME, __VA_ARGS__)
-#endif
-
 void mul_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (dtype == ScalarType::Bool) {
@@ -113,7 +85,7 @@ void mul_kernel(TensorIteratorBase& iter) {
         });
     });
   } else {
-    _AT_DISPATCH_MUL_TYPES(dtype, "mul_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, dtype, "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) __ubsan_ignore_undefined__ {
@@ -556,14 +528,14 @@ void ge_kernel(TensorIteratorBase& iter) {
 void eq_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
-    _AT_DISPATCH_ALL_TYPES_AND_BOOL(iter.common_dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> bool {
           return a == b;
         });
     });
   } else {
-    _AT_DISPATCH_ALL_TYPES_NO_BOOL(iter.common_dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kComplexHalf, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -579,14 +551,14 @@ void eq_kernel(TensorIteratorBase& iter) {
 void ne_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
-    _AT_DISPATCH_ALL_TYPES_AND_BOOL(iter.common_dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> bool {
           return a != b;
         });
     });
   } else {
-    _AT_DISPATCH_ALL_TYPES_NO_BOOL(iter.common_dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kComplexHalf, kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {

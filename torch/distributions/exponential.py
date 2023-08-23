@@ -5,8 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ["Exponential"]
-
+__all__ = ['Exponential']
 
 class Exponential(ExponentialFamily):
     r"""
@@ -22,7 +21,7 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
-    arg_constraints = {"rate": constraints.positive}
+    arg_constraints = {'rate': constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
     _mean_carrier_measure = 0
@@ -44,7 +43,7 @@ class Exponential(ExponentialFamily):
         return self.rate.pow(-2)
 
     def __init__(self, rate, validate_args=None):
-        (self.rate,) = broadcast_all(rate)
+        self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
@@ -78,7 +77,7 @@ class Exponential(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (-self.rate,)
+        return (-self.rate, )
 
     def _log_normalizer(self, x):
         return -torch.log(-x)

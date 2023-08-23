@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 from functorch.experimental import control_flow
 from functorch.experimental import _map
-from functorch.experimental._map import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
@@ -22,7 +21,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["_ExportPassBase"]
+__all__ = ["ExportPassBase"]
 
 
 Argument = Any
@@ -35,7 +34,7 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class _ExportPassBase(PassBase):
+class ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -48,9 +47,9 @@ class _ExportPassBase(PassBase):
 
     class ExportTracer(PythonKeyTracer):
         """
-        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
+        Tracer used to create nodes during the retracing part of the ExportPassBase
         """
-        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
+        def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -99,14 +98,7 @@ class _ExportPassBase(PassBase):
 
                     try:
                         assert self.fake_tensor_mode is not None
-                        # TODO we should allocate static shapes
-                        # for param/buffer values
-                        if isinstance(x, torch.nn.Parameter):
-                            fake_tensor = self.fake_tensor_mode.from_tensor(
-                                x, static_shapes=True
-                            )
-                        else:
-                            fake_tensor = self.fake_tensor_mode.from_tensor(x)
+                        fake_tensor = self.fake_tensor_mode.from_tensor(x)
                     except UnsupportedFakeTensorException:
                         # TODO: This is just a workaround to get over the
                         # x.as_subclass error
@@ -146,9 +138,9 @@ class _ExportPassBase(PassBase):
 
     class ExportInterpreter(fx.Interpreter):
         """
-        Interpreter to callback on any _ExportPassBase functions
+        Interpreter to callback on any ExportPassBase functions
         """
-        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
+        def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -232,11 +224,17 @@ class _ExportPassBase(PassBase):
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 
+    def __init_subclass__(cls, **kwargs):
+        if hasattr(cls, "ExportInterpreter"):
+            ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
+        if hasattr(cls, "ExportTracer"):
+            ExportPassBase.ExportTracer = cls.ExportTracer  # type: ignore[misc]
+
     def __init__(self) -> None:
         self.interpreter = torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
-        self.tracer = self.ExportTracer(self, CodeGen())
+        self.tracer = ExportPassBase.ExportTracer(self, CodeGen())
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
@@ -348,9 +346,7 @@ class _ExportPassBase(PassBase):
         args: List[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        xs = _unstack_pytree([arg.data for arg in args[:num_args]])[0]
-        pos_args = args[num_args:]
-        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in pos_args]))
+        f_branch = self.call_submodule(f, (args[:num_args][0], *args[num_args:]))
         assert f_branch is not None
         return self._fx(
             "call_function",
@@ -371,11 +367,11 @@ class _ExportPassBase(PassBase):
     def call_submodule(
         self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
     ) -> PassResult:
-        prev_tracer, self.tracer = self.tracer, self.ExportTracer(
+        prev_tracer, self.tracer = self.tracer, ExportPassBase.ExportTracer(
             self, graph_module.graph._codegen
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
-        interpreter = self.ExportInterpreter(self, graph_module)
+        interpreter = ExportPassBase.ExportInterpreter(self, graph_module)
         prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )

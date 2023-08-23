@@ -5,13 +5,11 @@
 #include <ATen/native/RNN.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/_lstm_mps_native.h>
-#include <ATen/ops/lstm_mps_backward_native.h>
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
 
 namespace at::native {
 
-static std::vector<long long> getTensorShape(MPSGraphTensor* mpsTensor) {
+std::vector<long long> getTensorShape(MPSGraphTensor* mpsTensor) {
   std::vector<long long> output_dimensions = {};
   auto dims = mpsTensor.shape;
   for (NSUInteger i = 0; i < [dims count]; i++) {

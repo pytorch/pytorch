@@ -42,6 +42,7 @@ modernize-*,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
 performance-*,
+-performance-unnecessary-value-param,
 readability-container-size-empty,
 '
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'

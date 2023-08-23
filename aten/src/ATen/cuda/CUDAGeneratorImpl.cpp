@@ -7,7 +7,8 @@
 #include <ATen/Utils.h>
 
 namespace at {
-namespace cuda::detail {
+namespace cuda {
+namespace detail {
 
 namespace {
 
@@ -75,7 +76,8 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   return gen;
 }
 
-} // namespace cuda::detail
+} // namespace detail
+} // namespace cuda
 
 /**
  * Note [Why enforce RNG offset % 4 == 0?]

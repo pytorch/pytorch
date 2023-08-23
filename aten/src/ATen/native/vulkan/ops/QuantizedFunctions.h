@@ -11,12 +11,6 @@ Tensor quantize_per_tensor(
     const int64_t zero_point,
     const c10::ScalarType dtype);
 
-Tensor quantize_per_tensor_tensor_qparams(
-    const at::Tensor& input_arg,
-    const at::Tensor& scale,
-    const at::Tensor& zero_point,
-    const c10::ScalarType dtype);
-
 Tensor dequantize_helper(
     const at::Tensor& input_arg,
     const double scale,

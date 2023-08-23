@@ -7,7 +7,6 @@ import re
 import torch
 import unittest
 import itertools
-import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
@@ -37,7 +36,7 @@ class RegularFuncWrapper:
             if isinstance(values, Number):
                 values = [values for _ in range(len(inputs[0]))]
             return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
-        if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
+        if len(inputs) == 2 and isinstance(inputs[1], Number):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
@@ -86,8 +85,6 @@ class InplaceForeachVersionBumpCheck:
 def get_transform_func(num_tensors, dtype, device, is_fastpath):
     def transform(t):
         if not torch.is_tensor(t):
-            return t
-        if torch.is_tensor(t) and t.ndim == 0:
             return t
         return make_tensor(
             (num_tensors, num_tensors), dtype=dtype, device=device,
@@ -812,7 +809,7 @@ class TestForeach(TestCase):
                 kwargs["weight"] = args[1]
                 ref_kwargs["weight"] = args[1]
 
-            if dtype in integral_types() or dtype == torch.bool:
+            if dtype in integral_types() or dtype == torch.bool or (not self.is_cuda and dtype == torch.half):
                 with self.assertRaises(RuntimeError):
                     wrapped_op(inputs, self.is_cuda, is_fastpath, **kwargs)
                 return
@@ -917,51 +914,6 @@ class TestForeach(TestCase):
         self.assertIsNone(sample.input[1].grad)
 
     @ops(
-        filter(
-            lambda op: op.backward_requires_result,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        ),
-        dtypes=(torch.float32,),
-    )
-    def test_lifetime_of_grad_fn_when_result_is_saved(self, device, dtype, op):
-
-        def get_ref(func, sample):
-            class Foo:
-                pass
-
-            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
-            foo = Foo()
-            meta_dict = out[0].grad_fn.metadata
-            meta_dict[0] = foo
-            ref = weakref.ref(foo)
-            return out, ref
-
-        def _test(func, sample):
-            out, ref = get_ref(func, sample)
-            self.assertIsNotNone(ref())
-            del out
-            self.assertIsNone(ref())
-
-        func = self._get_funcs(op)[0]
-        for sample in op.sample_inputs(device, dtype, requires_grad=True, num_input_tensors=[1]):
-            for key in ("is_fastpath", "disable_fastpath"):
-                if key in sample.kwargs:
-                    del sample.kwargs[key]
-            # note: `_foreach_pow.Scalar` and `_foreach_pow.ScalarList` don't depend on `result`
-            # see: https://github.com/pytorch/pytorch/blob/5403c7770cd9cdc05f6c216d593ea8e8ae328ff3/tools/autograd/derivatives.yaml#L3048-L3049  # noqa: B950
-            if op.name == "_foreach_pow":
-                if (
-                    (isinstance(sample.args[0], list) and isinstance(sample.args[0][0], Number))
-                    or (isinstance(sample.args[0], Number) and not isinstance(sample.args[0], float))
-                ):
-                    continue
-                if isinstance(sample.args[0], float):
-                    new_args = (sample.input,)
-                    sample.input = sample.args[0]
-                    sample.args = new_args
-            _test(func, sample)
-
-    @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
@@ -1050,30 +1002,16 @@ class TestForeach(TestCase):
         num_tensors_seen = 0
         for (device, dtype), ([l1, l2, l3], indices) in grouped_tensors.items():
             for t in itertools.chain(l1, l3):
-                self.assertEqual(t.device, device)
-                self.assertEqual(t.dtype, dtype)
+                self.assertEquals(t.device, device)
+                self.assertEquals(t.dtype, dtype)
                 num_tensors_seen += 1
             self.assertEqual(len(l1), len(l2))
             self.assertTrue(all(p is None for p in l2))
             for i, index in enumerate(indices):
-                self.assertEqual(l1[i], list1[index])
-                self.assertEqual(l2[i], list2[index])
-                self.assertEqual(l3[i], list3[index])
-        self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
-
-    @onlyCUDA
-    def test_0dim_tensor_overload_exception(self):
-        # check exceptions of fast path
-        tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
-
-        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
-            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
-        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
-            torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
-
-        tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
-        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
-            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+                self.assertEquals(l1[i], list1[index])
+                self.assertEquals(l2[i], list2[index])
+                self.assertEquals(l3[i], list3[index])
+        self.assertEquals(num_tensors_seen, 2 * num_tensors_per_list)
 
 
 instantiate_device_type_tests(TestForeach, globals())

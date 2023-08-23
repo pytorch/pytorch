@@ -28,19 +28,19 @@ void MPSGuardImpl::record(void** event,
 
   auto mps_event = static_cast<mpsEvent_t>(*event);
   MPSStream mps_stream{stream};
-  mps_event->record(true);
+  mps_event->recordEvent(true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
   auto mps_event = static_cast<mpsEvent_t>(event);
   MPSStream mps_stream{stream};
 
-  mps_event->wait(true, false);
+  mps_event->waitForEvent(true);
 }
 
 bool MPSGuardImpl::queryEvent(void* event) const {
   auto mps_event = static_cast<mpsEvent_t>(event);
-  return mps_event->query();
+  return mps_event->queryEvent();
 }
 
 }

@@ -83,7 +83,7 @@ def test_biject_to(constraint_fn, args, is_cuda):
         t = biject_to(constraint)
     except NotImplementedError:
         pytest.skip('`biject_to` not implemented.')
-    assert t.bijective, f"biject_to({constraint}) is not bijective"
+    assert t.bijective, "biject_to({}) is not bijective".format(constraint)
     if constraint_fn is constraints.corr_cholesky:
         # (D * (D-1)) / 2 (where D = 4) = 6 (size of last dim)
         x = torch.randn(6, 6, dtype=torch.double)
@@ -93,12 +93,12 @@ def test_biject_to(constraint_fn, args, is_cuda):
         x = x.cuda()
     y = t(x)
     assert constraint.check(y).all(), '\n'.join([
-        f"Failed to biject_to({constraint})",
-        f"x = {x}",
-        f"biject_to(...)(x) = {y}",
+        "Failed to biject_to({})".format(constraint),
+        "x = {}".format(x),
+        "biject_to(...)(x) = {}".format(y),
     ])
     x2 = t.inv(y)
-    assert torch.allclose(x, x2), f"Error in biject_to({constraint}) inverse"
+    assert torch.allclose(x, x2), "Error in biject_to({}) inverse".format(constraint)
 
     j = t.log_abs_det_jacobian(x, y)
     assert j.shape == x.shape[:x.dim() - t.domain.event_dim]
@@ -119,10 +119,10 @@ def test_transform_to(constraint_fn, args, is_cuda):
     if is_cuda:
         x = x.cuda()
     y = t(x)
-    assert constraint.check(y).all(), f"Failed to transform_to({constraint})"
+    assert constraint.check(y).all(), "Failed to transform_to({})".format(constraint)
     x2 = t.inv(y)
     y2 = t(x2)
-    assert torch.allclose(y, y2), f"Error in transform_to({constraint}) pseudoinverse"
+    assert torch.allclose(y, y2), "Error in transform_to({}) pseudoinverse".format(constraint)
 
 
 if __name__ == "__main__":

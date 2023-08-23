@@ -10,23 +10,18 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/native_batch_norm.h>
-#include <ATen/ops/native_batch_norm_backward_native.h>
-#include <ATen/ops/native_batch_norm_native.h>
-#include <ATen/ops/native_layer_norm_backward_native.h>
-#include <ATen/ops/native_layer_norm_native.h>
 #endif
 
 namespace at::native {
 namespace mps {
-static void get_shapes(MPSShape* input_shape_readonly,
-                       NSMutableArray<NSNumber*>*& input_shape,
-                       NSMutableArray<NSNumber*>*& new_mean_shape,
-                       NSMutableArray<NSNumber*>*& axes,
-                       int num_input_dims,
-                       c10::MemoryFormat memory_format,
-                       bool isBackward) {
+void get_shapes(MPSShape* input_shape_readonly,
+                NSMutableArray<NSNumber*>*& input_shape,
+                NSMutableArray<NSNumber*>*& new_mean_shape,
+                NSMutableArray<NSNumber*>*& axes,
+                int num_input_dims,
+                c10::MemoryFormat memory_format,
+                bool isBackward) {
   // Modify the shape
   if (memory_format == at::MemoryFormat::Contiguous) {
     for (int i = 0; i < num_input_dims; i++)
@@ -454,7 +449,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out(const T
       self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
 }
 
-static string get_mem_string(c10::MemoryFormat memory_format) {
+string get_mem_string(c10::MemoryFormat memory_format) {
   string mem_format_key;
   switch (memory_format) {
     case at::MemoryFormat::Contiguous:

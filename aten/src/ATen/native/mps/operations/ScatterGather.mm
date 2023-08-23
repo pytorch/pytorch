@@ -112,13 +112,13 @@ TORCH_IMPL_FUNC(gather_out_mps)
   }
 }
 
-static void scatter_mps_general(const Tensor& self_arg,
-                                int64_t dim,
-                                const Tensor& index,
-                                const Tensor& src,
-                                const Tensor& output,
-                                string func_name,
-                                const c10::string_view reduce) {
+void scatter_mps_general(const Tensor& self_arg,
+                         int64_t dim,
+                         const Tensor& index,
+                         const Tensor& src,
+                         const Tensor& output,
+                         string func_name,
+                         const c10::string_view reduce) {
   using namespace mps;
 
   if (self_arg.numel() == 0 || index.numel() == 0 || src.numel() == 0) {

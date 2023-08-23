@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any
 
 import sympy
 
@@ -47,11 +47,11 @@ class SymPyOps:
     """
 
     @staticmethod
-    def identity(value: Any) -> Any:
+    def identity(value):
         return value
 
     @staticmethod
-    def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
+    def constant(value, dtype):
         if is_boolean_dtype(dtype):
             expr = sympy.Integer(bool(value))
         elif is_integer_dtype(dtype):
@@ -61,13 +61,13 @@ class SymPyOps:
         return TypedExpr(expr, dtype)
 
     @staticmethod
-    def index_expr(value: sympy.Expr, dtype: torch.dtype) -> Union[int, TypedExpr]:
+    def index_expr(value, dtype):
         if isinstance(value, int):
             value = sympy.Integer(value)
         return TypedExpr(value, dtype)
 
     @staticmethod
-    def to_dtype(value: Any, dtype: torch.dtype) -> Union[int, TypedExpr]:
+    def to_dtype(value, dtype):
         if isinstance(value.expr, (sympy.Integer, sympy.Float)):
             return SymPyOps.constant(value.expr, dtype)
         elif is_integer_dtype(dtype) and is_integer_dtype(value.dtype):
@@ -77,30 +77,30 @@ class SymPyOps:
             return NotImplemented
 
     @staticmethod
-    def square(x: TypedExpr) -> TypedExpr:
+    def square(x):
         return TypedExpr(x.expr * x.expr, x.dtype)
 
     @staticmethod
-    def add(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def add(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr + y.expr, result_type)
 
     @staticmethod
-    def sub(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def sub(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr - y.expr, result_type)
 
     @staticmethod
-    def mul(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def mul(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr * y.expr, result_type)
 
     @staticmethod
-    def neg(x: TypedExpr) -> TypedExpr:
+    def neg(x):
         return TypedExpr(-x.expr, x.dtype)
 
     @staticmethod
-    def floordiv(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def floordiv(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -108,7 +108,7 @@ class SymPyOps:
         return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
 
     @staticmethod
-    def remainder(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
+    def remainder(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -117,12 +117,12 @@ class SymPyOps:
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
-    def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def minimum(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
 
     @staticmethod
-    def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def maximum(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
@@ -150,10 +150,10 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any):
+    def __init__(self, inner):
         self._inner = inner
 
-    def materialize_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
+    def materialize_expr(self, expr, dtype):
         # Construct a new constant/index_expr from the SymPy expression
         if isinstance(expr, sympy.Integer):
             return self._inner.constant(int(expr), dtype)
@@ -161,7 +161,7 @@ class IndexPropagation:
             return self._inner.constant(float(expr), dtype)
         return self._inner.index_expr(expr, dtype)
 
-    def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
+    def unwrap(self, a):
         if not isinstance(a, IndexPropVar):
             return a
 
@@ -171,17 +171,15 @@ class IndexPropagation:
 
         return a.value
 
-    def fallback(self, name: str, args: Tuple, kwargs: Dict[str, Any]) -> IndexPropVar:
+    def fallback(self, name, args, kwargs):
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
         return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
 
-    def propagate_sympy(
-        self, name: str, args: Tuple, kwargs: Dict[str, Any]
-    ) -> Union[TypedExpr, IndexPropVar]:
+    def propagate_sympy(self, name, args, kwargs):
         # Build a new SymPy expression from this ops call
-        def unwrap(a: Union[Any, IndexPropVar]) -> Any:
+        def unwrap(a):
             if not isinstance(a, IndexPropVar):
                 return a
             return a.value
@@ -193,8 +191,8 @@ class IndexPropagation:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
-    def __getattr__(self, name: str) -> Callable[..., Union[Any, IndexPropVar]]:
-        def inner(*args: Any, **kwargs: Any) -> Union[Any, IndexPropVar]:
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
             if not hasattr(SymPyOps, name):
                 return self.fallback(name, args, kwargs)
 
@@ -210,9 +208,7 @@ class IndexPropagation:
 
         return inner
 
-    def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
-    ) -> Any:
+    def indirect_indexing(self, index, size, check=True):
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             return index.value.expr

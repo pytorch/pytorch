@@ -7,7 +7,8 @@
 
 // Collection of in-kernel scan / prefix sum utilities
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 // Inclusive prefix sum for binary vars using intra-warp voting +
 // shared memory
@@ -75,4 +76,4 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   }
 }
 
-}  // namespace at::cuda
+}}  // namespace at::cuda

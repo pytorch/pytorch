@@ -620,7 +620,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 result,
-                msg=f"Mismatch in iteration {i}",
+                msg="Mismatch in iteration {}".format(i),
             )
 
     @requires_gloo()
@@ -642,7 +642,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 fut.wait(),
-                msg=f"Mismatch in iteration {i}",
+                msg="Mismatch in iteration {}".format(i),
             )
 
     @requires_gloo()
@@ -2374,10 +2374,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="gloo")
 
-    @requires_gloo()
-    def test_bool_tensors(self):
-        self._test_bool_tensors(backend="gloo")
-
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
     def test_collectives(self):
@@ -2482,11 +2478,11 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
-        super().setUp()
+        super(LargeCommTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super().tearDown()
+        super(LargeCommTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

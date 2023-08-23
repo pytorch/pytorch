@@ -258,7 +258,7 @@ class TestSchemaCheck(JitTestCase):
     @unittest.skipIf(not torch._C.has_spectral, "ATen not built with FFT.")
     def test_schema_check_mode_functionality_kwarg_tensor(self):
         x = torch.rand((3, 5))
-        w = torch.rand(4)
+        w = torch.rand((4))
         expected = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
         with SchemaCheckMode():
             actual = torch.stft(x, 4, win_length=4, window=w, return_complex=True)

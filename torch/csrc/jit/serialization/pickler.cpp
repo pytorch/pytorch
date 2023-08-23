@@ -552,11 +552,9 @@ void Pickler::pushDouble(double value) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
   push<double>(value);
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();

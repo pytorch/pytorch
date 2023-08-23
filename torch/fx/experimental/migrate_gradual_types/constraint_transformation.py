@@ -75,7 +75,7 @@ def transform_index_select(constraint, counter):
     # if the index is valid then replace the input dimension with the new dimension
     # otherwise the dimension will not be replaced and the clause will contain False
     if is_valid_index == T():
-        new_dims = copy.deepcopy(dims)
+        new_dims = copy.deepcopy((dims))
         new_dims[constraint.index] = constraint.dim_replace
 
     transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
@@ -803,7 +803,7 @@ def apply_padding(e1_var: TVar,
         broadcast_padding = []
 
         # for every padding size, we also consider broadcasting
-        for j in range(len(d2) - i):
+        for j in range((len(d2) - i)):
             broadcast_padding.append(broadcast_dim(simulate_padding, d2, d11, d12, j, True))
 
         # we consider the possibilities for broadcasting for every dimension. Since we already

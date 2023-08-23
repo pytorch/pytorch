@@ -69,6 +69,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   bool is_contiguous_custom(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const override;

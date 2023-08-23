@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, TEST_PRIVATEUSE1
+from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
@@ -528,22 +528,18 @@ class TestLazyModules(TestCase):
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.dtype == torch.float16)
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), 'CUDA and PRIVATEUSE1 not available')
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @suppress_warnings
     def test_materialize_device(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.device.type == 'cpu')
-        if TEST_CUDA:
-            device = 'cuda'
-        elif TEST_PRIVATEUSE1:
-            device = torch._C._get_privateuse1_backend_name()
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
-        module.to(device)
+        module.cuda()
         module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == device)
+        self.assertTrue(module.test_param.device.type == 'cuda')
 
     @suppress_warnings
     def test_chained_initialization(self):

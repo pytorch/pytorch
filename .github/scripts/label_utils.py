@@ -51,7 +51,7 @@ def get_last_page_num_from_header(header: Any) -> int:
     )
 
 
-@lru_cache
+@lru_cache()
 def gh_get_labels(org: str, repo: str) -> List[str]:
     prefix = f"https://api.github.com/repos/{org}/{repo}/labels?per_page=100"
     header, info = request_for_labels(prefix + "&page=1")

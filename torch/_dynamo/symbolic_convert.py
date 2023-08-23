@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
 from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -59,7 +59,6 @@ from .source import (
 from .utils import (
     counters,
     get_fake_value,
-    get_instruction_source_311,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -85,7 +84,6 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -109,7 +107,6 @@ from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariab
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
@@ -208,19 +205,23 @@ def _detect_and_normalize_assert_statement(
 
     current_instruction_pointer += 1
 
-    # Use dummy error message if its hard to extract
-    error_msg = "assertion error"
+    if current_instruction_pointer >= len(self.instructions):
+        return False
 
     inst = self.instructions[current_instruction_pointer]
+    has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
         if not isinstance(inst.argval, str):
             return False
-        error_msg = inst.argval
+        self.LOAD_CONST(inst)
+        has_error_msg = True
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
@@ -230,12 +231,16 @@ def _detect_and_normalize_assert_statement(
         current_instruction_pointer += 1
         if inst.opname == "PRECALL":
             current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
         inst = self.instructions[current_instruction_pointer]
 
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    self.push(ConstantVariable(error_msg))
+    if not has_error_msg:
+        # Push dummy value instead of error message
+        self.push(ConstantVariable("assertion error"))
 
     return True
 
@@ -386,9 +391,6 @@ def break_graph_if_unsupported(*, push):
             state = self.copy_graphstate()
             reason = None
             try:
-                TracingContext.set_current_loc(
-                    self.f_code.co_filename, self.lineno, self.f_code.co_name
-                )
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
@@ -414,8 +416,7 @@ def break_graph_if_unsupported(*, push):
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
-                user_stack = excp.real_stack
-                # TODO: Also report the traceback from the parent frame
+                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -426,7 +427,7 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
+                        "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,
                     )
@@ -602,22 +603,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
-    def get_line_of_code_header(self, lineno=None):
-        if lineno is None:
-            lineno = self.lineno
+    def get_log_starts_line_log_str(self):
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
-
-    def get_log_starts_line_log_str(self):
-        log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
+        log_str = f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
         line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
         log_str += f"    {line}"
         return log_str
 
     def log_starts_line(self):
-        trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
+        trace_source_log.debug(
+            "%s", LazyString(lambda: self.get_log_starts_line_log_str())
+        )
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -688,11 +686,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except Unsupported:
+        except BackendCompilerFailed:
+            raise
+        except Unsupported as exc:
+            exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
-                log.debug("empty checkpoint")
                 raise
             log.debug("step triggered compile", exc_info=True)
+        except Exception as exc:
+            real_stack = getattr(exc, "real_stack", [])
+            real_stack.append(self.frame_summary())
+            exc.real_stack = real_stack  # type: ignore[attr-defined]
+            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -709,10 +714,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def run_ctx_mgr(self):
-        # NB: Don't push the top level frame summary; set_current_loc will
-        # take care of it.  However, DO make sure we attach real_stack to
-        # exceptions
-        return TracingContext.current_frame(None)
+        return contextlib.nullcontext()
 
     def run(self):
         with self.run_ctx_mgr():
@@ -885,7 +887,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return f"{base}.{name}" if name else base
+        return "{}.{}".format(base, name) if name else base
 
     def calc_package(self):
         """
@@ -972,6 +974,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         val = self.f_builtins[inst.argval]
 
         if callable(val):
+            assert is_builtin_callable(val)
             self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
@@ -1274,14 +1277,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
-    def BUILD_SET(self, inst):
-        if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
-            unimplemented("missing: BUILD_SET")
-        items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
-        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
-        self.push(new_set)
-
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1366,14 +1361,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ),
         )
 
-    def SET_ADD(self, inst):
-        v = self.pop()
-        assert inst.argval > 0
-        obj = self.stack[-inst.arg]
-        assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
-        return obj.call_method(self, "add", [v], {})
-
     def LIST_APPEND(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -1440,7 +1427,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, (BaseListVariable, SetVariable)):
+        if isinstance(seq, BaseListVariable):
             self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
@@ -1838,7 +1825,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
+                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
             )
         )
 
@@ -2011,17 +1998,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                 ), "Export without one graph - something has gone wrong."
 
             vars = list(code_options["co_varnames"])
-            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
-            vars.extend(cells_and_freevars)
-            cells_and_freevars_set = set(cells_and_freevars)
+            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
 
             self.symbolic_locals = collections.OrderedDict(
                 (
                     k,
-                    VariableBuilder(
-                        self,
-                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                    )(f_locals[k]),
+                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals
@@ -2253,16 +2235,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
-        if sys.version_info >= (3, 11):
-            cur_inst = parent.current_instruction
-            parent_code = parent.f_code
-            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
-
-            def get_trace_call_log_str():
-                line = get_instruction_source_311(parent_code, cur_inst).rstrip()
-                return f"TRACE inlined call {code.co_name} from {header}\n{line}"
-
-            trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator

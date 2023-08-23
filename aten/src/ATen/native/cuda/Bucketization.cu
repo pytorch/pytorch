@@ -175,18 +175,6 @@ Tensor& searchsorted_out_cuda(
   return result;
 }
 
-Tensor& searchsorted_out_cuda(
-    const Tensor& sorted_sequence,
-    const Scalar& self,
-    bool out_int32,
-    bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt,
-    Tensor& result) {
-  const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
-  return searchsorted_out_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
-}
-
 Tensor searchsorted_cuda(
     const Tensor& sorted_sequence,
     const Tensor& self,

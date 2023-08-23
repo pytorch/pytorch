@@ -134,10 +134,12 @@ class RandomSampler(Sampler[int]):
         self.generator = generator
 
         if not isinstance(self.replacement, bool):
-            raise TypeError(f"replacement should be a boolean value, but got replacement={self.replacement}")
+            raise TypeError("replacement should be a boolean value, but got "
+                            "replacement={}".format(self.replacement))
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={self.num_samples}")
+            raise ValueError("num_samples should be a positive integer "
+                             "value, but got num_samples={}".format(self.num_samples))
 
     @property
     def num_samples(self) -> int:
@@ -216,9 +218,11 @@ class WeightedRandomSampler(Sampler[int]):
                  replacement: bool = True, generator=None) -> None:
         if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
-            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={num_samples}")
+            raise ValueError("num_samples should be a positive integer "
+                             "value, but got num_samples={}".format(num_samples))
         if not isinstance(replacement, bool):
-            raise ValueError(f"replacement should be a boolean value, but got replacement={replacement}")
+            raise ValueError("replacement should be a boolean value, but got "
+                             "replacement={}".format(replacement))
 
         weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
@@ -260,9 +264,11 @@ class BatchSampler(Sampler[List[int]]):
         # check here.
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
-            raise ValueError(f"batch_size should be a positive integer value, but got batch_size={batch_size}")
+            raise ValueError("batch_size should be a positive integer value, "
+                             "but got batch_size={}".format(batch_size))
         if not isinstance(drop_last, bool):
-            raise ValueError(f"drop_last should be a boolean value, but got drop_last={drop_last}")
+            raise ValueError("drop_last should be a boolean value, but got "
+                             "drop_last={}".format(drop_last))
         self.sampler = sampler
         self.batch_size = batch_size
         self.drop_last = drop_last

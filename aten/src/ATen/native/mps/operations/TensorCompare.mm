@@ -12,8 +12,6 @@
 #include <ATen/ops/clamp_max_native.h>
 #include <ATen/ops/clamp_min_native.h>
 #include <ATen/ops/clamp_native.h>
-#include <ATen/ops/nan_to_num_native.h>
-#include <ATen/ops/where_native.h>
 #endif
 
 namespace at::native {
@@ -25,49 +23,28 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor *minTensor = nil, *maxTensor = nil;
 };
 
-static void clamp_mps_graph(CachedGraph* cachedGraph,
-                            const Tensor& input_tensor,
-                            const Tensor& min_tensor,
-                            const Tensor& max_tensor) {
-  auto input_dtype = input_tensor.scalar_type();
-  auto min_dtype = input_dtype;
-  auto max_dtype = input_dtype;
-  if (cachedGraph->minTensor) {
-    min_dtype = min_tensor.scalar_type();
-  }
-  if (cachedGraph->maxTensor) {
-    max_dtype = max_tensor.scalar_type();
-  }
-
+void clamp_mps_graph(CachedGraph* cachedGraph, const Tensor& input_tensor) {
   MPSGraph* mpsGraph = cachedGraph->graph();
 
   cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
-  MPSGraphTensor* minTensor = cachedGraph->minTensor;
-  MPSGraphTensor* maxTensor = cachedGraph->maxTensor;
-  if (input_dtype != min_dtype) {
-    minTensor = castMPSTensor(mpsGraph, cachedGraph->minTensor, input_dtype);
-  }
-  if (input_dtype != max_dtype) {
-    maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
-  }
   if (cachedGraph->minTensor && cachedGraph->maxTensor) {
     cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
-                                           minValueTensor:minTensor
-                                           maxValueTensor:maxTensor
+                                           minValueTensor:cachedGraph->minTensor
+                                           maxValueTensor:cachedGraph->maxTensor
                                                      name:nil];
   } else if (cachedGraph->maxTensor) {
     cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:maxTensor
+                                                   secondaryTensor:cachedGraph->maxTensor
                                                               name:nil];
   } else if (cachedGraph->minTensor) {
     cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:minTensor
+                                                   secondaryTensor:cachedGraph->minTensor
                                                               name:nil];
   }
 }
 
-static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
+void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
   if (!clamp_opt->is_same_size(input_t)) {
     auto num_clamp_dims = clamp_opt->dim();
     auto num_input_dims = input_t.dim();
@@ -86,10 +63,7 @@ static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& 
   }
 }
 
-static void fill_new_shape(int64_t num_input_dims,
-                           int64_t num_clamp_dims,
-                           int64_t* new_shape,
-                           IntArrayRef clamp_shape) {
+void fill_new_shape(int64_t num_input_dims, int64_t num_clamp_dims, int64_t* new_shape, IntArrayRef clamp_shape) {
   // Extend the shape with ones to the left
   int clamp_idx = 0;
   for (int i = 0; i < num_input_dims; i++) {
@@ -102,11 +76,11 @@ static void fill_new_shape(int64_t num_input_dims,
   }
 }
 
-static void clamp_tensor_out_mps(const Tensor& input_t,
-                                 const OptionalTensorRef min_opt,
-                                 const OptionalTensorRef max_opt,
-                                 const Tensor& output_t,
-                                 string op_name) {
+void clamp_tensor_out_mps(const Tensor& input_t,
+                          const OptionalTensorRef min_opt,
+                          const OptionalTensorRef max_opt,
+                          const Tensor& output_t,
+                          string op_name) {
   const bool has_min = (min_opt.has_value() && min_opt->defined());
   const bool has_max = (max_opt.has_value() && max_opt->defined());
 
@@ -160,41 +134,25 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
 
     string key = op_name + (has_min ? "_min" : "") + (has_max ? "_max" : "") + "_tensor" + tensor_key;
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      if (has_min) {
+      if (has_min)
         newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, min_opt_tensor);
-      }
-      if (has_max) {
+      if (has_max)
         newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, max_opt_tensor);
-        ;
-      }
 
-      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor, max_opt_tensor);
+      clamp_mps_graph(newCachedGraph, input_t);
     });
 
-    bool gatherTensorData = true;
-    if (!output_t.is_contiguous() || output_t.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output_t);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     if (has_min) {
-      min_opt_tensor =
-          gatherTensorData && !min_opt_tensor.is_contiguous() ? min_opt_tensor.contiguous() : min_opt_tensor;
-      auto minPlaceholder =
-          Placeholder(cachedGraph->minTensor, min_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+      auto minPlaceholder = Placeholder(cachedGraph->minTensor, min_opt_tensor);
       feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
     }
     if (has_max) {
-      max_opt_tensor =
-          gatherTensorData && !max_opt_tensor.is_contiguous() ? max_opt_tensor.contiguous() : max_opt_tensor;
-      auto maxPlaceholder =
-          Placeholder(cachedGraph->maxTensor, max_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+      auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, max_opt_tensor);
       feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
     }
 
@@ -205,11 +163,11 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   }
 }
 
-static void clamp_scalar_out_mps(const Tensor& input_t,
-                                 const OptionalScalarRef min_opt,
-                                 const OptionalScalarRef max_opt,
-                                 const Tensor& output_t,
-                                 string op_name) {
+void clamp_scalar_out_mps(const Tensor& input_t,
+                          const OptionalScalarRef min_opt,
+                          const OptionalScalarRef max_opt,
+                          const Tensor& output_t,
+                          string op_name) {
   using scalar_t = double;
 
   const bool has_min = (min_opt.has_value());
@@ -241,18 +199,11 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
             constantWithScalar:max_scalar
                          shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
 
-      clamp_mps_graph(newCachedGraph, input_t, input_t, input_t);
+      clamp_mps_graph(newCachedGraph, input_t);
     });
 
-    bool gatherTensorData = true;
-    if (!output_t.is_contiguous() || output_t.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output_t);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),

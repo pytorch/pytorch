@@ -41,7 +41,7 @@ struct WarningCapture : public WarningHandler {
     WarningUtils::set_warning_handler(this);
   }
 
-  ~WarningCapture() override {
+  ~WarningCapture() {
     WarningUtils::set_warning_handler(prev_);
   }
 

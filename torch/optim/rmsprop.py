@@ -22,15 +22,15 @@ class RMSprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= momentum:
-            raise ValueError(f"Invalid momentum value: {momentum}")
+            raise ValueError("Invalid momentum value: {}".format(momentum))
         if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= alpha:
-            raise ValueError(f"Invalid alpha value: {alpha}")
+            raise ValueError("Invalid alpha value: {}".format(alpha))
 
         defaults = dict(
             lr=lr,
@@ -176,7 +176,7 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
     learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
-    """ + fr"""
+    """ + r"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -188,11 +188,11 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {_foreach_doc}
-        {_maximize_doc}
-        {_differentiable_doc}
+        {foreach}
+        {maximize}
+        {differentiable}
 
-    """
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def rmsprop(

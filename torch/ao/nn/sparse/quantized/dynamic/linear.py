@@ -42,7 +42,9 @@ class Linear(torch.nn.Module):
         return 'SparseQuantizedDynamicLinear'
 
     def extra_repr(self):
-        return f'in_features={self.in_features}, out_features={self.out_features}, qscheme={self.weight().qscheme()}'
+        return 'in_features={}, out_features={}, qscheme={}'.format(
+            self.in_features, self.out_features, self.weight().qscheme()
+        )
 
     def __repr__(self):
         return _hide_packed_params_repr(self, linear.LinearPackedParams)
@@ -58,7 +60,7 @@ class Linear(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         op_type = int(state_dict[prefix + 'op_type'])
         assert op_type == 'sparse', \
-            f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
+            "Cannot load from op_type [{}], expecting [{}]".format(op_type, self._op_type)
         state_dict.pop(prefix + 'op_type')
 
         version = local_metadata.get('version', None)

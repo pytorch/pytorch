@@ -59,24 +59,6 @@ static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyOb
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
 }
 
-static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyObject* _noargs) {
-  if (!self->frame->frame_obj) {
-    return PyLong_FromLong(self->frame->f_code->co_firstlineno);
-  }
-  int lineno = PyFrame_GetLineNumber(self->frame->frame_obj);
-  if (lineno < 0) {
-    Py_RETURN_NONE;
-  }
-  return PyLong_FromLong(lineno);
-}
-
-static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObject* _noargs) {
-  if (!self->frame->frame_obj) {
-    Py_RETURN_NONE;
-  }
-  return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
-}
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
@@ -87,8 +69,6 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
     {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
-    {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
-    {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
     {NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
@@ -263,14 +243,6 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #endif
 }
 
-
-inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
-  // Returns the C string name of the current frame.
-  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
-  return PyUnicode_AsUTF8(frame->f_code->co_name);
-}
-
-
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
@@ -328,40 +300,6 @@ inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
   return extra;
 }
 
-PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
-  PyObject* object;
-  if (!PyArg_ParseTuple(args, "O", &object)) {
-    return NULL;
-  }
-  if (!PyCode_Check(object)) {
-    PyErr_SetString(PyExc_TypeError, "expected a code object!");
-    return NULL;
-  }
-  PyCodeObject* code = (PyCodeObject*)object;
-
-  CacheEntry* current_node = get_cache_entry(code);
-
-  PyObject* outer_list = PyList_New(0);
-  if (!outer_list) {
-    return NULL;  // Return NULL if failed to create list
-  }
-  while (current_node != NULL && current_node != SKIP_CODE) {
-    // Creating a new Python tuple for the check_fn and code of current CacheEntry
-    PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
-    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
-    Py_DECREF(inner_list);  // Decrement our own reference
-    if (flag < 0) {
-      Py_DECREF(outer_list);  // Clean up if failed to append
-      return NULL;
-    }
-
-    // Move to the next node in the linked list
-    current_node = current_node->next;
-  }
-  // Return the outer list
-  return outer_list;
-}
-
 inline static void set_cache_entry(PyCodeObject* code, CacheEntry* extra) {
   // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
@@ -376,6 +314,11 @@ inline static PyObject* get_frame_state(PyCodeObject* code) {
 inline static void set_frame_state(PyCodeObject* code, PyObject* extra) {
   // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
+}
+
+inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
+  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
+  return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 
 static PyObject* call_guard_fail_hook(
@@ -624,14 +567,14 @@ static PyObject* _custom_eval_frame(
   #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
-      get_frame_name(frame),
+      name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_code->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
   #else
   DEBUG_TRACE(
       "begin %s %s %i %i %i",
-      get_frame_name(frame),
+      name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
@@ -659,13 +602,13 @@ static PyObject* _custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
   CacheEntry* extra = get_cache_entry(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
-    DEBUG_TRACE("skip %s", get_frame_name(frame));
+    DEBUG_TRACE("skip %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -673,14 +616,14 @@ static PyObject* _custom_eval_frame(
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // even though we should pass a PyFrameObject.
   if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
-    DEBUG_TRACE("error %s", get_frame_name(frame));
+    DEBUG_TRACE("error %s", name(frame));
     return NULL;
   }
 
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   if (callback == Py_False) {
-    DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
+    DEBUG_TRACE("In run only mode %s", name(frame));
     PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
     PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
     call_profiler_end_hook(hook_record);
@@ -690,12 +633,12 @@ static PyObject* _custom_eval_frame(
       // guard eval failed, keep propagating
       return NULL;
     } else if (maybe_cached_code == Py_None) {
-      DEBUG_TRACE("cache miss %s", get_frame_name(frame));
+      DEBUG_TRACE("cache miss %s", name(frame));
       return eval_frame_default(tstate, frame, throw_flag);
     }
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
-    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
+    DEBUG_TRACE("cache hit %s", name(frame));
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
@@ -717,7 +660,7 @@ static PyObject* _custom_eval_frame(
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
-    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
+    DEBUG_TRACE("cache hit %s", name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
@@ -744,7 +687,7 @@ static PyObject* _custom_eval_frame(
     // inside the torch.compile block we won't try to Dynamo anything else.
     return NULL;
   } else if (result != Py_None) {
-    DEBUG_TRACE("create cache %s", get_frame_name(frame));
+    DEBUG_TRACE("create cache %s", name(frame));
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_cache_entry(frame->f_code, extra);
@@ -752,7 +695,7 @@ static PyObject* _custom_eval_frame(
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
-    DEBUG_TRACE("create skip %s", get_frame_name(frame));
+    DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     destroy_cache_entry(extra);
     set_cache_entry(frame->f_code, SKIP_CODE);
@@ -904,7 +847,6 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
     {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
-    {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

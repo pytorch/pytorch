@@ -1112,10 +1112,8 @@ public:
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
-  IValue deepcopy(
-      HashAliasedIValueMap& memo,
-      c10::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy() const;
+  IValue deepcopy(HashAliasedIValueMap& memo) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {

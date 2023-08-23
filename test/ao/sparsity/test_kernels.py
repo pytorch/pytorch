@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 from torch.testing._internal.common_utils import run_tests

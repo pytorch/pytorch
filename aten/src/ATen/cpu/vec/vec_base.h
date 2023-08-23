@@ -72,9 +72,7 @@ struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
       std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value ||
-      std::is_same<T, at::Float8_e5m2>::value ||
-      std::is_same<T, at::Float8_e4m3fn>::value> {
+      std::is_same<T, at::BFloat16>::value> {
 };
 
 template<typename T>

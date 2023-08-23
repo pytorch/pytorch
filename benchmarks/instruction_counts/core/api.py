@@ -4,7 +4,7 @@ import enum
 import itertools as it
 import re
 import textwrap
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 
@@ -39,7 +39,6 @@ class AutogradMode(enum.Enum):
 @dataclasses.dataclass(frozen=True)
 class AutoLabels:
     """Labels for a TimerArgs instance which are inferred during unpacking."""
-
     runtime: RuntimeMode
     autograd: AutogradMode
     language: Language
@@ -166,6 +165,7 @@ class GroupedBenchmark:
         cls,
         py_stmt: Optional[str] = None,
         cpp_stmt: Optional[str] = None,
+
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
         signature: Optional[str] = None,
@@ -189,10 +189,8 @@ class GroupedBenchmark:
             cls._model_from_py_stmt(
                 py_stmt=py_stmt,
                 signature_args=signature_args,
-                signature_output=signature_output,
-            )
-            if torchscript
-            else None
+                signature_output=signature_output
+            ) if torchscript else None
         )
 
         return cls(
@@ -214,6 +212,7 @@ class GroupedBenchmark:
         cls,
         py_model_setup: Optional[str] = None,
         cpp_model_setup: Optional[str] = None,
+
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
         signature: Optional[str] = None,
@@ -232,14 +231,10 @@ class GroupedBenchmark:
         """
         signature_args, signature_output = cls._parse_signature(signature)
         if signature_args is None:
-            raise ValueError(
-                "signature is needed when initializing from model definitions."
-            )
+            raise ValueError("signature is needed when initializing from model definitions.")
 
         return cls(
-            *cls._make_model_invocation(
-                signature_args, signature_output, RuntimeMode.EAGER
-            ),
+            *cls._make_model_invocation(signature_args, signature_output, RuntimeMode.EAGER),
             py_model_setup=py_model_setup,
             cpp_model_setup=cpp_model_setup,
             inferred_model_setup=False,
@@ -258,12 +253,9 @@ class GroupedBenchmark:
         cpp_block: str = "",
         num_threads: Union[int, Tuple[int, ...]] = 1,
     ) -> Dict[Union[Tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
-        py_cases, py_setup, py_global_setup = cls._parse_variants(
-            py_block, Language.PYTHON
-        )
-        cpp_cases, cpp_setup, cpp_global_setup = cls._parse_variants(
-            cpp_block, Language.CPP
-        )
+
+        py_cases, py_setup, py_global_setup = cls._parse_variants(py_block, Language.PYTHON)
+        cpp_cases, cpp_setup, cpp_global_setup = cls._parse_variants(cpp_block, Language.CPP)
 
         assert not py_global_setup
         setup = GroupedSetup(
@@ -308,19 +300,13 @@ class GroupedBenchmark:
 
     def __post_init__(self) -> None:
         if self.autograd and self.signature_output is None:
-            raise ValueError(
-                "An output variable must be specified when `autograd=True`."
-            )
+            raise ValueError("An output variable must be specified when `autograd=True`.")
 
         if self.py_model_setup and "model" not in self.py_model_setup:
-            raise ValueError(
-                "`py_model_setup` appears to be missing `model` definition."
-            )
+            raise ValueError("`py_model_setup` appears to be missing `model` definition.")
 
         if self.cpp_model_setup and "model" not in self.cpp_model_setup:
-            raise ValueError(
-                "`cpp_model_setup` appears to be missing `model` definition."
-            )
+            raise ValueError("`cpp_model_setup` appears to be missing `model` definition.")
 
     # =========================================================================
     # == String manipulation methods ==========================================
@@ -328,7 +314,7 @@ class GroupedBenchmark:
 
     @staticmethod
     def _parse_signature(
-        signature: Optional[str],
+        signature: Optional[str]
     ) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
         if signature is None:
             return None, None
@@ -341,9 +327,7 @@ class GroupedBenchmark:
         output: str = match.groups()[1].strip()
 
         if "," in output:
-            raise ValueError(
-                f"Multiple return values are not currently allowed: `{output}`"
-            )
+            raise ValueError(f"Multiple return values are not currently allowed: `{output}`")
 
         if output == "None":
             return args, None
@@ -362,13 +346,11 @@ class GroupedBenchmark:
         if signature_args is None:
             raise ValueError("signature is needed in order to derive a model.")
 
-        return textwrap.dedent(
-            f"""\
+        return textwrap.dedent(f"""\
             def model({', '.join(signature_args)}):
             {{stmt_str}}
                 return {signature_output}
-        """
-        ).format(stmt_str=textwrap.indent(py_stmt, " " * 4))
+        """).format(stmt_str=textwrap.indent(py_stmt, ' ' * 4))
 
     @staticmethod
     def _make_model_invocation(
@@ -383,25 +365,21 @@ class GroupedBenchmark:
 
         if runtime == RuntimeMode.EAGER:
             model_name = "model"
-            cpp_invocation = (
-                f"{cpp_prefix}{model_name}->forward({', '.join(signature_args)});"
-            )
+            cpp_invocation = f"{cpp_prefix}{model_name}->forward({', '.join(signature_args)});"
 
         else:
             assert runtime == RuntimeMode.JIT
             model_name = "jit_model"
-            cpp_invocation = textwrap.dedent(
-                f"""\
+            cpp_invocation = textwrap.dedent(f"""\
                 std::vector<torch::jit::IValue> ivalue_inputs({{
                     {', '.join([f'torch::jit::IValue({a})' for a in signature_args])}
                 }});
                 {cpp_prefix}{model_name}.forward(ivalue_inputs);
-            """
-            )
+            """)
 
         # NB:
         #   In python we invoke __call__, however C++ doesn't have an analogous
-        #   method so we invoke `forward` instead. This means that Python
+        #   method so we invoke `forward` instead. This means that that Python
         #   is doing extra work (e.g. checking hooks) compared to C++; however
         #   because this is the default user experience that's acceptable.
         py_invocation = f"{py_prefix}{model_name}({', '.join(signature_args)})"
@@ -409,9 +387,7 @@ class GroupedBenchmark:
         return py_invocation, cpp_invocation
 
     @staticmethod
-    def _parse_variants(
-        block: str, language: Language
-    ) -> Tuple[Dict[str, List[str]], str, str]:
+    def _parse_variants(block: str, language: Language) -> Tuple[Dict[str, List[str]], str, str]:
         block = textwrap.dedent(block).strip()
         comment = "#" if language == Language.PYTHON else "//"
         label_pattern = f"{comment} @(.+)$"

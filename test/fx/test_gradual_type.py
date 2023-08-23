@@ -990,12 +990,12 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == 'conv1':
-                assert n.type == TensorType((4, 6, sympy.floor(sympy.symbols('~0') - 4),
-                                             sympy.floor(sympy.symbols('~1') - 4)))
+                assert n.type == TensorType((4, 6, sympy.floor((sympy.symbols('~0') - 4)),
+                                             sympy.floor((sympy.symbols('~1') - 4))))
 
             elif n.target == 'conv2':
-                assert n.type == TensorType((4, 16, sympy.floor(sympy.symbols('~4') - 4),
-                                             sympy.floor(sympy.symbols('~5') - 4)))
+                assert n.type == TensorType((4, 16, sympy.floor((sympy.symbols('~4') - 4)),
+                                             sympy.floor((sympy.symbols('~5') - 4))))
 
 if __name__ == '__main__':
     unittest.main()

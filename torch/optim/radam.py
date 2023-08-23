@@ -22,15 +22,15 @@ class RAdam(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -159,7 +159,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
     This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
     to the gradient) and not the one from AdamW (were weight_decay is applied to the update). This
     is different from the `author's implementation`_.
-    """ + fr"""
+    """ + r"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -169,15 +169,15 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {_foreach_doc}
-        {_differentiable_doc}
+        {foreach}
+        {differentiable}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
     .. _author's implementation:
         https://github.com/LiyuanLucasLiu/RAdam
 
-    """
+    """.format(foreach=_foreach_doc, differentiable=_differentiable_doc)
 
 
 def radam(

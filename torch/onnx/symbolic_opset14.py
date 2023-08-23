@@ -57,7 +57,6 @@ def triu(g: jit_utils.GraphContext, self, diagonal, out=None):
 
 
 @_onnx_symbolic("aten::reshape")
-@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def reshape(g: jit_utils.GraphContext, self, shape):

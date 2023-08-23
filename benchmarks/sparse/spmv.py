@@ -1,10 +1,7 @@
 import argparse
 import sys
-
 import torch
-
-from .utils import Event, gen_sparse_coo, gen_sparse_coo_and_csr, gen_sparse_csr
-
+from .utils import gen_sparse_csr, gen_sparse_coo, gen_sparse_coo_and_csr, Event
 
 def test_sparse_csr(m, nnz, test_count):
     start_timer = Event(enable_timing=True)
@@ -22,7 +19,6 @@ def test_sparse_csr(m, nnz, test_count):
 
     return sum(times) / len(times)
 
-
 def test_sparse_coo(m, nnz, test_count):
     start_timer = Event(enable_timing=True)
     stop_timer = Event(enable_timing=True)
@@ -38,7 +34,6 @@ def test_sparse_coo(m, nnz, test_count):
         times.append(start_timer.elapsed_time(stop_timer))
 
     return sum(times) / len(times)
-
 
 def test_sparse_coo_and_csr(m, nnz, test_count):
     start = Event(enable_timing=True)
@@ -68,21 +63,20 @@ def test_sparse_coo_and_csr(m, nnz, test_count):
 
     return coo_mean_time, csr_mean_time
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SpMV")
 
-    parser.add_argument("--format", default="csr", type=str)
-    parser.add_argument("--m", default="1000", type=int)
-    parser.add_argument("--nnz-ratio", "--nnz_ratio", default="0.1", type=float)
-    parser.add_argument("--outfile", default="stdout", type=str)
-    parser.add_argument("--test-count", "--test_count", default="10", type=int)
+    parser.add_argument("--format", default='csr', type=str)
+    parser.add_argument("--m", default='1000', type=int)
+    parser.add_argument("--nnz-ratio", "--nnz_ratio", default='0.1', type=float)
+    parser.add_argument("--outfile", default='stdout', type=str)
+    parser.add_argument("--test-count", "--test_count", default='10', type=int)
 
     args = parser.parse_args()
 
-    if args.outfile == "stdout":
+    if args.outfile == 'stdout':
         outfile = sys.stdout
-    elif args.outfile == "stderr":
+    elif args.outfile == 'stderr':
         outfile = sys.stderr
     else:
         outfile = open(args.outfile, "a")
@@ -92,43 +86,18 @@ if __name__ == "__main__":
     nnz_ratio = args.nnz_ratio
 
     nnz = int(nnz_ratio * m * m)
-    if args.format == "csr":
+    if args.format == 'csr':
         time = test_sparse_csr(m, nnz, test_count)
-    elif args.format == "coo":
+    elif args.format == 'coo':
         time = test_sparse_coo(m, nnz, test_count)
-    elif args.format == "both":
+    elif args.format == 'both':
         time_coo, time_csr = test_sparse_coo_and_csr(m, nnz, test_count)
 
-    if args.format != "both":
-        print(
-            "format=",
-            args.format,
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time,
-            file=outfile,
-        )
+    if args.format != 'both':
+        print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
+              " time=", time, file=outfile)
     else:
-        print(
-            "format=coo",
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time_coo,
-            file=outfile,
-        )
-        print(
-            "format=csr",
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time_csr,
-            file=outfile,
-        )
+        print("format=coo", " nnz_ratio=", nnz_ratio, " m=", m,
+              " time=", time_coo, file=outfile)
+        print("format=csr", " nnz_ratio=", nnz_ratio, " m=", m,
+              " time=", time_csr, file=outfile)

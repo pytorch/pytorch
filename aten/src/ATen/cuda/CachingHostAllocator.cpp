@@ -15,7 +15,8 @@
 #include <unordered_set>
 #include <utility>
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 namespace {
 
 struct BlockSize {
@@ -400,4 +401,5 @@ at::Allocator* getCachingHostAllocator() {
   return &cuda_host_allocator;
 }
 
-} // namespace at::cuda
+} // namespace cuda
+} // namespace at

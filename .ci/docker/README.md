@@ -1,7 +1,7 @@
-# Docker images for GitHub CI
+# Docker images for Jenkins
 
 This directory contains everything needed to build the Docker images
-that are used in our CI.
+that are used in our CI
 
 The Dockerfiles located in subdirectories are parameterized to
 conditionally run build stages depending on build arguments passed to
@@ -12,13 +12,13 @@ each image as the `BUILD_ENVIRONMENT` environment variable.
 
 See `build.sh` for valid build environments (it's the giant switch).
 
+Docker builds are now defined with `.circleci/cimodel/data/simple/docker_definitions.py`
+
 ## Contents
 
 * `build.sh` -- dispatch script to launch all builds
 * `common` -- scripts used to execute individual Docker build stages
-* `ubuntu` -- Dockerfile for Ubuntu image for CPU build and test jobs
 * `ubuntu-cuda` -- Dockerfile for Ubuntu image with CUDA support for nvidia-docker
-* `ubuntu-rocm` -- Dockerfile for Ubuntu image with ROCm support
 
 ## Usage
 

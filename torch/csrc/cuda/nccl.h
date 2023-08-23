@@ -18,7 +18,9 @@
 #define HAS_NCCL_BF16_DATATYPE 0
 #endif
 
-namespace torch::cuda::nccl {
+namespace torch {
+namespace cuda {
+namespace nccl {
 
 /* The following are copied from <nccl.h> and redefined in torch::cuda::nccl
  * namespace */
@@ -214,4 +216,6 @@ TORCH_CUDA_CPP_API void recv(
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src);
-} // namespace torch::cuda::nccl
+} // namespace nccl
+} // namespace cuda
+} // namespace torch

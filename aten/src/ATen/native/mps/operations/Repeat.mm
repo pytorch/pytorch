@@ -5,9 +5,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/permute_native.h>
-#include <ATen/ops/repeat_interleave_native.h>
-#include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
 #ifdef __OBJC__

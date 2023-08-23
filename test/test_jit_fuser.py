@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import unittest
@@ -50,7 +51,7 @@ class TestFuser(JitTestCase):
         allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate',
                          'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        f'got {graph}')
+                        'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def _test_fused_abs(self, device='cpu'):

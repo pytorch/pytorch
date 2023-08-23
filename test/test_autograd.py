@@ -121,7 +121,7 @@ class TestAutograd(TestCase):
         # Decorating class is deprecated and should not be used
         with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
             @torch.no_grad()
-            class Foo:
+            class Foo():
                 def __init__(self):
                     assert not torch.is_grad_enabled()
 
@@ -141,7 +141,7 @@ class TestAutograd(TestCase):
 
             foo()
 
-            class Foo2:
+            class Foo2():
                 @torch.no_grad()
                 def __init__(self):
                     assert not torch.is_grad_enabled()
@@ -3697,18 +3697,6 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
-        # Accumulate grad node has more than one input
-        a = torch.tensor(1., requires_grad=True)
-        b = a.sin()
-        c = a.cos()
-        out = b * c
-        register_logging_hooks(a, b, c, out)
-        out.register_hook(hook)
-        with torch.autograd.set_multithreading_enabled(False):
-            out.backward()
-        self.assertEqual(predicted[0], grad_fns(*actual))
-        actual = []
-
         # Multiple roots are also OK
         a = torch.tensor(1., requires_grad=True)
         b = a * 2
@@ -3786,39 +3774,16 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             return out
 
         x = torch.ones(2, 2, requires_grad=True)
-
-        # Test as a context manager
-        with torch.autograd._force_original_view_tracking(False):
-            out = f(x)
-            self.assertTrue("AsStridedBackward" in str(out.grad_fn))
-            self.assertFalse(torch.autograd.is_view_replay_enabled())
-        self.assertFalse(torch.autograd.is_view_replay_enabled())
-
         with torch.autograd._force_original_view_tracking(True):
             out = f(x)
-            self.assertTrue("ViewBackward" in str(out.grad_fn))
-            self.assertTrue(torch.autograd.is_view_replay_enabled())
-        out = f(x)
-        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
-        self.assertFalse(torch.autograd.is_view_replay_enabled())
 
-        with torch.autograd._force_original_view_tracking(False):
-            torch.autograd._force_original_view_tracking(True)
-            out = f(x)
-            self.assertTrue("ViewBackward" in str(out.grad_fn))
-            self.assertTrue(torch.autograd.is_view_replay_enabled())
-        self.assertFalse(torch.autograd.is_view_replay_enabled())
-
-        # Test as a function
-        torch.autograd._force_original_view_tracking(False)
-        out = f(x)
-        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
-        self.assertFalse(torch.autograd.is_view_replay_enabled())
-
-        torch.autograd._force_original_view_tracking(True)
-        out = f(x)
+        # view-replay was enabled, so we should see ViewBackward in the graph
+        # instead of AsStridedBackward.
         self.assertTrue("ViewBackward" in str(out.grad_fn))
-        self.assertTrue(torch.autograd.is_view_replay_enabled())
+
+        # Without view-replay we should as an AsStridedBackward
+        out = f(x)
+        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
 
     def test_unsafe_set_version_counter(self):
         x = torch.ones(2, requires_grad=True).clone()
@@ -7528,7 +7493,7 @@ for shape in [(1,), ()]:
         #
         #   grad_output -> grad_output.grad_fn -> graph -> hook -> grad_output
         #
-        class TestCls:
+        class TestCls():
             # Dummy class for the purpose of creating a weakref
             pass
 
@@ -7593,7 +7558,7 @@ for shape in [(1,), ()]:
             def backward(ctx, grad):
                 return grad
 
-        class Test:
+        class Test():
             pass
 
         count = [0]
@@ -9266,7 +9231,7 @@ class TestAutogradDeviceType(TestCase):
             if dtype.is_floating_point:
                 f()
             else:
-                with self.assertRaisesRegex(RuntimeError, 'floating point', msg=f"dt: {a.dtype} device: {a.device}"):
+                with self.assertRaisesRegex(RuntimeError, 'floating point', msg="dt: {} device: {}".format(a.dtype, a.device)):
                     f()
 
     @onlyCUDA
@@ -10812,27 +10777,6 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn2, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn2, [inp_c, inp_r], check_forward_ad=True)
 
-    def test_set_multithreading_enabled_as_context_manager_and_function(self):
-        # Test as a context manager
-        with torch.autograd.set_multithreading_enabled(False):
-            self.assertFalse(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        with torch.autograd.set_multithreading_enabled(True):
-            self.assertTrue(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.set_multithreading_enabled(True)
-            self.assertTrue(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        torch.autograd.set_multithreading_enabled(False)
-        self.assertFalse(torch.autograd.is_multithreading_enabled())
-
-        torch.autograd.set_multithreading_enabled(True)
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
 class TestNestedCheckpoint(TestCase):
     @staticmethod
     def grad(fn):
@@ -10888,7 +10832,7 @@ class TestNestedCheckpoint(TestCase):
 
                 yield node
 
-        class Handle:
+        class Handle():
             __slot__ = ["node_name"]
 
             def __init__(self, node_name):
@@ -11323,6 +11267,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
+from autograd.test_fallback import TestAutogradFallback  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(

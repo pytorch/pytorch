@@ -1301,8 +1301,7 @@ Example::
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
                       bool multiTenant,
-                      c10::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      c10::optional<int> masterListenFd) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
@@ -1315,8 +1314,7 @@ Example::
                 waitWorkers,
                 timeout,
                 multiTenant,
-                masterListenFd,
-                useLibUV};
+                masterListenFd};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -1331,7 +1329,6 @@ Example::
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
-          py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
@@ -1378,11 +1375,6 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
-          .def("_id", &::c10d::ProcessGroup::getID)
-          .def(
-              "_backend_id",
-              &::c10d::ProcessGroup::getBackendID,
-              py::arg("backend_type"))
           .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
@@ -2187,15 +2179,7 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-      .def_property(
-          "net_name",
-          [](const ncclConfig_t& self) { return self.netName; },
-          // Note: NCCL calls free on the netName pointer
-          // when destroying the communicator. So memory
-          // shouldn't leak because of allocation in strdup.
-          [](ncclConfig_t& self, const char* tmp) {
-            self.netName = strdup(tmp);
-          });
+      .def_readwrite("net_name", &ncclConfig_t::netName);
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(

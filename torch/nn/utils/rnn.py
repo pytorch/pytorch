@@ -61,7 +61,7 @@ class PackedSequence(PackedSequence_):
 
     """
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-        return super().__new__(
+        return super(PackedSequence, cls).__new__(
             cls,
             *_packed_sequence_init_args(data, batch_sizes, sorted_indices,
                                         unsorted_indices))

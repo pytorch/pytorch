@@ -55,7 +55,7 @@ def generate_callgrind_artifacts() -> None:
         "ones_with_data_exclusive": to_entry(stats_with_data.stmt_exclusive_stats),
     }
 
-    with open(CALLGRIND_ARTIFACTS, "w") as f:
+    with open(CALLGRIND_ARTIFACTS, "wt") as f:
         json.dump(artifacts, f, indent=4)
 
 
@@ -70,7 +70,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
     testing are stored in raw string form for easier inspection and to avoid
     baking any implementation details into the artifact itself.
     """
-    with open(CALLGRIND_ARTIFACTS) as f:
+    with open(CALLGRIND_ARTIFACTS, "rt") as f:
         artifacts = json.load(f)
 
     pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")

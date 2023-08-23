@@ -1032,7 +1032,9 @@ c10::SymbolicShape ComputeShapeForSlice(
   final_shape = input_shape;
   for (const auto idx : c10::irange(axes_vector.size())) {
     auto axis = axes_vector[idx];
-    TORCH_INTERNAL_ASSERT(axis >= 0);
+    if (axis < 0) {
+      axis += input_shape.size();
+    }
     if (!input_shape[axis].is_static()) {
       final_shape[axis] = c10::ShapeSymbol::newSymbol();
       continue;
@@ -1068,18 +1070,20 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  bool valid = ConstantValueMap::HasShape(n->input(0)->debugName());
-
+  auto valid = true;
   // For opset version <= 9, starts, ends, axes, steps are attributes,
   // so their values are always valid.
   if (opset_version >= 10) {
-    // We can only infer shapes if 'axes' is known.
-    if (n->inputs().size() > 3) {
-      valid = valid && ConstantValueMap::HasValue(n->input(3)->debugName());
+    valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
+        ConstantValueMap::HasValue(n->input(2)->debugName());
+    for (const auto input_idx : c10::irange(3U, 5U)) {
+      if (n->inputs().size() > input_idx) {
+        valid = valid &&
+            ConstantValueMap::HasValue(n->input(input_idx)->debugName());
+      }
     }
   }
-
-  if (!valid) {
+  if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
     if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
       auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
       UpdateRank(n->output(), rank);
@@ -1093,49 +1097,27 @@ void ProcessSliceNode(Node* n, int opset_version) {
 
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
-      std::vector<int64_t> step_vector;
-
       std::vector<int64_t> axes_vector(input0_shape_value.size(), 0);
       for (const auto i : c10::irange(input0_shape_value.size())) {
         axes_vector[i] = i;
       }
-      if (opset_version >= 10 && n->inputs().size() > 3) {
-        axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-            n->input(3)->debugName());
-      } else if (opset_version < 10 && n->hasAttributeS("axes")) {
-        axes_vector = n->is(attr::axes);
-      }
-      for (auto& axis : axes_vector) {
-        if (axis < 0) {
-          axis += input0_shape_value.size();
-        }
-      }
+      std::vector<int64_t> step_vector;
 
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
-      } else {
-        // If starts, ends, or step are unknown,
-        // then mark all dimensions in 'axes' as unknown.
-        std::vector<uint64_t> indices = {1U, 2U, 4U};
-        bool start_end_step_known =
-            std::all_of(indices.begin(), indices.end(), [&n](auto i) {
-              return (i >= n->inputs().size()) ||
-                  ConstantValueMap::HasValue(n->input(i)->debugName());
-            });
-        if (!start_end_step_known) {
-          auto final_shape = input0_shape_value;
-          for (const auto axis : axes_vector) {
-            final_shape[axis] = c10::ShapeSymbol::newSymbol();
-          }
-          UpdateShape(n->output(), final_shape);
-          return;
+        if (n->hasAttributeS("axes")) {
+          axes_vector = n->is(attr::axes);
         }
-
+      } else {
         start_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(1)->debugName());
         end_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(2)->debugName());
+        if (n->inputs().size() > 3) {
+          axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
+              n->input(3)->debugName());
+        }
         if (n->inputs().size() > 4) {
           step_vector = ConstantValueMap::GetValueInto1DInt64Vector(
               n->input(4)->debugName());

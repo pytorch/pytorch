@@ -40,7 +40,7 @@ def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.S
     )
 
 
-class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
+class ExportDiagnostic(infra.Diagnostic):
     """Base class for all export diagnostics.
 
     This class is used to represent all export diagnostics. It is a subclass of
@@ -76,6 +76,9 @@ class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
         stack.message = "C++ call stack"
         self.with_stack(stack)
         return stack
+
+    def record_fx_graphmodule(self, gm: torch.fx.GraphModule) -> None:
+        self.with_graph(infra.Graph(gm.print_readable(False), gm.__class__.__name__))
 
 
 class ExportDiagnosticEngine:
@@ -177,13 +180,12 @@ def create_export_diagnostic_context() -> (
         _context == engine.background_context
     ), "Export context is already set. Nested export is not supported."
     _context = engine.create_diagnostic_context(
-        "torch.onnx.export",
-        torch.__version__,
-        diagnostic_type=TorchScriptOnnxExportDiagnostic,
+        "torch.onnx.export", torch.__version__, diagnostic_type=ExportDiagnostic
     )
     try:
         yield _context
     finally:
+        _context.pretty_print(_context.options.log_verbose, _context.options.log_level)
         _context = engine.background_context
 
 
@@ -193,14 +195,14 @@ def diagnose(
     message: Optional[str] = None,
     frames_to_skip: int = 2,
     **kwargs,
-) -> TorchScriptOnnxExportDiagnostic:
+) -> ExportDiagnostic:
     """Creates a diagnostic and record it in the global diagnostic context.
 
     This is a wrapper around `context.log` that uses the global diagnostic
     context.
     """
     # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
-    diagnostic = TorchScriptOnnxExportDiagnostic(
+    diagnostic = ExportDiagnostic(
         rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )
     export_context().log(diagnostic)

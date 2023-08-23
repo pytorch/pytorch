@@ -8,19 +8,19 @@ qcomparators_configs = op_bench.cross_product_configs(
     contig=(False, True),
     other_scalar=(False, True),
     out_variant=(False, True),
-    tags=("short",),
+    tags=('short',)
 )
 
 qcomparators_ops = op_bench.op_list(
     attrs=(
-        ("eq", torch.eq),
-        ("ne", torch.ne),
-        ("lt", torch.lt),
-        ("gt", torch.gt),
-        ("le", torch.le),
-        ("ge", torch.ge),
+        ('eq', torch.eq),
+        ('ne', torch.ne),
+        ('lt', torch.lt),
+        ('gt', torch.gt),
+        ('le', torch.le),
+        ('ge', torch.ge),
     ),
-    attr_names=("op_name", "op_func"),
+    attr_names=('op_name', 'op_func'),
 )
 
 
@@ -31,9 +31,9 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
         scale = 1.0
         zero_point = 0
 
-        q_input_a = torch.quantize_per_tensor(
-            f_input, scale=scale, zero_point=zero_point, dtype=dtype
-        )
+        q_input_a = torch.quantize_per_tensor(f_input, scale=scale,
+                                              zero_point=zero_point,
+                                              dtype=dtype)
         q_input_b = q_input_a.clone()
 
         if not contig:
@@ -53,9 +53,7 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
             if other_scalar:
                 return self.qop(q_input_a, 42, out=torch.tensor(True, dtype=torch.bool))
             else:
-                return self.qop(
-                    q_input_a, q_input_b, out=torch.tensor(True, dtype=torch.bool)
-                )
+                return self.qop(q_input_a, q_input_b, out=torch.tensor(True, dtype=torch.bool))
         else:
             if other_scalar:
                 return self.qop(q_input_a, 42)
@@ -63,10 +61,11 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
                 return self.qop(q_input_a, q_input_b)
 
 
-op_bench.generate_pt_tests_from_op_list(
-    qcomparators_ops, qcomparators_configs, QComparatorBenchmark
-)
+
+op_bench.generate_pt_tests_from_op_list(qcomparators_ops,
+                                        qcomparators_configs,
+                                        QComparatorBenchmark)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     op_bench.benchmark_runner.main()

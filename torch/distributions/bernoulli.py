@@ -4,16 +4,10 @@ import torch
 from torch import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import (
-    broadcast_all,
-    lazy_property,
-    logits_to_probs,
-    probs_to_logits,
-)
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
-__all__ = ["Bernoulli"]
-
+__all__ = ['Bernoulli']
 
 class Bernoulli(ExponentialFamily):
     r"""
@@ -34,22 +28,21 @@ class Bernoulli(ExponentialFamily):
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
     def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
-            raise ValueError(
-                "Either `probs` or `logits` must be specified, but not both."
-            )
+            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            (self.probs,) = broadcast_all(probs)
+            self.probs, = broadcast_all(probs)
         else:
             is_scalar = isinstance(logits, Number)
-            (self.logits,) = broadcast_all(logits)
+            self.logits, = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
             batch_shape = torch.Size()
@@ -60,10 +53,10 @@ class Bernoulli(ExponentialFamily):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Bernoulli, _instance)
         batch_shape = torch.Size(batch_shape)
-        if "probs" in self.__dict__:
+        if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(Bernoulli, new).__init__(batch_shape, validate_args=False)
@@ -108,12 +101,10 @@ class Bernoulli(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduction="none")
+        return -binary_cross_entropy_with_logits(logits, value, reduction='none')
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(
-            self.logits, self.probs, reduction="none"
-        )
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
     def enumerate_support(self, expand=True):
         values = torch.arange(2, dtype=self._param.dtype, device=self._param.device)
@@ -124,7 +115,7 @@ class Bernoulli(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.logit(self.probs),)
+        return (torch.logit(self.probs), )
 
     def _log_normalizer(self, x):
         return torch.log1p(torch.exp(x))

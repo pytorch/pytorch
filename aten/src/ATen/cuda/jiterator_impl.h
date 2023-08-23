@@ -13,7 +13,8 @@
 #include <string>
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 
 #define AT_FOR_8_CASES(_)  \
@@ -243,7 +244,7 @@ private:
   StoreWithCastPtr v;
 };
 
-} // namespace at::native
+}} // namespace at::native
 
 
 #endif // AT_USE_JITERATOR()

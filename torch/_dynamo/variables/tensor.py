@@ -3,11 +3,7 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
-
 import sympy
-
-import torch._numpy as tnp
 
 import torch.fx
 import torch.random
@@ -25,6 +21,7 @@ from ..utils import (
     get_fake_value,
     get_real_value,
     guard_if_dyn,
+    HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
     proxy_args_kwargs,
@@ -479,51 +476,29 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
+            if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+                unimplemented(
+                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor and install torch_np to support "
+                    f"tensor.numpy(). "
+                )
+            from .builder import wrap_fx_proxy_cls
+
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:
                 unimplemented(f"Tensor.numpy(force={kwargs['force']})")
-            proxy = tx.output.create_proxy(
-                "call_function",
-                torch.detach,
-                *proxy_args_kwargs([self], {}),
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.detach,
+                    *proxy_args_kwargs([self], {}),
+                ),
+                example_value=None,
+                **options,
             )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
-
-        elif name == "tolist":
-            from .builder import SourcelessBuilder
-
-            def tolist(tensor, sub_proxy):
-                def wrap(i, sub_proxy):
-                    return SymNodeVariable.create(
-                        tx,
-                        sub_proxy.item(),
-                        sym_num=tx.output.shape_env.create_unbacked_symint(),
-                    )
-
-                if tensor.dtype not in [
-                    torch.int8,
-                    torch.int16,
-                    torch.int32,
-                    torch.int64,
-                ]:
-                    unimplemented("Input tensor for tolist must be an integer tensor")
-
-                if tensor.dim() == 0:
-                    return wrap(tensor, sub_proxy)
-
-                if tensor.dim() == 1:
-                    return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
-
-                return [
-                    tolist(sub_tensor, sub_proxy=sub_proxy[i])
-                    for i, sub_tensor in enumerate(tensor)
-                ]
-
-            tensor = self.as_proxy().node.meta["example_value"]
-            out = tolist(tensor, self.as_proxy())
-            return SourcelessBuilder()(tx, out).add_options(options)
-        elif name in ("backward", "data_ptr"):
+        elif name in ("tolist", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
@@ -616,26 +591,6 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
-        elif name == "redistribute":
-            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-            # and rewrite args to have only proxyable args, then insert call_function
-            args_as_value = [x.as_python_constant() for x in args]
-
-            def redistribute_fn_with_prim_types(x):
-                return x.redistribute(*args_as_value)
-
-            # attach the same function name for better debugging
-            redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    redistribute_fn_with_prim_types,
-                    *proxy_args_kwargs([self], {}),
-                ),
-                **options,
-            )
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -861,20 +816,15 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
 class NumpyNdarrayVariable(TensorVariable):
     """
-    Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
-    Use this for Tensor.numpy() call.
+    Represents a torch_np.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
 
-    @staticmethod
-    def create(tx, proxy, **options):
-        from .builder import wrap_fx_proxy_cls
-
-        return wrap_fx_proxy_cls(
-            target_cls=NumpyNdarrayVariable,
-            tx=tx,
-            proxy=proxy,
-            **options,
-        )
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        **kwargs,
+    ):
+        super().__init__(proxy, **kwargs)
 
     def var_getattr(self, tx, name):
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -882,13 +832,15 @@ class NumpyNdarrayVariable(TensorVariable):
         # properties.  The inheritance here is for implementation sharing.
 
         from ..utils import numpy_attr_wrapper
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         result = None
         options = VariableTracker.propagate(self)
 
-        example_value = self.as_proxy().node.meta["example_value"]
-        example_ndarray = tnp.ndarray(example_value)
+        import torch_np
+
+        example_value = self.proxy.node.meta["example_value"]
+        example_ndarray = torch_np.ndarray(example_value)
 
         def insert_into_graph():
             return wrap_fx_proxy(
@@ -900,16 +852,19 @@ class NumpyNdarrayVariable(TensorVariable):
             )
 
         if name in ["T", "real", "imag"]:
-            proxy = tx.output.create_proxy(
-                "call_function",
-                numpy_attr_wrapper,
-                (self.as_proxy(), name),
-                {},
+            result = wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    numpy_attr_wrapper,
+                    (self.as_proxy(), name),
+                    {},
+                ),
+                **options,
             )
-            result = NumpyNdarrayVariable.create(tx, proxy, **options)
-
-        # These are awkward to implement.  The standard playbook for torch._numpy
-        # interop is to trace a call into the torch._numpy wrapper which works for
+        # These are awkward to implement.  The standard playbook for torch_np
+        # interop is to trace a call into the torch_np wrapper which works for
         # Tensor operations.  However, we don't want to do this for calls
         # that don't return Tensors, because in those cases we may not want
         # to trace the attribute access into the graph at all (it is sort
@@ -945,20 +900,22 @@ class NumpyNdarrayVariable(TensorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        from torch._dynamo.variables.builder import wrap_fx_proxy_cls
         from ..utils import numpy_method_wrapper
 
-        if name in ["__len__", "size"]:
-            # delegate back to TensorVariable
-            return super().call_method(tx, name, args, kwargs)
-        proxy = tx.output.create_proxy(
-            "call_function",
-            numpy_method_wrapper(name),
-            *proxy_args_kwargs([self] + list(args), kwargs),
+        result = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                numpy_method_wrapper(name),
+                *proxy_args_kwargs([self] + list(args), kwargs),
+            ),
+            example_value=None,
+            **options,
         )
-        return NumpyNdarrayVariable.create(tx, proxy, **options)
 
-    def python_type(self):
-        return np.ndarray
+        return result
 
 
 class UnspecializedPythonVariable(TensorVariable):

@@ -41,8 +41,6 @@ using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
-using torch::dynamo::autograd::CompiledNodeArgs;
-using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
@@ -229,11 +227,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   const InputMetadata& input_metadata(size_t index) const {
-    return input_metadata_[index];
-  }
-
-  // Danger: not thread safe, caller must protect with lock
-  InputMetadata& mutable_input_metadata(size_t index) {
     return input_metadata_[index];
   }
 
@@ -559,27 +552,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  // see [Note: Compiled Autograd]
-  // Used by compiled autograd to
-  //   1) Extract tensors/symint args
-  //   2) Collect node information for specialization and caching
-  // Implementations in subclasses should call args.collect() with all node
-  // attrs. These functions are only called durring backward.
-  virtual void compiled_args(CompiledNodeArgs& args) {
-    throw std::runtime_error(
-        std::string("compiled_args not implemented: ") + name());
-  }
-
-  // Used by compiled autograd to call apply() with different saved tensors
-  // Implementations should call saved.before() on all attrs, then apply(), then
-  // saved.after() on all attrs in the same order.
-  virtual variable_list apply_with_saved(
-      const variable_list& inputs,
-      SwapSavedVariables& saved) {
-    throw std::runtime_error(
-        std::string("apply_with_saved not implemented: ") + name());
-  }
-
  protected:
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
@@ -758,21 +730,6 @@ edge_list collect_next_edges(Variables&&... variables) {
   make.apply(std::forward<Variables>(variables)...);
   return std::move(make.next_edges);
 }
-
-struct TypeAndSize {
-  TypeAndSize() : options(at::TensorOptions()) {}
-  /* implicit */
-  TypeAndSize(const at::Tensor& t)
-      : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
-
-  at::Tensor zeros() {
-    return at::zeros_symint(sym_sizes, options);
-  }
-
-  std::vector<c10::SymInt> sym_sizes;
-  at::TensorOptions options;
-};
-
 } // namespace autograd
 } // namespace torch
 

@@ -34,7 +34,7 @@ def emit(initializer_parameter_map):
             print("    {")
             for parameter in sample:
                 parameter_values = "{{{}}}".format(", ".join(map(str, parameter)))
-                print(f"      torch::tensor({parameter_values}),")
+                print("      torch::tensor({}),".format(parameter_values))
             print("    },")
         print("  };")
         print("}\n")
@@ -63,7 +63,7 @@ def run(initializer):
 def main():
     initializer_parameter_map = {}
     for initializer in INITIALIZERS.keys():
-        sys.stderr.write(f'Evaluating {initializer} ...\n')
+        sys.stderr.write('Evaluating {} ...\n'.format(initializer))
         initializer_parameter_map[initializer] = run(initializer)
 
     emit(initializer_parameter_map)

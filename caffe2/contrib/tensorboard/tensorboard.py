@@ -106,7 +106,7 @@ def graph_def_to_event(step, graph_def):
         wall_time=step, step=step, graph_def=graph_def.SerializeToString())
 
 
-@cli.command("tensorboard-graphs")  # type: ignore[arg-type, attr-defined]
+@cli.command("tensorboard-graphs")
 @click.option("--c2-netdef", type=click.Path(exists=True, dir_okay=False),
               multiple=True)
 @click.option("--tf-dir", type=click.Path(exists=True))
@@ -129,7 +129,7 @@ def tensorboard_graphs(c2_netdef, tf_dir):
     log.info("Wrote %s graphs to logdir %s", len(events), tf_dir)
 
 
-@cli.command("tensorboard-events")  # type: ignore[arg-type, attr-defined]
+@cli.command("tensorboard-events")
 @click.option("--c2-dir", type=click.Path(exists=True, file_okay=False),
               help="Root directory of the Caffe2 run")
 @click.option("--tf-dir", type=click.Path(writable=True),
@@ -209,4 +209,4 @@ def tensorboard_events(c2_dir, tf_dir):
 
 
 if __name__ == "__main__":
-    cli()  # type: ignore[misc]
+    cli()

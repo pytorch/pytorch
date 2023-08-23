@@ -76,7 +76,7 @@ class TensorCheck {
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
-      const std::string& tensor_name) {
+      std::string tensor_name) {
     std::stringstream fail_reason;
     fail_reason << "tensor '" << tensor_name << "' ";
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {

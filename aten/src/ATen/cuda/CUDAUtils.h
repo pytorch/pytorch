@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-namespace at::cuda {
+namespace at { namespace cuda {
 
 // Check if every tensor in a list of tensors matches the current
 // device.
@@ -17,4 +17,4 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
-} // namespace at::cuda
+}} // namespace at::cuda

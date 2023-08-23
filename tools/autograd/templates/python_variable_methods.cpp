@@ -969,8 +969,22 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
   if (check_has_torch_function(self)) {
     return handle_torch_function(self, "untyped_storage");
   }
+
+  // Note [Python Storages for Tensor Subclasses]
+  // For tensor subclasses that are traceable,
+  // we need to be able to track aliasing of subclasses in AOTAutograd.
+  // __tensor_flatten__/__tensor_unflatten__ are part of the contract
+  // for "declaring your subclass to be traceable",
+  // So we detect this situation and allow python storage objects to be returned.
+  // In the future we could think about making subclass storages always visible in python,
+  // although it has some footguns (you can use them to loosely track aliasing,
+  // but they don't have a valid data pointer).
+  py::object maybe_tensor_flatten = PyObject_FastGetAttrString(self, "__tensor_flatten__");
+  py::object maybe_tensor_unflatten = PyObject_FastGetAttrString(self, "__tensor_unflatten__");
+  auto is_traceable_subclass = maybe_tensor_flatten && maybe_tensor_unflatten;
+
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage());
+  return createPyObject(self_.storage(), /*always_create_python_storage=*/is_traceable_subclass);
   END_HANDLE_TH_ERRORS
 }
 

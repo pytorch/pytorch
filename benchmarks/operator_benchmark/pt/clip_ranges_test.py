@@ -1,6 +1,5 @@
-import torch
-
 import operator_benchmark as op_bench
+import torch
 
 
 """Microbenchmarks for ClipRanges operator."""
@@ -12,7 +11,7 @@ clip_ranges_long_configs = op_bench.cross_product_configs(
     M=[1],
     N=[2],
     MAX_LENGTH=range(1, 100),
-    device=["cpu", "cuda"],
+    device=['cpu', 'cuda'],
     dtype=[torch.int32],
     tags=["long"],
 )
@@ -28,7 +27,7 @@ clip_ranges_short_configs = op_bench.config_list(
     ],
     attr_names=["LENGTH", "M", "N", "MAX_LENGTH", "dtype"],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )
@@ -38,7 +37,7 @@ class ClipRangesBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, LENGTH, M, N, MAX_LENGTH, device, dtype):
         self.inputs = {
             "input": torch.rand(LENGTH, M, N, device=device).type(dtype),
-            "max_length": MAX_LENGTH,
+            "max_length": MAX_LENGTH
         }
         self.set_module_name("clip_ranges")
 

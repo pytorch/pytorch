@@ -1,9 +1,7 @@
 conv2d_dw:
   parameter_names_with_default_values:
-      NAME: conv2d_dw_3x3
       KERNEL_SIZE_X: 3
       KERNEL_SIZE_Y: 3
   parameter_values:
-    - NAME: conv2d_dw_5x5
-      KERNEL_SIZE_X: 5
+    - KERNEL_SIZE_X: 5
       KERNEL_SIZE_Y: 5

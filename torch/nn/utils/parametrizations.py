@@ -262,7 +262,7 @@ def orthogonal(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            f"Module '{module}' has no parameter or buffer with name '{name}'"
+            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
         )
 
     # We could implement this for 1-dim tensors as the maps on the sphere
@@ -556,7 +556,7 @@ def spectral_norm(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            f"Module '{module}' has no parameter or buffer with name '{name}'"
+            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
         )
 
     if dim is None:

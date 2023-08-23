@@ -234,7 +234,7 @@ class _DataPipeType:
             return issubtype(self.param, other.param)
         if isinstance(other, type):
             return issubtype(self.param, other)
-        raise TypeError(f"Expected '_DataPipeType' or 'type', but found {type(other)}")
+        raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
 
     def issubtype_of_instance(self, other):
         return issubinstance(other, self.param)
@@ -279,13 +279,13 @@ class _DataPipeMeta(GenericMeta):
     @_tp_cache
     def _getitem_(self, params):
         if params is None:
-            raise TypeError(f'{self.__name__}[t]: t can not be None')
+            raise TypeError('{}[t]: t can not be None'.format(self.__name__))
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
             params = (params, )
 
-        msg = f"{self.__name__}[t]: t must be a type"
+        msg = "{}[t]: t must be a type".format(self.__name__)
         params = tuple(_type_check(p, msg) for p in params)
 
         if isinstance(self.type.param, _GenericAlias):
@@ -303,12 +303,13 @@ class _DataPipeMeta(GenericMeta):
                                        '__type_class__': True})
 
         if len(params) > 1:
-            raise TypeError(f'Too many parameters for {self} actual {len(params)}, expected 1')
+            raise TypeError('Too many parameters for {} actual {}, expected 1'.format(self, len(params)))
 
         t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
-            raise TypeError(f'Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]')
+            raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
+                            .format(t, self.type))
 
         # Types are equal, fast path for inheritance
         if self.type == t:
@@ -387,7 +388,8 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             param = _eval_type(sub_cls.type.param, base_globals, locals())
             sub_cls.type.param = param
         except TypeError as e:
-            raise TypeError(f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing") from e
+            raise TypeError("{} is not supported by Python typing"
+                            .format(sub_cls.type.param.__forward_arg__)) from e
 
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
@@ -419,7 +421,8 @@ def reinforce_type(self, expected_type):
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):
-        raise TypeError(f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}")
+        raise TypeError("Expected 'expected_type' as subtype of {}, but found {}"
+                        .format(self.type, _type_repr(expected_type)))
 
     self.type = _DataPipeType(expected_type)
     return self

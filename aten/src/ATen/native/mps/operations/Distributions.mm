@@ -13,17 +13,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/argmax.h>
-#include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/div.h>
-#include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
-#include <ATen/ops/multinomial_native.h>
-#include <ATen/ops/normal_native.h>
-#include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
-#include <ATen/ops/randperm_native.h>
 #include <ATen/ops/topk.h>
-#include <ATen/ops/uniform_native.h>
 #endif
 
 namespace at::native {
@@ -142,13 +135,13 @@ Tensor& random_mps_impl(Tensor& self,
   return self;
 }
 
-static Tensor& normal_mps_impl(Tensor& self,
-                               double mean_s,
-                               double std_s,
-                               const c10::optional<Tensor>& mean_opt,
-                               const c10::optional<Tensor>& std_opt,
-                               c10::optional<Generator> gen,
-                               std::string op_name) {
+Tensor& normal_mps_impl(Tensor& self,
+                        double mean_s,
+                        double std_s,
+                        const c10::optional<Tensor>& mean_opt,
+                        const c10::optional<Tensor>& std_opt,
+                        c10::optional<Generator> gen,
+                        std::string op_name) {
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
 
@@ -186,10 +179,7 @@ static Tensor& normal_mps_impl(Tensor& self,
                                  random_op_block);
 }
 
-static Tensor& bernoulli_mps_impl(Tensor& self,
-                                  const Tensor& prob_t,
-                                  c10::optional<Generator> gen,
-                                  std::string op_name) {
+Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Generator> gen, std::string op_name) {
   TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
               op_name,
               ": probability and self tensor should be of the same shape")
@@ -432,10 +422,10 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
                                        random_op_block);
 }
 
-static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
-                                                       const int64_t n_sample,
-                                                       c10::optional<Generator> generator,
-                                                       Tensor& result) {
+Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
+                                                const int64_t n_sample,
+                                                c10::optional<Generator> generator,
+                                                Tensor& result) {
   using namespace mps;
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());

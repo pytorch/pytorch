@@ -32,6 +32,7 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     Work
 )
+from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -42,7 +43,7 @@ __all__ = [
     'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
-    'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
+    'dist_backend', 'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
@@ -180,13 +181,6 @@ class Backend:
         MPI : ["cpu"],
     }
 
-    backend_type_map: Dict[str, ProcessGroup.BackendType] = {
-        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO : ProcessGroup.BackendType.GLOO,
-        NCCL: ProcessGroup.BackendType.NCCL,
-        UCC: ProcessGroup.BackendType.UCC,
-    }
-
     def __new__(cls, name: str):
         if not isinstance(name, str):
             raise ValueError(f"Backend name must be a string, but got: {name}")
@@ -234,7 +228,6 @@ class Backend:
 
         setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -319,6 +312,13 @@ class BackendConfig:
 
     def get_device_backend_map(self):
         return self.device_backend_map
+
+# `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
+# compatibility with pre-c10d distributed package.
+# TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
+_backend: str = Backend.UNDEFINED
+dist_backend = Backend
+
 
 class _reduce_op:
     r"""
@@ -513,27 +513,6 @@ class _World:
     def pg_default_device(self) -> Dict[ProcessGroup, torch.device]:
         return self._pg_default_device
 
-    @property
-    def pg_config_info(self) -> List[Dict[str, Union[int, str]]]:
-        """
-        Returns a list of dict with process groups and backends with their unique IDs
-        and configurations (types and ranks).
-        """
-        config_info = []
-        for pg, backend in self.pg_map.items():
-            # backend is a tuple with the first element being the backend type ("nccl", etc.)
-            backend_type = Backend.backend_type_map[backend[0]]
-            config_info.append(
-                {
-                    "pg_id": pg._id(),
-                    "backend_id": pg._backend_id(backend_type),
-                    "backend_config": self.pg_backend_config[pg],
-                    "ranks": self.pg_group_ranks[pg],
-                }
-            )
-        return config_info
-
-
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
 
@@ -555,7 +534,7 @@ class group(metaclass=_WorldMeta):
     pass
 
 class GroupMember(metaclass=_WorldMeta):
-    NON_GROUP_MEMBER = -100
+    NON_GROUP_MEMBER = object()
 
 
 # Default process group state
@@ -784,7 +763,8 @@ def _check_single_tensor(param, param_name):
     """
     if not isinstance(param, torch.Tensor):
         raise RuntimeError(
-            f"Invalid function argument. Expected parameter `{param_name}` to be of type torch.Tensor."
+            "Invalid function argument. Expected parameter `{}` "
+            "to be of type torch.Tensor.".format(param_name)
         )
 
 
@@ -796,7 +776,8 @@ def _check_tensor_list(param, param_name):
         isinstance(p, torch.Tensor) for p in param
     ):
         raise RuntimeError(
-            f"Invalid function argument. Expected parameter `{param_name}` to be of type List[torch.Tensor]."
+            "Invalid function argument. Expected parameter `{}` "
+            "to be of type List[torch.Tensor].".format(param_name)
         )
 
 def _as_iterable(obj) -> collections.abc.Iterable:
@@ -982,7 +963,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
+    pg_store = _world.pg_map.get(pg, None)
     assert pg_store is not None
     return pg_store[0]
 
@@ -3916,17 +3897,18 @@ def _new_group_with_tag(
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
-    pg, pg_store = _new_process_group_helper(
-        group_world_size,
-        group_rank,
-        ranks,
-        backend,
-        default_store,
-        group_name=group_name,
-        pg_options=pg_options,
-        timeout=timeout,
-        pg_tag=pg_tag
-    )
+    with record_function(f"## process_group:init with ranks: {ranks}"):
+        pg, pg_store = _new_process_group_helper(
+            group_world_size,
+            group_rank,
+            ranks,
+            backend,
+            default_store,
+            group_name=group_name,
+            pg_options=pg_options,
+            timeout=timeout,
+            pg_tag=pg_tag
+        )
 
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {

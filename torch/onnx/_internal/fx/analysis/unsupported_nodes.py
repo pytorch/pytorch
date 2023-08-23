@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import torch
 from torch.onnx._internal.fx import _pass, diagnostics
@@ -9,7 +9,7 @@ from torch.onnx._internal.fx import _pass, diagnostics
 
 @dataclasses.dataclass
 class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
-    unsupported_op_to_target_mapping: Dict[str, Dict[str, None]]
+    unsupported_op_to_target_mapping: Dict[str, Set[str]]
 
 
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
@@ -25,7 +25,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             return
 
         normalized_op_targets_map = {
-            op: list(targets.keys())
+            op: [str(target) for target in targets]
             for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
         }
 
@@ -63,12 +63,12 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     unsupported_nodes.append(node)
 
-        op_to_target_mapping: Dict[str, Dict[str, None]] = {}
+        op_to_target_mapping: Dict[str, Set[str]] = {}
 
         for node in unsupported_nodes:
             op = node.op
             target = node.target
-            op_to_target_mapping.setdefault(op, {}).setdefault(str(target), None)
+            op_to_target_mapping.setdefault(op, set()).add(str(target))
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
         self._lint(analysis_result, diagnostic_level)

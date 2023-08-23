@@ -1,6 +1,4 @@
-#include "kernel_runtime_context.h"
 #include "operator_registry.h"
-
 #include <gtest/gtest.h>
 
 namespace torch {
@@ -20,7 +18,7 @@ TEST(OperatorRegistrationTest, Add) {
     for (size_t i = 0; i < 4; i++) {
         kernel_values[i] = &values[i];
     }
-    KernelRuntimeContext context{};
+    RuntimeContext context{};
     op(context, kernel_values);
     at::Tensor expected = at::ones({2, 3});
     expected = at::fill(expected, 2);
@@ -42,7 +40,7 @@ TEST(OperatorRegistrationTest, CustomAdd3) {
     for (size_t i = 0; i < 4; i++) {
         kernel_values[i] = &values[i];
     }
-    KernelRuntimeContext context{};
+    RuntimeContext context{};
     op(context, kernel_values);
     at::Tensor expected = at::ones({2, 3});
     expected = at::fill(expected, 3);

@@ -3,7 +3,6 @@ import builtins
 import collections
 import dataclasses
 import enum
-import functools
 import importlib
 import itertools
 import logging
@@ -19,11 +18,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
-from torch._dynamo.source import (
-    is_from_local_source,
-    TensorProperty,
-    TensorPropertySource,
-)
+from torch._dynamo.source import TensorProperty, TensorPropertySource
 
 from torch._guards import (
     DuplicateInputs,
@@ -39,7 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -50,7 +45,7 @@ from .utils import (
     dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
-    is_guard_failure_reporting_enabled,
+    HAS_NUMPY,
     istype,
     np,
     orig_code_map,
@@ -85,7 +80,6 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
     ]
 )
 
@@ -285,17 +279,21 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         np_types = (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-            np.float16,
-            np.float32,
-            np.float64,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
+            )
+            if HAS_NUMPY
+            else ()
         )
         ok_types = (
             int,
@@ -570,16 +568,12 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard, value=None):
+    def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            if isinstance(value, TensorWeakRef):
-                value = value()
-
-            value = value if value is not None else self.get(guard.name)
+            value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
-
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
@@ -607,18 +601,15 @@ class GuardBuilder(GuardBuilderBase):
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
-                    "device",
+                    "device.type",
+                    "device.index",
                     "requires_grad",
                     "ndimension()",
                 ]
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
-                    if istype(real_value, (torch.device, torch.dtype)):
-                        # copy pasted from EQUALS_MATCH
-                        code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
-                    else:
-                        code.append(f"{tensor_name}.{term} == {real_value}")
+                    code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
@@ -835,7 +826,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List[ReferenceType[object]] = []
+        self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
         self.output_graph = output_graph
 
@@ -1004,7 +995,7 @@ class CheckFunctionManager:
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", guard_body)
 
-        if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
+        if config.report_guard_failures or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
             # lookup where there are multiple entries in the same cache line,
             # this can lead to very high performance overhead. So, we have
@@ -1168,29 +1159,3 @@ def unique(seq):
         if x not in seen:
             yield x
             seen.add(x)
-
-
-def make_dupe_guard(obj_source, dupe_source):
-    # Note - we may end up in a situation where we invoke something like
-    # def fn(x, y)
-    # with fn(x, x)
-    # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
-    # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
-    # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
-    # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
-
-    # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
-    # leave unsourced - like a local list created and discharged entirely within a local scope.
-    if dupe_source and dupe_source != obj_source:
-        ser_source_is_local = is_from_local_source(dupe_source)
-        source_is_local = is_from_local_source(obj_source)
-        # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
-        # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
-        # so maybe we should do this refactor before we land this...
-        # TODO(voz): Combine local and global guard builders.
-        if ser_source_is_local == source_is_local:
-            # Note - this is a little agressive - these being duplicate input does not always matter.
-            # However, this should always be a sound guard to add here.
-            return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
-    return None

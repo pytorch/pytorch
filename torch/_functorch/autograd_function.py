@@ -11,10 +11,10 @@ from torch._C._functorch import (
 from torch._functorch.vmap import (
     wrap_batched,
     unwrap_batched,
+    vmap,
     restore_vmap,
     _add_batch_dim,
 )
-from torch._functorch.apis import vmap
 from torch._functorch.vmap import _broadcast_to_and_flatten
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import Any, NamedTuple, Tuple

@@ -27,11 +27,7 @@ Node* CreateCastToBoolNode(Value* val, Graph* graph) {
   return cast_node;
 }
 
-Node* InsertCastForCond(
-    Value* cond_val,
-    Graph* graph,
-    Node* consumer_node,
-    int opset_version) {
+Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
   // prev:  cond_val -> consumer_node
   // after: cond_val -> cast -> consumer_node
   // NOTE: The cast is required because operators like PyTorch Greater/Less
@@ -41,8 +37,6 @@ Node* InsertCastForCond(
   cast_node->insertBefore(consumer_node);
 
   consumer_node->replaceInputWith(cond_val, cast_node->output());
-  const ParamMap empty_params_dict = {};
-  ONNXShapeTypeInference(cast_node, empty_params_dict, opset_version);
   return cast_node;
 }
 
@@ -294,7 +288,7 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   FixupONNXSubblockOutputs(n);
 }
 
-void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
+void FixupONNXLoopNodeInputs(Node* node) {
   if (node->kind() != ::c10::onnx::Loop) {
     return;
   }
@@ -304,7 +298,7 @@ void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
   // add cast to condition input outside the loop.
   Value* cond_val = node->input(1);
   if (IsCondCastRequired(cond_val)) {
-    auto* cast_node = InsertCastForCond(cond_val, graph, node, opset_version);
+    auto* cast_node = InsertCastForCond(cond_val, graph, node);
     cast_node->copyMetadata(node);
   }
 
@@ -320,8 +314,8 @@ void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
   // add cast to condition input inside the loop.
   Value* next_cond_val = sub_block->outputs().at(0);
   if (IsCondCastRequired(next_cond_val)) {
-    auto* cast_node = InsertCastForCond(
-        next_cond_val, graph, sub_block->return_node(), opset_version);
+    auto* cast_node =
+        InsertCastForCond(next_cond_val, graph, sub_block->return_node());
     cast_node->copyMetadata(node);
   }
 
@@ -361,7 +355,7 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   GRAPH_DEBUG("before FixupONNXLoopBlockInputs: ", *node->owningGraph());
   FixupONNXLoopBlockInputs(node);
   GRAPH_DEBUG("after FixupONNXLoopBlockInputs: ", *node->owningGraph());
-  FixupONNXLoopNodeInputs(node, opset_version);
+  FixupONNXLoopNodeInputs(node);
   GRAPH_DEBUG("after FixupONNXLoopNodeInputs: ", *node->owningGraph());
   FixupONNXLoopBlockOutputs(node);
   GRAPH_DEBUG("after FixupONNXLoopBlockOutputs: ", *node->owningGraph());
@@ -477,9 +471,10 @@ void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   // Check if the input to ONNX If node is node Bool, and insert
   // cast to Bool if needed.
   if (!if_node->input()->type()->isSubtypeOf(*BoolType::get())) {
-    Node* cast_node =
-        InsertCastForCond(if_node->input(), graph, if_node, opset_version);
+    Node* cast_node = CreateCastToBoolNode(if_node->input(), graph);
+    cast_node->insertBefore(if_node);
     cast_node->copyMetadata(if_node);
+    if_node->replaceInputWith(if_node->input(), cast_node->output());
   }
 
   Block* then_block = if_node->blocks()[0];

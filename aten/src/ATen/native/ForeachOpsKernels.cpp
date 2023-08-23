@@ -43,7 +43,6 @@
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
-#include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
 #include <ATen/ops/_foreach_sinh_native.h>
 #include <ATen/ops/_foreach_sqrt_native.h>
@@ -60,43 +59,6 @@
 #endif
 
 namespace at::native {
-
-#define FOREACH_BINARY_OP_TENSOR(OP)                            \
-  void foreach_tensor_##OP##_tensor_kernel_slow_(               \
-      TensorList tensors, const Tensor& scalar) {               \
-    TORCH_CHECK(                                                \
-        scalar.dim() == 0 && scalar.numel() == 1,               \
-        "scalar tensor expected to be 0 dim but it has ",       \
-        scalar.dim(),                                           \
-        " dimensions and ",                                     \
-        scalar.numel(),                                         \
-        " elements.");                                          \
-    check_foreach_api_restrictions(tensors);                    \
-                                                                \
-    for (auto& t : tensors) {                                   \
-      t.OP##_(scalar);                                          \
-    }                                                           \
-  }                                                             \
-                                                                \
-  std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow( \
-      TensorList tensors, const Tensor& scalar) {               \
-    TORCH_CHECK(                                                \
-        scalar.dim() == 0 && scalar.numel() == 1,               \
-        "scalar tensor expected to be 0 dim but it has ",       \
-        scalar.dim(),                                           \
-        " dimensions and ",                                     \
-        scalar.numel(),                                         \
-        " elements.");                                          \
-    check_foreach_api_restrictions(tensors);                    \
-                                                                \
-    std::vector<Tensor> result;                                 \
-    result.reserve(tensors.size());                             \
-    for (const auto& t : tensors) {                             \
-      result.emplace_back(t.OP(scalar));                        \
-    }                                                           \
-                                                                \
-    return result;                                              \
-  }
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                            \
   void foreach_tensor_##OP##_scalar_kernel_slow_(               \
@@ -293,8 +255,6 @@ FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
-FOREACH_BINARY_OP_TENSOR(mul);
-
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
 FOREACH_BINARY_OP_SCALAR(mul);
@@ -345,7 +305,6 @@ FOREACH_UNARY_OP(frac);
 FOREACH_UNARY_OP(trunc);
 FOREACH_UNARY_OP(reciprocal);
 FOREACH_UNARY_OP(sigmoid);
-FOREACH_UNARY_OP(sign);
 
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
 FOREACH_POINTWISE_OP_SCALAR(addcmul);

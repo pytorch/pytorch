@@ -47,7 +47,6 @@ struct TORCH_API ExperimentalConfig {
       bool profiler_measure_per_kernel = false,
       bool verbose = false,
       std::vector<std::string> performance_events = {},
-      bool enable_cuda_sync_events = false,
       bool adjust_timestamps = false);
   ~ExperimentalConfig() = default;
   explicit operator bool() const;
@@ -60,12 +59,6 @@ struct TORCH_API ExperimentalConfig {
    * An empty list will disable performance event based profiling altogether.
    */
   std::vector<std::string> performance_events;
-  /*
-   * For CUDA profiling mode, enable adding CUDA synchronization events
-   * that expose CUDA device, stream and event synchronization activities.
-   * This feature is new and currently disabled by default.
-   */
-  bool enable_cuda_sync_events;
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those

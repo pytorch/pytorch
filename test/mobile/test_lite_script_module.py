@@ -197,7 +197,7 @@ class TestLiteScriptModule(TestCase):
         )
 
     def test_unsupported_classtype(self):
-        class Foo:
+        class Foo():
             def __init__(self):
                 return
 
@@ -313,7 +313,7 @@ class TestLiteScriptModule(TestCase):
         loaded = self.getScriptExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, f'test_lite_script_module.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_source_range_raise_exception(self):
@@ -357,8 +357,8 @@ class TestLiteScriptModule(TestCase):
             loaded(torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
         except RuntimeError as e:
             error_message = f"{e}"
-        self.assertTrue(f'test_lite_script_module.py\", line {lineno + 3}' in error_message)
-        self.assertTrue(f'test_lite_script_module.py\", line {lineno + 9}' in error_message)
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 3) in error_message)
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 9) in error_message)
         self.assertTrue('top(FooTest3)' in error_message)
 
     def test_source_range_no_debug_info(self):

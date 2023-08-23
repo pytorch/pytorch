@@ -8,10 +8,6 @@ pip=22.2.2
 pillow=9.2.0
 pkg-config=0.29.2
 wheel=0.37.1
-# NB: This is intentionally held back because anaconda main doesn't
-# have updated expecttest, but you don't /need/ the updated version
-# to run the tests.  In the meantime I need to figure out how to
-# cajole anaconda into updating, or get the package from pypi instead...
 expecttest=0.1.3
 
 # Not pinning certifi so that we can always get the latest certificates

@@ -176,12 +176,12 @@ class JitTestCase(JitCommonTestCase):
 
         fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
-        self.assertTrue(len(fusion_groups) == 1, f'got {graph}')
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
         (graph, fusion_nodes) = list(fusion_groups.items())[0]
         # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
-        self.assertTrue(len(fusion_nodes) == 1, f'got {graph}')
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        f'got {graph}')
+                        'got {}'.format(graph))
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -294,7 +294,7 @@ class JitTestCase(JitCommonTestCase):
 
         if consider_subgraphs:
             strgraph = str(graph)
-            count = strgraph.count(kind) - strgraph.count(f'with {kind}')
+            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
             self.assertTrue(count > 0)
             return
 
@@ -316,11 +316,12 @@ class JitTestCase(JitCommonTestCase):
                 return
             subgraph = 'including' if consider_subgraphs else 'excluding'
             raise AssertionError(
-                f'{graph}\nError: graph contains {actual} {kind} nodes ({subgraph} subgraphs) but expected {expected}')
+                '{}\nError: graph contains {} {} nodes ({} subgraphs) but expected {}'.format(
+                    graph, actual, kind, subgraph, expected))
 
         if consider_subgraphs:
             strgraph = str(graph)
-            count = strgraph.count(kind) - strgraph.count(f'with {kind}')
+            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
             perform_assert(graph, kind, count, num_kind_nodes,
                            consider_subgraphs)
             return
@@ -525,7 +526,7 @@ class JitTestCase(JitCommonTestCase):
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
-                   _force_outplace=False, grad_atol=None, grad_rtol=None):
+                   _force_outplace=False):
 
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
@@ -586,7 +587,11 @@ class JitTestCase(JitCommonTestCase):
                                            allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge, atol=grad_atol, rtol=grad_rtol)
+            self.assertEqual(grads, grads_ge)
+
+        self.assertEqual(outputs, outputs_ge)
+        if inputs_require_grads:
+            self.assertEqual(grads, grads_ge)
 
         # test the grad grad case
         outputs = func(*recording_inputs)
@@ -614,7 +619,7 @@ class JitTestCase(JitCommonTestCase):
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge, atol=grad_atol, rtol=grad_rtol)
+            self.assertEqual(grads, grads_ge)
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
@@ -767,7 +772,7 @@ def _get_py3_code(code, fn_name):
         fn = getattr(module, fn_name)
         return fn
 
-class TensorExprTestOptions:
+class TensorExprTestOptions():
     def __init__(self):
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
@@ -868,7 +873,7 @@ def get_traced_sample_variant_pairs(device, dtype, op):
         return outputs
 
     for sample in samples:
-        for variant in variants.values():
+        for func_type, variant in variants.items():
             if variant is None:
                 continue
 

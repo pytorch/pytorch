@@ -14,4 +14,4 @@ set_property(
 # MKL libraries correctly; see https://github.com/pytorch/pytorch/issues/73008
 set_property(
   TARGET caffe2::mkl PROPERTY INTERFACE_LINK_DIRECTORIES
-  ${MKL_ROOT}/lib ${MKL_ROOT}/lib/intel64 ${MKL_ROOT}/lib/intel64_win ${MKL_ROOT}/lib/win-x64)
+  ${MKL_ROOT}/lib)

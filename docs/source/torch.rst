@@ -725,6 +725,9 @@ Operator Tags
 .. py:module:: torch.contrib
 .. py:module:: torch.utils.backcompat
 
+.. This submodule is split manually without a top level page.
+.. py:module:: torch.utils
+
 .. This module is only used internally for ROCm builds.
 .. py:module:: torch.utils.hipify
 
@@ -732,3 +735,14 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_multithreading_enabled

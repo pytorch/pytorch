@@ -7,12 +7,16 @@ import types
 from typing import Dict, List
 
 import torch._C
-import torch._numpy as tnp
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    HAS_NUMPY_TORCH_INTEROP,
+    identity,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 from .functions import (
@@ -789,26 +793,9 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
-@functools.lru_cache(maxsize=1)
-def get_np_to_tnp_map():
-    from ..utils import NP_TO_TNP_MODULE
-
-    np_fn_to_tnp_fn = {}
-
-    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
-        for fn_name, tnp_fn in tnp_mod.__dict__.items():
-            if callable(tnp_fn):
-                # some internal details do leak from tnp
-                # which are not part of numpy API.
-                if np_fn := getattr(np_mod, fn_name, None):
-                    np_fn_to_tnp_fn[np_fn] = tnp_fn
-
-    return np_fn_to_tnp_fn
-
-
 class NumpyVariable(VariableTracker):
     """
-    Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
+    Wrapper around `numpy.*` for better error messages.
     """
 
     def __init__(self, value, **kwargs):
@@ -818,32 +805,32 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+            unimplemented(f"numpy.{self.value}()")
+        import torch_np
+
         from ..utils import numpy_to_tensor_wrapper
 
+        from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
-        if self.value.__name__ == "dtype":
-            unimplemented(
-                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
+        # lookup method name in torch_np
+        if hasattr(torch_np, self.value.__name__):
+            func = getattr(torch_np, self.value.__name__)
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    numpy_to_tensor_wrapper(func),
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                example_value=None,
+                **options,
             )
-        else:  # We are dealing with a callable.
-            func = get_np_to_tnp_map().get(self.value)
-            if func is None:
-                unimplemented(
-                    f"Can't find numpy function {self.value} in torch._numpy. "
-                    " Please file an issue to request support for this function."
-                )
-
-            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-            #  wrapped by NumpyNdarrayVariable which is wrong!
-            proxy = tx.output.create_proxy(
-                "call_function",
-                numpy_to_tensor_wrapper(func),
-                *proxy_args_kwargs(args, kwargs),
-            )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
+        else:
+            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,
@@ -860,27 +847,11 @@ class NumpyVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def as_proxy(self):
-        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
-        #  into NumpyVariable for instances/objects and NumpyVariable for types.
-        if isinstance(self.value, type):
-            # retrieve attribute str. E.g., "float32" if given np.float32
-
-            attr = self.value.__name__
-            # get tnp equivalent
-            tnp_dtype = tnp.dtype(attr)
-            # returning a string here because we are assuming all `dtype` kwargs for numpy
-            # functions can take an equivalent string and the behavior of the function would
-            # be the same as taking a numpy dtype.
-            return tnp_dtype.name
-
-        return super().as_proxy()
-
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super(NullVariable, self).__init__(**kwargs)
 
     def __str__(self):
         return "NullVariable"

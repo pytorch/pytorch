@@ -23,7 +23,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         root: torch.nn.Module,
         graph: torch.fx.Graph,
         const_subgraph: Optional[torch.fx.Graph] = None,
-        fx_const_folded_attrs_name: Optional[str] = None,
+        fx_const_folded_attrs_name: str = None,
         device_for_folded_attrs: str = "cuda",
     ):
         super().__init__(root, graph)

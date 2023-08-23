@@ -1,13 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUFallback.h>
 
+#include <sstream>
+
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-
-#include <sstream>
-#include <vector>
-
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -66,16 +64,6 @@ static c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>&
   return c10::nullopt;
 }
 
-static bool validate_tensor_list(const c10::List<at::Tensor>& tensorlist) {
-  bool flag = false;
-
-  for (const auto& i : c10::irange(tensorlist.size())) {
-    if (tensorlist[i].defined())
-      flag = true;
-  }
-
-  return flag;
-}
 
 void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
   auto& schema_args = op.schema().arguments();
@@ -87,10 +75,6 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<int> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
-  std::vector<int> tensorlist_args_indices;
-
-  // save converted cpu tensor for TensorList
-  std::vector<c10::IValue> tensorlist_cpu_args;
 
   // Step 1: Convert all non-CPU tensor inputs into CPU tensors
   // and put them on the stack at the correct indices.
@@ -103,11 +87,9 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       // Note: we copy each TensorList argument to CPU individually out of convenience,
       // but XLA would benefit from materializing all tensor and TensorList args onto the CPU at the same time.
       // We can improve this if we need better perf for XLA's CPU fallbacks.
-      tensorlist_args.push_back(ivalue.toTensorList());
-      tensorlist_args_indices.push_back(idx);
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
-      tensorlist_cpu_args.push_back(cpu_ivalue);
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
+      tensorlist_args.push_back(ivalue.toTensorList());
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
@@ -129,19 +111,6 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
     const AliasInfo* alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
       at::_copy_from_and_resize(cpu_tensors[i], tensor_args[i]);
-    }
-  }
-
-  // We also need to explicit reapply input mutations to inputs that are lists
-  // of tensors
-  for (const auto i : c10::irange(tensorlist_args_indices.size())) {
-    auto tensorlist_idx = tensorlist_args_indices[i];
-    const AliasInfo* alias_info = schema_args[tensorlist_idx].alias_info();
-    if (alias_info != nullptr && alias_info->isWrite()) {
-      const auto& cpu_tensors = tensorlist_cpu_args[i].toTensorList().vec();
-      for (const auto idx : c10::irange(tensorlist_args[i].size())) {
-        at::_copy_from_and_resize(cpu_tensors[idx], tensorlist_args[i][idx]);
-      }
     }
   }
 
@@ -168,125 +137,62 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  c10::optional<c10::Device> tgt_device =
-      compute_target_device(tensor_args, tensorlist_args);
-
   for (const auto idx : c10::irange(returns.size())) {
-    const AliasInfo* alias_info = schema_returns[idx].alias_info();
-    if (alias_info != nullptr && alias_info->isWrite()) {
-      // Case (1): mutable alias case.
-      // Move the input ivalue directly onto the stack in place of
-      // the existing cpu output tensor.
-      bool found_alias = false;
-      if (returns[idx].isTensor() && returns[idx].toTensor().defined()) {
-        // We could store some extra metadata on the function schema to avoid
-        // the loop here if we need to improve perf.
-        for (const auto i : c10::irange(tensor_args_indices.size())) {
-          auto input_tensor_idx = tensor_args_indices[i];
-          const auto& input_tensor = cpu_tensors[i];
-          const AliasInfo* input_alias_info =
-              schema_args[input_tensor_idx].alias_info();
-          // Checked above; adding assert to guard against breakage of the below
-          // condition due to changing the above if test.
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alias_info != nullptr);
-          if (input_tensor.defined() &&
-              (alias_info == input_alias_info ||
-               (input_alias_info != nullptr &&
-                *alias_info == *input_alias_info))) {
-            // We've found the original input tensor that aliases with the
-            // current output. Wrap it in an IValue and put it directly on the
-            // stack.
-            (*stack)[returns_begin + idx] = c10::IValue(tensor_args[i]);
-            found_alias = true;
-            break;
+    if (returns[idx].isTensor()) {
+      const auto& return_tens = returns[idx].toTensor();
+      if (return_tens.defined()) {
+        const AliasInfo* alias_info = schema_returns[idx].alias_info();
+        if (alias_info != nullptr && alias_info->isWrite()) {
+          // Case (1): mutable alias case. Move the input ivalue directly onto the stack
+          // in place of the existing cpu output tensor.
+          bool found_alias = false;
+          // We could store some extra metadata on the function schema to avoid the loop here
+          // if we need to improve perf.
+          for (const auto i : c10::irange(tensor_args_indices.size())) {
+            auto input_tensor_idx = tensor_args_indices[i];
+            const auto& input_tensor = cpu_tensors[i];
+            const AliasInfo* input_alias_info = schema_args[input_tensor_idx].alias_info();
+            // Checked above; adding assert to guard against breakage of the below condition due to changing the above if test.
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alias_info != nullptr);
+            if (input_tensor.defined() && (alias_info == input_alias_info || (input_alias_info != nullptr && *alias_info == *input_alias_info))) {
+              // We've found the original input tensor that aliases with the current output.
+              // Wrap it in an IValue and put it directly on the stack.
+              (*stack)[returns_begin + idx] = c10::IValue(tensor_args[i]);
+              found_alias = true;
+              break;
+            }
           }
-        }
-      } else if (
-          returns[idx].isTensorList() &&
-          validate_tensor_list(returns[idx].toTensorList())) {
-        for (const auto i : c10::irange(tensorlist_args_indices.size())) {
-          auto input_tensor_idx = tensorlist_args_indices[i];
-          const AliasInfo* input_alias_info =
-              schema_args[input_tensor_idx].alias_info();
-          // Checked above; adding assert to guard against breakage of the below
-          // condition due to changing the above if test.
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alias_info != nullptr);
-          if (validate_tensor_list(tensorlist_args[i]) &&
-              (alias_info == input_alias_info ||
-               (input_alias_info != nullptr &&
-                *alias_info == *input_alias_info))) {
-            // We've found the original input tensor that aliases with the
-            // current output. Wrap it in an IValue and put it directly on the
-            // stack.
-            (*stack)[returns_begin + idx] = c10::IValue(tensorlist_args[i]);
-            found_alias = true;
-            break;
-          }
-        }
-      }
-      TORCH_CHECK(
-          found_alias,
-          "The operator ",
-          op.schema().operator_name(),
-          " appears to have invalid alias information. ",
-          "Found a return tensor argument with a mismatched mutable alias: ",
-          schema_returns[idx]);
-    } else {
-      if (alias_info != nullptr && !alias_info->isWrite()) {
-        // Case (3): immutable alias (view) case.
-        // Warn here, since we're copying and not creating a view.
-        // If this operator is needed, the backend should provide a kernel for
-        // it. See Note [CPU Fallback Does Not Handle View Operators]
-        std::stringstream dev_str;
-        if (tgt_device) {
-          dev_str << *tgt_device;
+          TORCH_CHECK(found_alias, "The operator ", op.schema().operator_name(), " appears to have invalid alias information. ",
+                      "Found a return tensor argument with a mismatched mutable alias: ", schema_returns[idx]);
         } else {
-          dev_str << "<none>";
-        }
-        if (error_on_views) {
-          TORCH_CHECK(
-              false,
-              "The operator ",
-              op.schema().operator_name(),
-              " appears to be a view operator, ",
-              "but it has no implementation for the backend \"",
-              dev_str.str(),
-              "\". View operators don't support ",
-              "since the tensor's storage cannot be shared across devices.");
-        } else {
-          TORCH_WARN(
-              false,
-              "The operator ",
-              op.schema().operator_name(),
-              " appears to be a view operator, ",
-              "but it has no implementation for the backend \"",
-              dev_str.str(),
-              "\". View operators don't support falling back to run on the CPU, ",
-              "since the tensor's storage cannot be shared across devices.");
-        }
-      }
-      // Case (2): copy case.
-      // Copy the cpu output tensor to the original device.
-
-      // We technically  might not have a target device, e.g. if you call
-      // torch.cat() with an empty list In that case, we shouldn't have any
-      // tensors to schlep across devices anyway.
-      if (tgt_device) {
-        if (returns[idx].isTensor() && returns[idx].toTensor().defined()) {
-          (*stack)[returns_begin + idx] =
-              c10::IValue(returns[idx].toTensor().to(*tgt_device));
-        } else if (
-            returns[idx].isTensorList() &&
-            validate_tensor_list(returns[idx].toTensorList())) {
-          const auto& cpu_tensors = returns[idx].toTensorList().vec();
-          std::vector<at::Tensor> tensors;
-          tensors.reserve(cpu_tensors.size());
-
-          for (const auto& tensor : cpu_tensors) {
-            tensors.push_back(tensor.to(*tgt_device));
+          c10::optional<c10::Device> tgt_device = compute_target_device(tensor_args, tensorlist_args);
+          if (alias_info != nullptr && !alias_info->isWrite()) {
+            // immutable alias (view) case: Warn here, since we're copying and not creating a view.
+            //If this operator is needed, the backend should provide a kernel for it.
+            // See Note [CPU Fallback Does Not Handle View Operators]
+            std::stringstream dev_str;
+            if (tgt_device) {
+                dev_str << *tgt_device;
+            } else {
+                dev_str << "<none>";
+            }
+            if (error_on_views) {
+                TORCH_CHECK(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            } else {
+                TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            }
           }
-          (*stack)[returns_begin + idx] =
-              c10::IValue(c10::List<at::Tensor>(tensors));
+          // Case (2): copy case. Copy the cpu output tensor to the original device.
+
+          // We technically  might not have a target device, e.g. if you call torch.cat() with an empty list
+          // In that case, we shouldn't have any tensors to schlep across devices anyway.
+          if (tgt_device) {
+              (*stack)[returns_begin + idx] = c10::IValue(returns[idx].toTensor().to(*tgt_device));
+          }
         }
       }
     }

@@ -35,7 +35,7 @@ class LintMessage(NamedTuple):
 def check_file(filename: str) -> Optional[LintMessage]:
     logging.debug("Checking file %s", filename)
 
-    with open(filename) as f:
+    with open(filename, "r") as f:
         lines = f.readlines()
 
     for idx, line in enumerate(lines):

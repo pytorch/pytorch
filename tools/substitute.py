@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--replace", action="append", nargs=2)
     options = parser.parse_args()
 
-    with open(options.input_file) as f:
+    with open(options.input_file, "r") as f:
         contents = f.read()
 
     output_file = os.path.join(options.install_dir, options.output_file)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import logging
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
@@ -50,7 +49,7 @@ def format_return_values_in_markdown(
     return_values: Any,
     format_argument: Callable[[Any], str] = formatter.format_argument,
 ) -> str:
-    return f"{format_argument(return_values)}"
+    return f"- Return value: {format_argument(return_values)}"
 
 
 ModifierCallableType = Callable[
@@ -116,38 +115,30 @@ def diagnose_call(
             if stack is not None:
                 stack.frames.insert(0, infra.StackFrame(location=fn_location))
 
-            with diag.log_section(logging.INFO, "Function Signature"):
-                diag.log(
-                    logging.INFO,
-                    "%s",
-                    formatter.LazyString(
-                        format_function_signature_in_markdown,
-                        fn,
-                        args,
-                        kwargs,
-                        format_argument,
-                    ),
-                )
+            additional_messages = [
+                format_function_signature_in_markdown(
+                    fn, args, kwargs, format_argument
+                ),
+            ]
 
             return_values: Any = None
             with ctx.add_inflight_diagnostic(diag) as diag:
                 try:
                     return_values = fn(*args, **kwargs)
-                    with diag.log_section(logging.INFO, "Return values"):
-                        diag.log(
-                            logging.INFO,
-                            "%s",
-                            formatter.LazyString(
-                                format_return_values_in_markdown,
-                                return_values,
-                                format_argument,
-                            ),
-                        )
+                    additional_messages.append(
+                        format_return_values_in_markdown(return_values, format_argument)
+                    )
                     return return_values
                 except Exception as e:
-                    diag.log_source_exception(logging.ERROR, e)
-                    diag.level = infra.Level.ERROR
+                    # Record exception.
+                    diag.level = infra.levels.ERROR
+                    # TODO(bowbao): Message emitting api.
+                    diag.message = diag.message or ""
+                    diag.message += f"Raised from:\n    {type(e).__name__}: {e}"
+                    diag.with_source_exception(e)
+                    additional_messages.append(format_exception_in_markdown(e))
                 finally:
+                    diag.with_additional_message("\n".join(additional_messages).strip())
                     ctx.log_and_raise_if_error(diag)
 
         return wrapper

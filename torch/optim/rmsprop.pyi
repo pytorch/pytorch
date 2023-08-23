@@ -1,9 +1,9 @@
-from .optimizer import Optimizer, params_t
+from .optimizer import _params_t, Optimizer
 
 class RMSprop(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: _params_t,
         lr: float = ...,
         alpha: float = ...,
         eps: float = ...,

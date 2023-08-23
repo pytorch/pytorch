@@ -2,9 +2,14 @@
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests
 import unittest
 
+# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
+# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
+# as well during the execution of this test suite, and it will cause
+# CUDA OOM error on Windows.
+TEST_CUDA = torch.cuda.is_available()
 try:
     import tabulate  # noqa: F401  # type: ignore[import]
     from torch.utils.benchmark.utils.compile import bench_all
@@ -18,7 +23,7 @@ class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(ToyModel, self).__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(2, 2))
 
             def forward(self, x):

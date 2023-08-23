@@ -4,7 +4,6 @@
 import itertools
 
 import torch
-import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.random as random
 
 from torch.distributed._tensor import DeviceMesh, DTensor
@@ -127,9 +126,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+        local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
         # compare with local tensors from other ranks
         self_slice = slice(4 * self.rank, 4 * self.rank + 4)
@@ -266,9 +263,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor.uniform_()
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+        local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
         # compare with local tensors from other ranks
         self_slice = slice(1024 * self.rank, 1024 * self.rank + 1024)
@@ -288,9 +283,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor.uniform_()
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+        local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
         # compare with local tensors from other ranks
         for other_rank in range(self.world_size):

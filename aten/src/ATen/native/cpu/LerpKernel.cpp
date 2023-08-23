@@ -79,24 +79,6 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
           auto result1 = lerp_vec(self_vec1, end_vec1, weight_vec);
           return convert_float_bfloat16(result0, result1);
       });
-  } else if (iter.common_dtype() == kHalf) {
-    using hVec = Vectorized<Half>;
-    using fVec = Vectorized<float>;
-    float weight_val = weight.to<float>();
-    auto weight_vec = fVec(weight_val);
-    at::native::cpu_kernel_vec(
-      iter,
-      [weight_val](Half self_val, Half end_val) -> Half {
-        return lerp(self_val, end_val, weight_val);
-      },
-      [=](hVec self_vec, hVec end_vec) -> hVec {
-          fVec self_vec0, self_vec1, end_vec0, end_vec1;
-          std::tie(self_vec0, self_vec1) = convert_half_float(self_vec);
-          std::tie(end_vec0, end_vec1) = convert_half_float(end_vec);
-          auto result0 = lerp_vec(self_vec0, end_vec0, weight_vec);
-          auto result1 = lerp_vec(self_vec1, end_vec1, weight_vec);
-          return convert_float_half(result0, result1);
-      });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_scalar", [&] {
       auto weight_val = weight.to<scalar_t>();
@@ -130,23 +112,6 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
           auto result0 = lerp_vec(self_vec0, end_vec0, weight_vec0);
           auto result1 = lerp_vec(self_vec1, end_vec1, weight_vec1);
           return convert_float_bfloat16(result0, result1);
-      });
-  } else if (iter.common_dtype() == kHalf) {
-    using hVec = Vectorized<Half>;
-    using fVec = Vectorized<float>;
-    at::native::cpu_kernel_vec(
-      iter,
-      [=](Half self_val, Half end_val, Half weight_val) -> Half {
-        return lerp(self_val, end_val, weight_val);
-      },
-      [=](hVec self_vec, hVec end_vec, hVec weight_vec) -> hVec {
-          fVec self_vec0, self_vec1, end_vec0, end_vec1, weight_vec0, weight_vec1;
-          std::tie(self_vec0, self_vec1) = convert_half_float(self_vec);
-          std::tie(end_vec0, end_vec1) = convert_half_float(end_vec);
-          std::tie(weight_vec0, weight_vec1) = convert_half_float(weight_vec);
-          auto result0 = lerp_vec(self_vec0, end_vec0, weight_vec0);
-          auto result1 = lerp_vec(self_vec1, end_vec1, weight_vec1);
-          return convert_float_half(result0, result1);
       });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_tensor", [&] {

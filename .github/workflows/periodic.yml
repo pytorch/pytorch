@@ -47,10 +47,9 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.8-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
-      cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
@@ -203,11 +202,11 @@ jobs:
       docker-image: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.test-matrix }}
 
-  linux-focal-rocm5_6-py3_8-build:
-    name: linux-focal-rocm5.6-py3.8
+  linux-focal-rocm5_4_2-py3_8-build:
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
+      build-environment: linux-focal-rocm5.4.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -215,14 +214,14 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm5_6-py3_8-test:
-    name: linux-focal-rocm5.6-py3.8
+  linux-focal-rocm5_4_2-py3_8-test:
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_6-py3_8-build
+    needs: linux-focal-rocm5_4_2-py3_8-build
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}

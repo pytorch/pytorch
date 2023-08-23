@@ -160,17 +160,12 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.1.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+  pytorch-linux-focal-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.9
+    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -230,7 +225,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.4.2
+    ROCM_VERSION=5.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -241,7 +236,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=5.4.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -277,15 +272,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang12-asan)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=12
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-linter)
@@ -375,7 +361,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906;gfx90a}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

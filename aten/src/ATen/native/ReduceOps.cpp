@@ -30,7 +30,6 @@
 #include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
-#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -2166,24 +2165,6 @@ Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keep
     }
   }
   return result;
-}
-
-Tensor sum_sparse_compressed(
-    const Tensor& self,
-    at::OptionalIntArrayRef dim,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
-  // TODO: The signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype is a little
-  // bit different in the second parameters `dim`, which causes the conversion of `dim`
-  // to call into `_sparse_csr_sum`. Align the signatures would be a better choice.
-  TORCH_CHECK(
-      dim.has_value(), "dim has no value, cannot be used in sum.dim_IntList");
-  auto layout = self.layout();
-  TORCH_CHECK(
-      layout == kSparseCsr,
-      "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout ",
-      layout)
-  return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
 } // namespace native

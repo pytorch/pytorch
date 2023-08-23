@@ -1,6 +1,5 @@
-import torch
-
 import operator_benchmark as op_bench
+import torch
 
 """Microbenchmarks for sum reduction operator."""
 
@@ -10,15 +9,15 @@ sum_configs = op_bench.cross_product_configs(
     V=[32, 512],  # Length of other dimension
     dim=[0, 1],
     contiguous=[True, False],
-    device=["cpu", "cuda"],
-    tags=["short"],
+    device=['cpu', 'cuda'],
+    tags=['short']
 ) + op_bench.cross_product_configs(
     R=[1024, 8192],
     V=[512, 1024],
     dim=[0, 1],
     contiguous=[True, False],
-    device=["cpu", "cuda"],
-    tags=["long"],
+    device=['cpu', 'cuda'],
+    tags=['long']
 )
 
 
@@ -34,12 +33,14 @@ class SumBenchmark(op_bench.TorchBenchmarkBase):
         else:
             self.input_tensor = tensor
 
-        self.inputs = {"input_tensor": self.input_tensor, "dim": dim}
+        self.inputs = {
+            "input_tensor": self.input_tensor,
+            "dim": dim
+        }
         self.set_module_name("sum")
 
     def forward(self, input_tensor, dim: int):
         return input_tensor.sum(dim=dim)
-
 
 op_bench.generate_pt_test(sum_configs, SumBenchmark)
 

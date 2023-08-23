@@ -63,7 +63,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: Optional[int] = None, vdim: Optional[int] = None, batch_first: bool = False,
+                 kdim: int = None, vdim: int = None, batch_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(embed_dim, num_heads, dropout,
@@ -317,7 +317,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             raise AssertionError("causal mask not supported by AO MHA module")
 
         if self.batch_first:
-            query, key, value = (x.transpose(0, 1) for x in (query, key, value))
+            query, key, value = [x.transpose(0, 1) for x in (query, key, value)]
 
         tgt_len, bsz, embed_dim_to_check = query.size()
         assert self.embed_dim == embed_dim_to_check
@@ -339,7 +339,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
                 attn_mask = attn_mask.to(torch.bool)
             assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                f'Only float and bool types are supported for attn_mask, not {attn_mask.dtype}'
+                'Only float and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)
@@ -349,7 +349,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 if list(attn_mask.size()) != [bsz * self.num_heads, query.size(0), key.size(0)]:
                     raise RuntimeError('The size of the 3D attn_mask is not correct.')
             else:
-                raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
+                raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
             # attn_mask's dim is 3 now.
 
         # convert ByteTensor key_padding_mask to bool

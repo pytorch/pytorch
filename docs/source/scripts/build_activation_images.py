@@ -6,9 +6,8 @@ online tutorials.
 
 from pathlib import Path
 
-import matplotlib
-
 import torch
+import matplotlib
 from matplotlib import pyplot as plt
 
 matplotlib.use("Agg")

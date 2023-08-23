@@ -175,8 +175,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
-        (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
-        (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
@@ -329,8 +327,6 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
-    # This decomp runs before autograd.
-    (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
@@ -435,44 +431,6 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
-    def test_rrelu_with_noise(self, device):
-        # rrelu_with_noise behavior depends on a) whether elements in the input
-        # are <= 0, and b) whether we're in training mode. Cover all cases:
-        dtype = torch.float64
-        x = torch.tensor(
-            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device,
-        )
-        lower = 1.0
-        upper = 4.0
-        training = False
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x, noise_res, lower, upper, training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
-        # Now with training=True:
-        training = True
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x, noise_res, lower, upper, training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
@@ -535,7 +493,7 @@ class TestDecomp(TestCase):
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
             in_place = func.name()[-1] == '_'
-            ignored_ops = [
+            if func not in decomposition_table or func in [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
                 torch.ops.aten.empty.memory_format,
@@ -545,14 +503,7 @@ class TestDecomp(TestCase):
                 torch.ops.aten.new_empty_strided.default,
                 torch.ops.aten.randn.default,
                 torch.ops.aten.native_dropout.default,
-            ]
-            if (
-                    func not in decomposition_table or
-                    func in ignored_ops or
-                    torch.Tag.nondeterministic_seeded in func.tags or
-                    any_unsupported(args, kwargs) or
-                    in_place
-            ):
+            ] or any_unsupported(args, kwargs) or in_place:
                 return func(*args, **kwargs)
 
             self.decomposed.add(func)

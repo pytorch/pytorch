@@ -1076,7 +1076,6 @@ def embedding_bag(
 
 
 @_onnx_symbolic("aten::size")
-@symbolic_helper.quantized_args(True, quantize_output=False)
 @_beartype.beartype
 def size(g: jit_utils.GraphContext, self, dim=None):
     if dim is None:

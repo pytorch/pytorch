@@ -13,7 +13,7 @@ class Var:
 
     def __new__(cls, *token):
         if len(token) == 0:
-            token = f"_{Var._id}"  # type: ignore[assignment]
+            token = "_%s" % Var._id  # type: ignore[assignment]
             Var._id += 1
         elif len(token) == 1:
             token = token[0]

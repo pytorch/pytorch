@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS

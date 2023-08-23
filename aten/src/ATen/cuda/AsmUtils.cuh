@@ -3,7 +3,8 @@
 
 // Collection of direct PTX functions
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 template <typename T>
 struct Bitfield {};
@@ -146,4 +147,4 @@ __device__ __forceinline__ unsigned getLaneMaskGe() {
 }
 #endif
 
-} // namespace at::cuda
+}} // namespace at::cuda

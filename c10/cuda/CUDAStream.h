@@ -180,15 +180,8 @@ class C10_CUDA_API CUDAStream {
     int least_priority, greatest_priority;
     C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
-#ifdef USE_ROCM
-    // See Note [HIP stream priorities]
-    TORCH_INTERNAL_ASSERT(
-        least_priority == 1, "Unexpected HIP stream priority range");
-    least_priority = 0;
-#else
     TORCH_INTERNAL_ASSERT(
         least_priority == 0, "Unexpected CUDA stream priority range");
-#endif
     TORCH_INTERNAL_ASSERT(
         greatest_priority <= -1, "Unexpected CUDA stream priority range");
     greatest_priority = std::max(

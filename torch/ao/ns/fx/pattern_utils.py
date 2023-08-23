@@ -26,7 +26,7 @@ def get_type_a_related_to_b(
     # TODO(future PR): add the rest of modules and ops here
     type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]] = set()
 
-    for s in base_name_to_sets_of_related_ops.values():
+    for base_name, s in base_name_to_sets_of_related_ops.items():
         s_list = list(s)
         # add every bidirectional pair
         for idx_0 in range(0, len(s_list)):
@@ -70,7 +70,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     all_quant_patterns = _get_pattern_to_quantize_handlers(get_native_backend_config())
 
     default_base_op_idx = 0
-    for quant_pattern in all_quant_patterns.keys():
+    for quant_pattern, _quant_handler in all_quant_patterns.items():
         # TODO: this is a temporary hack to flatten the patterns from quantization so
         # that it works with the ns matcher function, maybe we should use `_is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns

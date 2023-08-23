@@ -84,35 +84,35 @@ jobs:
       docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
 
-  linux-focal-rocm5_6-py3_8-build:
-    name: linux-focal-rocm5.6-py3.8
+  linux-focal-rocm5_4_2-py3_8-build:
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
+      build-environment: linux-focal-rocm5.4.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm5_6-py3_8-test:
-    name: linux-focal-rocm5.6-py3.8
+  linux-focal-rocm5_4_2-py3_8-test:
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_6-py3_8-build
+    needs: linux-focal-rocm5_4_2-py3_8-build
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-jammy-py3_9-clang12-asan-build:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-focal-py3_9-clang7-asan-build:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
@@ -120,12 +120,12 @@ jobs:
         ]}
       sync-tag: asan-build
 
-  linux-jammy-py3_9-clang12-asan-test:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-focal-py3_9-clang7-asan-test:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_9-clang12-asan-build
+    needs: linux-focal-py3_9-clang7-asan-build
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
       sync-tag: asan-test

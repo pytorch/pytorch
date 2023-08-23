@@ -64,16 +64,16 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
             sharded_tree_info[0] += printed_prefixed_module_name + "\n"
             return
 
-        handle = state._fully_sharded_module_to_handle.get(module, None)
+        handles = state._fully_sharded_module_to_handles.get(module, [])
 
-        if handle:
+        if handles:
             sharded_tree_info[0] += (
                 printed_prefixed_module_name + " FULLY SHARDED" + "\n"
             )
         else:
             sharded_tree_info[0] += printed_prefixed_module_name + "\n"
 
-        if handle:
+        for handle in handles:
             param = handle.flat_param
             assert isinstance(param, flat_param_file.FlatParameter)
             global_fqns = [

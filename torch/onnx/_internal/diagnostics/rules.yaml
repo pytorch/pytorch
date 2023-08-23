@@ -356,15 +356,15 @@
 - id: FXE0014
   name: find-opschema-matched-symbolic-function
   short_description:
-    text: Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas.
+    text: Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
   full_description:
     text: "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
       A warning will be issued if the matched OnnxFunction is not an exact match."
     markdown: |
-      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute
-      dtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas
+      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input
+      dtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas
       to find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find
-      the nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while
+      the nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while
       issuing a warning.
 
       There are two types of level that can be triggered in this rule:

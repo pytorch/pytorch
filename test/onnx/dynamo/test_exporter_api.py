@@ -8,12 +8,13 @@ import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter, io_adapter
+from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import (
+    _DEFAULT_OPSET_VERSION,
     ExportOutputSerializer,
     ProtobufExportOutputSerializer,
     ResolvedExportOptions,
 )
-from torch.onnx._internal.fx import diagnostics
 
 from torch.testing._internal import common_utils
 
@@ -26,8 +27,18 @@ class SampleModel(torch.nn.Module):
 
 
 class TestExportOptionsAPI(common_utils.TestCase):
+    def test_opset_version_default(self):
+        options = ResolvedExportOptions(None)
+        self.assertEquals(options.opset_version, _DEFAULT_OPSET_VERSION)
+
+    def test_opset_version_explicit(self):
+        options = ResolvedExportOptions(ExportOptions(opset_version=3000))
+        self.assertEquals(options.opset_version, 3000)
+
     def test_raise_on_invalid_argument_type(self):
         expected_exception_type = roar.BeartypeException
+        with self.assertRaises(expected_exception_type):
+            ExportOptions(opset_version="3000")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
             ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
@@ -49,12 +60,12 @@ class TestExportOptionsAPI(common_utils.TestCase):
 
     def test_logger_default(self):
         options = ResolvedExportOptions(None)
-        self.assertEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
+        self.assertEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
 
     def test_logger_explicit(self):
         options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
-        self.assertEqual(options.logger, logging.getLogger())
-        self.assertNotEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
+        self.assertEquals(options.logger, logging.getLogger())
+        self.assertNotEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
 
 
 class TestDynamoExportAPI(common_utils.TestCase):
@@ -69,6 +80,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 SampleModel(),
                 torch.randn(1, 1, 2),
                 export_options=ExportOptions(
+                    opset_version=17,
                     logger=logging.getLogger(),
                     dynamic_shapes=True,
                 ),
@@ -99,8 +111,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
-            with open(path) as fp:
-                self.assertEqual(fp.read(), expected_buffer)
+            with open(path, "r") as fp:
+                self.assertEquals(fp.read(), expected_buffer)
 
     def test_save_to_file_using_specified_serializer_without_inheritance(self):
         expected_buffer = "I am not actually ONNX"
@@ -118,8 +130,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
-            with open(path) as fp:
-                self.assertEqual(fp.read(), expected_buffer)
+            with open(path, "r") as fp:
+                self.assertEquals(fp.read(), expected_buffer)
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName() as path:
@@ -144,8 +156,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
             onnx.ModelProto(),
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
-            diagnostics.DiagnosticContext("test", "1.0"),
-            fake_context=None,
+            infra.DiagnosticContext("test", "1.0"),
         )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]

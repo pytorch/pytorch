@@ -7,20 +7,20 @@ appropriate files under `torch/ao/quantization/fx/`, while adding an import stat
 here.
 """
 from torch.ao.quantization.fx.quantize_handler import (
-    BatchNormQuantizeHandler,
+    QuantizeHandler,
     BinaryOpQuantizeHandler,
     CatQuantizeHandler,
     ConvReluQuantizeHandler,
+    LinearReLUQuantizeHandler,
+    BatchNormQuantizeHandler,
+    EmbeddingQuantizeHandler,
+    RNNDynamicQuantizeHandler,
+    DefaultNodeQuantizeHandler,
+    FixedQParamsOpQuantizeHandler,
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
-    DefaultNodeQuantizeHandler,
-    EmbeddingQuantizeHandler,
-    FixedQParamsOpQuantizeHandler,
     GeneralTensorShapeOpQuantizeHandler,
-    LinearReLUQuantizeHandler,
-    QuantizeHandler,
-    RNNDynamicQuantizeHandler,
-    StandaloneModuleQuantizeHandler,
+    StandaloneModuleQuantizeHandler
 )
 
 QuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
@@ -32,16 +32,8 @@ BatchNormQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_pat
 EmbeddingQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
 RNNDynamicQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
 DefaultNodeQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
-FixedQParamsOpQuantizeHandler.__module__ = (
-    "torch.ao.quantization.fx.quantization_patterns"
-)
+FixedQParamsOpQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
 CopyNodeQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
-CustomModuleQuantizeHandler.__module__ = (
-    "torch.ao.quantization.fx.quantization_patterns"
-)
-GeneralTensorShapeOpQuantizeHandler.__module__ = (
-    "torch.ao.quantization.fx.quantization_patterns"
-)
-StandaloneModuleQuantizeHandler.__module__ = (
-    "torch.ao.quantization.fx.quantization_patterns"
-)
+CustomModuleQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
+GeneralTensorShapeOpQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"
+StandaloneModuleQuantizeHandler.__module__ = "torch.ao.quantization.fx.quantization_patterns"

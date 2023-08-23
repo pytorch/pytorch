@@ -4,10 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import torch
-
 from . import _Tensor, Tensor
 from .reference import _dims, _enable_layers, llist, ltuple
-
 
 class DelayedMulTensor(_Tensor):
     def __init__(self, lhs, rhs):
@@ -39,9 +37,7 @@ class DelayedMulTensor(_Tensor):
     @property
     def _tensor(self):
         if self._tensor_data is None:
-            self._tensor_data = Tensor.from_batched(
-                self._batchtensor, self._has_device
-            )._tensor
+            self._tensor_data = Tensor.from_batched(self._batchtensor, self._has_device)._tensor
         return self._tensor_data
 
     @property
@@ -52,26 +48,20 @@ class DelayedMulTensor(_Tensor):
     def dims(self):
         return ltuple(super().dims)
 
+
     def sum(self, dim):
         dims = _dims(dim, 0, False, False)
-        n = ord("a")
+        n = ord('a')
         all_levels = self._levels
 
         def to_char(d):
             return chr(n + all_levels.index(d))
-
         plhs, levelslhs = self._lhs._tensor, self._lhs._levels
         prhs, levelsrhs = self._rhs._tensor, self._rhs._levels
         new_dims = tuple(d for d in self.dims if d not in dims)
         new_levels = [l for l in self._levels if l not in dims]
-        fmt = "".join(
-            [
-                *(to_char(d) for d in levelslhs),
-                ",",
-                *(to_char(d) for d in levelsrhs),
-                "->",
-                *(to_char(d) for d in new_levels),
-            ]
-        )
+        fmt = ''.join([*(to_char(d) for d in levelslhs), ',',
+                       *(to_char(d) for d in levelsrhs), '->',
+                       *(to_char(d) for d in new_levels)])
         result_data = torch.einsum(fmt, (plhs, prhs))
         return Tensor.from_positional(result_data, new_levels, True)

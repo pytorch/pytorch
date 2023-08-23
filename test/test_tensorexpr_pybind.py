@@ -392,9 +392,9 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_alloc_in_loop(self):
-        a, tmp, b = (
+        a, tmp, b = [
             te.BufHandle(name, [1], torch.float32) for name in ["a", "tmp", "b"]
-        )
+        ]
         body = te.Block([tmp.store([0], a.load([0])), b.store([0], tmp.load([0]))])
         for _ in range(4):
             i = te.VarHandle("i", torch.int32)
@@ -402,7 +402,7 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         nest = te.LoopNest(body, [b])
         nest.prepare_for_codegen()
         f = te.construct_codegen("llvm", nest.simplify(), [a, b])
-        ta, tb = (torch.ones(1) for _ in range(2))
+        ta, tb = [torch.ones(1) for _ in range(2)]
         f.call([ta.data_ptr(), tb.data_ptr()])
 
 

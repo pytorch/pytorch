@@ -837,7 +837,7 @@ class CheckSparseTensorInvariantsContext {
 };
 
 static Tensor sparse_compressed_tensor_ctor_worker(
-    const std::string& name,
+    std::string name,
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PythonArgs& r,
@@ -1633,9 +1633,6 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
-  // Used when:
-  // 1. 'obj' implements the buffer protocol and no type is given.
-  // 2. creating a new tensor from a Python sequence.
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 

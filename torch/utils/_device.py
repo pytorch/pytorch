@@ -51,7 +51,6 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
-        torch.asarray,
     }
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp

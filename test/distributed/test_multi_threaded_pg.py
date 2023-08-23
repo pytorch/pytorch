@@ -254,8 +254,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
 
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
-        fwd_tid = threading.current_thread().ident
-
         class MyFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, rank):
@@ -268,13 +266,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
             @staticmethod
             def backward(ctx, grad_output):
                 result, rank = ctx.saved_tensors
-                bwd_tid = threading.current_thread().ident
 
-                self.assertEqual(fwd_tid, bwd_tid, f"bwd not running in the same thread a fwd for rank {rank.item()}")
-                self.assertTrue(dist.is_initialized())
-                self.assertEqual(int(rank.item()), dist.get_rank())
+                assert int(rank.item()) == dist.get_rank()
                 dist.all_reduce(result)
-                self.assertEqual(int(result.item()), 12)  # (0 + 1 + 2 + 3) * 2
+                assert int(result.item()) == 12  # (0 + 1 + 2 + 3) * 2
 
                 return grad_output * result
 

@@ -85,7 +85,7 @@ The categories are as follow:
 * fx: Everything related to torch.fx
 * code_coverage: Everything related to the code coverage tool
 * vulkan: Everything related to vulkan support (mobile GPU backend)
-* skip: Everything that is not end user or dev facing like code refactoring or internal implementation changes
+* skip: Everything that is not end user or dev facing like code refactoring or internal inplementation changes
 * frontend: To ease your future work, we split things here (may be merged in the final document)
     * python_api
     * cpp_api

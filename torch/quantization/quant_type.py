@@ -7,4 +7,5 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-from torch.ao.quantization.quant_type import _get_quant_type_to_str, QuantType
+from torch.ao.quantization.quant_type import QuantType
+from torch.ao.quantization.quant_type import _get_quant_type_to_str

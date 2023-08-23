@@ -95,4 +95,4 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
-} // namespace at::native
+}

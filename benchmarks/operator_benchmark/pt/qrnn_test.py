@@ -1,7 +1,7 @@
-import torch
-from torch import nn
 
 import operator_benchmark as op_bench
+import torch
+from torch import nn
 
 """
 Microbenchmarks for RNNs.
@@ -15,13 +15,12 @@ qrnn_configs = op_bench.config_list(
     # names: input_size, hidden_size, num_layers
     attr_names=["I", "H", "NL"],
     cross_product_configs={
-        "B": (True,),  # Bias always True for quantized
-        "D": (False, True),  # Bidirectional
-        "dtype": (torch.qint8,),  # Only qint8 dtype works for now
+        "B": (True,),               # Bias always True for quantized
+        "D": (False, True),         # Bidirectional
+        "dtype": (torch.qint8,)     # Only qint8 dtype works for now
     },
-    tags=["short"],
+    tags=["short"]
 )
-
 
 class LSTMBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, I, H, NL, B, D, dtype):
@@ -42,26 +41,29 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
             bidirectional=D,
         )
         cell_temp = nn.Sequential(cell_nn)
-        self.cell = torch.ao.quantization.quantize_dynamic(
-            cell_temp, {nn.LSTM, nn.Linear}, dtype=dtype
-        )[0]
+        self.cell = torch.ao.quantization.quantize_dynamic(cell_temp,
+                                                           {nn.LSTM, nn.Linear},
+                                                           dtype=dtype)[0]
 
-        x = torch.randn(
-            sequence_len, batch_size, I  # sequence length  # batch size
-        )  # Number of features in X
-        h = torch.randn(
-            NL * (D + 1), batch_size, H  # layer_num * dir_num  # batch size
-        )  # hidden size
-        c = torch.randn(
-            NL * (D + 1), batch_size, H  # layer_num * dir_num  # batch size
-        )  # hidden size
+        x = torch.randn(sequence_len,  # sequence length
+                        batch_size,    # batch size
+                        I)             # Number of features in X
+        h = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                        batch_size,    # batch size
+                        H)             # hidden size
+        c = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                        batch_size,    # batch size
+                        H)             # hidden size
 
-        self.inputs = {"x": x, "h": h, "c": c}
+        self.inputs = {
+            "x": x,
+            "h": h,
+            "c": c
+        }
         self.set_module_name("QLSTM")
 
     def forward(self, x, h, c):
         return self.cell(x, (h, c))[0]
-
 
 op_bench.generate_pt_test(qrnn_configs, LSTMBenchmark)
 

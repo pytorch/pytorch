@@ -11,7 +11,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -97,7 +96,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
   return output;
 }
 
-static MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTensor, NSArray* permuteOrder) {
+MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTensor, NSArray* permuteOrder) {
   NSUInteger srcRank = [[inputTensor shape] count];
   if (srcRank != [permuteOrder count]) {
     return nil;
@@ -120,7 +119,7 @@ static MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTenso
   return outputTensor;
 }
 
-static NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger rank, NSUInteger offset) {
+NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger rank, NSUInteger offset) {
   // Assuming input tensor has default strides
   NSInteger stride = 1;
   NSMutableDictionary* strideToDimLengthOffset = [[NSMutableDictionary alloc] init];
@@ -139,12 +138,12 @@ static NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUI
 }
 
 // Detect only expand dims, allows for duplicate strides
-static MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
-                                                        MPSGraphTensor* inputTensor,
-                                                        size_t dstRank,
-                                                        const IntArrayRef& dstSizes,
-                                                        const IntArrayRef& dstStrides,
-                                                        int offset) {
+MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
+                                                 MPSGraphTensor* inputTensor,
+                                                 size_t dstRank,
+                                                 const IntArrayRef& dstSizes,
+                                                 const IntArrayRef& dstStrides,
+                                                 int offset) {
   NSUInteger srcRank = [[inputTensor shape] count];
   // Not an expand dims
   if (srcRank >= dstRank)
@@ -191,12 +190,12 @@ static MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
 }
 
 // Detect contiguous reshapes, no slicing
-static MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
-                                                     MPSGraphTensor* inputTensor,
-                                                     size_t dstRank,
-                                                     const IntArrayRef& dstSizes,
-                                                     const IntArrayRef& dstStrides,
-                                                     int offset) {
+MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
+                                              MPSGraphTensor* inputTensor,
+                                              size_t dstRank,
+                                              const IntArrayRef& dstSizes,
+                                              const IntArrayRef& dstStrides,
+                                              int offset) {
   NSUInteger srcRank = [[inputTensor shape] count];
   // Not a reshape
   if (srcRank <= dstRank)
@@ -234,12 +233,12 @@ static MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
   return outputTensor;
 }
 
-static MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
-                                                     MPSGraphTensor* inputTensor,
-                                                     size_t dstRank,
-                                                     const IntArrayRef& dstSizes,
-                                                     const IntArrayRef& dstStrides,
-                                                     int offset) {
+MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
+                                              MPSGraphTensor* inputTensor,
+                                              size_t dstRank,
+                                              const IntArrayRef& dstSizes,
+                                              const IntArrayRef& dstStrides,
+                                              int offset) {
   // Duplicate strides cannot be done
   {
     BOOL allUnique = YES;
@@ -414,12 +413,12 @@ static MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
   return broadcastTensor;
 }
 
-static MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
-                                              MPSGraphTensor* inputTensor,
-                                              size_t dstRank,
-                                              const IntArrayRef& dstSizes,
-                                              const IntArrayRef& dstStrides,
-                                              int offset) {
+MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
+                                       MPSGraphTensor* inputTensor,
+                                       size_t dstRank,
+                                       const IntArrayRef& dstSizes,
+                                       const IntArrayRef& dstStrides,
+                                       int offset) {
   if (!dstRank)
     return nil;
 
@@ -468,7 +467,7 @@ static std::vector<int64_t> getViewShape(const Tensor& src, MPSShape* mpsShape, 
   return src_view_shape;
 }
 
-static std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
+std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
   std::vector<int64_t> src_base_shape;
   for (const auto i : c10::irange(shape.size())) {
     if (shape[i] == 1)
@@ -727,7 +726,7 @@ static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t d
   return kernelName + "_kernel_" + std::to_string(dim == 0 ? 1 : dim);
 }
 
-static const std::string& getGatherScatterScalarType(const Tensor& t) {
+const std::string& getGatherScatterScalarType(const Tensor& t) {
   auto scalar_type = t.scalar_type();
   static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
       {c10::ScalarType::Float, "float"},

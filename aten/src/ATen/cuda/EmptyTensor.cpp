@@ -3,7 +3,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/EmptyTensor.h>
 
-namespace at::detail {
+namespace at {
+namespace detail {
 
 TensorBase empty_cuda(
     IntArrayRef size,
@@ -87,4 +88,4 @@ TensorBase empty_strided_cuda(
       options.pinned_memory_opt());
 }
 
-}  // namespace at::detail
+}}  // namespace at::detail

@@ -312,8 +312,8 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy(c10::optional<at::Device> device) const {
-  return Module(_ivalue()->deepcopy(device));
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
 }
 
 Module Module::clone(bool inplace) const {
@@ -471,7 +471,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    const c10::optional<std::vector<std::string>>& preserved_attrs,
+    c10::optional<std::vector<std::string>> preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),

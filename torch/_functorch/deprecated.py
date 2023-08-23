@@ -1,5 +1,6 @@
-import torch._functorch.apis as apis
+import torch._functorch.vmap as _vmap_impl
 import torch._functorch.eager_transforms as _impl
+import torch._functorch.apis as apis
 import torch._functorch.make_functional as _nn_impl
 from torch._functorch.vmap import in_dims_t, out_dims_t
 from torch._functorch.eager_transforms import argnums_t
@@ -59,7 +60,7 @@ def vmap(
         *,
         chunk_size=None) -> Callable:
     warn_deprecated('vmap', 'torch.vmap')
-    return apis.vmap(func, in_dims, out_dims, randomness, chunk_size=chunk_size)
+    return _vmap_impl.vmap(func, in_dims, out_dims, randomness, chunk_size=chunk_size)
 
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     warn_deprecated('grad')
@@ -108,7 +109,7 @@ def combine_state_for_ensemble(models):
     warn_deprecated('combine_state_for_ensemble', 'torch.func.stack_module_state')
     return _nn_impl.combine_state_for_ensemble(models)
 
-setup_docs(vmap, apis.vmap, 'torch.vmap')
+setup_docs(vmap, _vmap_impl.vmap, 'torch.vmap')
 setup_docs(grad, apis.grad)
 setup_docs(grad_and_value)
 setup_docs(vjp)

@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace at::cuda {
+namespace at { namespace cuda {
 
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
@@ -205,4 +205,5 @@ private:
   }
 };
 
-} // namespace at::cuda
+} // namespace cuda
+} // namespace at

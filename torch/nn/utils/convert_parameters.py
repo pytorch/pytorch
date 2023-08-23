@@ -34,7 +34,8 @@ def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) 
     """
     # Ensure vec of type Tensor
     if not isinstance(vec, torch.Tensor):
-        raise TypeError(f'expected torch.Tensor, but got: {torch.typename(vec)}')
+        raise TypeError('expected torch.Tensor, but got: {}'
+                        .format(torch.typename(vec)))
     # Flag for the device where the parameter is located
     param_device = None
 

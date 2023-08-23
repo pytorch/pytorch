@@ -8,14 +8,20 @@ import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
+from torch.testing._internal.common_utils import IS_ARM64
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
+TEST_CUDNN = False
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
+    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
+    TEST_CUDNN = (
+        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
+    )
 
 
 def remove_build_path():
@@ -27,7 +33,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule:
+class DummyModule(object):
 
     @staticmethod
     def device_count() -> int:
@@ -116,7 +122,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
                 torch._register_device_module('xxx', DummyModule)
             # check generator registered before using
-            torch.utils.rename_privateuse1_backend('foo')
             with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
                 with torch.random.fork_rng(device_type="foo"):
                     pass
@@ -156,7 +161,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
                 torch.utils.generate_methods_for_privateuse1_backend()
 
-        def test_open_device_generator_registration_and_hooks():
+        def test_generator_registration():
             device = self.module.custom_device()
             # None of our CPU operations should call the custom add function.
             self.assertFalse(self.module.custom_add_called())
@@ -164,16 +169,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError,
                                         "Please register a generator to the PrivateUse1 dispatch key"):
                 gen_ = torch.Generator(device=device)
-            self.module.register_generator_first()
+            self.module.register_generator()
             gen = torch.Generator(device=device)
             self.assertTrue(gen.device == device)
             # generator can be registered only once
             with self.assertRaisesRegex(RuntimeError,
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
-                self.module.register_generator_second()
-            self.module.register_hook()
-            default_gen = self.module.default_generator(0)
-            self.assertTrue(default_gen.device.type == torch._C._get_privateuse1_backend_name())
+                self.module.register_generator()
 
         def test_open_device_dispatchstub():
             # test kernels could be reused by privateuse1 backend through dispatchstub
@@ -379,7 +381,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = foo_tensor.storage()
             self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
-            class CustomFloatStorage:
+            class CustomFloatStorage():
                 @property
                 def __module__(self):
                     return "torch." + torch._C._get_privateuse1_backend_name()
@@ -411,76 +413,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             torch.utils.rename_privateuse1_backend('foo')
             a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
-        # Not an open registration test - this file is just very convenient
-        # for testing torch.compile on custom C++ operators
-        def test_compile_autograd_function_returns_self():
-            x_ref = torch.randn(4, requires_grad=True)
-            out_ref = self.module.custom_autograd_fn_returns_self(x_ref)
-            out_ref.sum().backward()
-
-            x_test = x_ref.clone().detach().requires_grad_(True)
-            f_compiled = torch.compile(self.module.custom_autograd_fn_returns_self)
-            out_test = f_compiled(x_test)
-            out_test.sum().backward()
-
-            self.assertEqual(out_ref, out_test)
-            self.assertEqual(x_ref.grad, x_test.grad)
-
-        # Not an open registration test - this file is just very convenient
-        # for testing torch.compile on custom C++ operators
-        def test_compile_autograd_function_aliasing():
-            x_ref = torch.randn(4, requires_grad=True)
-            out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
-            out_ref.sum().backward()
-
-            x_test = x_ref.clone().detach().requires_grad_(True)
-            f_compiled = torch.compile(torch.ops._test_funcs.custom_autograd_fn_aliasing)
-            out_test = f_compiled(x_test)
-            out_test.sum().backward()
-
-            self.assertEqual(out_ref, out_test)
-            self.assertEqual(x_ref.grad, x_test.grad)
-
-        def test_open_device_tensor_type_fallback():
-            torch.utils.rename_privateuse1_backend('foo')
-            # create tensors located in custom device
-            x = torch.Tensor([1, 2, 3]).to('foo')
-            y = torch.Tensor([1, 0, 2]).to('foo')
-            # create result tensor located in cpu
-            z_cpu = torch.Tensor([0, 2, 1])
-            # Check that our device is correct.
-            device = self.module.custom_device()
-            self.assertTrue(x.device == device)
-            self.assertFalse(x.is_cpu)
-            # call sub op, which will fallback to cpu
-            z = torch.sub(x, y)
-
-            self.assertEqual(z_cpu, z)
-
-        def test_open_device_tensorlist_type_fallback():
-            torch.utils.rename_privateuse1_backend('foo')
-            # create tensors located in custom device
-            v_foo = torch.Tensor([1, 2, 3]).to('foo')
-            # create result tensor located in cpu
-            z_cpu = torch.Tensor([2, 4, 6])
-            # create tensorlist for foreach_add op
-            x = (v_foo, v_foo)
-            y = (v_foo, v_foo)
-            # Check that our device is correct.
-            device = self.module.custom_device()
-            self.assertTrue(v_foo.device == device)
-            self.assertFalse(v_foo.is_cpu)
-            # call _foreach_add op, which will fallback to cpu
-            z = torch._foreach_add(x, y)
-
-            self.assertEqual(z_cpu, z[0])
-            self.assertEqual(z_cpu, z[1])
-
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
         test_after_common_registration()
-        test_open_device_generator_registration_and_hooks()
+        test_generator_registration()
         test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()
@@ -491,12 +428,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
-
-        test_compile_autograd_function_returns_self()
-        test_compile_autograd_function_aliasing()
-
-        test_open_device_tensor_type_fallback()
-        test_open_device_tensorlist_type_fallback()
 
 
 if __name__ == "__main__":

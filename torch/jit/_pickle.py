@@ -7,7 +7,6 @@
 # a type attached and restored via `restore_type_tag` below. The legacy
 # functions should stick around for backwards-compatibility.
 
-
 def build_intlist(data):
     return data
 

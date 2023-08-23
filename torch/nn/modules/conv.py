@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import math
 import warnings
 
@@ -50,7 +51,7 @@ class _ConvNd(Module):
                      'out_channels', 'kernel_size']
     __annotations__ = {'bias': Optional[torch.Tensor]}
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:  # type: ignore[empty-body]
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
         ...
 
     in_channels: int
@@ -93,13 +94,15 @@ class _ConvNd(Module):
         if isinstance(padding, str):
             if padding not in valid_padding_strings:
                 raise ValueError(
-                    f"Invalid padding string {padding!r}, should be one of {valid_padding_strings}")
+                    "Invalid padding string {!r}, should be one of {}".format(
+                        padding, valid_padding_strings))
             if padding == 'same' and any(s != 1 for s in stride):
                 raise ValueError("padding='same' is not supported for strided convolutions")
 
         valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
         if padding_mode not in valid_padding_modes:
-            raise ValueError(f"padding_mode must be one of {valid_padding_modes}, but got padding_mode='{padding_mode}'")
+            raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
+                valid_padding_modes, padding_mode))
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -616,7 +619,7 @@ class _ConvTransposeNd(_ConvNd):
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode, device=None, dtype=None) -> None:
         if padding_mode != 'zeros':
-            raise ValueError(f'Only "zeros" padding mode is supported for {self.__class__.__name__}')
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(

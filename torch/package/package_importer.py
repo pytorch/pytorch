@@ -484,7 +484,7 @@ class PackageImporter(Importer):
             return self._do_find_and_load(name)
 
         if module is None:
-            message = f"import of {name} halted; None in sys.modules"
+            message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
 
         # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
@@ -539,7 +539,7 @@ class PackageImporter(Importer):
                     if not recursive and hasattr(module, "__all__"):
                         self._handle_fromlist(module, module.__all__, recursive=True)
                 elif not hasattr(module, x):
-                    from_name = f"{module_name}.{x}"
+                    from_name = "{}.{}".format(module_name, x)
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:
@@ -587,13 +587,13 @@ class PackageImporter(Importer):
         """
         if hasattr(package, "__spec__"):
             if package.__spec__.submodule_search_locations is None:
-                raise TypeError(f"{package.__spec__.name!r} is not a package")
+                raise TypeError("{!r} is not a package".format(package.__spec__.name))
             else:
                 return package
         else:
             module = self.import_module(package)
             if module.__spec__.submodule_search_locations is None:
-                raise TypeError(f"{package!r} is not a package")
+                raise TypeError("{!r} is not a package".format(package))
             else:
                 return module
 

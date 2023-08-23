@@ -1573,12 +1573,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> copy() const;
 
-  c10::intrusive_ptr<Object> deepcopy(
-      c10::optional<at::Device> device = c10::nullopt) const;
+  c10::intrusive_ptr<Object> deepcopy() const;
 
-  c10::intrusive_ptr<Object> deepcopy(
-      IValue::HashAliasedIValueMap& memo,
-      c10::optional<at::Device> device = c10::nullopt) const;
+  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
   bool is_weak_compilation_ref() const {
     return !type_.holds_strong_ref();
@@ -1922,7 +1919,7 @@ template <
             std::is_lvalue_reference<Args>...,
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
-std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
+std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
