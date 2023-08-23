@@ -62,12 +62,18 @@ def compute_local_offset(
         # if rank not in the mesh, return empty offset
         return ()
     else:
-        local_offsets = [0] * len(global_shape)
+        # local_offsets = [0] * len(global_shape)
         local_shape = list(global_shape)
+        global_offsets = []
+        sum_over_dim = [False] * len(global_shape)
 
         for idx, placement in enumerate(placements):
             mesh_dim_size = mesh.size(idx)
             if isinstance(placement, Shard):
+
+                local_offsets = [0] * len(global_shape)
+
+
                 shard_dim = placement.dim
                 assert shard_dim < len(
                     local_shape
@@ -80,7 +86,12 @@ def compute_local_offset(
                 )
                 local_shape[shard_dim] = shard_size
                 local_offsets[shard_dim] = shard_offset
-                p0(f"idx:{idx}, placement:{placement}, mesh_dim_size:{mesh_dim_size}, shard_dim:{shard_dim}, local_shape[shard_dim]:{local_shape[shard_dim]}, my_coordinate[idx]:{my_coordinate[idx]}, shard_offset:{shard_offset}, local_offsets:{local_offsets}, local_shape:{local_shape}")
+                global_offsets.append(local_offsets)
+            # p0(f"idx:{idx}, placement:{placement}, mesh_dim_size:{mesh_dim_size}, shard_dim:{shard_dim}, local_shape[shard_dim]:{local_shape[shard_dim]}, my_coordinate[idx]:{my_coordinate[idx]}, shard_offset:{shard_offset}, local_offsets:{local_offsets}, local_shape:{local_shape}")
+            # last_dim = len(global_shape) - 1
+            # global_offsets = torch.sum(torch.tensor(global_offsets), last_dim)
+            if dist.get_rank() == 4:
+                print(f"idx:{idx}, placement:{placement}, mesh_dim_size:{mesh_dim_size}, shard_dim:{shard_dim}, local_shape[shard_dim]:{local_shape[shard_dim]}, my_coordinate[idx]:{my_coordinate[idx]}, shard_offset:{shard_offset}, local_offsets:{local_offsets}, local_shape:{local_shape}")
         return tuple(local_offsets)
 
 

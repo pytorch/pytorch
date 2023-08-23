@@ -47,11 +47,16 @@ class UtilTest(DTensorTestBase):
 
     @with_comms
     def test_compute_local_offset_2d(self):
+        # mesh_tensor= torch.arange(self.world_size)
         mesh_tensor= torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
         placements = [Shard(0), Shard(0)]
+        # placements = [Shard(0)]
         my_rank = device_mesh.get_rank()
-        size = torch.Size([10, 2])
+        size = torch.Size([8, 4])
+
+        dtensor = distribute_tensor(torch.arange(32).view(8, 4), device_mesh, placements)
+        # print(f"rank: {device_mesh.get_rank()}, dtensor: {dtensor}")
 
         local_size = compute_local_shape(size, device_mesh, placements)
         local_offset = compute_local_offset(size, device_mesh, placements)
