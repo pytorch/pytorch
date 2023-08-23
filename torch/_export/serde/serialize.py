@@ -854,6 +854,14 @@ class GraphModuleDeserializer:
                 ),
             )
 
+    def deserialize_graph_output(self, output) -> torch.fx.Node:
+        if isinstance(output.value, TensorArgument):
+            return self.serialized_name_to_node[output.value.name]
+        elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
+            return self.serialized_name_to_node[output.value.as_name]
+        else:
+            raise SerializeError(f"Unable to deserialize output node {output}")
+
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
@@ -883,13 +891,7 @@ class GraphModuleDeserializer:
         # Outputs: convert to a single `output` node.
         outputs = []
         for output in serialized_graph.outputs:
-            if isinstance(output.value, TensorArgument):
-                outputs.append(self.serialized_name_to_node[output.value.name])
-            elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
-                outputs.append(self.serialized_name_to_node[output.value.as_name])
-            else:
-                raise SerializeError(f"Unable to deserialize output node {output}")
-
+            outputs.append(self.deserialize_graph_output(output))
 
         output_node = self.graph.output(tuple(outputs))
         output_node.meta["val"] = tuple(
