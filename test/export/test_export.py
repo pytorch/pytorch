@@ -10,7 +10,7 @@ from functorch.experimental.control_flow import map
 from torch import Tensor
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
-from torch._export.utils import register_dataclass_as_pytree_node
+from torch._export.utils import register_dataclass_as_pytree_node, is_param, get_param
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -437,6 +437,27 @@ class TestExport(TestCase):
         unflat = tree_unflatten(flat, spec)
         self.assertEqual(unflat, inp)
 
+    def test_param_util(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        ep = export(Basic(), (torch.randn(5, 10),))
+        num_params = 0
+        params = []
+        for node in ep.graph.nodes:
+            if is_param(ep, node):
+                num_params += 1
+                params.append(get_param(ep, node))
+        self.assertEqual(num_params, 2)
+        self.assertEqual(params[0].shape, [1, 10])  # weight
+        self.assertEqual(params[1].shape, [1])  # bias
+
+
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -727,6 +748,126 @@ class TestExport(TestCase):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
+
+    def test_to_module_with_mutated_buffer(self):
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x.sum() + self.buf.sum()
+
+        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        stateful_gm = exported.module()
+        export_return_val = stateful_gm(torch.ones(5, 5))
+        eager = Foo()
+        eager_return_val = eager(torch.ones(5, 5))
+        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+
+        for name, buffer in stateful_gm.named_buffers():
+            self.assertTrue(torch.allclose(torch.ones(1), buffer))
+
+        changed = stateful_gm.graph.eliminate_dead_code()
+        self.assertFalse(changed)
+        self.assertTrue(torch.allclose(stateful_gm(torch.ones(5, 5)), eager(torch.ones(5, 5))))
+
+        for name, buffer in stateful_gm.named_buffers():
+            self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
+
+    def test_to_module_with_mutated_buffer_multiple(self):
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x.sum() + self.buf.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.buf.add_(1)
+                self.bar.buf.add_(2)
+                bar = self.bar(x)
+                return bar.sum() + self.buf.sum()
+
+        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        stateful_gm = exported.module()
+        export_return_val = stateful_gm(torch.ones(5, 5))
+        eager = Foo()
+        eager_return_val = eager(torch.ones(5, 5))
+        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+
+        for name, buffer in stateful_gm.named_buffers():
+            if name == "L__self___buf":
+                self.assertTrue(torch.allclose(torch.ones(1), buffer))
+            if name == "L__self___bar_buf":
+                self.assertTrue(torch.allclose(torch.tensor(4, dtype=torch.float), buffer))
+
+        changed = stateful_gm.graph.eliminate_dead_code()
+        self.assertFalse(changed)
+        self.assertTrue(torch.allclose(stateful_gm(torch.ones(5, 5)), eager(torch.ones(5, 5))))
+
+        for name, buffer in stateful_gm.named_buffers():
+            if name == "L__self___buf":
+                self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
+            if name == "L__self___bar_buf":
+                self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
+
+    def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x.sum() + self.buf.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.buf.add_(1)
+                bar = self.bar(x)
+                self.bar.buf.add_(2)
+                return bar.sum() + self.buf.sum()
+
+        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        stateful_gm = exported.module()
+        export_return_val = stateful_gm(torch.ones(5, 5))
+        eager = Foo()
+        eager_return_val = eager(torch.ones(5, 5))
+        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+
+        for name, buffer in stateful_gm.named_buffers():
+            if name == "L__self___buf":
+                self.assertTrue(torch.allclose(torch.ones(1), buffer))
+            if name == "L__self___bar_buf":
+                self.assertTrue(torch.allclose(torch.tensor(4, dtype=torch.float), buffer))
+
+        changed = stateful_gm.graph.eliminate_dead_code()
+        self.assertFalse(changed)
+        self.assertTrue(torch.allclose(stateful_gm(torch.ones(5, 5)), eager(torch.ones(5, 5))))
+
+        for name, buffer in stateful_gm.named_buffers():
+            if name == "L__self___buf":
+                self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
+            if name == "L__self___bar_buf":
+                self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
 
 if __name__ == '__main__':
