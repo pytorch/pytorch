@@ -2900,12 +2900,14 @@
   dispatch:
     CPU: _fft_r2c_mkl
     CUDA: _fft_r2c_cufft
+    MPS: _fft_r2c_mps
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_r2c_mkl_out
     CUDA: _fft_r2c_cufft_out
+    MPS: _fft_r2c_mps_out
 
 # Complex to real inverse FFT
 - func: _fft_c2r(Tensor self, int[] dim, int normalization, SymInt last_dim_size) -> Tensor
@@ -2913,12 +2915,14 @@
   dispatch:
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
+    MPS: _fft_c2r_mps
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
     CUDA: _fft_c2r_cufft_out
+    MPS: _fft_c2r_mps_out
 
 # Standard complex to complex FFT (forward or backward)
 - func: _fft_c2c(Tensor self, SymInt[] dim, int normalization, bool forward) -> Tensor
@@ -2926,12 +2930,14 @@
   dispatch:
     CPU: _fft_c2c_mkl
     CUDA: _fft_c2c_cufft
+    MPS: _fft_c2c_mps
 
 - func: _fft_c2c.out(Tensor self, SymInt[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
+    MPS: _fft_c2c_mps_out
 
 - func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
   device_check: NoCheck
