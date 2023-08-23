@@ -51,7 +51,7 @@ class PairwiseParallel(ParallelStyle):
     We assume both input and output need to be replicate DTensors.
 
     .. warning::
-        PairwiseParallel does not support ``nn.Multihead Attention``,
+        PairwiseParallel does not support ``nn.MultiheadAttention``,
         ``nn.Transformer`` well at this moment. One workaround is to
         use `ColwiseParallel` and `RowwiseParallel` directly. We recommend to
         use `PairwiseParallel` only for even-number-layer MLP for now.
