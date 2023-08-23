@@ -5,7 +5,7 @@ Understanding CUDA Memory Usage
 To debug CUDA memory use, PyTorch provides a way to generate memory snapshots that record the state of allocated CUDA memory
 at any point in time, and optionally record the history of allocation events that led up to that snapshot.
 
-The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at `pytorch.org/memory_viz <pytorch.org/memory_viz>`_ which
+The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at `pytorch.org/memory_viz <https://pytorch.org/memory_viz>`_ which
 can be used to explore the snapshot.
 
 Generating a Snapshot
@@ -24,7 +24,7 @@ The common pattern for recording a snapshot is to enable memory history, run the
 Using the visualizer
 ====================
 
-Open `pytorch.org/memory_viz <pytorch.org/memory_viz>`_ and drag/drop the pickled snapshot file into the visualizer.
+Open `pytorch.org/memory_viz <https://pytorch.org/memory_viz>`_ and drag/drop the pickled snapshot file into the visualizer.
 The visualizer is a javascript application that runs locally on your computer. It does not upload any snapshot data.
 
 
