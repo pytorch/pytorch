@@ -3186,6 +3186,7 @@ exit(2)
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
+    @unittest.skip("Corrupts process, only works as stand alone test")
     def test_cuda_graph_error_options(self):
         def fn():
             x = torch.zeros([2000], device="cuda")
