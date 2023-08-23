@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfRocm, skipCUDAIfRocmVersionLessThan, \
     onlyNativeDeviceTypes, largeTensorTest, skipMeta, \
     disableMkldnn, skipCPUIfNoMkldnn, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen, \
-    onlyCUDAAndPRIVATEUSE1, dtypesIfPRIVATEUSE1
+    onlyCUDAAndPRIVATEUSE1
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import gradcheck, gradgradcheck, \
@@ -2062,7 +2062,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
             self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
-    @dtypesIfPRIVATEUSE1(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)

@@ -43,7 +43,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types, \
-    onlyCUDAAndPRIVATEUSE1, dtypesIfPRIVATEUSE1
+    onlyCUDAAndPRIVATEUSE1
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -8391,7 +8391,6 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
-    @dtypesIfPRIVATEUSE1(torch.float, torch.double, torch.half, torch.complex128)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
     def test_conv_empty_input(self, device, dtype):
@@ -10257,7 +10256,6 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
-    @dtypesIfPRIVATEUSE1(torch.half, torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -10333,7 +10331,6 @@ class TestNNDeviceType(NNTestCase):
 
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.float, torch.half)
     @dtypesIfCUDA(torch.float, torch.half)
     def test_log_softmax_big(self, device, dtype):
         def _test_helper(shape):
@@ -10586,7 +10583,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
     @skipIfMps
-    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
@@ -10614,7 +10610,6 @@ class TestNNDeviceType(NNTestCase):
                 grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
                 self.assertEqual(grads, grads2)
 
-    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.double)
     def test_rnn_retain_variables(self, device, dtype):
@@ -11072,7 +11067,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad1, grad2)
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.float, torch.bfloat16)
     @dtypesIfCUDA(torch.float, torch.bfloat16)
     def test_batchnorm_eval(self, device, dtype):
         self._test_batchnorm_eval(2, device, dtype)
@@ -11122,7 +11116,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad1, grad2)
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.float, torch.bfloat16)
     @dtypesIfCUDA(torch.float, torch.bfloat16)
     def test_batchnorm_affine(self, device, dtype):
         self._test_batchnorm_affine(2, device, dtype)
@@ -11192,7 +11185,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(module.running_var, (running_var1 + running_var2) / 2)
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.float, torch.bfloat16)
     @dtypesIfCUDA(torch.float, torch.bfloat16)
     def test_batchnorm_simple_average(self, device, dtype):
         self._test_batchnorm_simple_average(device, dtype)
@@ -11314,7 +11306,6 @@ class TestNNDeviceType(NNTestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
-    @dtypesIfPRIVATEUSE1(torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @tf32_on_and_off(0.005)
@@ -12355,7 +12346,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.double, torch.float, torch.half)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer
@@ -12569,7 +12559,6 @@ class TestNNDeviceType(NNTestCase):
 
 
     @dtypes(torch.float)
-    @dtypesIfPRIVATEUSE1(torch.half, torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     def test_transformerencoderlayer_gelu(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer with gelu activation
