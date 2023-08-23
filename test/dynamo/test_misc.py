@@ -55,6 +55,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
+from torch.testing._internal.common_methods_invocations import sample_inputs_gather
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -162,6 +163,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(AssertionError, lambda: opt_fn(a, b, c, AssertionError))
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
+
+    def test_module_not_callable(self):
+        def fn(x):
+            return torch.fft(x)
+
+        counter = CompileCounter()
+        a = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertRaisesRegex(
+            TypeError, "'module' object is not callable", lambda: opt_fn(a)
+        )
 
     def test_inplace(self):
         def inplace1(a, b):
@@ -1264,6 +1276,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_numpy_take_along_axis(self):
+        def fn(x, a, i):
+            return np.take_along_axis(x, i, a)
+
+        def sample_to_args(s):
+            args = (s.input, *sample.args)
+            return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
+
+        # The last sample from gather does not work in np.take_along_axis
+        samples = list(
+            sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False)
+        )[:-1]
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        i = 1
+        for sample in samples:
+            args = sample_to_args(sample)
+            self.assertEqual(fn(*args), opt_fn(*args))
+            self.assertEqual(cnts.frame_count, i)
+            i += 1
 
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
@@ -6620,6 +6653,67 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
+
+    def test_yield_from(self):
+        def yield_from_fn(t_list, k):
+            def yield_from_gen(l):
+                l2 = [t * k for t in l]
+                yield from l2
+
+            return [t * k for t in yield_from_gen(t_list)]
+
+        t_list = [torch.randn([2, 3])] * 3
+        multiplier = torch.tensor([10])
+        eager = yield_from_fn(t_list, 2)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_gen_and_from(self):
+        def populate_and_multiply_sequence(n, multiplier):
+            # Inline generator
+            def tensor_generator():
+                for i in range(n):
+                    yield torch.tensor([i])
+
+            # Use 'yield from' to iterate over tensors and multiply
+            t_list = [tensor * multiplier for tensor in tensor_generator()]
+
+            def yield_from_gen():
+                yield from t_list
+
+            return [t for t in yield_from_gen()]
+
+        multiplier = torch.tensor([10])
+        eager = populate_and_multiply_sequence(5, multiplier)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(populate_and_multiply_sequence)(
+            5, multiplier
+        )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_send_to_subgenerator_graph_break(self):
+        def subgenerator(tensor):
+            multiplier = yield
+            yield tensor * multiplier
+
+        def main_generator(t_list):
+            for tensor in t_list:
+                subgen = subgenerator(tensor)
+                next(subgen)
+                yield from subgen.send(torch.tensor([10]))
+
+        t_list = [torch.tensor([i]) for i in range(5)]
+        eager = list(main_generator(t_list))
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(main_generator)
+        compiled = list(compiled_fn(t_list))
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
 
 
 class TestTracer(JitTestCase):

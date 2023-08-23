@@ -959,6 +959,12 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
 
+# Skips a test on Lazy if the condition is true.
+class skipLazyIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='lazy')
+
 # Skips a test on Meta if the condition is true.
 class skipMetaIf(skipIf):
 
@@ -1195,7 +1201,7 @@ class dtypes:
                 assert isinstance(arg, (list, tuple)), \
                     "When one dtype variant is a tuple or list, " \
                     "all dtype variants must be. " \
-                    "Received non-list non-tuple dtype {}".format(str(arg))
+                    f"Received non-list non-tuple dtype {str(arg)}"
                 assert all(isinstance(dtype, torch.dtype) for dtype in arg), f"Unknown dtype in {str(arg)}"
         else:
             assert all(isinstance(arg, torch.dtype) for arg in args), f"Unknown dtype in {str(args)}"
@@ -1355,8 +1361,13 @@ def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
-def skipCUDAIfRocm(fn):
-    return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipCUDAIfRocm: {msg}"
+        return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
@@ -1451,6 +1462,9 @@ def skipCUDAIfMiopen(fn):
 
 def skipCUDAIfNoMiopen(fn):
     return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
+
+def skipLazy(fn):
+    return skipLazyIf(True, "test doesn't work with lazy tensors")(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)

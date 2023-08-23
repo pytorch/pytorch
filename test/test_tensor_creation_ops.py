@@ -451,9 +451,8 @@ class TestTensorCreation(TestCase):
             other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
             a = torch.tensor([1, 2], device=device, dtype=dtype)
             b = torch.tensor([3, 4], device=device, dtype=other_dtype)
-            error = "Expected object of scalar type {} but got scalar type " \
-                    "{} for second argument".format(dtype_name(dtype),
-                                                    dtype_name(other_dtype))
+            error = f"Expected object of scalar type {dtype_name(dtype)} but got scalar type " \
+                    f"{dtype_name(other_dtype)} for second argument"
             with self.assertRaisesRegex(RuntimeError, error):
                 op(a, b)
 
@@ -472,9 +471,8 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             out = torch.zeros(2, device=device, dtype=dtype)
             expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-            error = "Expected object of scalar type {} but got scalar type " \
-                    "{} for argument 'out'".format(
-                        complex_dtype_name(expected_dtype), dtype_name(dtype))
+            error = f"Expected object of scalar type {complex_dtype_name(expected_dtype)} but got scalar type " \
+                    f"{dtype_name(dtype)} for argument 'out'"
             with self.assertRaisesRegex(RuntimeError, error):
                 op(a, b, out=out)
 

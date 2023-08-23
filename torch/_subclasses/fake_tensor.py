@@ -172,7 +172,8 @@ def is_fake(x):
         return all_fake
     elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
-        return is_fake(torch._C._functorch._unwrap_functional_tensor(x, reapply_views))
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return is_fake(unwrapped)
     return False
 
 
@@ -543,7 +544,8 @@ def nonzero(fake_mode, func, arg):
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
             if arg.numel() >= 2:
-                maxval = arg.numel()
+                maxval = int(arg.numel())
+
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
