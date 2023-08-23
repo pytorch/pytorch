@@ -150,9 +150,10 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
-            &\hspace{15mm} \theta_{t-1} \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
+            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1}                 \\
             &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{6mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
             &\hspace{6mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
@@ -162,9 +163,9 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\hspace{12mm} l_t \leftarrow \frac{\sqrt{ (1-\beta^t_2) }}{ \sqrt{v_t} +\epsilon  } \\
             &\hspace{12mm} r_t \leftarrow
       \sqrt{\frac{(\rho_t-4)(\rho_t-2)\rho_{\infty}}{(\rho_{\infty}-4)(\rho_{\infty}-2) \rho_t}} \\
-            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t} r_t l_t        \\
+            &\hspace{12mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t} r_t l_t        \\
             &\hspace{6mm}\textbf{else}                                                           \\
-            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}                \\
+            &\hspace{12mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}                \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
