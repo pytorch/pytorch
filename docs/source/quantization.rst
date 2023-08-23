@@ -108,7 +108,7 @@ Please see our `Introduction to Quantization on PyTorch
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
-Operator coverage varies between dynamic and static quantization and is captured in the table below.
+Operator coverage varies between dynamic and static quantization and is captured in the table below for eager mode quantization.
 
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
@@ -128,7 +128,8 @@ Operator coverage varies between dynamic and static quantization and is captured
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | Y                  |
+|nn.Embedding               | Y (activations    |                    |
+|                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
 | nn.MultiheadAttention     | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
@@ -789,8 +790,8 @@ Default settings for qnnpack::
 Operator Support
 ^^^^^^^^^^^^^^^^^^^^
 
-Operator coverage varies between dynamic and static quantization and is captured in the table below.
-Note that for FX Graph Mode Quantization, the corresponding functionals are also supported.
+Operator coverage varies between dynamic and static quantization and is captured in the table
+below for FX Graph Mode Quantization (which also supports the corresponding functionals).
 
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
@@ -806,10 +807,10 @@ Note that for FX Graph Mode Quantization, the corresponding functionals are also
 | | nn.GRUCell              | | N               | | Y                |
 | | nn.LSTMCell             | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
-|nn.EmbeddingBag            | Y (activations    |                    |
-|                           | are in fp32)      | Y                  |
+|nn.EmbeddingBag            | N                 | Y (float qparams   |
+|                           |                   | weight only)       |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | Y                  |
+|nn.Embedding               | N                 | Y                  |
 +---------------------------+-------------------+--------------------+
 |nn.MultiheadAttention      |Not Supported      | Not supported      |
 +---------------------------+-------------------+--------------------+
