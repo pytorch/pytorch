@@ -12,8 +12,8 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistError, 
-    *THPException_DistBackendError, *THPException_DistNetworkError, 
+    *THPException_OutOfMemoryError, *THPException_DistError,
+    *THPException_DistBackendError, *THPException_DistNetworkError,
     *THPException_DistStoreError;
 
 #define ASSERT_TRUE(cond) \
@@ -101,8 +101,7 @@ could not be completed because the input matrix is singular.",
           PyExc_RuntimeError,
           nullptr));
   ASSERT_TRUE(
-      PyModule_AddObject(
-          module, "_DistError", THPException_DistError) == 0);
+      PyModule_AddObject(module, "_DistError", THPException_DistError) == 0);
 
   return true;
 }

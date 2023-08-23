@@ -93,8 +93,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     retstmnt;                                                                 \
   }
 
-#define CATCH_TH_ERRORS(retstmnt) \
-  CATCH_CORE_ERRORS(retstmnt)     \
+#define CATCH_TH_ERRORS(retstmnt) CATCH_CORE_ERRORS(retstmnt)
 
 #define CATCH_ALL_ERRORS(retstmnt)               \
   CATCH_TH_ERRORS(retstmnt)                      \
@@ -140,8 +139,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistError, 
-    *THPException_DistBackendError,*THPException_DistNetworkError, 
+    *THPException_OutOfMemoryError, *THPException_DistError,
+    *THPException_DistBackendError, *THPException_DistNetworkError,
     *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
