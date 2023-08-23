@@ -191,6 +191,7 @@ class Graph:
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
+    _is_single_tensor_return: bool = False
 
 
 @dataclass

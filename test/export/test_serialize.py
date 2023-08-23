@@ -204,53 +204,65 @@ class TestDeserialize(TestCase):
             else:
                 self.assertEqual(orig, loaded)
 
-        self.assertEqual(len(ep.graph.nodes), len(deserialized_ep.graph.nodes))
-        for node1, node2 in zip(ep.graph.nodes, deserialized_ep.graph.nodes):
-            self.assertEqual(node1.op, node2.op)
-            if node1.op == "call_function":
-                # Check "val" metadata
-                val1 = node1.meta.get("val", None)
-                val2 = node2.meta.get("val", None)
-                if val1 is None or val2 is None:
-                    # Either both are None
-                    self.assertEqual(val1, val2)
-                elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
-                    # Or both are fake tensors with the same shape/dtype
-                    self.assertEqual(len(val1.shape), len(val2.shape))
-                    for s1, s2 in zip(val1.shape, val2.shape):
-                        if is_concrete_int(s1) and is_concrete_int(s2):
-                            self.assertEqual(s1, s2)
-                        else:
-                            self.assertEqual(str(s1), str(s2))
-                    self.assertEqual(val1.dtype, val2.dtype)
-                elif isinstance(val1, list) and isinstance(val2, list):
-                    # Or both are fake tensors lists with one element and with the
-                    # same shape/dtype
-                    self.assertTrue(len(val1) == 1 and len(val2) == 1)
-                    self.assertEqual(val1[0].shape, val2[0].shape)
-                    self.assertEqual(val1[0].dtype, val2[0].dtype)
-                else:
-                    # For expressions like 's0 < 10' can only compare through string
-                    self.assertEqual(str(val1), str(val2))
+        def _check_graph_nodes(gm1, gm2):
+            self.assertEqual(len(gm1.graph.nodes), len(gm2.graph.nodes))
 
-                # Check "stack_trace" metadata
-                self.assertEqual(
-                    node1.meta.get("stack_trace", None),
-                    node2.meta.get("stack_trace", None),
-                )
+            for node1, node2 in zip(gm1.graph.nodes, gm2.graph.nodes):
+                self.assertEqual(node1.op, node2.op)
+                if node1.op == "call_function":
+                    # Check "val" metadata
+                    val1 = node1.meta.get("val", None)
+                    val2 = node2.meta.get("val", None)
+                    if val1 is None or val2 is None:
+                        # Either both are None
+                        self.assertEqual(val1, val2)
+                    elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
+                        # Or both are fake tensors with the same shape/dtype
+                        self.assertEqual(len(val1.shape), len(val2.shape))
+                        for s1, s2 in zip(val1.shape, val2.shape):
+                            if is_concrete_int(s1) and is_concrete_int(s2):
+                                self.assertEqual(s1, s2)
+                            else:
+                                self.assertEqual(str(s1), str(s2))
+                        self.assertEqual(val1.dtype, val2.dtype)
+                    elif isinstance(val1, list) and isinstance(val2, list):
+                        # Or both are fake tensors lists with one element and with the
+                        # same shape/dtype
+                        self.assertTrue(len(val1) == 1 and len(val2) == 1)
+                        self.assertEqual(val1[0].shape, val2[0].shape)
+                        self.assertEqual(val1[0].dtype, val2[0].dtype)
+                    else:
+                        # For expressions like 's0 < 10' can only compare through string
+                        self.assertEqual(str(val1), str(val2))
 
-            if node1.op != "get_attr" and node1.op != "placeholder":
-                # Check "nn_module_stack" metadata
-                self.assertEqual(
-                    node1.meta.get("nn_module_stack", None),
-                    node2.meta.get("nn_module_stack", None),
-                )
+                    # Check "stack_trace" metadata
+                    self.assertEqual(
+                        node1.meta.get("stack_trace", None),
+                        node2.meta.get("stack_trace", None),
+                    )
 
-                # Check "source_fn" metadata
-                self.assertEqual(
-                    node1.meta.get("source_fn", None),
-                    node2.meta.get("source_fn", None),
-                )
+                    if node1.target == torch.ops.higher_order.cond:
+                        true_graph1 = getattr(gm1, node1.args[1].target)
+                        true_graph2 = getattr(gm2, node2.args[1].target)
+                        _check_graph_nodes(true_graph1, true_graph2)
+
+                        false_graph1 = getattr(gm1, node1.args[2].target)
+                        false_graph2 = getattr(gm2, node2.args[2].target)
+                        _check_graph_nodes(false_graph1, false_graph2)
+
+                if node1.op not in ("get_attr", "placeholder", "output"):
+                    # Check "nn_module_stack" metadata
+                    self.assertEqual(
+                        node1.meta.get("nn_module_stack", None),
+                        node2.meta.get("nn_module_stack", None),
+                    )
+                    # Check "source_fn" metadata
+                    self.assertEqual(
+                        node1.meta.get("source_fn", None),
+                        node2.meta.get("source_fn", None),
+                    )
+
+        _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module)
 
     def test_multi_return(self) -> None:
         """
