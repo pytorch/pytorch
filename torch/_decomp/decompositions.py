@@ -1730,8 +1730,7 @@ def _to_copy(
     if dtype_converted:
         x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
-        x = torch.clone(x, memory_format=memory_format)
-
+        return torch.clone(x, memory_format=memory_format)
     return x
 
 

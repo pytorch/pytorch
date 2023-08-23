@@ -340,6 +340,27 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
 
 
+def is_noncontiguous_supported(device):
+    if device is not None and device.type == "hpu":
+        return False
+    return True
+
+
+def handle_noncontiguous_outputs(input_tlist, output):
+    device = None
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    for t in input_tlist:
+        if isinstance(t, FakeTensor):
+            device = t.fake_device
+            break
+
+    if not is_noncontiguous_supported(device):
+        output = output.new_empty(output.shape)
+
+    return output
+
+
 def _broadcast_shapes(*_shapes):
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -436,17 +457,8 @@ def _make_elementwise_unary_reference(
             if extra_meta is not None:
                 extra_meta(a)
 
-            out = prim(a)
-            device = None
-            from torch._subclasses.fake_tensor import FakeTensor
-
-            if isinstance(a, FakeTensor):
-                device = a.fake_device
-
-            if is_noncontiguous_supported(device) is False:
-                out = out.new_empty(out.shape)
-
-            return out
+            output = prim(a)
+            return handle_noncontiguous_outputs([a],output)
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -967,20 +979,8 @@ def _make_elementwise_binary_reference(
                 lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
             )
             a, b = _maybe_broadcast(a, b)
-
-            device = None
-            from torch._subclasses.fake_tensor import FakeTensor
-
-            if isinstance(a, FakeTensor):
-                device = a.fake_device
-            elif isinstance(b, FakeTensor):
-                device = b.fake_device
-
-            out = prim(a, b)
-            if is_noncontiguous_supported(device) is False:
-                out = out.new_empty(out.shape)
-
-            return out
+            output = prim(a, b)
+            return handle_noncontiguous_outputs([a,b],output)
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -1685,18 +1685,8 @@ def sub(
             # which will mess with type promotion.
             b = b * alpha
 
-    out = prims.sub(a, b)
-    device = None
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    if isinstance(a, FakeTensor):
-        device = a.fake_device
-    elif isinstance(b, FakeTensor):
-        device = b.fake_device
-
-    if is_noncontiguous_supported(device) is False:
-        out = out.new_empty(out.shape)
-    return out
+    output = prims.sub(a, b)
+    return  handle_noncontiguous_outputs([a,b],output)
 
 
 # TODO: add docstring
@@ -4816,20 +4806,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     # make sure the decomposition output's stride is same as non-decomposition path.
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
-        return prims.copy_strided(output, stride)
+        output = prims.copy_strided(output, stride)
 
-    device = None
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    for t in inputs:
-        if isinstance(t, FakeTensor):
-            device = t.fake_device
-            break
-
-    if is_noncontiguous_supported(device) is False:
-        output = output.new_empty(output.shape)
-
-    return output
+    return handle_noncontiguous_outputs(inputs,output)
 
 
 @register_decomposition(aten.linspace)
