@@ -254,6 +254,64 @@ class CPUReproTests(TestCase):
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
+    @config.patch(implicit_fallbacks=True)
+    def test_multihead_attention_cpu(self):
+        def fn(
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ):
+            return torch._native_multi_head_attention(
+                q,
+                k,
+                v,
+                embed_dim,
+                num_heads,
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                mask,
+                need_weights,
+            )
+
+        B = 1
+        T = 3
+        embed_dim = 6
+        num_heads = 2
+        q = torch.randn([B, T, embed_dim])
+        k = torch.randn([B, T, embed_dim])
+        v = torch.randn([B, T, embed_dim])
+        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
+        qkv_bias = torch.randn([3 * embed_dim])
+        proj_weight = torch.randn([3 * embed_dim, embed_dim])
+        proj_bias = torch.randn([3 * embed_dim])
+        mask = None
+        need_weights = False
+
+        inps = [
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ]
+        self.common(fn, inps)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
@@ -385,6 +443,7 @@ class CPUReproTests(TestCase):
                         inps_var = [v_var]
                         self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    @slowTest
     def test_lstm_packed(self):
         params_dict = {
             "unbatched": [True, False],
@@ -2120,6 +2179,15 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_invalid_index_of_empty_tensor(self):
+        def fn(a):
+            b = a[[0]]
+            return b
+
+        a = torch.tensor([])
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(a)
 
     def test_ir_node_str(self):
         @torch.compile

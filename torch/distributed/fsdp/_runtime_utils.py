@@ -19,7 +19,9 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state,
     _is_composable,
+    _log_post_backward_hook,
     _no_dispatch_record_stream,
+    clean_tensor_name,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
@@ -347,9 +349,12 @@ def _reshard(
     """
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
-        free_event = state._device_handle.Event()
-        free_event.record()
-        state._free_event_queue.enqueue(free_event)
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            # We don't run a even queue for freeing under torch compile atm
+            # But maybe we need to? TODO(voz): Look into this
+            free_event = state._device_handle.Event()
+            free_event.record()
+            state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
     # Since we prefetch entire handles keys at a time, conservatively mark
     # the entire key as no longer prefetched once we free at least one
@@ -719,7 +724,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    _log_post_backward_hook(state, handle)
+    _log_post_backward_hook(state, handle, log)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -887,22 +892,6 @@ def _post_backward_hook(
                     handle._reset_flat_param_grad_info_if_needed()
                     if handle._offload_params:
                         handle.flat_param._cpu_grad = None
-
-
-@no_type_check
-def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
-    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
-    # Below logging of module names this post-bwd hook fires for can help debug certain
-    # cases where hooks don't fire, such as under certain activation checkpoint configs.
-    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
-        param_to_fqn = state._exec_order_data.param_to_fqn
-        handle_params = handle.flat_param._params  # only populated for use_orig_params
-        param_fqns = [
-            param
-            for param_list in [param_to_fqn[p] for p in handle_params]
-            for param in param_list
-        ]
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
@@ -1485,10 +1474,12 @@ def _get_buffers_and_dtypes_for_computation(
         root_module
     )
     for fsdp_state, fsdp_module in zip(reversed(fsdp_states), reversed(fsdp_modules)):
-        for buffer in fsdp_module.buffers():
+        for buffer_name, buffer in fsdp_module.named_buffers():
             if buffer in visited_buffers:
                 continue
             visited_buffers.add(buffer)
+            if clean_tensor_name(buffer_name) in fsdp_state._ignored_buffer_names:
+                continue
             buffers.append(buffer)
             buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)
     assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"

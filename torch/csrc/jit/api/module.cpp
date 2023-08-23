@@ -19,6 +19,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <iostream>
+
 namespace torch::jit {
 
 namespace {
@@ -312,8 +314,8 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy() const {
-  return Module(_ivalue()->deepcopy());
+Module Module::deepcopy(c10::optional<at::Device> device) const {
+  return Module(_ivalue()->deepcopy(device));
 }
 
 Module Module::clone(bool inplace) const {

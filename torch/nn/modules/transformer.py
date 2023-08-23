@@ -120,7 +120,9 @@ class Transformer(Module):
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None,
+                src_is_causal: Optional[bool] = None, tgt_is_causal: Optional[bool] = None,
+                memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -132,6 +134,28 @@ class Transformer(Module):
             src_key_padding_mask: the Tensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
+            src_is_causal: If specified, applies a causal mask as ``src_mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``src_is_causal`` provides a hint that ``src_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt_mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory_mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -177,10 +201,12 @@ class Transformer(Module):
         if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
-        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask,
+                              is_causal=src_is_causal)
         output = self.decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
                               tgt_key_padding_mask=tgt_key_padding_mask,
-                              memory_key_padding_mask=memory_key_padding_mask)
+                              memory_key_padding_mask=memory_key_padding_mask,
+                              tgt_is_causal=tgt_is_causal, memory_is_causal=memory_is_causal)
         return output
 
     @staticmethod
@@ -865,8 +891,8 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
 
 def _detect_is_causal_mask(
         mask: Optional[Tensor],
-        is_causal: Optional[bool],
-        size: Optional[int]
+        is_causal: Optional[bool] = None,
+        size: Optional[int] = None,
 ) -> bool:
     """Return whether the given attention mask is causal.
 

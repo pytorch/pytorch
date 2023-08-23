@@ -539,6 +539,28 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(**torch._logging.DEFAULT_LOGGING)
+    def test_default_logging(self, records):
+        def fn(a):
+            if a.sum() < 0:
+                a = torch.sin(a)
+            else:
+                a = torch.cos(a)
+            print("hello")
+            return a + 1
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(10, 10))
+        fn_opt(-torch.ones(10, 5))
+
+        self.assertGreater(len([r for r in records if ".__graph_breaks" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__recompiles" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".symbolic_shapes" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__guards" in r.name]), 0)
+        self.assertGreater(
+            len([r for r in records if "return a + 1" in r.getMessage()]), 0
+        )
+
 
 # single record tests
 exclusions = {
@@ -556,6 +578,8 @@ exclusions = {
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",
+    "guards",
+    "verbose_guards",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

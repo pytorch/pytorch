@@ -102,6 +102,35 @@ class TestFakePG(TestCase):
         gm = make_fx(allgather_fn)(torch.randn(2, 2, device='cuda'))
         FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
 
+    def test_broadcast(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        # src == rank
+        output = torch.ones(3, 3)
+        dist.broadcast(output, src=0)
+        self.assertEqual(tuple(output.shape), (3, 3))
+
+        # src != rank
+        output = torch.ones(3, 3)
+        dist.broadcast(output, src=1)
+        self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_scatter(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        # src == rank
+        output = torch.ones(3, 3)
+        to_scatter = [torch.ones(3, 3) * rank for rank in range(2)]
+        dist.scatter(output, to_scatter)
+        self.assertEqual(tuple(output.shape), (3, 3))
+
+        # src != rank
+        output = torch.ones(3, 3)
+        dist.scatter(output, None, src=1)
+        self.assertEqual(tuple(output.shape), (3, 3))
+
 
 if __name__ == "__main__":
     run_tests()

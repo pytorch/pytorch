@@ -118,6 +118,15 @@ class LogState:
 log_registry = LogRegistry()
 log_state = LogState()
 
+# sample usage: torch._logging.set_logs(**torch._logging.DEFAULT_LOGGING)
+DEFAULT_LOGGING = {
+    "graph_breaks": True,
+    "recompiles": True,
+    "dynamic": logging.INFO,
+    "guards": True,
+    "trace_source": True,
+}
+
 
 def set_logs(
     *,
@@ -559,9 +568,14 @@ class TorchLogsFormatter(logging.Formatter):
         record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
-        prefix = (
-            f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
-        )
+
+        record.compileid = ""
+        if (
+            compile_id := torch._guards.CompileContext.current_compile_id()
+        ) is not None:
+            record.compileid = f" [{compile_id}]"
+
+        prefix = f"{record.rankprefix}[{record.asctime}]{record.compileid} {record.name}: [{record.levelname}]"
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 
@@ -662,4 +676,15 @@ def warning_once(logger_obj, *args, **kwargs):
     logger_obj.warning(*args, **kwargs)
 
 
+class LazyString:
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.func(*self.args, **self.kwargs)
+
+
+import torch._guards
 import torch.distributed as dist
