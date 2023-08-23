@@ -1,5 +1,6 @@
 import os
 import copy
+import tqdm
 import pickle
 import logging
 import functools
@@ -335,15 +336,6 @@ class Autotuner_FFN(nn.Module):
                 for i in range(model_cfg["op_cnt"])
             ]
         )
-        self.is_contiguous_ln = torch.nn.Embedding(
-            num_embeddings=2, embedding_dim=model_cfg["bool_embed_dim"]
-        )
-        self.is_scalar_ln = torch.nn.Embedding(
-            num_embeddings=2, embedding_dim=model_cfg["bool_embed_dim"]
-        )
-        self.is_indirect_ln = torch.nn.Embedding(
-            num_embeddings=2, embedding_dim=model_cfg["bool_embed_dim"]
-        )
 
         self.layers = nn.ModuleList(
             [
@@ -356,80 +348,81 @@ class Autotuner_FFN(nn.Module):
             [nn.LayerNorm(self.hidden_dim[i + 1]) for i in range(self.num_layers - 1)]
         )
 
-        torch.nn.init.xavier_normal_(self.kernel_category_embedding.weight)
-        torch.nn.init.xavier_normal_(self.num_of_loops_embedding.weight)
-        torch.nn.init.xavier_normal_(self.is_contiguous_ln.weight)
-        torch.nn.init.xavier_normal_(self.is_scalar_ln.weight)
-        torch.nn.init.xavier_normal_(self.is_indirect_ln.weight)
-        for layer in list(self.op_bag_ln) + list(self.layers):
-            torch.nn.init.xavier_normal_(layer.weight)
-            torch.nn.init.zeros_(layer.bias)
-
         self.activation = model_cfg["activation"]
 
-    def forward(self, x):
-        if not isinstance(x, list):
-            x = [x]
+    def get_feature_groups(self, x, show_progress=False):
+        device = "cuda"
+
+        def normalize(x, positive=True):
+            if positive:
+                return torch.log2(x + 1)
+            return torch.log2(torch.abs(x) + 1) * torch.sign(x)
+
         x_kernel_category = np.array([i.kernel_feature.kernel_category for i in x])
-        x_kernel_category = torch.from_numpy(x_kernel_category).to("cuda").long()
-        x_kernel_category = self.kernel_category_embedding(x_kernel_category)
+        x_kernel_category = torch.tensor(x_kernel_category, device=device).long()
 
         x_num_of_loops = np.array([i.kernel_feature.num_of_loops for i in x])
-        x_num_of_loops = torch.from_numpy(x_num_of_loops).to("cuda").long()
-        x_num_of_loops = self.num_of_loops_embedding(x_num_of_loops)
+        x_num_of_loops = torch.tensor(x_num_of_loops, device=device).long()
 
         x_op_vec = np.array([i.kernel_feature.op_vec for i in x])
-        x_op_vec = torch.from_numpy(x_op_vec).to("cuda").float()
-        x_op_vec = torch.cat(
-            [
-                self.op_bag_ln[i](x_op_vec[:, i].unsqueeze(1))
-                for i in range(len(OP_DICT))
-            ],
-            dim=1,
-        )
+        x_op_vec = torch.tensor(x_op_vec, device=device).float()
 
         x_size_hints = np.array([i.kernel_feature.size_hints for i in x])
-        x_size_hints = np.log2(x_size_hints + 1)
-        x_size_hints = torch.from_numpy(x_size_hints).to("cuda")
+        x_size_hints = torch.tensor(x_size_hints, device=device).float()
+        x_size_hints = normalize(x_size_hints)
 
-        def get_dep_feature_vec(dep_features):
-            feature_vecs = list()
-            for dep_feature in dep_features:
-                feature_vecs.append(
-                    [dep_feature.StarDepOrWeakDep, dep_feature.bytes]
-                    + list(
-                        np.log2(np.abs(dep_feature.strides) + 1)
-                        * np.sign(dep_feature.strides)
-                    )
-                    + list(
-                        np.log2(np.abs(dep_feature.sizes) + 1)
-                        * np.sign(dep_feature.sizes)
-                    )
-                    + [
-                        dep_feature.is_contiguous,
-                        dep_feature.is_scalar,
-                        dep_feature.is_indirect,
-                    ]
-                )
-            feature_vecs = torch.from_numpy(np.array(feature_vecs)).to("cuda")
-            return torch.flatten(
+        def get_dep_feature_vec(x, attr):
+            assert attr in ["read_deps", "write_deps"]
+            StarOrWeakdep_list = list()
+            bytes_list = list()
+            strides_list = list()
+            sizes_list = list()
+            is_contiguous_list = list()
+            is_scalar_list = list()
+            is_indirect_list = list()
+
+            for i in x if not show_progress else tqdm.tqdm(x):
+                for j in getattr(i.kernel_feature, attr):
+                    StarOrWeakdep_list.append(j.StarDepOrWeakDep)
+                    bytes_list.append(j.bytes)
+                    strides_list.append(j.strides)
+                    sizes_list.append(j.sizes)
+                    is_contiguous_list.append(j.is_contiguous)
+                    is_scalar_list.append(j.is_scalar)
+                    is_indirect_list.append(j.is_indirect)
+
+            StarOrWeakdep_tensor = torch.tensor(StarOrWeakdep_list).to("cuda")
+
+            bytes_tensor = normalize(torch.tensor(bytes_list).to("cuda"))
+            strides_tensor = normalize(
+                torch.tensor(np.array(strides_list)).to("cuda"), positive=False
+            )
+            sizes_tensor = normalize(
+                torch.tensor(np.array(sizes_list)).to("cuda"), positive=False
+            )
+            is_contiguous_tensor = torch.tensor(is_contiguous_list).to("cuda")
+            is_scalar_tensor = torch.tensor(is_scalar_list).to("cuda")
+            is_indirect_tensor = torch.tensor(is_indirect_list).to("cuda")
+
+            return (
                 torch.cat(
                     [
-                        feature_vecs[:, 0:-3],
-                        self.is_contiguous_ln(feature_vecs[:, -3].long()),
-                        self.is_scalar_ln(feature_vecs[:, -2].long()),
-                        self.is_indirect_ln(feature_vecs[:, -1].long()),
+                        StarOrWeakdep_tensor.unsqueeze(1),
+                        bytes_tensor.unsqueeze(1),
+                        strides_tensor,
+                        sizes_tensor,
+                        is_contiguous_tensor.unsqueeze(1),
+                        is_scalar_tensor.unsqueeze(1),
+                        is_indirect_tensor.unsqueeze(1),
                     ],
                     dim=1,
                 )
+                .reshape(len(x), -1)
+                .float()
             )
 
-        x_read_deps = torch.stack(
-            [get_dep_feature_vec(i.kernel_feature.read_deps) for i in x], dim=0
-        )
-        x_write_deps = torch.stack(
-            [get_dep_feature_vec(i.kernel_feature.write_deps) for i in x], dim=0
-        )
+        x_read_deps = get_dep_feature_vec(x, "read_deps")
+        x_write_deps = get_dep_feature_vec(x, "write_deps")
 
         rest_vec = np.array(
             [
@@ -438,9 +431,40 @@ class Autotuner_FFN(nn.Module):
                 for i in x
             ]
         )
-        rest_vec[:, 0:3] = np.log2(rest_vec[:, 0:3] + 1)
-        rest_vec[:, -3:] = np.log2(rest_vec[:, -3:] + 1)
+
         rest_vec = torch.from_numpy(rest_vec).to("cuda")
+        rest_vec[:, 0:3] = normalize(rest_vec[:, 0:3])
+        rest_vec[:, -3:] = normalize(rest_vec[:, -3:])
+
+        return (
+            x_kernel_category,
+            x_num_of_loops,
+            x_op_vec,
+            x_size_hints,
+            x_read_deps,
+            x_write_deps,
+            rest_vec,
+        )
+
+    def forward_(self, x_tuple):
+        (
+            x_kernel_category,
+            x_num_of_loops,
+            x_op_vec,
+            x_size_hints,
+            x_read_deps,
+            x_write_deps,
+            rest_vec,
+        ) = x_tuple
+        x_kernel_category = self.kernel_category_embedding(x_kernel_category)
+        x_num_of_loops = self.num_of_loops_embedding(x_num_of_loops)
+        x_op_vec = torch.cat(
+            [
+                self.op_bag_ln[i](x_op_vec[:, i].unsqueeze(1))
+                for i in range(len(OP_DICT))
+            ],
+            dim=1,
+        )
 
         x = torch.cat(
             [
@@ -464,6 +488,9 @@ class Autotuner_FFN(nn.Module):
         x = self.layers[-1](x)
         return x
 
+    def forward(self, x):
+        return self.forward_(self.get_feature_groups(x))
+
 
 def get_model(model_type: ModelType):
     if model_type == ModelType.XGB_BASELINE:
@@ -483,7 +510,7 @@ def get_model(model_type: ModelType):
             "kernel_category_embed_dim": 32,
             "num_of_loops_cnt": 10,
             "num_of_loops_embed_dim": 32,
-            "feature_dim": 576,
+            "feature_dim": 443,
             "op_embed_dim": 2,
             "op_cnt": len(OP_DICT),
             "bool_embed_dim": 4,
@@ -497,7 +524,7 @@ def get_model(model_type: ModelType):
             model_cfg["hidden_dim"] = [4096, 1024, 32]
             return Autotuner_FFN(model_cfg)
         elif model_type == ModelType.NN_PAIRWISE_SMALL:
-            model_cfg["hidden_dim"] = [8192, 64]
+            model_cfg["hidden_dim"] = [8192, 64 * 4]
             model_cfg["use_norm"] = False
             model_cfg["activation"] = torch.nn.functional.leaky_relu
             return Autotuner_FFN(model_cfg)
@@ -627,7 +654,7 @@ class AutotunerModel:
 
     def score(self, configs, autotuner_raw_data):
         X = self.get_feature_vec(configs, autotuner_raw_data)
-        indices = np.argsort(score_(X))
+        indices = np.argsort(self.score_(X))
         return [configs[i] for i in indices]
 
     def predict(self, configs, autotuner_raw_data, autotuner_space):

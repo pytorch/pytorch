@@ -192,8 +192,20 @@ def main(args):
         qid_test_unique
     )
 
+    if model_type in [
+        ModelType.NN_POINTWISE,
+        ModelType.NN_PAIRWISE,
+        ModelType.NN_PAIRWISE_SMALL,
+    ]:
+        print("Getting training feature groups...")
+        X_train = autotuner_model.model.get_feature_groups(X_train, show_progress=True)
+        X_train = tuple(X_group.to("cpu") for X_group in X_train)
+        print("Getting testing feature groups...")
+        X_test = autotuner_model.model.get_feature_groups(X_test, show_progress=True)
+        X_test = tuple(X_group.to("cpu") for X_group in X_test)
+
     def save(file_name, obj):
-        print("Saving " + file_name + "...")
+        print("Saving " + file_name + "...", len(obj))
         with open(join(output_dir, file_name), "wb") as file:
             pickle.dump(obj, file)
 
@@ -213,17 +225,18 @@ def main(args):
     if model_type in [ModelType.NN_PAIRWISE, ModelType.NN_PAIRWISE_SMALL]:
         threshold = args.pairwise_threshold
 
-        def get_pairwise_data(qid):
+        def get_pairwise_data(X, y, qid):
             pointer = 0
-            X_pairwise = list()
+            X_pairwise = list(), list()
             y_pairwise = list()
 
             for id in tqdm.tqdm(np.unique(np.array(qid))):
                 X_group = list()
                 y_group = list()
                 while pointer < len(qid) and qid[pointer] == id:
-                    X_group.append(X_all[pointer])
-                    y_group.append(y_all[pointer])
+                    X_group.append(pointer)
+                    y_group.append(y[pointer] if not np.isinf(y[pointer]) else 1e6)
+                    assert np.max(np.array(y_group)) <= 1e6, y_group
                     pointer += 1
                 dedup = dict()
                 for i in range(len(X_group)):
@@ -236,18 +249,29 @@ def main(args):
                         if (i, j) in dedup or (j, i) in dedup:
                             continue
                         if y_group[i] > y_group[j]:
-                            X_pairwise.append([X_group[i], X_group[j]])
+                            X_pairwise[0].append(X_group[i])
+                            X_pairwise[1].append(X_group[j])
                             y_pairwise.append(y_group[i] - y_group[j])
-                        else:
-                            X_pairwise.append([X_group[j], X_group[i]])
+                        elif y_group[i] < y_group[j]:
+                            X_pairwise[0].append(X_group[j])
+                            X_pairwise[1].append(X_group[i])
                             y_pairwise.append(y_group[j] - y_group[i])
                         dedup[(i, j)] = True
                         dedup[(j, i)] = True
 
+            X_pairwise = tuple(np.array(X_side) for X_side in X_pairwise)
+            X_pairwise = (
+                tuple(X_group[X_pairwise[0]] for X_group in X),
+                tuple(X_group[X_pairwise[1]] for X_group in X),
+            )
+            return X_pairwise, y_pairwise
+
         print("Generating pairwise training data...")
-        X_pairwise_train, y_pairwise_train = get_pairwise_data(qid_train)
+        X_pairwise_train, y_pairwise_train = get_pairwise_data(
+            X_train, y_train, qid_train
+        )
         print("Generating pairwise testing data...")
-        X_pairwise_test, y_pairwise_test = get_pairwise_data(qid_test)
+        X_pairwise_test, y_pairwise_test = get_pairwise_data(X_test, y_test, qid_test)
         save("X_pairwise_train.pkl", X_pairwise_train)
         save("y_pairwise_train.pkl", y_pairwise_train)
         save("X_pairwise_test.pkl", X_pairwise_test)

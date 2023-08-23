@@ -5,8 +5,9 @@ import numpy as np
 from torch._inductor.autotuner.model import AutotunerModel, ModelType
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--data_dir", type=str, default="./")
-parser.add_argument("--model_dir", type=str, default=None)
+parser.add_argument("--data-dir", type=str, default="./")
+parser.add_argument("--model-dir", type=str, default=None)
+parser.add_argument("--model-name", type=str, required=True)
 
 
 np.random.seed(0)
@@ -17,6 +18,7 @@ np.set_printoptions(edgeitems=30, linewidth=100000)
 def main(args):
     data_dir = args.data_dir
     model_dir = args.model_dir
+    model_name = args.model_name
     if model_dir is None:
         model_dir = data_dir
 
@@ -44,7 +46,7 @@ def main(args):
 
     assert np.intersect1d(qid_train, qid_test).size == 0
 
-    autotuner = load("xgb_baseline.pkl", dir=model_dir)
+    autotuner = load(model_name, dir=model_dir)
 
     def measure(X, y, y_baseline, qid):
         qid_unique = np.unique(qid)
@@ -60,15 +62,30 @@ def main(args):
         counter = 0
 
         for i, test_id in enumerate(qid_unique):
-            X_group = list()
-            y_group = list()
-            while pointer < len(qid) and qid[pointer] == test_id:
-                X_group.append(X[pointer])
-                y_group.append(y[pointer])
-                y_baseline_ = y_baseline[pointer]
-                pointer += 1
+            if autotuner.model_type == ModelType.XGB_BASELINE:
+                X_group = list()
+                y_group = list()
+                while pointer < len(qid) and qid[pointer] == test_id:
+                    X_group.append(X[pointer])
+                    y_group.append(y[pointer])
+                    y_baseline_ = y_baseline[pointer]
+                    pointer += 1
+                scores = autotuner.score_(X_group)
+            else:
+                X_group = list()
+                y_group = list()
+                while pointer < len(qid) and qid[pointer] == test_id:
+                    X_group.append(pointer)
+                    y_group.append(y[pointer])
+                    y_baseline_ = y_baseline[pointer]
+                    pointer += 1
+                X_group = np.array(X_group)
+                X_group = tuple(Xg[X_group].to("cuda") for Xg in X)
+                autotuner.model.eval()
+                scores = autotuner.model.forward_(X_group).squeeze().cpu().detach().numpy()
+                if autotuner.model_type == ModelType.NN_POINTWISE:
+                    scores = scores * -1
 
-            scores = autotuner.score_(X_group)
             y_group = np.array(y_group)
             y_pred = y_group[np.argsort(scores)]
             y_pred_top1 = y_pred[:1].min()
@@ -92,10 +109,10 @@ def main(args):
                 print("y_pred", y_pred)
                 print("y_true", y_true)
                 print("y_baseline", y_baseline_)
-                print("y_pred_top1", y_pred_top1)
-                print("y_pred_top2", y_pred_top2)
-                print("y_pred_top5", y_pred_top5)
-                print("counter", counter, "ratio", counter / (i + 1))
+                print("y_pred_top1", y_pred_top1, "->", y_pred_top1 - y_baseline_)
+                print("y_pred_top2", y_pred_top2, "->", y_pred_top2 - y_baseline_)
+                print("y_pred_top5", y_pred_top5, "->", y_pred_top5 - y_baseline_)
+                print("counter", counter, "ratio", counter / (i + 1) * 100)
 
         print("acc_top1", acc_top1 / len(qid_unique) * 100)
         print("acc_top2", acc_top2 / len(qid_unique) * 100)
