@@ -37,6 +37,17 @@ def _fx_node_to_onnx_message_formatter(
     return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
 
 
+@_beartype.beartype
+def _fx_graph_to_onnx_message_formatter(
+    fn: Callable,
+    self,
+    fx_graph_module: torch.fx.GraphModule,
+    *args,
+    **kwargs,
+) -> str:
+    return f"FX Graph: {fx_graph_module._get_name()}. "
+
+
 def _location_from_fx_stack_trace(
     node_stack_trace: str,
 ) -> Optional[diagnostics.infra.Location]:
@@ -440,7 +451,10 @@ class FxOnnxInterpreter:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(diagnostics.rules.fx_graph_to_onnx)
+    @diagnostics.diagnose_call(
+        diagnostics.rules.fx_graph_to_onnx,
+        diagnostic_message_formatter=_fx_graph_to_onnx_message_formatter,
+    )
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
@@ -460,6 +474,13 @@ class FxOnnxInterpreter:
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
         """
+        diagnostic = self.diagnostic_context.inflight_diagnostic()
+        with diagnostic.log_section(logging.DEBUG, "FX Graph:"):
+            diagnostic.debug(
+                "```\n%s\n```",
+                diagnostics.LazyString(fx_graph_module.print_readable, False),
+            )
+
         if parent_onnxscript_graph is not None:
             # If parent_onnxscript_graph is provided, we assume fx_graph_module is a
             # submodule representing a forward call of an nn.Module.
@@ -519,6 +540,9 @@ class FxOnnxInterpreter:
                     onnxscript_tracer,
                     fx_name_to_onnxscript_value,
                 )
+
+        with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
 
         return onnxscript_graph
 
