@@ -72,8 +72,8 @@ class CUDAGraph(torch._C._CUDAGraph):
                 Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
-                unless you're familiar with :ref:`_cudaStreamCaptureMode`.
-        """
+                unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+        """  # noqa: B950
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self):
@@ -143,7 +143,7 @@ class graph:
             Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
             actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
-            unless you're familiar with :ref:`_cudaStreamCaptureMode`.
+            unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -154,7 +154,7 @@ class graph:
 
     .. _cudaStreamCaptureMode:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-    """
+    """  # noqa: B950
     default_capture_stream = None
 
     def __init__(
