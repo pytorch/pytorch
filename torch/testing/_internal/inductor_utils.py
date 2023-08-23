@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
 )
 from torch._dynamo.backends.registry import register_backend
+from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 
 import torch
 
