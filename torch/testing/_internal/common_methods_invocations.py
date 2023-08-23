@@ -8327,11 +8327,14 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
 
         yield SampleInput(q, args=sample_args, kwargs=sample_kwargs)
 
+
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
 # kernel code paths.
 NUM_SIZE0_TENSORS = 10000
 foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
+_foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
+
 
 class ForeachRightmostArgType(enum.Enum):
     TensorList = enum.auto()
@@ -8339,7 +8342,17 @@ class ForeachRightmostArgType(enum.Enum):
     Scalar = enum.auto()
     Tensor = enum.auto()
 
-_foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
+
+class ForeachSampleInput(SampleInput):
+    ref_args: Any
+    ref_kwargs: Dict[Any, Any]
+    expected_error_msg_pattern: str
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ref_args = self.args
+        self.ref_kwargs = {k: self.kwargs[k] for k in self.kwargs if k != "disable_fastpath"}
+        self.expected_error_msg_pattern = ""
+
 
 class foreach_inputs_sample_func:
     def __init__(
@@ -8498,7 +8511,7 @@ class foreach_inputs_sample_func:
                     kwargs["disable_fastpath"] = False
                 else:
                     kwargs["disable_fastpath"] = dtype in integral_types_and(torch.bool)
-            yield SampleInput(input, *args, **kwargs)
+            yield ForeachSampleInput(input, *args, **kwargs)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors_specified = "num_input_tensors" in kwargs
@@ -8524,10 +8537,15 @@ class foreach_inputs_sample_func:
                 for rightmost_arg in rightmost_arg_list:
                     args.append(rightmost_arg)
                     kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
-                    yield SampleInput(input, *args, **kwargs)
+                    sample = ForeachSampleInput(input, *args, **kwargs)
+                    ref_args = args
+                    if rightmost_arg_type in (ForeachRightmostArgType.Scalar, ForeachRightmostArgType.Tensor):
+                        ref_args = args[:-1] + [[args[-1] for _ in range(num_tensors)]]
+                    sample.ref_args = ref_args
+                    yield sample
                     args.pop()
             else:
-                yield SampleInput(
+                yield ForeachSampleInput(
                     input,
                     *args,
                     disable_fastpath=self._should_disable_fastpath(opinfo, None, None, dtype),
@@ -8544,7 +8562,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield SampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
@@ -8557,7 +8575,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield SampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
@@ -8603,7 +8621,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         ]
         kwargs["values"] = None
         kwargs.update(self._sample_kwargs(opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype))
-        yield SampleInput(input, *args, **kwargs)
+        yield ForeachSampleInput(input, *args, **kwargs)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors_specified = "num_input_tensors" in kwargs
@@ -8624,16 +8642,15 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 kwargs = {}
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
                     args.append(rightmost_arg)
-                    kwargs["values"] = None
                 else:
                     kwargs["values"] = rightmost_arg
-                kwargs.update(
-                    self._sample_kwargs(
-                        opinfo, kwargs["values"] or rightmost_arg, rightmost_arg_type, dtype)
-                )
-                assert hasattr(kwargs, "values")
-                assert len(args) == 2
-                yield SampleInput(input, *args, **kwargs)
+                kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
+                assert len(args) == 2, f"{len(args)=}"
+                sample = ForeachSampleInput(input, *args, **kwargs)
+                sample.ref_kwargs["values"] = None if rightmost_arg_type == ForeachRightmostArgType.TensorList else rightmost_arg
+                yield sample
+                if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+                    args.pop()
 
 
 foreach_unary_op_db: List[OpInfo] = [

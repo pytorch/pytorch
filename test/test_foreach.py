@@ -19,7 +19,7 @@ from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
     foreach_reduce_op_db, foreach_lerp_op_db)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, integral_types, complex_types,
+    all_types_and_complex_and, integral_types,
     floating_types_and, floating_types, integral_types_and,
 )
 
@@ -138,6 +138,48 @@ class TestForeach(TestCase):
                 wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+    )
+    @parametrize(
+        "noncontiguous,inplace",
+        [(False, False), (False, True), (True, False), (True, True)],
+        name_fn=lambda x, y: '{}_{}'.format(
+            'fastpath' if x else 'slowpath', 'inplace' if y else 'outplace'
+        )
+    )
+    def test_parity(self, device, dtype, op, noncontiguous, inplace):
+        if inplace:
+            _, _, func, ref = self._get_funcs(op)
+        else:
+            func, ref, _, _ = self._get_funcs(op)
+        for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
+            kwargs = sample.kwargs
+            disable_fastpath = kwargs.pop("disable_fastpath")
+            expect_fastpath = not (noncontiguous or disable_fastpath)
+            # # TODO(crcrpar): push this processing to sample func.
+            if op in foreach_pointwise_op_db:
+                values = kwargs.pop("values", None)
+                if values is not None:
+                    sample.args = (*sample.args, values)
+            if inplace:
+                with torch.no_grad():
+                    ref_input = [t.clone().detach() for t in sample.input]
+                ctxmgr = InplaceForeachVersionBumpCheck(self, sample.input)
+            else:
+                ref_input = sample.input
+                ctxmgr = nullcontext()
+            try:
+                with ctxmgr:
+                    actual = func([sample.input, *sample.args], self.is_cuda, expect_fastpath, **kwargs)
+            # TODO(crcrpar): Check the pattern as well by using `assertRaisesRegex`
+            except Exception as e:
+                with self.assertRaises(type(e)):
+                    ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
+            else:
+                expected = ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
+                self.assertEqual(expected, actual)
 
     def _binary_test(
         self,
