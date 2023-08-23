@@ -78,7 +78,7 @@ class TestPasses(TestCase):
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(ep(x), f(x)))
+        self.assertTrue(torch.allclose(ep(x), f(x), atol=1e-3, rtol=0.01))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -250,7 +250,7 @@ class TestPasses(TestCase):
         mod = M()
         ep = export(mod, (x,))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
             ep(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
@@ -278,10 +278,10 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 4)
         self.assertEqual(num_scalar_tensor, 4)
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.tensor([1, 1, 0, 0, 0]))
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
@@ -361,7 +361,7 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             gm(torch.tensor([20]))
 

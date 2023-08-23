@@ -459,7 +459,7 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size, frame_state):
+    def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
         if (
@@ -487,10 +487,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks, frame_state)
+                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
         with compile_lock, _disable_current_modes():
-            return callback(frame, cache_size, hooks, frame_state)
+            return callback(frame, cache_entry, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -788,6 +788,11 @@ class Constraint(ConstraintTarget):
         }
 
     def __eq__(self, other):
+        if not isinstance(other, Constraint):
+            raise TypeError(
+                "A dynamic dim can be specified equal only to another dynamic dim. "
+                f"Equality with {type(other)} is not supported."
+            )
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
@@ -916,7 +921,7 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    def produce_matching(source_args, candidate_args):
+    def produce_matching(source_args, candidate_args, loc):
         matched_elements_positions = []
         dict_of_source_args = dict()
         for i in range(0, len(source_args)):
@@ -935,23 +940,27 @@ def rewrite_signature(
                     )
                 else:
                     raise AssertionError(
-                        "Dynamo input/output is not consistent with traced input/output"
+                        f"Dynamo {loc} is not consistent with traced {loc}"
                     )
             else:
                 assert (
                     id(arg) in dict_of_source_args
-                ), "Dynamo input and output is a strict subset of traced input/output"
+                ), f"Dynamo {loc} is a strict subset of traced {loc}"
                 matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
-    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
+    matched_input_elements_positions = produce_matching(
+        flat_args, graph_captured_input, "input"
+    )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
     flat_both = list(graph_captured_output) + flat_args
-    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
+    matched_output_elements_positions = produce_matching(
+        flat_both, flat_results_traced, "output"
+    )
 
     new_graph = FlattenInputOutputSignature(
         graph,
@@ -1163,7 +1172,35 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
-                graph_captured_result = graph(*graph_inputs)
+
+                named_parameters = dict(graph.named_parameters(remove_duplicate=False))
+                named_buffers = dict(graph.named_buffers(remove_duplicate=False))
+
+                ambient_fake_mode = (
+                    _guards.detect_fake_mode(graph_inputs)
+                    if _guards.detect_fake_mode(graph_inputs) is not None
+                    else fake_mode
+                )
+
+                with ambient_fake_mode, enable_python_dispatcher():
+                    params_and_buffers = {
+                        **dict(named_parameters),
+                        **dict(named_buffers),
+                    }
+                    fake_params_buffers = dict()
+
+                    for name, value in params_and_buffers.items():
+                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(
+                            value, static_shapes=True
+                        )
+
+                    fake_graph_inputs = pytree.tree_map(
+                        ambient_fake_mode.from_tensor, graph_inputs
+                    )
+                    graph_captured_result = torch.func.functional_call(
+                        graph, fake_params_buffers, fake_graph_inputs
+                    )
+
                 return graph_captured_result
 
             return result_capturing_wrapper
@@ -1351,13 +1388,6 @@ class TorchPatcher:
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        optimizers = [
-            opt
-            for opt in torch.optim.__dict__.values()
-            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
-        ]
-
-        # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
             adadelta,
             adagrad,
@@ -1365,38 +1395,45 @@ class TorchPatcher:
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         )
 
-        all_opts = {
+        optimizer_modules = {
             adadelta,
             adagrad,
             adam,
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         }
 
-        disabled_multi_tensor_opts = {
+        disabled_multi_tensor_opt_modules = {
             adamax,
             nadam,
+            radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
-        for opt_mod in all_opts:
+        for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
             if (
                 hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opts
+                and opt_mod in disabled_multi_tensor_opt_modules
             ):
                 setattr(
                     opt_mod,
@@ -1409,10 +1446,20 @@ class TorchPatcher:
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
                 )
 
+        optimizer_classes = [
+            opt
+            for opt in torch.optim.__dict__.values()
+            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
+        ]
+
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
-        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
-        for opt in optimizers:
-            if opt in excluded_opts:
+        excluded_optimizer_classes = {
+            torch.optim.SparseAdam,
+            torch.optim.RAdam,
+            torch.optim.LBFGS,
+        }
+        for opt in optimizer_classes:
+            if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
             if hasattr(opt, "_init_group"):

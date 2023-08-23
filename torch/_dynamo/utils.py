@@ -27,23 +27,32 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch._logging
 import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
+from torch._logging import LazyString
 from . import config
 
 
 # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+if np:
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-NP_TO_TNP_MODULE = {
-    np: tnp,
-    np.fft: tnp.fft,
-    np.linalg: tnp.linalg,
-    np.random: tnp.random,
-}
+    NP_TO_TNP_MODULE = {
+        np: tnp,
+        np.fft: tnp.fft,
+        np.linalg: tnp.linalg,
+        np.random: tnp.random,
+    }
+else:
+    NP_SUPPORTED_MODULES = {}
+
+    NP_TO_TNP_MODULE = {}
 
 import importlib
 
@@ -63,8 +72,11 @@ nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
-# profiling compilation time
-compilation_metrics = collections.OrderedDict()
+# profiling compilation time by function
+compilation_time_metrics = collections.OrderedDict()
+
+# profiling compilation time by frame phase
+frame_phase_timing = collections.OrderedDict()
 
 timer_counter = itertools.count()
 
@@ -101,8 +113,6 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-frame_phase_timing = collections.OrderedDict()
-
 curr_frame = 0
 
 
@@ -116,6 +126,7 @@ def increment_frame():
 def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
+    compilation_time_metrics.clear()
     curr_frame = 0
 
 
@@ -151,7 +162,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
@@ -171,14 +182,13 @@ def dynamo_timed(original_function=None, phase_name=None):
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
+            if key not in compilation_time_metrics:
+                compilation_time_metrics[key] = []
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(time_spent)
+            compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
@@ -217,8 +227,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_metrics
+            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_time_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -226,9 +236,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-            for v in compilation_metrics.values()
+            for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_metrics.keys())
+        headers = list(compilation_time_metrics.keys())
         return headers, values
 
 
@@ -404,6 +414,9 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -420,6 +433,9 @@ def is_numpy_int_type(value):
 
 
 def is_numpy_float_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -431,6 +447,9 @@ def is_numpy_float_type(value):
 
 
 def is_numpy_ndarray(value):
+    if not np:
+        return False
+
     return istype(value, np.ndarray)
 
 
@@ -477,6 +496,22 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         ) from e
+
+
+@dataclasses.dataclass
+class CompilationMetrics:
+    frame_key: str
+    co_name: str
+    co_filename: str
+    co_firstlineno: int
+    cache_size: int
+    guard_count: Optional[int]
+    graph_op_count: Optional[int]
+    graph_node_count: Optional[int]
+    graph_input_count: Optional[int]
+    entire_frame_compile_time_s: Optional[float]
+    backend_compile_time_s: Optional[float]
+    fail_reason: Optional[str]
 
 
 @dataclasses.dataclass
@@ -1512,16 +1547,6 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
-
-
 def lazy_format_graph_code(name, gm, maybe_id=None):
     def format_name():
         if maybe_id is not None:
@@ -2022,3 +2047,10 @@ def is_guard_failure_reporting_enabled():
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
+
+
+def get_static_address_type(t):
+    if isinstance(t, torch.Tensor):
+        return getattr(t, "_dynamo_static_input_type", None)
+
+    return None

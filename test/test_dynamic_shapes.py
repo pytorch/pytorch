@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
+    expect_true,
     guard_bool,
     guard_float,
     guard_int,
@@ -194,13 +195,17 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
-        self.assertTrue(isinstance(x.size()[1], int))  # due to guard above
+        # Should be simplifiable to an integer.
+        # Ref: https://github.com/pytorch/pytorch/pull/107492
+        self.assertTrue(isinstance(x.size()[1], SymInt))
+        self.assertTrue(isinstance(x.size()[1].node.maybe_as_int(), int))  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
-        self.assertTrue(isinstance(x.size(2), int))
+        self.assertTrue(isinstance(x.size(2), SymInt))
+        self.assertTrue(isinstance(x.size(2).node.maybe_as_int(), int))
 
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
@@ -416,6 +421,56 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
+
+    def test_expect_true_basic(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        # This doesn't error
+        self.assertTrue(expect_true(i0 == 0))
+        # This generates a deferred runtime assert
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[Eq(i0, 0)]"""
+        )
+        self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
+        # After expecting true, guards now resolve given the runtime assert
+        bool(i0 == 0)
+
+    def test_expect_true_with_s0(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5)
+        i0 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 <= s0))
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
+            """[i0 <= s0]"""
+        )
+        self.assertTrue(i0 <= s0)
+        self.assertFalse(i0 > s0)
+
+    def test_expect_true_prefer_later(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 + i1 == 10))
+        # Importantly, this is put in i1, not i0!
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1.node.expr]]),
+            """[Eq(i0 + i1, 10)]"""
+        )
+        self.assertTrue(i0 + i1 == 10)
+        # NB: We currently don't support deriving that we can substitute
+        # i0 + i1 with 10; maybe we should, but this means our rewriting
+        # system is no longer confluent (it's probably OK though, because
+        # you're unlikely to get other equalities like this on the
+        # unbacked SymInts.)
+
+    def test_expect_true_double_digits(self):
+        shape_env = ShapeEnv()
+        ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
+        self.assertEqual(str(ia[-1]), "i10")
+        self.assertTrue(expect_true(sum(ia) == 20))
+        self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
 
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
