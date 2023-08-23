@@ -32,7 +32,6 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext
-import torch.utils._pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -2248,15 +2247,48 @@ class ShapeEnv:
 
         # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
         # We create symbols in shape_env using the backed hints behind SymInt.
+
         # Case 1: when SymInt is backed, dynamo can proceed with FakeTensors that have concrete shape.
         # produce_guards will trigger specializations on the outer stuff
+
         # Case 2: when the SymInt is unbacked, we will throw an data dependent error in require_hint().
+        #
+        # It's probably good for now but it's important to note that this approach has implications for
+        # the original shape_env when checking guards in different order.
+
+        # Example:
+        # ---------
+        # Consider a function "opt_f" as shown below:
+
+        # @torch.compile()
+        # def opt_f(x: bool, y: Tensor):
+        #   if x == True:
+        #     return y + torch.randn([4])
+        #   else:
+        #     return y
+        # Depending on the sequence of calls, we might install two different sets of guards:
+
+        # 1. opt_f(False, y):
+        #    - "x == False" (always works for any size y)
+
+        # 2. opt_f(True, y):
+        #    - Triggers recompilation and results in guards like:
+        #      - "x == True and y.size(0) == 4"
+        #      - (or "y.size(0) == 4 and x == True")
+
+        # The order of checking the guards matters. In this specific example:
+        # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
+        # we may have an unnessary shape speciliazation for y.
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            return maybe_sym if isinstance(maybe_sym, int) else maybe_sym.node.require_hint()
+            if isinstance(maybe_sym, SymInt):
+                assert maybe_sym.node.shape_env is not self, \
+                    "expect the symbol is created from an shape env other than current one."
+                return maybe_sym.node.require_hint()
+            return maybe_sym
 
-        ex_size = pytree.tree_map(maybe_specialize_sym_int_with_hint, tuple(ex.size()))
-        ex_stride = pytree.tree_map(maybe_specialize_sym_int_with_hint, tuple(ex.stride()))
+        ex_size = tuple(maybe_specialize_sym_int_with_hint(sz) for sz in ex.size())
+        ex_stride = tuple(maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride())
         ex_storage_offset = maybe_specialize_sym_int_with_hint(ex.storage_offset())
         dim = ex.dim()
 
