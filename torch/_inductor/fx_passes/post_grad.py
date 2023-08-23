@@ -53,6 +53,8 @@ def get_storage(t):
 
 
 def get_node_storage(node):
+    if "val" not in node.meta:
+        return None
     if not isinstance(node.meta["val"], torch.Tensor):
         return None
     if not torch._C._has_storage(node.meta["val"]):
@@ -69,7 +71,7 @@ class FakeTensorUpdater:
             self.processed_hashes.add(self.hash_node(node))
 
     def hash_node(self, node):
-        return (node, node.target, node.args, node.kwargs)
+        return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
         """
@@ -85,6 +87,10 @@ class FakeTensorUpdater:
             existing_tensors[get_node_storage(node)] += 1
 
         def is_fake_tensor_same(new, old):
+            if type(new) != type(old):
+                return False
+            if isinstance(new, (list, tuple)):
+                return all(is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old))
             if new.shape != old.shape or new.stride() != old.stride():
                 return False
             if get_storage(new) == get_storage(old):
@@ -122,7 +128,7 @@ class FakeTensorUpdater:
                         get_fake_tensor, (updating_node.args, updating_node.kwargs)
                     )
                     new_fake_tensor = updating_node.target(*args, **kwargs)
-                    if is_fake_tensor_same(new_fake_tensor, updating_node.meta["val"]):
+                    if "val" in updating_node.meta and is_fake_tensor_same(new_fake_tensor, updating_node.meta["val"]):
                         continue
                     updating_node.meta["val"] = new_fake_tensor
                     processed.add(updating_node)
@@ -637,6 +643,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 graph.erase_node(node)
 
 
+InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
@@ -650,15 +657,12 @@ def reinplace_scatters(graph):
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     for node in reversed(graph.nodes):
-        if isinstance(node.meta["val"], torch.Tensor):
-            storage_to_nodes[get_node_storage(node)].append(node)
+        storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
             copy_nodes[(node.args[0], node.args[1])] = node
+            assert node.args[0].op == 'placeholder'
             mutated_inputs.add(node.args[0])
-        elif node.op == "output":
-            pass
 
-    InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
