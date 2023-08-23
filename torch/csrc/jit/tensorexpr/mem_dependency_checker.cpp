@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 
 #include <fstream>
-#include <iostream>
 
 namespace torch::jit::tensorexpr::analysis {
 
