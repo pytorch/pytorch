@@ -88,18 +88,61 @@ def export(
     constraints: Optional[List["torch._dynamo.eval_frame.Constraint"]] = None,
 ) -> "torch._export.exported_program.ExportedProgram":  # type: ignore[name-defined]
     """
-    `export()` is a one-shot process for capturing a computation graph from
-    a PyTorch program Ahead-of-Time (AOT).
+    :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
+    a method) and produces a traced graph representing only the Tensor
+    computation of the function in an Ahead-of-Time (AOT) fashion, which can
+    subsequently be executed with different outputs or serialized.  The traced
+    graph (1) produces a normalized operator set consisting only of functional
+    [core ATen operator set](LINK HERE) and user specified custom operators, (2) has
+    eliminated all Python control flow and data structures (except for certain
+    conditions), and (3) has the set of shape constraints needed to show that
+    this normalization and control flow elimination is sound for a future
+    input.
 
-    This function traces a callable (an nn.Module, a function or a method)
-    containing PyTorch operations and produces an ExportedProgram. The
-    ExportedProgram includes PyTorch operations that perform computations
-    equivalent to those in the given nn.Module or callable.
+    Args:
+        f: The callable to trace.
 
-    In specific terms, `export()` traces a function `f` by executing it
-    with the provided `args` and `kwargs`. It records the PyTorch operations
-    invoked during execution to produce the ExportedProgram.
+        args: Example positional inputs.
 
+        kwargs: Optional example keyword inputs.
+
+        constraints: An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use `torch.export.dynamic_dim()`
+         to define `Constraint` objects that specify the dynamics and the possible
+         range of shapes. See torch.export.dynamic_dim() docstring for examples on
+         how to use it.
+
+    Returns:
+        An ExportedProgram containing the traced callable.
+
+    **How it works**
+
+    :func:`export` operates by using TorchDynamo to symbolically trace the
+    bytecode of the passed in Python callable, inlining functions and control
+    flow and recording the Tensor calls into an FX graph.  Export then
+    applies further lowering passes to normalize these calls into a
+    functionalized core ATen operator set.
+
+    Compared to :func:`torch.fx.symbolic_trace`, :func:`export` operates at
+    the bytecode level, giving it the ability to trace arbitrary Python constructs
+    not limited by what Python operator overloading supports.  We also keep
+    fine-grained track of Tensor metadata, so that conditionals on things like
+    ``tensor.size(i)`` do not fail tracing, and then normalize the graph to ATen operators.
+    In general, you should expect :func:`export` to work on more user programs, but to
+    produce lower-level graphs.  You can still use :func:`torch.fx.symbolic_trace` as
+    a pre-processing step before :func:`export`
+
+    Compared to :func:`torch.jit.script`, :func:`export` does not capture Python
+    control flow or data structures.  We support more Python language features than
+    TorchScript (as it is easier to have comprehensive coverage over Python
+    bytecodes).  The resulting graphs are simpler and only have straight line
+    control flow (except for explicit control flow operators).
+
+    Compared to :func:`torch.jit.trace`, :func:`export` is sound: it is able to
+    trace code that performs integer computation on sizes and records all of the
+    side-conditions necessary to show that a particular trace is valid for other inputs.
 
     **Acceptable input/output types**
 
@@ -196,6 +239,38 @@ def export(
     operators (like `torch.ops.higher_order.cond`).
 
 
+
+    [1, Inf]
+    [2, Inf]
+
+    f(x)
+    x in [2, Inf]  ~>  FAILS (ConstraintViolation)
+    then
+    x in [1, Inf]  ~>  ALSO FAILS
+
+    hint x == 2
+
+    if x == 1:
+        something()
+
+    ~~ConstraintViolation: x was dynamic, but actually specialized~~
+
+    * What is a value ranges on variables [-Inf, Inf] vs [0, Inf]
+    * Size variables intuitively are [0, Inf], but we treat them as [2, Inf]
+      for reasoning purposes
+        if sizevar == 0:  # this is always False
+
+      If you don't use constraint_as_size, and you pass a value to a
+      function, you will get error like "unbacked symint could not prove i0 == 0"
+    * Upshot:
+        - if your thing is going to be used like a size (pass as a size arg to
+          a factory, or view), use constrain_as_size
+        - otherwise, it probably doesn't matter
+        - if your size is intended to be dynamic, do NOT test if sizes are ==
+          0, 1, these will SILENTLY report false and be bypassed
+        - the more elaborate, obscure explanatioN
+
+
     **Soundness Guarantee**
 
     While tracing, `export()` takes note of shape-related assumptions
@@ -255,24 +330,6 @@ def export(
      - Contains only a curated subset of ATen operations and registered
        custom operations (by default). See the list of Core ATen Ops
        here: https://pytorch.org/docs/stable/ir.html
-
-    Args:
-        f: The callable to trace.
-
-        args: Example positional inputs.
-
-        kwargs: Optional example keyword inputs.
-
-        constraints: An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use `torch.export.dynamic_dim()`
-         to define `Constraint` objects that specify the dynamics and the possible
-         range of shapes. See torch.export.dynamic_dim() docstring for examples on
-         how to use it.
-
-    Returns:
-        An ExportedProgram containing the traced callable.
 
     """
 
