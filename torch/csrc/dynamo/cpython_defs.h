@@ -6,7 +6,7 @@
 // should go in cpython_defs.c. Copying is required when, e.g.,
 // we need to call internal CPython functions that are not exposed.
 
-#if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_11_PLUS && !(IS_PYTHON_3_12_PLUS)
 
 #include <internal/pycore_frame.h>
 

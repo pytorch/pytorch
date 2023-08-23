@@ -771,7 +771,7 @@ inline static PyObject* eval_custom_code(
 
   Py_INCREF(func);
   // consumes reference to func
-  #if !IS_PYTHON_3_12_PLUS
+  #if !(IS_PYTHON_3_12_PLUS)
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
   #endif
 
