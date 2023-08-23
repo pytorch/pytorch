@@ -1727,6 +1727,26 @@ class numpy_method_wrapper:
         return numpy_to_tensor(out)
 
 
+class numpy_operator_wrapper:
+    """Implements dunder methods for tnp.ndarray via functions from the operator library"""
+
+    def __init__(self, op: str):
+        self.op = op
+        self.__name__ = f"wrapped_{op.__name__}"
+
+    def __repr__(self):
+        return f"<Wrapped operator <original {self.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        assert not kwargs
+
+        args = (
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        out = self.op(*args)
+        return numpy_to_tensor(out)
+
+
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x

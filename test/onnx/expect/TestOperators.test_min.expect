@@ -9,7 +9,7 @@ graph {
     name: "Min_0"
     op_type: "Min"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Min_0"
     type {
