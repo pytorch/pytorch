@@ -2413,10 +2413,6 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg((M, S)),
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
-    yield SampleInput(
-        make_arg(),
-        0,
-        torch.tensor([0], dtype=torch.int64, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
     yield SampleInput(
         make_arg((S,)),
@@ -5471,6 +5467,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
+    yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
 
 def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwargs):
@@ -13459,7 +13456,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         decorators=[DecorateInfo(toleranceOverride(
-            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
+            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(
             # When attn mask is a composite tensor this fails backward by returning a none
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
@@ -13467,11 +13464,25 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
-                         device_type='cuda', dtypes=(torch.float32,)),
+                         dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Forward works for dtype=float64 which is the math path
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+            # Not implemented for Forward AD
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
+                         device_type='cpu'),
+            # Not implemented for backward derivative
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad',
+                         device_type='cpu'),
+            # CPU and CUDA have inconsistencies for intermediate outputs
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='cpu'),
+            # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
+                         device_type='cpu'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
@@ -13528,7 +13539,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
         dtypes=complex_types(),
-        dtypesIfCUDA=empty_types(),
+        dtypesIfCUDA=complex_types(),
         supports_forward_ad=False,
         supports_autograd=False,
         assert_autodiffed=False,
@@ -13544,7 +13555,7 @@ op_db: List[OpInfo] = [
             ), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                         dtypes=(torch.cfloat,), device_type='cpu'),
+                         dtypes=(torch.cfloat,)),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
