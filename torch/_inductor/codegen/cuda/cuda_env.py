@@ -1,7 +1,8 @@
 import functools
 import logging
-import torch
 from subprocess import PIPE, Popen
+
+import torch
 
 from ... import config
 

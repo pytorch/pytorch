@@ -2,17 +2,17 @@ import functools
 import logging
 from typing import Any, List
 
-import sympy
-
-import torch
-
 # Import cutlass python scripts.
 import generator as cutlass_generator
 import library as cutlass_lib
 import manifest as cutlass_manifest
 
-from .cuda_env import get_cuda_arch, get_cuda_version
+import sympy
+
+import torch
+
 from ...ir import Layout
+from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 class Args:
