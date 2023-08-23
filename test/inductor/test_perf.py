@@ -5,9 +5,7 @@ from unittest.mock import patch
 import functorch
 
 import torch
-import torch._inductor.config as config
 from torch._inductor import metrics
-import torch._inductor.compile_fx
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 

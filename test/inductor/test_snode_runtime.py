@@ -10,9 +10,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 aten = torch.ops.aten
 
 
-# TODO(xmfan): remove this backend once we call from prod i.e. @torch.compile codepath
-
-
 def calculate_runtime(f, *args) -> float:
     """
     Assumes all inputs are fp32
