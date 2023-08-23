@@ -75,10 +75,10 @@ class SequenceParallel(PairwiseParallel):
     We assume both input and output need to be sharded DTensors.
 
     .. warning::
-        SequenceParallel does not support ``nn.Multihead Attention``,
+        SequenceParallel does not support ``nn.MultiheadAttention``,
         ``nn.Transformer`` well at this moment. One workaround is to
-        use `ColwiseParallel` and `RowwiseParallel` directly. We recommend to
-        use `SequenceParallel` only for even-number-layer MLP for now.
+        use ``ColwiseParallel`` and ``RowwiseParallel`` directly. We recommend to
+        use ``SequenceParallel`` only for even-number-layer MLP for now.
     """
 
     def __init__(self) -> None:
