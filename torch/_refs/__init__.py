@@ -1686,7 +1686,7 @@ def sub(
             b = b * alpha
 
     output = prims.sub(a, b)
-    return  handle_noncontiguous_outputs([a, b], output)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
