@@ -314,7 +314,7 @@ class ModelType(IntEnum):
     NN_PAIRWISE_SMALL = 3
 
 
-class Autotuner_FFN(nn.Module):
+class AutotunerFFN(nn.Module):
     def __init__(self, model_cfg):
         super().__init__()
 
@@ -391,18 +391,18 @@ class Autotuner_FFN(nn.Module):
                     is_scalar_list.append(j.is_scalar)
                     is_indirect_list.append(j.is_indirect)
 
-            StarOrWeakdep_tensor = torch.tensor(StarOrWeakdep_list).to("cuda")
+            StarOrWeakdep_tensor = torch.tensor(StarOrWeakdep_list, device=device)
 
-            bytes_tensor = normalize(torch.tensor(bytes_list).to("cuda"))
+            bytes_tensor = normalize(torch.tensor(bytes_list, device=device))
             strides_tensor = normalize(
-                torch.tensor(np.array(strides_list)).to("cuda"), positive=False
+                torch.tensor(np.array(strides_list), device=device), positive=False
             )
             sizes_tensor = normalize(
-                torch.tensor(np.array(sizes_list)).to("cuda"), positive=False
+                torch.tensor(np.array(sizes_list), device=device), positive=False
             )
-            is_contiguous_tensor = torch.tensor(is_contiguous_list).to("cuda")
-            is_scalar_tensor = torch.tensor(is_scalar_list).to("cuda")
-            is_indirect_tensor = torch.tensor(is_indirect_list).to("cuda")
+            is_contiguous_tensor = torch.tensor(is_contiguous_list, device=device)
+            is_scalar_tensor = torch.tensor(is_scalar_list, device=device)
+            is_indirect_tensor = torch.tensor(is_indirect_list, device=device)
 
             return (
                 torch.cat(
@@ -432,7 +432,7 @@ class Autotuner_FFN(nn.Module):
             ]
         )
 
-        rest_vec = torch.from_numpy(rest_vec).to("cuda")
+        rest_vec = torch.tensor(rest_vec, device=device)
         rest_vec[:, 0:3] = normalize(rest_vec[:, 0:3])
         rest_vec[:, -3:] = normalize(rest_vec[:, -3:])
 
@@ -519,15 +519,15 @@ def get_model(model_type: ModelType):
         }
         if model_type == ModelType.NN_POINTWISE:
             model_cfg["hidden_dim"] = [8192, 2048, 32]
-            return Autotuner_FFN(model_cfg)
+            return AutotunerFFN(model_cfg)
         elif model_type == ModelType.NN_PAIRWISE:
             model_cfg["hidden_dim"] = [4096, 1024, 32]
-            return Autotuner_FFN(model_cfg)
+            return AutotunerFFN(model_cfg)
         elif model_type == ModelType.NN_PAIRWISE_SMALL:
             model_cfg["hidden_dim"] = [8192, 64 * 4]
             model_cfg["use_norm"] = False
             model_cfg["activation"] = torch.nn.functional.leaky_relu
-            return Autotuner_FFN(model_cfg)
+            return AutotunerFFN(model_cfg)
         else:
             assert False, "Unknown model type"
 
