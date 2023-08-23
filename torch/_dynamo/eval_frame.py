@@ -1388,13 +1388,6 @@ class TorchPatcher:
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        optimizers = [
-            opt
-            for opt in torch.optim.__dict__.values()
-            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
-        ]
-
-        # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
             adadelta,
             adagrad,
@@ -1402,38 +1395,45 @@ class TorchPatcher:
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         )
 
-        all_opts = {
+        optimizer_modules = {
             adadelta,
             adagrad,
             adam,
             adamax,
             adamw,
             asgd,
+            lbfgs,
             nadam,
+            radam,
             rmsprop,
             rprop,
             sgd,
+            sparse_adam,
         }
 
-        disabled_multi_tensor_opts = {
+        disabled_multi_tensor_opt_modules = {
             adamax,
             nadam,
+            radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
-        for opt_mod in all_opts:
+        for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
             if (
                 hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opts
+                and opt_mod in disabled_multi_tensor_opt_modules
             ):
                 setattr(
                     opt_mod,
@@ -1446,10 +1446,25 @@ class TorchPatcher:
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
                 )
 
+        optimizer_classes = [
+            opt
+            for opt in torch.optim.__dict__.values()
+            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
+        ]
+
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
-        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
-        for opt in optimizers:
-            if opt in excluded_opts:
+        excluded_optimizer_classes = {
+            torch.optim.SparseAdam,
+            torch.optim.RAdam,
+            torch.optim.LBFGS,
+        }
+        for opt in optimizer_classes:
+            # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
+            # through the optimizer init without failing. See #107789
+            opt.register_load_state_dict_pre_hook = disable(
+                opt.register_load_state_dict_pre_hook
+            )
+            if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
             if hasattr(opt, "_init_group"):

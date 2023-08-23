@@ -9,7 +9,7 @@ graph {
     name: "Max_0"
     op_type: "Max"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Max_0"
     type {

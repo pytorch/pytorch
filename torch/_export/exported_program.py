@@ -291,6 +291,7 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
         ep.graph_signature.buffers_to_mutate,
         ep.graph_signature.user_outputs,
     )
+    new_gm.meta.update(ep.graph_module.meta)
     return new_gm
 
 
@@ -309,6 +310,8 @@ class ExportedProgram:
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         self._graph_module = torch.fx.GraphModule(root, graph)
+        if isinstance(root, torch.fx.GraphModule):
+            self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._call_spec: CallSpec = call_spec
@@ -463,10 +466,91 @@ class ExportedProgram:
             }
             return range_constraints
 
+        def get_output_node_names(gm):
+            output_node = list(gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+
+            return [str(arg) for arg in output_node.args[0]]
+
+        def get_input_node_names(gm):
+            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+
+        def _generate_new_graph_signature(old_ep, new_gm):
+            """
+            Update graph_signature according to graph after transformation.
+            Transformations can lead to node name changes, which are used in
+            graph_signature to identify inputs and outputs. Therefore, after each
+            transformation, we need to update the graph_signature according to
+            new node names.
+
+            WARNING: This implementation makes a few assumptions
+                - The transformation doesn't change number of inputs/outputs
+                - Each input/output still has the same meaning.
+                    - For inputs, that means that the inputs in transformed
+                        graph map to the same lifted parameter/buffer or user
+                        input as the input of the same position in the graph
+                        before transformation.
+                    - Similarly for outputs, each output should correspond to the
+                        same mutated buffer or user output as the output value of
+                        the same position  in the graph before transformation.
+
+            It is difficult to programatically validate these assumptions, but they
+            should hold true most of the time as inputs/outputs of the graph rarely
+            need to be changed.
+            """
+            old_signature = old_ep.graph_signature
+            old_gm = old_ep.graph_module
+
+            old_graph_input_node_names = get_input_node_names(old_gm)
+            new_graph_input_node_names = get_input_node_names(new_gm)
+            assert len(old_graph_input_node_names) == len(new_graph_input_node_names), f"""
+                Number of input nodes changed from {len(old_graph_input_node_names)}
+                to {len(new_graph_input_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            old_graph_output_node_names = get_output_node_names(old_gm)
+            new_graph_output_node_names = get_output_node_names(new_gm)
+            assert len(old_graph_output_node_names) == len(new_graph_output_node_names), f"""
+                Number of output values changed from {len(old_graph_output_node_names)}
+                to {len(new_graph_output_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            node_names_mapping = dict(zip(
+                old_graph_input_node_names + old_graph_output_node_names,
+                new_graph_input_node_names + new_graph_output_node_names
+            ))
+
+            new_signature = copy.deepcopy(old_signature)
+            new_signature.user_inputs = [
+                node_names_mapping[old_user_input]
+                for old_user_input in old_signature.user_inputs
+            ]
+            new_signature.user_outputs = [
+                node_names_mapping[old_user_output]
+                for old_user_output in old_signature.user_outputs
+            ]
+            new_signature.inputs_to_parameters = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[old_input_name]
+                for old_input_name in old_signature.inputs_to_parameters.keys()
+            }
+            new_signature.inputs_to_buffers = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[old_input_name]
+                for old_input_name in old_signature.inputs_to_buffers.keys()
+            }
+            new_signature.buffers_to_mutate = {
+                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[old_output_name]
+                for old_output_name in old_signature.buffers_to_mutate.keys()
+            }
+            return new_signature
+
+        new_graph_signature = _generate_new_graph_signature(self, transformed_gm)
+
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            copy.deepcopy(self.graph_signature),
+            new_graph_signature,
             copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
