@@ -879,7 +879,14 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        self._assert_fake_tensor_mode()
+        # TODO:Retire FXSymbolicTracer
+        # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
+        from torch.onnx._internal.fx import fx_symbolic_graph_extractor
+
+        if not isinstance(
+            self.options.fx_tracer, fx_symbolic_graph_extractor.FXSymbolicTracer
+        ):
+            self._assert_fake_tensor_mode()
 
     def export(self) -> ExportOutput:
         with self.options.diagnostic_context:
@@ -939,7 +946,7 @@ class Exporter:
         if (
             has_any_fake_tensor or has_any_fake_param_or_buffer
         ) and not self.options.fake_context:
-            return RuntimeError(
+            raise RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         has_any_non_fake_tensors = pytree.tree_any(
