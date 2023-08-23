@@ -10555,7 +10555,10 @@ Keyword args:
         flag to :attr:`is_coalesced`. If ``True``, the caller is
         responsible for providing tensor indices that correspond to a
         coalesced tensor that is a prerequisite for various algoritms
-        that process tensor indices to produce expected results.
+        that process tensor indices to produce expected results.  If
+        the :attr:`check_invariants` flag is False, no error will be
+        raised if the prerequisites are not met and this will likely
+        lead to silently incorrect results.
         Default: if None, the coalesced flag may be estimated using
         the conservative value ``False`` as an initial state.
 
