@@ -8,7 +8,7 @@ graph {
     name: "Sign_0"
     op_type: "Sign"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Sign_0"
     type {

@@ -9,7 +9,7 @@ graph {
     name: "GreaterOrEqual_0"
     op_type: "GreaterOrEqual"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::GreaterOrEqual_0"
     type {
