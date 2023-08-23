@@ -502,7 +502,6 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val1.stride() == val2.stride()
     )
 
-
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes aten.clone and aten.alias ops from the graph when it's safe.
