@@ -17,7 +17,7 @@ VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.is_nested()
+      size((var.is_nested() && !var.unsafeGetTensorImpl()->key_set().has(at::DispatchKey::Python))
         ? VariableInfoSizeType(
           NestedSizeInfo(
             var.sym_numel(),
