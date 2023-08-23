@@ -6,7 +6,8 @@ import itertools
 import logging
 import math
 import operator
-import pickle, os
+import os
+import pickle
 from typing import Dict, Iterable, List, Set
 
 import sympy
@@ -19,13 +20,13 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
+from ..autotuner.model import autotuner_predict, AutotunerRawData, get_reads_writes
 from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
-from ..autotuner.model import AutotunerRawData, get_reads_writes, autotuner_predict
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
@@ -2438,8 +2439,14 @@ class TritonScheduling(BaseScheduling):
             if not os.path.exists(tuning_metadata_path):
                 # only dump if the file does not exist
                 # otherwise we will overwrite the existing file with possibly a different kernel
-                log.debug("Kernel path : " + self.kernel_path_)
-                log.debug("Metadata path : " + tuning_metadata_path)
+                log.debug(
+                    "Kernel path : {kernel_path_}",
+                    extra={"kernel_path_": self.kernel_path_},
+                )
+                log.debug(
+                    "Metadata path : {tuning_metadata_path}",
+                    extra={"tuning_metadata_path": tuning_metadata_path},
+                )
                 log.debug(str(autotuner_raw_data))
                 with open(tuning_metadata_path, "wb") as f:
                     pickle.dump(autotuner_raw_data, f)
