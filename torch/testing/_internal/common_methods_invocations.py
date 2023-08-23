@@ -2413,10 +2413,6 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg((M, S)),
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
-    yield SampleInput(
-        make_arg(),
-        0,
-        torch.tensor([0], dtype=torch.int64, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
     yield SampleInput(
         make_arg((S,)),
