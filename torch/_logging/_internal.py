@@ -38,6 +38,12 @@ class LogRegistry:
     # e.g. "guards"
     artifact_names: Set[str] = field(default_factory=set)
 
+    # Artifacts that should be visible by default in the error message
+    visible_artifacts: Set[str] = field(default_factory=set)
+
+    # A short description of each artifact
+    artifact_descriptions: Dict[str, str] = field(default_factory=dict)
+
     # artifacts which are not displayed unless explicitly named in the
     # settings. Ex. output_code is NOT displayed even if the inductor
     # log level is set to DEBUG. It must be explicitly named in the settings
@@ -57,8 +63,13 @@ class LogRegistry:
         self.log_alias_to_log_qname[alias] = log_qname
 
     # register an artifact name
-    def register_artifact_name(self, name, off_by_default, log_format):
+    def register_artifact_name(
+        self, name, description, visible, off_by_default, log_format
+    ):
         self.artifact_names.add(name)
+        if visible:
+            self.visible_artifacts.add(name)
+        self.artifact_descriptions[name] = description
 
         # if off by default, don't enable it
         # when log_name's log_level is set to DEBUG
@@ -396,15 +407,21 @@ def register_log(setting_name, log_name):
     log_registry.register_log(setting_name, log_name)
 
 
-def register_artifact(setting_name, off_by_default=False, log_format=None):
+def register_artifact(
+    setting_name, description, visible=False, off_by_default=False, log_format=None
+):
     """
     Enables an artifact to be controlled by the env var and user API with name
     Args:
         setting_name: the shorthand name used in the env var and user API
+        description: A description of what this outputs
+        visible: Whether it gets suggested to users by default
         off_by_default: whether this artifact should be logged when the ancestor loggers
             are enabled at level DEBUG
     """
-    log_registry.register_artifact_name(setting_name, off_by_default, log_format)
+    log_registry.register_artifact_name(
+        setting_name, description, visible, off_by_default, log_format
+    )
 
 
 def getArtifactLogger(module_qname, artifact_name):
@@ -452,18 +469,63 @@ def _validate_settings(settings):
     return re.fullmatch(_gen_settings_regex(), settings) is not None
 
 
-def _invalid_settings_err_msg(settings):
-    entities = "\n  " + "\n  ".join(
-        itertools.chain(
-            ["all"],
-            log_registry.log_alias_to_log_qname.keys(),
-            log_registry.artifact_names,
-        )
+def help_message(verbose=False):
+    def pad_to(s, length=30):
+        assert len(s) <= length
+        return s + " " * (length - len(s))
+
+    if verbose:
+        printed_artifacts = log_registry.artifact_names
+    else:
+        printed_artifacts = log_registry.visible_artifacts
+
+    if verbose:
+        heading = "All registered names"
+    else:
+        heading = "Visible registered names (use TORCH_LOGS='help' for full list)"
+    lines = (
+        ["all"]
+        + list(log_registry.log_alias_to_log_qname.keys())
+        + [
+            f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
+            for name in printed_artifacts
+        ]
     )
-    msg = (
-        f"Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, "
-        f"registered log names or registered artifact names.\nCurrently registered names: {entities}"
+    setting_info = "  " + "\n  ".join(lines)
+    examples = """
+Examples:
+  TORCH_LOGS="+dynamo,aot" will set the log level of TorchDynamo to logging.DEBUG and AOT to logging.INFO
+
+  TORCH_LOGS="-dynamo,+inductor" will set the log level of TorchDynamo to logging.ERROR and TorchInductor to logging.DEBUG
+
+  TORCH_LOGS="aot_graphs" will enable the aot_graphs artifact
+
+  TORCH_LOGS="+dynamo,schedule" will enable set the log level of TorchDynamo to logging.DEBUG and enable the schedule artifact
+
+  TORCH_LOGS="+some.random.module,schedule" will set the log level of some.random.module to logging.DEBUG and enable the schedule artifact
+"""
+    msg = f"""
+TORCH_LOGS Infor
+{examples}
+
+{heading}
+{setting_info}
+"""
+    return msg
+
+
+def _invalid_settings_err_msg(settings, verbose=False):
+    valid_settings = ", ".join(
+        ["all"]
+        + list(log_registry.log_alias_to_log_qname.keys())
+        + list(log_registry.artifact_names)
     )
+    msg = f"""
+Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, registered log names or registered artifact names.
+For more info on various settings, try TORCH_LOGS="help"
+Valid settings:
+{valid_settings}
+"""
     return msg
 
 
@@ -472,6 +534,10 @@ def _parse_log_settings(settings):
     if settings == "":
         return dict()
 
+    if settings == "help":
+        raise ValueError(help_message(verbose=False))
+    elif settings == "+help":
+        raise ValueError(help_message(verbose=True))
     if not _validate_settings(settings):
         raise ValueError(_invalid_settings_err_msg(settings))
 
