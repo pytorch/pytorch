@@ -94,11 +94,9 @@ std::vector<int64_t> compute_sizes(
     ScalarType scalar_type) {
   bool is_storage = isStorage(seq_or_set);
   std::vector<int64_t> sizes;
+  THPObjectPtr iter, item;
   while (PySequence_Check(seq_or_set) || PyAnySet_Check(seq_or_set)) {
-    THPObjectPtr wrapped(PySequence_Fast(seq_or_set, "not a sequence or set"));
-    if (!wrapped)
-      throw python_error();
-    auto length = PySequence_Fast_GET_SIZE(wrapped.get());
+    auto length = PyObject_Length(seq_or_set);
     if (length < 0)
       throw python_error();
     if (is_storage) {
@@ -111,7 +109,13 @@ std::vector<int64_t> compute_sizes(
     }
     if (length == 0)
       break;
-    seq_or_set = PySequence_Fast_GET_ITEM(wrapped.get(), 0);
+    iter = THPObjectPtr(PyObject_GetIter(seq_or_set));
+    if (!iter)
+      throw python_error();
+    item = THPObjectPtr(PyIter_Next(iter));
+    if (!item)
+      throw python_error();
+    seq_or_set = item.get();
   }
 
   return sizes;
@@ -166,21 +170,23 @@ ScalarType infer_scalar_type(PyObject* obj) {
   }
   if (PySequence_Check(obj) || PyAnySet_Check(obj)) {
     c10::optional<ScalarType> scalarType;
-    auto wrapped_obj =
-        THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
-    if (!wrapped_obj)
-      throw python_error();
-    auto length = PySequence_Fast_GET_SIZE(wrapped_obj.get());
+    auto length = PyObject_Length(obj);
     if (length < 0)
       throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
-    PyObject** items = PySequence_Fast_ITEMS(wrapped_obj.get());
+    auto obj_iter = THPObjectPtr(PyObject_GetIter(obj));
+    if (!obj_iter)
+      throw python_error();
+    THPObjectPtr item;
     for (const auto i : c10::irange(length)) {
-      if (items[i] == obj)
+      item = THPObjectPtr(PyIter_Next(obj_iter.get()));
+      if (!item)
+        throw python_error();
+      if (item.get() == obj)
         throw TypeError("new(): self-referential lists are incompatible");
-      ScalarType item_scalarType = infer_scalar_type(items[i]);
+      ScalarType item_scalarType = infer_scalar_type(item.get());
       scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
                                 : item_scalarType;
       if (scalarType == ScalarType::ComplexDouble) {
@@ -241,11 +247,8 @@ void recursive_store(
   }
 
   auto n = sizes[dim];
-  auto wrapped = THPObjectPtr(PySequence_Fast(obj, "not a sequence or set"));
-  if (!wrapped)
-    throw python_error();
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = PySequence_Fast_GET_SIZE(wrapped.get());
+  auto size = PyObject_Length(obj);
   if (size != n) {
     throw ValueError(
         "expected sequence of length %lld at dim %lld (got %lld)",
@@ -254,10 +257,16 @@ void recursive_store(
         (long long)size);
   }
 
-  PyObject** items = PySequence_Fast_ITEMS(wrapped.get());
+  auto obj_iter = THPObjectPtr(PyObject_GetIter(obj));
+  if (!obj_iter)
+    throw python_error();
+  THPObjectPtr item;
   for (const auto i : c10::irange(n)) {
+    item = THPObjectPtr(PyIter_Next(obj_iter.get()));
+    if (!item)
+      throw python_error();
 #ifdef USE_NUMPY
-    if (is_numpy_available() && PyArray_Check(items[i])) {
+    if (is_numpy_available() && PyArray_Check(item.get())) {
       TORCH_WARN_ONCE(
           "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
           "Please consider converting the list to a single numpy.ndarray with "
@@ -265,7 +274,7 @@ void recursive_store(
     }
 #endif
     recursive_store(
-        data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
+        data, sizes, strides, dim + 1, scalarType, elementSize, item.get());
     data += strides[dim] * elementSize;
   }
 }
