@@ -1,4 +1,5 @@
 import logging
+import types
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -55,7 +56,7 @@ compilations to burst the cache and fallback to eager. These 32 recompilations
 are too many and we want to fallback for these compilation-unfriendly functions
 sooner.
 
-In the new scenario, we can have (1) cache_size_limit = 32, (2)
+In the new scenario, we can have (1) cache_size_limit = 2, (2)
 accumulated_cache_size_limit = 32. This means that each ID_MATCH'd object can
 have maximum of two cache entries, and the maximum number of cache entries
 (irrespective of ID_MATCH obj) is 32. This covers the case of forward code
@@ -88,7 +89,7 @@ class CacheSize:
         return f"CacheSize(total={self.total}, per_guarded_obj={tuple(self.per_id_guarded_obj.values())})"
 
 
-def compute_cache_size(frame, cache_entry):
+def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
     # Walk the linked list to calculate the cache size
     cache_size_per_id_matched_obj = defaultdict(int)
     total = 0
@@ -104,7 +105,7 @@ def compute_cache_size(frame, cache_entry):
     return CacheSize(total, cache_size_per_id_matched_obj, sources)
 
 
-def _get_weakref_from_f_locals(frame, source):
+def _get_weakref_from_f_locals(frame: types.FrameType, source: str):
     obj = frame.f_locals.get(source, None)
     weak_id = None
     try:
@@ -114,7 +115,7 @@ def _get_weakref_from_f_locals(frame, source):
     return weak_id
 
 
-def is_recompilation(frame, cache_size):
+def is_recompilation(frame: types.FrameType, cache_size: CacheSize) -> bool:
     sources = cache_size.id_guarded_sources
 
     if not sources:
@@ -132,7 +133,7 @@ def is_recompilation(frame, cache_size):
     return False
 
 
-def exceeds_cache_size(frame, cache_size) -> bool:
+def exceeds_cache_size(frame: types.FrameType, cache_size: CacheSize) -> bool:
     sources = cache_size.id_guarded_sources
     per_id_guarded_obj = cache_size.per_id_guarded_obj
     accumulated_limit = config.accumulated_cache_size_limit
