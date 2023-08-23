@@ -914,15 +914,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = sum(
+        a_first = all(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = sum(
+        b_first = all(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first > b_first:
+        if a_first and not b_first:
             return -1
-        if b_first > a_first:
+        if b_first and not a_first:
             return 1
 
         # otherwise contiguous
@@ -1047,11 +1047,18 @@ class Scheduler:
     def create_foreach_nodes(self):
         removed_node_names = set()
         fe_nodes = []
+        kept_node_names = self.name_to_fused_node.keys()
+
         for names in V.graph.lists.values():
             removed_node_names.update(names)
-            fe_node = ForeachKernelSchedulerNode(
-                self, [self.name_to_node[name] for name in names]
-            )
+
+            names = [name for name in names if name in kept_node_names]
+            if not names:
+                # All nodes eliminated
+                continue
+
+            snodes = [self.name_to_node[name] for name in names]
+            fe_node = ForeachKernelSchedulerNode(self, snodes)
 
             fe_nodes.append(fe_node)
 

@@ -105,7 +105,7 @@ graph {
     name: "Sub_6"
     op_type: "Sub"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::MaxPool_0"
     type {
