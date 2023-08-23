@@ -16,6 +16,7 @@ def __singleton(cls):
 class StreamMethodContainer:
     def __init__(self) -> None:
         '''
+        containers to mantain the cuda methods:
         set_stream_method: {'cuda': [torch.cuda.set_stream]}
         set_stream_by_id_method: {'cuda': [torch.cuda.set_stream_by_id]}
         current_stream_method: {'cuda': [torch.cuda.current_stream]}
@@ -58,24 +59,8 @@ class StreamMethodContainer:
         return ret_method
 
 
-    def register_current_stream_method(self, device: str, *method_args):
-        self.__register('current_stream_method', device, method_args)
-
-
-    def register_create_stream_method(self, device: str, *method_args):
-        self.__register('create_stream_method', device, method_args)
-
-
-    def register_create_stream_context_method(self, device: str, *method_args):
-        self.__register('create_stream_context_method', device, method_args)
-
-
-    def register_set_stream_method(self, device: str, *method_args):
-        self.__register('set_stream_method', device, method_args)
-
-
-    def register_set_stream_by_id_method(self, device: str, *method_args):
-        self.__register('set_stream_by_id_method', device, method_args)
+    def register_stream_method(self, container: str, device: str, *method_args):
+        self.__register(container, device, method_args)
 
 
     def get_all_methods(self, container: str):
@@ -86,11 +71,33 @@ class StreamMethodContainer:
         return self.__get(container, device)
 
 
+StreamMethodObject = StreamMethodContainer()
+
+
+def register_current_stream_method(device: str, *method_args):
+    StreamMethodObject.register_stream_method('current_stream_method', device, method_args)
+
+
+def register_create_stream_method(device: str, *method_args):
+    StreamMethodObject.register_stream_method('create_stream_method', device, method_args)
+
+
+def register_create_stream_context_method(device: str, *method_args):
+    StreamMethodObject.register_stream_method('create_stream_context_method', device, method_args)
+
+
+def register_set_stream_method(device: str, *method_args):
+    StreamMethodObject.register_stream_method('set_stream_method', device, method_args)
+
+
+def register_set_stream_by_id_method(device: str, *method_args):
+    StreamMethodObject.register_stream_method('set_stream_by_id_method', device, method_args)
+
+
 if torch.cuda.is_available():
     # register stream API for dynamo stream capture
-    StreamAPIObject = StreamMethodContainer()
-    StreamAPIObject.register_create_stream_method('cuda', torch.cuda.streams.Stream)
-    StreamAPIObject.register_create_stream_context_method('cuda', torch.cuda.stream)
-    StreamAPIObject.register_current_stream_method('cuda', torch.cuda.current_stream)
-    StreamAPIObject.register_set_stream_method('cuda', torch.cuda.set_stream)
-    StreamAPIObject.register_set_stream_by_id_method('cuda', torch.cuda.set_stream_by_id)
+    register_current_stream_method('cuda', torch.cuda.current_stream)
+    register_create_stream_method('cuda', torch.cuda.streams.Stream)
+    register_create_stream_context_method('cuda', torch.cuda.stream)
+    register_set_stream_method('cuda', torch.cuda.set_stream)
+    register_set_stream_by_id_method('cuda', torch.cuda.set_stream_by_id)
