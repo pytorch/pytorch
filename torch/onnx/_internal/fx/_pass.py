@@ -246,6 +246,12 @@ class Transform(abc.ABC):
         diagnostic = self.diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_pass
         )
+        diagnostic.info(
+            "For detailed logging of graph modifications by this pass, either set "
+            "`DiagnosticOptions.verbosity_level` to `logging.DEBUG` or use the environment variable "
+            "`TORCH_LOGS='onnx_diagnostics'`."
+        )
+
         # Gather graph information before transform.
         graph_diff_log_level = logging.DEBUG
         if diagnostic.logger.isEnabledFor(graph_diff_log_level):
