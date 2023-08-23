@@ -72,7 +72,7 @@ if HAS_CPU:
             bias = torch.randn(16)
 
             base_result = foo(input, weight, bias)
-            base_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            base_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
 
             # The compilation metrics of the first compilation should show codegen
             self.assertIn("Scheduler.codegen", base_compilation_metrics)
@@ -81,7 +81,7 @@ if HAS_CPU:
             torch._dynamo.reset()
 
             cached_result = foo(input, weight, bias)
-            cached_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            cached_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
 
             # The cached_result coming from a cached kernel should be the same as the original one
             # The compilation metrics of the cached compilation should show no codegen
@@ -96,7 +96,7 @@ if HAS_CPU:
             input = torch.rand(15, 15)
 
             base_result = model(input)
-            base_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            base_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
 
             # The compilation metrics of the first compilation should show codegen
             self.assertIn("Scheduler.codegen", base_compilation_metrics)
@@ -105,7 +105,7 @@ if HAS_CPU:
             torch._dynamo.reset()
 
             cached_result = model(input)
-            cached_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            cached_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
             # The cached_result coming from a cached kernel should be the same as the original one
             # The compilation metrics of the cached compilation should show no codegen
             self.assertEqual(base_result, cached_result)
@@ -126,7 +126,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             input = torch.rand(15, 15).cuda()
 
             base_result = opt_model1(input).clone().detach()
-            base_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            base_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
 
             # The compilation metrics of the first compilation should show codegen
             self.assertIn("Scheduler.codegen", base_compilation_metrics)
@@ -134,10 +134,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # Important to reset so in-memory guards don't prevent compilation
             torch._dynamo.reset()
 
-            cuda_model2 = model.cuda()
+            input2 = torch.rand(15, 15).cuda()
+            cuda_model2 = Foo().cuda()
             opt_model2 = torch.compile(cuda_model2, mode="reduce-overhead")
-            cached_result = opt_model2(input)
-            cached_compilation_metrics = torch._dynamo.utils.compilation_metrics
+            cached_result = opt_model2(input2)
+            cached_compilation_metrics = torch._dynamo.utils.compilation_time_metrics
             # The cached_result coming from a cached kernel should be the same as the original one
             # The compilation metrics of the cached compilation should show no codegen
             self.assertEqual(base_result, cached_result)
