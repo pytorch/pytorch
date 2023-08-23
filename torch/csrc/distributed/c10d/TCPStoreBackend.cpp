@@ -244,9 +244,11 @@ void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
 
 // query communicates with the worker. The format
 // of the query is as follows:
-// queryMagicNumber | type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
+// queryMagicNumber | type of query | size of arg1 | arg1 | size of arg2
+// | arg2 | ...
 // or, in the case of wait
-// queryMagicNumber | type of query | number of args | size of arg1 | arg1 | ...
+// queryMagicNumber | type of query | number of args | size of arg1
+// | arg1 | ...
 void TCPStoreMasterDaemon::query(int socket) {
   QueryType qt;
   uint32_t qPrefix;

@@ -237,7 +237,7 @@ class SendBuffer {
       : client(client) {
     const uint8_t* tmp_ptr = (const uint8_t*)&queryMagicNumber;
     buffer.reserve(36); // enough for most commands
-    for (int i = 0; i < 4; i ++) {
+    for (int i = 0; i < 4; i++) {
       buffer.push_back(tmp_ptr[i]);
     }
     buffer.push_back((uint8_t)cmd);
