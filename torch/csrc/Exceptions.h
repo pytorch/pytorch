@@ -157,7 +157,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistBackendError,
-    THPException_DistNetworkError, *THPException_DistStoreError;
+    *THPException_DistNetworkError, *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
