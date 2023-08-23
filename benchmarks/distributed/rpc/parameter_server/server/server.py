@@ -3,14 +3,15 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
-import torch
-import torch.distributed.rpc as rpc
-
 from metrics.MetricsLogger import MetricsLogger
 from utils import sparse_rpc_format_to_tensor, sparse_tensor_to_rpc_format
 
+import torch
+import torch.distributed.rpc as rpc
+
 
 class ParameterServerBase(ABC):
+
     PARAMETER_SERVER_BATCH_METRIC = "parameter_server_batch_metric"
     PARAMETER_SERVER_STRAGGLER_METRIC = "parameter_server_straggler_metric"
     PARAM_INDEX_STRAGGLER = "param_index_straggler"
@@ -59,7 +60,12 @@ class ParameterServerBase(ABC):
             name (str): description of the metric
             cuda (bool): indicator to determine if this is a CUDA metric
         """
-        self.__metrics_logger.record_start(type, key, name, cuda)
+        self.__metrics_logger.record_start(
+            type,
+            key,
+            name,
+            cuda
+        )
 
     def record_end(self, type, key):
         r"""
@@ -68,7 +74,10 @@ class ParameterServerBase(ABC):
             type (str): group id for metric
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(type, key)
+        self.__metrics_logger.record_end(
+            type,
+            key
+        )
 
     def record_straggler_start(self, key, cuda=True):
         r"""
@@ -83,7 +92,7 @@ class ParameterServerBase(ABC):
             self.PARAMETER_SERVER_STRAGGLER_METRIC,
             key,
             self.PARAM_INDEX_STRAGGLER,
-            cuda,
+            cuda
         )
 
     def record_straggler_end(self, key):
@@ -94,7 +103,10 @@ class ParameterServerBase(ABC):
         Args:
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(self.PARAMETER_SERVER_STRAGGLER_METRIC, key)
+        self.__metrics_logger.record_end(
+            self.PARAMETER_SERVER_STRAGGLER_METRIC,
+            key
+        )
 
     def record_batch_start(self, key, cuda=True):
         r"""
@@ -106,7 +118,10 @@ class ParameterServerBase(ABC):
             cuda (bool): indicator to determine if this is a CUDA metric
         """
         self.__metrics_logger.record_start(
-            self.PARAMETER_SERVER_BATCH_METRIC, key, self.PARAM_INDEX_BATCH, cuda
+            self.PARAMETER_SERVER_BATCH_METRIC,
+            key,
+            self.PARAM_INDEX_BATCH,
+            cuda
         )
 
     def record_batch_end(self, key):
@@ -118,7 +133,10 @@ class ParameterServerBase(ABC):
         Args:
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(self.PARAMETER_SERVER_BATCH_METRIC, key)
+        self.__metrics_logger.record_end(
+            self.PARAMETER_SERVER_BATCH_METRIC,
+            key
+        )
 
     @staticmethod
     def record_method(name, type="method_metric", cuda=True):
@@ -129,7 +147,6 @@ class ParameterServerBase(ABC):
             type (str): group id for metric
             cuda (bool): indicator to determine if this is a CUDA metric
         """
-
         def decorator(function):
             @functools.wraps(function)
             def wrapper(self, *args):
@@ -138,9 +155,7 @@ class ParameterServerBase(ABC):
                 result = function(self, *args)
                 self.__metrics_logger.record_end(type, key)
                 return result
-
             return wrapper
-
         return decorator
 
     @staticmethod
@@ -161,7 +176,13 @@ class ParameterServerBase(ABC):
 
 
 class AverageParameterServer(ParameterServerBase):
-    def __init__(self, rank, trainer_count, use_cuda_rpc):
+
+    def __init__(
+        self,
+        rank,
+        trainer_count,
+        use_cuda_rpc
+    ):
         r"""
         A parameter server that averages the gradients
         from trainers for each training iteration step.
@@ -246,7 +267,12 @@ class AverageParameterServer(ParameterServerBase):
 
     @staticmethod
     @rpc.functions.async_execution
-    def average_gradient(server_rref, received_batch_number, param_loc, gradient):
+    def average_gradient(
+        server_rref,
+        received_batch_number,
+        param_loc,
+        gradient
+    ):
         r"""
         An asynchronous function that will average gradients
         sent from trainers.
@@ -285,7 +311,13 @@ class AverageParameterServer(ParameterServerBase):
 
 
 class AverageBatchParameterServer(AverageParameterServer):
-    def __init__(self, rank, trainer_count, use_cuda_rpc):
+
+    def __init__(
+        self,
+        rank,
+        trainer_count,
+        use_cuda_rpc
+    ):
         r"""
         A parameter server that averages the gradients
         from trainers for each training iteration step.

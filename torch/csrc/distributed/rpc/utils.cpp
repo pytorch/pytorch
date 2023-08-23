@@ -502,8 +502,8 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
-      additionalPayloadSize > 0 &&
-          static_cast<int64_t>(payload.size()) > additionalPayloadSize,
+      static_cast<decltype(additionalPayloadSize)>(payload.size()) >
+          additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
       " but additional payload size is ",

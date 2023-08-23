@@ -264,5 +264,77 @@ MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
 }
 
+//-----------------------------------------------------------------
+//  MPSEvent
+//-----------------------------------------------------------------
+
+MPSEvent::MPSEvent(bool deferInitialization)
+    : is_initialized(false), _signalCounter(0), _stream(nil), _event(nil), _listener(nil) {
+  if (!deferInitialization) {
+    initialize();
+  }
+}
+
+MPSEvent::~MPSEvent() {
+  if (_event) {
+    [_event release];
+    _event = nil;
+  }
+  if (_listener) {
+    [_listener release];
+    _listener = nil;
+  }
+}
+
+void MPSEvent::initialize() {
+  _stream = getDefaultMPSStream();
+  _event = [_stream->device() newSharedEvent];
+  _listener = [[MTLSharedEventListener alloc] init];
+  is_initialized = true;
+}
+
+void MPSEvent::recordEvent(bool syncEvent) {
+  if (!is_initialized)
+    initialize();
+
+  dispatch_sync(_stream->queue(), ^() {
+    @autoreleasepool {
+      ++_signalCounter;
+      id<MTLCommandBuffer> commandBuffer = _stream->commandBuffer();
+      [commandBuffer encodeSignalEvent:_event value:_signalCounter];
+      if (syncEvent)
+        _stream->synchronize(SyncType::COMMIT);
+    }
+  });
+}
+
+void MPSEvent::waitForEvent(bool syncEvent) {
+  TORCH_INTERNAL_ASSERT(is_initialized);
+  dispatch_sync(_stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = _stream->commandBuffer();
+      [commandBuffer encodeWaitForEvent:_event value:_signalCounter];
+      if (syncEvent)
+        _stream->synchronize(SyncType::COMMIT);
+    }
+  });
+}
+
+void MPSEvent::notifyEvent(MTLSharedEventNotificationBlock block) {
+  if (!is_initialized)
+    initialize();
+  dispatch_sync(_stream->queue(), ^() {
+    @autoreleasepool {
+      ++_signalCounter;
+      [_event notifyListener:_listener atValue:_signalCounter block:block];
+    }
+  });
+}
+
+bool MPSEvent::queryEvent() const {
+  // return false if not recorded or signaled yet
+  return _signalCounter && (_event.signaledValue >= _signalCounter);
+}
+
 } // namespace mps
 } // namespace at

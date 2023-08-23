@@ -11,7 +11,6 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
 
@@ -469,13 +468,12 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices
-  if (THPUtils_checkLong(index) || torch::is_symint(index)) {
+  if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
-                                          : SymInt(THPUtils_unpackLong(index));
-    dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
+    dispatch_set_item(
+        self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

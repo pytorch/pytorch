@@ -32,9 +32,9 @@ class _Faketqdm:  # type: ignore[no-redef]
 
         self.n += n
         if self.total is None:
-            sys.stderr.write(f"\r{self.n:.1f} bytes")
+            sys.stderr.write("\r{0:.1f} bytes".format(self.n))
         else:
-            sys.stderr.write(f"\r{100 * self.n / float(self.total):.1f}%")
+            sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
         sys.stderr.flush()
 
     # Don't bother implementing; use real tqdm if you want
@@ -222,7 +222,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
     if use_cache:
         if verbose:
-            sys.stderr.write(f'Using cache found in {repo_dir}\n')
+            sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
@@ -233,7 +233,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: \"{url}\" to {cached_file}\n')
+            sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -273,7 +273,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
 
     if not os.path.exists(filepath):
         Path(filepath).touch()
-    with open(filepath) as file:
+    with open(filepath, 'r') as file:
         trusted_repos = tuple(line.strip() for line in file)
 
     # To minimize friction of introducing the new trust_repo mechanism, we consider that
@@ -328,7 +328,7 @@ def _check_dependencies(m):
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
         if len(missing_deps):
-            raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
+            raise RuntimeError('Missing dependencies: {}'.format(', '.join(missing_deps)))
 
 
 def _load_entry_from_hubconf(m, model):
@@ -344,7 +344,7 @@ def _load_entry_from_hubconf(m, model):
     func = _load_attr_from_module(m, model)
 
     if func is None or not callable(func):
-        raise RuntimeError(f'Cannot find callable {model} in hubconf')
+        raise RuntimeError('Cannot find callable {} in hubconf'.format(model))
 
     return func
 
@@ -650,7 +650,8 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
         if hash_prefix is not None:
             digest = sha256.hexdigest()
             if digest[:len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
+                raise RuntimeError('invalid hash value (expected "{}", got "{}")'
+                                   .format(hash_prefix, digest))
         shutil.move(f.name, dst)
     finally:
         f.close()
@@ -748,7 +749,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+        sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]

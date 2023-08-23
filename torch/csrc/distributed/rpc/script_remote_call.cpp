@@ -77,7 +77,6 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
   auto values = value.toTupleRef().elements().vec();
-  TORCH_CHECK(!values.empty(), "Malformed message: empty values unpickled");
   return fromIValues(values);
 }
 

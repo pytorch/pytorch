@@ -108,7 +108,7 @@ def lint_file(
     original = None
     replacement = None
     if replace_pattern:
-        with open(filename) as f:
+        with open(filename, "r") as f:
             original = f.read()
 
         try:

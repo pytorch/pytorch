@@ -1,12 +1,10 @@
 conv2d_pw:
   parameter_names_with_default_values:
-      NAME: conv2d_pw_2x2
       TILE_SIZE_X: 2
       TILE_SIZE_Y: 2
       REGISTER_FOR:
         - !!python/tuple ["conv2d_pw", ["catchall"]]
   parameter_values:
-    - NAME: conv2d_pw_1x1
-      TILE_SIZE_X: 1
+    - TILE_SIZE_X: 1
       TILE_SIZE_Y: 1
       REGISTER_FOR: null

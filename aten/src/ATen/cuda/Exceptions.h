@@ -40,9 +40,9 @@ class CuDNNError : public c10::Error {
     }                                                                                           \
   } while (0)
 
-namespace at::cuda::blas {
+namespace at { namespace cuda { namespace blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
-} // namespace at::cuda::blas
+}}} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
   do {                                                          \
@@ -67,9 +67,9 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 // cusolver related headers are only supported on cuda now
 #ifdef CUDART_VERSION
 
-namespace at::cuda::solver {
+namespace at { namespace cuda { namespace solver {
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
-} // namespace at::cuda::solver
+}}} // namespace at::cuda::solver
 
 // When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
 // When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.

@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional, List
 
 import torch
 from torch._export import export
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import ExportPassBase
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor
@@ -33,7 +33,7 @@ def get_upgraders() -> Dict[str, Tuple[str, str]]:
     """Getting upgraders entry map and operator version map and merge them into one dict."""
     upgraders = torch._C._get_upgraders_entry_map()
     op_version_map = torch._C._get_operator_version_map()
-    output: Dict[str, Tuple[str, str]] = defaultdict(tuple)  # type: ignore[arg-type]
+    output = defaultdict(tuple)
     for opname, entry_list in op_version_map.items():
         if not entry_list:
             raise RuntimeError(f"Op version map has an empty entry for opname {opname}")
@@ -74,7 +74,7 @@ class GraphModuleOpUpgrader:
     original TorchScript upgrader).
     """
 
-    class UpgraderPass(_ExportPassBase):
+    class UpgraderPass(ExportPassBase):
         def __init__(self, old_target: Target, new_target: Target):
             super().__init__()
             self.old_target = old_target
@@ -189,13 +189,13 @@ class GraphModuleOpUpgrader:
         args = [n.meta.get("val", None) for n in exported_program.graph.nodes if n.op == "placeholder"]
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
-        assert exported_program.call_spec.in_spec is not None
         inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:
             upgraded_program = exported_program.transform(_pass)
-            # NB: we have to retrace the graph_module instead of ep because of some failure.
-            exported_program = export(upgraded_program.module(), inputs, {})
-            exported_program._call_spec = upgraded_program.call_spec
+            # NB: we have to retrace the graph_module instead of ep because of some failure. Also, we need to turn of
+            # _add_runtime_assertions because dynamo is not happy with sym_size.int.
+            exported_program = export(upgraded_program.graph_module, inputs, [], _add_runtime_assertions=False)
+            exported_program.call_spec = upgraded_program.call_spec
 
         return exported_program

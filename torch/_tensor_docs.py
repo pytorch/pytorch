@@ -4728,26 +4728,6 @@ Example::
 )
 
 add_docstr_all(
-    "shape",
-    r"""
-shape() -> torch.Size
-
-Returns the size of the :attr:`self` tensor. Alias for :attr:`size`.
-
-See also :meth:`Tensor.size`.
-
-Example::
-
-    >>> t = torch.empty(3, 4, 5)
-    >>> t.size()
-    torch.Size([3, 4, 5])
-    >>> t.shape
-    torch.Size([3, 4, 5])
-
-""",
-)
-
-add_docstr_all(
     "sort",
     r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -5078,7 +5058,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(dims) -> Tensor
+tile(*reps) -> Tensor
 
 See :func:`torch.tile`
 """,

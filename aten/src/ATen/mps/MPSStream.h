@@ -131,5 +131,38 @@ class TORCH_API MPSStreamImpl
   MPSStreamImpl();
 };
 
+
+//-----------------------------------------------------------------
+//  MPSEvent
+//-----------------------------------------------------------------
+
+struct TORCH_API MPSEvent
+{
+  // for a new instance of MPSEvent, sometimes we want an empty shell and don't
+  // necessarily want to create events or listeners. So we defer initialization
+  // until we actually use the event (e.g., record, notify, etc.)
+  MPSEvent(bool deferInitialization = true);
+  ~MPSEvent();
+  MTLSharedEvent_t event() const {return _event; }
+
+  void recordEvent(bool syncEvent = false);
+  void waitForEvent(bool syncEvent = false); // waits on the cpu
+  void notifyEvent(MTLSharedEventNotificationBlock block);
+  bool queryEvent() const;
+  uint64_t getCurrentValue() const { return _signalCounter; }
+  void setCurrentValue(uint64_t currValue) { _signalCounter = currValue; }
+private:
+  bool is_initialized;
+  uint64_t _signalCounter;
+  MPSStream* _stream;
+  MTLSharedEvent_t _event;
+  MTLSharedEventListener* _listener;
+
+  void initialize();
+};
+
+typedef MPSEvent* mpsEvent_t;
+
+
 } // namespace mps
 } // namespace at

@@ -7,12 +7,13 @@ from torch.utils.data import Dataset
 
 
 class DummyData(Dataset):
+
     def __init__(
         self,
         max_val: int,
         sample_count: int,
         sample_length: int,
-        sparsity_percentage: int,
+        sparsity_percentage: int
     ):
         r"""
         A data class that generates random data.

@@ -321,7 +321,7 @@ def get_all_tested_ops():
     overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
     op_to_opinfo = get_ops_covered_by_opinfos()
     result = set({})
-    for op in get_covered_ops(overridable_outplace_we_care_about).values():
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         opinfos = op_to_opinfo[op]
         for opinfo in opinfos:
             result.add(opinfo.name)
@@ -332,7 +332,7 @@ def get_skipped_or_xfailed_ops_for(test_name):
     overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
     op_to_opinfo = get_ops_covered_by_opinfos()
     result = set({})
-    for op in get_covered_ops(overridable_outplace_we_care_about).values():
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         opinfos = op_to_opinfo[op]
         for opinfo in opinfos:
             for decorator in opinfo.decorators:

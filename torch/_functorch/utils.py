@@ -5,7 +5,6 @@ from torch._C._functorch import (
     get_single_level_autograd_function_allowed,
     unwrap_if_dead,
 )
-from typing import Union, Tuple
 
 @contextlib.contextmanager
 def enable_single_level_autograd_function():
@@ -37,5 +36,3 @@ def exposed_in(module):
         fn.__module__ = module
         return fn
     return wrapper
-
-argnums_t = Union[int, Tuple[int, ...]]

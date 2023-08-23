@@ -5,13 +5,15 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
-namespace torch::cuda {
+namespace torch {
+namespace cuda {
 
 using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
 using c10::cuda::CUDACachingAllocator::BlockInfo;
+using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
@@ -135,10 +137,12 @@ std::string _memory_snapshot_pickled() {
   IValue active_pending_free_s = "active_pending_free";
   IValue inactive_s = "inactive";
   IValue addr_s = "addr";
+  IValue real_size_s = "real_size";
   IValue filename_s = "filename";
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
+  IValue history_s = "history";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
 
@@ -146,16 +150,6 @@ std::string _memory_snapshot_pickled() {
 
   std::vector<CapturedTraceback*> frame_tracebacks;
   std::vector<Dict<IValue, IValue>> frame_dict;
-
-  auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
-                           const std::shared_ptr<c10::GatheredContext>& ctx) {
-    if (ctx) {
-      frame_tracebacks.push_back(getFromContext(ctx));
-      frame_dict.push_back(d);
-    } else {
-      d.insert(frames_s, empty_frames);
-    }
-  };
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
@@ -173,8 +167,6 @@ std::string _memory_snapshot_pickled() {
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
-    add_frame_key(segmentDict, segmentInfo.context_when_allocated);
-
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
@@ -185,8 +177,20 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      add_frame_key(blockDict, blockInfo.context_when_allocated);
-
+      if (blockInfo.history.size()) {
+        auto history = new_list();
+        for (const History& h : blockInfo.history) {
+          auto history_entry = new_dict();
+          history_entry.insert(addr_s, (int64_t)h.addr);
+          history_entry.insert(real_size_s, (int64_t)h.real_size);
+          if (h.context) {
+            frame_tracebacks.push_back(getFromContext(h.context));
+            frame_dict.push_back(history_entry);
+          }
+          history.push_back(std::move(history_entry));
+        }
+        blockDict.insert(history_s, std::move(history));
+      }
       blocks.push_back(blockDict);
     }
     segmentDict.insert(blocks_s, blocks);
@@ -270,4 +274,5 @@ std::string _memory_snapshot_pickled() {
 
   return write_pickle(result);
 }
-} // namespace torch::cuda
+} // namespace cuda
+} // namespace torch

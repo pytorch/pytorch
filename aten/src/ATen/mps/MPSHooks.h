@@ -4,7 +4,6 @@
 
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/Generator.h>
-#include <ATen/mps/MPSEvent.h>
 #include <c10/util/Optional.h>
 
 namespace at { namespace mps {
@@ -33,19 +32,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getCurrentAllocatedMemory() const override;
   size_t getDriverAllocatedMemory() const override;
   void setMemoryFraction(double ratio) const override;
-
-  // MPSProfiler interface
   void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const override;
   void profilerStopTrace() const override;
-
-  // MPSEvent interface
-  uint32_t acquireEvent(bool enable_timing) const override;
-  void releaseEvent(uint32_t event_id) const override;
-  void recordEvent(uint32_t event_id) const override;
-  void waitForEvent(uint32_t event_id) const override;
-  void synchronizeEvent(uint32_t event_id) const override;
-  bool queryEvent(uint32_t event_id) const override;
-  double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const override;
 };
 
 }} // at::mps

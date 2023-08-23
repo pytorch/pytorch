@@ -3,13 +3,11 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/_copy_from_and_resize_native.h>
-#include <ATen/ops/_copy_from_native.h>
 
 namespace at::native {
 namespace mps {
 
-static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
+void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
   uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
   uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
@@ -22,13 +20,13 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
   return (void*)alignedAddress;
 }
 
-// Copy sourceBuffer into destBuffer, casting sourceBuffer to dst.scalar_type().
+// Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
-static void copy_cast_mps(at::Tensor& dst,
-                          const at::Tensor& src,
-                          id<MTLBuffer> destBuffer,
-                          id<MTLBuffer> sourceBuffer,
-                          bool non_blocking = true) {
+void copy_cast_mps(at::Tensor& dst,
+                   const at::Tensor& src,
+                   id<MTLBuffer> destBuffer,
+                   id<MTLBuffer> sourceBuffer,
+                   bool non_blocking = true) {
   using namespace mps;
 
   using CachedGraph = MPSUnaryCachedGraph;
@@ -292,19 +290,8 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   if (dst.numel() == 0) {
     dst.resize_as_(src);
   }
-
-  TORCH_CHECK(dst.dim() >= src.dim());
   if (dst.dim() > src.dim()) {
     needs_broadcasting = true;
-  } else {
-    const IntArrayRef src_sizes = src.sizes();
-    const IntArrayRef dst_sizes = dst.sizes();
-    for (const auto j : c10::irange(src.dim())) {
-      if (src_sizes[j] == 1 && dst_sizes[j] != 1) {
-        needs_broadcasting = true;
-        break;
-      }
-    }
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {

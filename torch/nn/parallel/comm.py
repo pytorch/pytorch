@@ -29,7 +29,8 @@ def broadcast(tensor, devices=None, *, out=None):
     tensor = _handle_complex(tensor)
     if not ((devices is None) ^ (out is None)):
         raise RuntimeError(
-            f"Exactly one of 'devices' and 'out' must be specified, but got devices={devices} and out={out}")
+            "Exactly one of 'devices' and 'out' must be specified, but got "
+            "devices={} and out={}".format(devices, out))
     if devices is not None:
         devices = [_get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
@@ -82,7 +83,8 @@ def reduce_add(inputs, destination=None):
         if inp.size() != input_size:
             got = 'x'.join(str(x) for x in inp.size())
             expected = 'x'.join(str(x) for x in input_size)
-            raise ValueError(f"input {i} has invalid size: got {got}, but expected {expected}")
+            raise ValueError("input {} has invalid size: got {}, but expected "
+                             "{}".format(i, got, expected))
     if root_index is None:
         raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
 
@@ -160,7 +162,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
           into equal chunks.
         dim (int, optional): A dimension along which to chunk :attr:`tensor`.
           Default: ``0``.
-        streams (Iterable[torch.cuda.Stream], optional): an iterable of Streams, among
+        streams (Iterable[Stream], optional): an iterable of Streams, among
           which to execute the scatter. If not specified, the default stream will
           be utilized.
         out (Sequence[Tensor], optional, keyword-only): the GPU tensors to
@@ -188,10 +190,12 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     else:
         if devices is not None:
             raise RuntimeError(
-                f"'devices' must not be specified when 'out' is specified, but got devices={devices}")
+                "'devices' must not be specified when 'out' is specified, but "
+                "got devices={}".format(devices))
         if chunk_sizes is not None:
             raise RuntimeError(
-                f"'chunk_sizes' must not be specified when 'out' is specified, but got chunk_sizes={chunk_sizes}")
+                "'chunk_sizes' must not be specified when 'out' is specified, "
+                "but got chunk_sizes={}".format(chunk_sizes))
         return tuple(torch._C._scatter_out(tensor, out, dim, streams))
 
 
@@ -232,5 +236,6 @@ def gather(tensors, dim=0, destination=None, *, out=None):
     else:
         if destination is not None:
             raise RuntimeError(
-                f"'destination' must not be specified when 'out' is specified, but got destination={destination}")
+                "'destination' must not be specified when 'out' is specified, but "
+                "got destination={}".format(destination))
         return torch._C._gather_out(tensors, out, dim)

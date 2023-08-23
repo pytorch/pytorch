@@ -387,7 +387,7 @@ class BackendConfig:
             elif isinstance(d, Dict):
                 conf.set_backend_pattern_config(BackendPatternConfig.from_dict(d))
             else:
-                raise ValueError(f"Expected backend_config_dict['{CONFIGS_DICT_KEY}'] to be a dictionary")
+                raise ValueError("Expected backend_config_dict['%s'] to be a dictionary" % CONFIGS_DICT_KEY)
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -599,10 +599,8 @@ class BackendPatternConfig:
                 return obj
             if isinstance(obj, Dict):
                 return DTypeConfig.from_dict(obj)
-            raise ValueError(
-                f"Expected a list of DTypeConfigs in "
-                f"backend_pattern_config_dict[\"{DTYPE_CONFIGS_DICT_KEY}\"], got '{type(obj)}'"
-            )
+            raise ValueError("Expected a list of DTypeConfigs in backend_pattern_config_dict[\"%s\"], got '%s'" %
+                             (DTYPE_CONFIGS_DICT_KEY, type(obj)))
 
         conf = cls()
         if PATTERN_DICT_KEY in backend_pattern_config_dict:

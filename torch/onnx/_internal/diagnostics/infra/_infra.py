@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-import logging
+import pprint
 from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
@@ -131,6 +131,9 @@ class Rule:
         """
         return self.message_default_template.format(*args, **kwargs)
 
+    def pretty_print(self):
+        pass
+
 
 @dataclasses.dataclass
 class Location:
@@ -159,6 +162,16 @@ class Location:
             else None,
         )
 
+    def pretty_print(self):
+        """Prints the location in a traceback style format."""
+        unknown = "<unknown>"
+        snippet = self.snippet or unknown
+        uri = self.uri or unknown
+        function = self.function or unknown
+        lineno = self.line if self.line is not None else unknown
+        message = f"  # {self.message}" if self.message is not None else ""
+        print(f'  File "{uri}", line {lineno}, in {function}\n    {snippet}{message}')
+
 
 @dataclasses.dataclass
 class StackFrame:
@@ -167,6 +180,10 @@ class StackFrame:
     def sarif(self) -> sarif.StackFrame:
         """Returns the SARIF representation of this stack frame."""
         return sarif.StackFrame(location=self.location.sarif())
+
+    def pretty_print(self):
+        """Prints the stack frame in a human-readable format."""
+        self.location.pretty_print()
 
 
 @dataclasses.dataclass
@@ -185,6 +202,12 @@ class Stack:
             else None,
         )
 
+    def pretty_print(self):
+        """Prints the stack in a human-readable format."""
+        formatter.pretty_print_title(f"Stack: {self.message}", fill_char="-")
+        for frame in reversed(self.frames):
+            frame.pretty_print()
+
 
 @dataclasses.dataclass
 class ThreadFlowLocation:
@@ -202,6 +225,15 @@ class ThreadFlowLocation:
             state=self.state,
             stack=self.stack.sarif() if self.stack is not None else None,
         )
+
+    def pretty_print(self, verbose: bool = False):
+        """Prints the thread flow location in a human-readable format."""
+        formatter.pretty_print_title(f"Step {self.index}", fill_char="-")
+        self.location.pretty_print()
+        if verbose:
+            print(f"State: {pprint.pformat(self.state)}")
+            if self.stack is not None:
+                self.stack.pretty_print()
 
 
 @dataclasses.dataclass
@@ -222,6 +254,22 @@ class Graph:
             description=sarif.Message(text=self.graph),
             properties=PatchedPropertyBag(name=self.name, description=self.description),
         )
+
+    def pretty_print(
+        self,
+        verbose: bool = False,
+    ):
+        """Prints the diagnostics in a human-readable format.
+
+        Args:
+            verbose: If True, prints all information. Otherwise, only prints compact
+                information. E.g., graph name and description.
+            log_level: The minimum level of diagnostics to print.
+        """
+        formatter.pretty_print_title(f"Graph: {self.name}", fill_char="-")
+        print(self.description)
+        if verbose:
+            print(self.graph)
 
 
 @dataclasses.dataclass
@@ -273,9 +321,5 @@ class DiagnosticOptions:
     Options for diagnostic context.
     """
 
-    verbosity_level: int = dataclasses.field(default=logging.INFO)
-    """Diagnostic context verbosity level, equivalent to the 'level' in Python logging module.
-    Controls the amount of information logged inside each diagnostics."""
-
-    warnings_as_errors: bool = dataclasses.field(default=False)
-    """If True, warning diagnostics are treated as error diagnostics."""
+    log_verbose: bool = dataclasses.field(default=False)
+    log_level: Level = dataclasses.field(default=Level.ERROR)

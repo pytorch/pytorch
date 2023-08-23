@@ -28,10 +28,7 @@ else:
     CompletedProcessType = subprocess.CompletedProcess
 
 
-class FunctionCount(NamedTuple):
-    # TODO(#105471): Rename the count field
-    count: int  # type: ignore[assignment]
-    function: str
+FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -601,7 +598,7 @@ class _ValgrindWrapper:
                     stderr=subprocess.STDOUT,
                     **kwargs,
                 )
-                with open(stdout_stderr_log) as f:
+                with open(stdout_stderr_log, "rt") as f:
                     return invocation, f.read()
             finally:
                 f_stdout_stderr.close()
@@ -615,7 +612,7 @@ class _ValgrindWrapper:
                     )
 
                 script_file = os.path.join(working_dir, "timer_callgrind.py")
-                with open(script_file, "w") as f:
+                with open(script_file, "wt") as f:
                     f.write(self._construct_script(
                         task_spec,
                         globals=GlobalsBridge(globals, data_dir),
@@ -655,7 +652,7 @@ class _ValgrindWrapper:
             if valgrind_invocation.returncode:
                 error_report = ""
                 if os.path.exists(error_log):
-                    with open(error_log) as f:
+                    with open(error_log, "rt") as f:
                         error_report = f.read()
                 if not error_report:
                     error_report = "Unknown error.\n" + valgrind_invocation_output
@@ -727,7 +724,7 @@ class _ValgrindWrapper:
                 fpath = f"{callgrind_out}.{i + 1}"  # Callgrind one-indexes files.
                 callgrind_out_contents: Optional[str] = None
                 if retain_out_file:
-                    with open(fpath) as f:
+                    with open(fpath, "rt") as f:
                         callgrind_out_contents = f.read()
 
                 return (

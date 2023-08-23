@@ -71,8 +71,8 @@ template <class Input, class Output, class Model>
 class BenchmarkHelper {
  public:
   BenchmarkHelper();
-  explicit BenchmarkHelper(Model model)
-      : model_(std::move(model)), initialized_(true) {}
+  // NOLINTNEXTLINE(modernize-pass-by-value)
+  explicit BenchmarkHelper(Model model) : model_(model), initialized_(true) {}
 
   // This method to be used in benchmark() method
   // Note that there is no result. This way we don't have to call this under GIL
@@ -171,7 +171,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(const jit::Module& module);
+  explicit ThroughputBenchmark(jit::Module module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact

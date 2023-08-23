@@ -482,7 +482,9 @@ def hash_configs(configs: List[Config]):
     hasher = hashlib.sha256()
     for cfg in configs:
         hasher.update(
-            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
+            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode(
+                "utf-8"
+            )
         )
     return hasher.hexdigest()
 
@@ -496,7 +498,7 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    with open(cache_filename) as fd:
+    with open(cache_filename, "r") as fd:
         best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
@@ -649,10 +651,6 @@ def triton_config(
     override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
-
-    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
-    size_hints = list(reversed(size_hints))
-
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -711,7 +709,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -733,9 +731,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    if num_warps is None:
-        num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -912,10 +908,6 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 tiny_config,
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
-                # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduciton
-                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],
             meta=meta,
             filename=filename,
@@ -986,17 +978,8 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(*numels):
+def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1:
-        xnumel, ynumel, znumel = numels[0], None, None
-    elif len(numels) == 2:
-        xnumel, ynumel, znumel = numels[1], numels[0], None
-    elif len(numels) == 3:
-        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
-    else:
-        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:

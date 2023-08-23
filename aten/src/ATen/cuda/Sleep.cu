@@ -3,7 +3,8 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 namespace {
 __global__ void spin_kernel(int64_t cycles) {
   // Few AMD specific GPUs have different clock intrinsic
@@ -32,4 +33,4 @@ void sleep(int64_t cycles) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-}  // namespace at::cuda
+}}  // namespace at::cuda

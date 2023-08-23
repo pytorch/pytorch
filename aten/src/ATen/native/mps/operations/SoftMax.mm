@@ -17,10 +17,10 @@
 
 namespace at::native {
 
-static void get_shapes(MPSShape* input_shape_readonly,
-                       NSMutableArray<NSNumber*>*& input_shape,
-                       int num_input_dims,
-                       c10::MemoryFormat memory_format) {
+void get_shapes(MPSShape* input_shape_readonly,
+                NSMutableArray<NSNumber*>*& input_shape,
+                int num_input_dims,
+                c10::MemoryFormat memory_format) {
   // Modify the shape
   if (memory_format == at::MemoryFormat::Contiguous) {
     for (int i = 0; i < num_input_dims; i++)

@@ -43,9 +43,18 @@ def process_bucket_with_remote_server(state, bucket):
     if sparse:
         tensor = sparse_tensor_to_rpc_format(tensor)
     b_index = bucket.get_index()
-    server_args = [cref.server_rref, state.batch_number, b_index, tensor]
+    server_args = [
+        cref.server_rref,
+        state.batch_number,
+        b_index,
+        tensor
+    ]
     key = state.get_key(b_index)
-    cref.record_start("hook_future_metric", key, RPC_SPARSE if sparse else RPC_DENSE)
+    cref.record_start(
+        "hook_future_metric",
+        key,
+        RPC_SPARSE if sparse else RPC_DENSE
+    )
     fut = cref.server_rref.rpc_async().average_gradient(*server_args)
 
     def callback(fut):

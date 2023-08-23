@@ -1,23 +1,15 @@
-from typing import Iterable, List, Union
-
 import torch
+from typing import cast, Iterable, List, Union
+from . import _lazy_init, _lazy_call, device_count, current_device
 from .. import Tensor
-from . import _lazy_call, _lazy_init, current_device, device_count
 
-__all__ = [
-    "get_rng_state",
-    "get_rng_state_all",
-    "set_rng_state",
-    "set_rng_state_all",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "initial_seed",
-]
+__all__ = ['get_rng_state', 'get_rng_state_all',
+           'set_rng_state', 'set_rng_state_all',
+           'manual_seed', 'manual_seed_all',
+           'seed', 'seed_all', 'initial_seed']
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
+def get_rng_state(device: Union[int, str, torch.device] = 'cuda') -> Tensor:
     r"""Returns the random number generator state of the specified GPU as a ByteTensor.
 
     Args:
@@ -31,7 +23,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):
-        device = torch.device("cuda", device)
+        device = torch.device('cuda', device)
     idx = device.index
     if idx is None:
         idx = current_device()
@@ -48,9 +40,7 @@ def get_rng_state_all() -> List[Tensor]:
     return results
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "cuda"
-) -> None:
+def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cuda') -> None:
     r"""Sets the random number generator state of the specified GPU.
 
     Args:
@@ -63,10 +53,10 @@ def set_rng_state(
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):
-        device = torch.device("cuda", device)
+        device = torch.device('cuda', device)
 
     def cb():
-        idx = device.index
+        idx = cast(torch.device, device).index
         if idx is None:
             idx = current_device()
         default_generator = torch.cuda.default_generators[idx]
@@ -133,7 +123,6 @@ def seed() -> None:
         If you are working with a multi-GPU model, this function will only initialize
         the seed on one GPU.  To initialize all GPUs, use :func:`seed_all`.
     """
-
     def cb():
         idx = current_device()
         default_generator = torch.cuda.default_generators[idx]
@@ -147,7 +136,6 @@ def seed_all() -> None:
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
     """
-
     def cb():
         random_seed = 0
         seeded = False

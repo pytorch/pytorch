@@ -9,7 +9,8 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::cuda {
+namespace torch {
+namespace cuda {
 
 using tensor_list2d = std::vector<std::vector<at::Tensor>>;
 
@@ -48,5 +49,5 @@ TORCH_CUDA_CU_API at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     c10::optional<int32_t> destination_index);
-
-} // namespace torch::cuda
+} // namespace cuda
+} // namespace torch

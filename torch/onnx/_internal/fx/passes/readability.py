@@ -54,12 +54,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
                 new_node.meta = node.meta
                 node.replace_all_uses_with(new_node)
                 self.module.graph.erase_node(node)
-        diagnostic.info(
-            "Renamed 'self.%s' to 'self.%s', "
-            "normalized from original parameter name '%s'.",
-            old_name,
-            normalized_name,
-            new_name,
+        diagnostic.with_additional_message(
+            f"Renamed 'self.{old_name}' to 'self.{normalized_name}', "
+            f"normalized from original parameter name '{new_name}'."
         )
 
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
@@ -114,10 +111,8 @@ class RestoreParameterAndBufferNames(_pass.Transform):
                     old_name_to_nodes[node.target] = ([node], readable_name)
                     continue
 
-                diagnostic.info(
-                    "Cannot find readable name for self.%s: %s. The name is unchanged.",
-                    node.target,
-                    type(attr_value),
+                diagnostic.with_additional_message(
+                    f"Cannot find readable name for self.{node.target}: {type(attr_value)}. The name is unchanged."
                 )
                 if isinstance(attr_value, torch.nn.Parameter):
                     # If it is a parameter we treat it more seriously.

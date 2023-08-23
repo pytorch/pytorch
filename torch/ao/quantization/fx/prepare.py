@@ -106,7 +106,7 @@ from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
 )
-from torch.ao.quantization.quantizer import (
+from torch.ao.quantization._pt2e.quantizer import (
     EdgeOrNode,
     QuantizationSpec,
     FixedQParamsQuantizationSpec,
@@ -238,7 +238,7 @@ def _needs_obs_or_fq(
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
         assert cur_target_dtype in _OBS_DTYPE_LIST, \
-            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+            "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return is_zeroth_arg
     if reuse_input_obs_or_fq:
@@ -1370,7 +1370,7 @@ def insert_observers_for_model(
     # Step 1, set the observer or fake quantize module constructor for each node in the
     # matched_node_pattern
 
-    for match_res_with_qconfig in node_name_to_match_result_with_qconfig.values():
+    for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         assert qhandler is not None
         _set_target_dtype_info_for_matched_node_pattern(
@@ -1425,7 +1425,7 @@ def insert_observers_for_model(
 
     # reset the counters and set of processed_nodes
     processed_nodes: Set[Node] = set()
-    for match_res_with_qconfig in node_name_to_match_result_with_qconfig.values():
+    for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
             pattern, matched_node_pattern, qconfig, backend_config)
@@ -1654,7 +1654,10 @@ def _run_prepare_fx_on_standalone_modules(
     not modify the graph, it just replaces the unobserved modules with
     their observed versions.
     """
-    for (root_node, _, pattern, qhandler, qconfig) in node_name_to_match_result_with_qconfig.values():
+    for (
+        node_name,
+        (root_node, _, pattern, qhandler, qconfig),
+    ) in node_name_to_match_result_with_qconfig.items():
         if qhandler is None:
             continue
         elif not qhandler.is_standalone_module():

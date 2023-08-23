@@ -30,7 +30,7 @@ class TestSourceMatcher(JitTestCase):
                 return x
 
         inputs = (torch.randn(3, 3),)
-        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
         module_partitions = get_source_partitions(gm.graph, [torch.nn.Linear, torch.nn.ReLU])
@@ -69,7 +69,7 @@ class TestSourceMatcher(JitTestCase):
                 return self.maxpool(self.relu(z))
 
         inputs = (torch.randn(1, 3, 256, 256),)
-        gm, _ = torch._dynamo.export(M(torch.ones(1, 16, 256, 256)), aten_graph=True)(*inputs)
+        gm, _ = torch._dynamo.export(M(torch.ones(1, 16, 256, 256)), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
         module_partitions = get_source_partitions(gm.graph, [torch.nn.Conv2d, torch.nn.ReLU, torch.nn.MaxPool2d])
@@ -111,7 +111,7 @@ class TestSourceMatcher(JitTestCase):
                 return x
 
         inputs = (torch.randn(1, 3, 5, 5), torch.rand(3, 3, 3, 3), torch.rand(3))
-        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
         module_partitions = get_source_partitions(gm.graph, [torch.nn.functional.conv2d])
@@ -135,7 +135,7 @@ class TestSourceMatcher(JitTestCase):
                 return x
 
         inputs = (torch.randn(1, 5), torch.rand((5, 5)), torch.zeros(5))
-        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
         module_partitions = get_source_partitions(gm.graph, [torch.nn.functional.linear, torch.nn.functional.relu])

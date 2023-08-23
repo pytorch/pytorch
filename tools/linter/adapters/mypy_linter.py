@@ -82,28 +82,6 @@ severities = {
 }
 
 
-def check_mypy_installed(code: str) -> List[LintMessage]:
-    cmd = [sys.executable, "-mmypy", "-V"]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True)
-        return []
-    except subprocess.CalledProcessError as e:
-        msg = e.stderr.decode(errors="replace")
-        return [
-            LintMessage(
-                path=None,
-                line=None,
-                char=None,
-                code=code,
-                severity=LintSeverity.ERROR,
-                name="command-failed",
-                original=None,
-                replacement=None,
-                description=f"Could not run '{' '.join(cmd)}': {msg}",
-            )
-        ]
-
-
 def check_files(
     filenames: List[str],
     config: str,
@@ -209,9 +187,7 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_mypy_installed(args.code) + check_files(
-        list(filenames), args.config, args.retries, args.code
-    )
+    lint_messages = check_files(list(filenames), args.config, args.retries, args.code)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 

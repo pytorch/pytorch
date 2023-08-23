@@ -435,7 +435,7 @@ class _OpLevelDebugging(infra.Rule):
 
 
 class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
-    """Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."""
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
 
     def format_message(self, symbolic_fn, node) -> str:  # type: ignore[override]
         """Returns the formatted default message of this Rule.
@@ -955,11 +955,11 @@ class _POERules(infra.RuleCollection):
                 "id": "FXE0014",
                 "name": "find-opschema-matched-symbolic-function",
                 "short_description": {
-                    "text": "Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."
+                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."
                 },
                 "full_description": {
                     "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas. A warning will be issued if the matched OnnxFunction is not an exact match.",
-                    "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute\ndtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
+                    "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input\ndtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
                 },
                 "message_strings": {
                     "default": {
@@ -972,7 +972,7 @@ class _POERules(infra.RuleCollection):
         ),
         init=False,
     )
-    """Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."""
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
 
     fx_node_insert_type_promotion: _FxNodeInsertTypePromotion = dataclasses.field(
         default=_FxNodeInsertTypePromotion.from_sarif(

@@ -1208,7 +1208,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logical_xor
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1899,7 +1899,6 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: cumprod_out
-    MPS: cumprod_out_mps
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1920,7 +1919,6 @@
   structured_delegate: cumsum.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  tags: core
 
 - func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
   structured_delegate: cumsum.out
@@ -2196,7 +2194,6 @@
     CompositeExplicitAutograd: embedding_symint
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_embedding
   autogen: embedding.out
-  tags: core
 
 - func: embedding_backward(Tensor grad, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
   dispatch:
@@ -2947,7 +2944,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: quantized_index
-  tags: [core, dynamic_output_shape]
+  tags: dynamic_output_shape
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -3008,7 +3005,6 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put
-  tags: core
 
 - func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
@@ -3844,7 +3840,6 @@
 - func: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: mkldnn_rnn_layer
-    MkldnnCPU: mkldnn_rnn_layer
   autogen: mkldnn_rnn_layer.out
 
 - func: mkldnn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
@@ -4162,7 +4157,7 @@
     CUDA: batch_norm_backward_reduce_cuda
   autogen: batch_norm_backward_reduce.out
 
-- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor sum_dy, Tensor sum_dy_xmu, Tensor count) -> Tensor
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu, Tensor count) -> Tensor
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
   autogen: batch_norm_backward_elemt.out
@@ -4301,7 +4296,7 @@
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
-    CPU, CUDA: channel_shuffle
+    CPU: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
   autogen: channel_shuffle.out
 
@@ -5469,14 +5464,12 @@
   autogen: sum.out
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  # TODO: Align the signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     NestedTensorCPU: NestedTensor_sum_dim_CPU
     SparseCPU, SparseCUDA: sum_sparse_coo
-    SparseCsrCPU, SparseCsrCUDA: sum_sparse_compressed
   tags: core
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -5739,6 +5732,8 @@
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  dispatch:
+    CPU, CUDA: tensordot_out
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
@@ -5780,10 +5775,8 @@
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
-- func: tile(Tensor self, SymInt[] dims) -> Tensor
+- func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: tile_symint
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
@@ -6445,7 +6438,7 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
     NestedTensorCPU, NestedTensorCUDA: clone_nested
   autogen: clone.out
-  tags: [core, pointwise]
+  tags: core
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -7871,7 +7864,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: bitwise_and
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: bitwise_and.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7934,7 +7927,7 @@
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: bitwise_or.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7997,7 +7990,7 @@
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: bitwise_xor.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9131,7 +9124,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfinv_out
-    MPS: erfinv_out_mps
     SparseCPU, SparseCUDA: erfinv_sparse_out
     SparseCsrCPU, SparseCsrCUDA: erfinv_sparse_csr_out
   tags: pointwise
@@ -9245,7 +9237,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lerp_Scalar
-    MPS: lerp_Scalar_mps
   tags: pointwise
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
@@ -9254,7 +9245,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lerp_Tensor
-    MPS: lerp_Tensor_mps
   tags: pointwise
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
@@ -9330,7 +9320,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: fmod
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9438,7 +9428,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: remainder
-  tags: [core, pointwise]
+  tags: pointwise
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -9687,7 +9677,6 @@
   variants: method, function
   dispatch:
     SparseCPU, SparseCUDA: any_sparse
-  tags: core
 
 - func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -9701,7 +9690,6 @@
   structured: True
   dispatch:
     CPU, CUDA: renorm_out
-    MPS: renorm_out_mps
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -10060,21 +10048,6 @@
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
   autogen: _foreach_mul.ScalarList_out
-
-- func: _foreach_mul.Tensor(Tensor[] self, Tensor other) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_mul_tensor_kernel_slow
-    CUDA: foreach_tensor_mul_tensor_kernel_cuda
-
-- func: _foreach_mul_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_mul_tensor_kernel_slow_
-    CUDA: foreach_tensor_mul_tensor_kernel_cuda_
-  autogen: _foreach_mul.Tensor_out
 
 - func: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10816,21 +10789,6 @@
     CUDA: foreach_tensor_sigmoid_cuda_
   autogen: _foreach_sigmoid.out
 
-- func: _foreach_sign(Tensor[] self) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sign_slow
-    CUDA: foreach_tensor_sign_cuda
-
-- func: _foreach_sign_(Tensor(a!)[] self) -> ()
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sign_slow_
-    CUDA: foreach_tensor_sign_cuda_
-  autogen: _foreach_sign.out
-
 - func: _foreach_sin(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -10959,11 +10917,7 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
-
-- func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: searchsorted_out_cpu
-    CUDA: searchsorted_out_cuda
+  autogen: searchsorted.Scalar_out
 
 - func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
   structured_delegate: _convert_indices_from_coo_to_csr.out
@@ -14220,13 +14174,13 @@
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
 
-- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
+- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor attn_bias, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, float dropout_p, bool[4] grad_input_mask, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, float dropout_p, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   device_check: NoCheck
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
@@ -14251,7 +14205,7 @@
     CUDA: _efficient_attention_forward
   tags: nondeterministic_seeded
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor philox_seed, Tensor philox_offset, int custom_mask_type, bool bias_requires_grad, *, float? scale=None, int? num_splits_key=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor philox_seed, Tensor philox_offset, int custom_mask_type, *, float? scale=None, int? num_splits_key=None) -> (Tensor, Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:

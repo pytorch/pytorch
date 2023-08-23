@@ -1,8 +1,7 @@
 import contextlib
-from typing import List, Tuple
 
 import torch
-
+from typing import List, Tuple
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
@@ -16,7 +15,6 @@ def optimized_execution(should_optimize):
         yield
     finally:
         torch._C._set_graph_executor_optimize(stored_flag)
-
 
 @contextlib.contextmanager
 def fuser(name):
@@ -35,13 +33,13 @@ def fuser(name):
     old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
     old_nvfuser_state = torch._C._jit_nvfuser_enabled()
     old_llga_state = torch._C._jit_llga_enabled()
-    if name == "fuser0":  # legacy fuser
+    if name == 'fuser0':  # legacy fuser
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(False)
         torch._C._jit_set_llga_enabled(False)
-    elif name == "fuser1":  # NNC
+    elif name == 'fuser1':  # NNC
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         old_profiling_mode = torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -49,13 +47,13 @@ def fuser(name):
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_nvfuser_enabled(False)
         torch._C._jit_set_llga_enabled(False)
-    elif name == "fuser2":  # nvFuser
+    elif name == 'fuser2':  # nvFuser
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._jit_set_llga_enabled(False)
-    elif name == "fuser3":  # oneDNN Graph
+    elif name == 'fuser3':  # oneDNN Graph
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         old_profiling_mode = torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -63,7 +61,7 @@ def fuser(name):
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_nvfuser_enabled(False)
         torch._C._jit_set_llga_enabled(True)
-    elif name == "none":  # Turn Pytorch fuser off
+    elif name == 'none':  # Turn Pytorch fuser off
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
@@ -74,7 +72,7 @@ def fuser(name):
     try:
         yield
     finally:
-        if name in ["fuser1", "fuser3"]:  # NNC or oneDNN Graph
+        if name in ['fuser1', 'fuser3']:  # NNC or oneDNN Graph
             torch._C._jit_set_profiling_executor(old_profiling_executor)
             torch._C._get_graph_executor_optimize(old_profiling_mode)
         # recover the previous values
@@ -87,25 +85,22 @@ def fuser(name):
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
-
 def _get_differentiable_graph_node(node, diff_node):
-    if node.kind() == "prim::DifferentiableGraph":
+    if node.kind() == 'prim::DifferentiableGraph':
         diff_node.append(node)
     else:
         for block in node.blocks():
             for n in block.nodes():
                 _get_differentiable_graph_node(n, diff_node)
 
-
 def _graph_for(self, *args, **kwargs):
     return _script_method_graph_for(self, self, *args, **kwargs)
-
 
 def _script_method_graph_for(self, parent, *args, **kwargs):
     try:
         dbs = parent.get_debug_state()
         eps = list(dbs.execution_plans.values())
-        assert len(eps) == 1
+        assert(len(eps) == 1)
         graph = eps[0].graph.copy()
 
         # graph_executor_states for differentiable node
@@ -114,7 +109,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         for n in graph.nodes():
             _get_differentiable_graph_node(n, diff_nodes)
 
-        assert len(fw_states) == len(diff_nodes)
+        assert(len(fw_states) == len(diff_nodes))
         # swap each differentiable graph with optimized graph in their execution plan
         for n, state in zip(diff_nodes, fw_states):
             fw_execution_plans = list(state.execution_plans.values())
@@ -122,7 +117,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
             # plan. Avoid assert here so we would skip the ones that can't be
             # updated while try the best effort to update other nodes.
             if len(fw_execution_plans) == 1:
-                n.g_("Subgraph", fw_execution_plans[0].graph)
+                n.g_('Subgraph', fw_execution_plans[0].graph)
 
         return graph
     except Exception:
@@ -130,7 +125,6 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         # graph
         self(*args, **kwargs)
         return last_executed_optimized_graph()
-
 
 def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     """

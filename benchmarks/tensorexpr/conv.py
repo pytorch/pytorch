@@ -19,7 +19,7 @@ class ConvImplBench(benchmark.Benchmark):
         elif case == "depthwise_conv":
             self.groups = iC
         else:
-            raise ValueError(f"invalid case: {case}")
+            raise ValueError("invalid case: %s" % (case))
 
         self.conv = self.conv2d_layer(iC, oC, kernel_size, groups=self.groups)
         if device != "cpu":
@@ -61,7 +61,7 @@ class ConvImplBench(benchmark.Benchmark):
         elif self.mode == "both":
             count = 1 + (1 + 1)
         else:
-            raise ValueError(f"invalid mode: {self.mode}")
+            raise ValueError("invalid mode: %s" % (self.mode))
 
         op_count = (
             self.N

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: package/deploy"]
 
 import inspect

@@ -7,13 +7,13 @@ __all__ = ['SparseAdam']
 class SparseAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, maximize: bool = False):
         if not 0.0 < lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < eps:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
 
         params = list(params)
 
@@ -97,7 +97,7 @@ class SparseAdam(Optimizer):
 
         return loss
 
-SparseAdam.__doc__ = fr"""SparseAdam implements a masked version of the Adam algorithm
+SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algorithm
     suitable for sparse gradients. Currently, due to implementation constraints (explained
     below), SparseAdam is only intended for a narrow subset of use cases, specifically
     parameters of a dense layout with gradients of a sparse layout. This occurs in a
@@ -150,9 +150,9 @@ SparseAdam.__doc__ = fr"""SparseAdam implements a masked version of the Adam alg
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        {_maximize_doc}
+        {maximize}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """
+    """.format(maximize=_maximize_doc)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 import logging
@@ -88,6 +89,7 @@ try:
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXX86Inductor  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
 except ImportError as e:
     # In FBCode we separate PT2 out into a separate target for the sake of dev
@@ -148,18 +150,6 @@ except ImportError as e:
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401
-try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPU  # noqa: F401
-except ImportError as e:
-    logging.warning(e)
-try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCUDA  # noqa: F401
-except ImportError as e:
-    logging.warning(e)
-try:
-    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
-except ImportError as e:
-    logging.warning(e)
 
 if __name__ == '__main__':
     run_tests()

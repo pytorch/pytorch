@@ -163,8 +163,8 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
-# NOTE: This decorator is currently unused, but we may want to use it in the future when
-# we have more tests that are not supported in released ORT.
+# TODO(titaiwang): dynamic_only is specific to the situation that dynamic fx exporter
+# is not yet supported by ORT until 1.15.0. Remove dynamic_only once ORT 1.15.0 is released.
 def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     def skip_dec(func):
         @functools.wraps(func)
@@ -203,30 +203,6 @@ def skip_dynamic_fx_test(reason: str):
             if self.dynamic_shapes:
                 raise unittest.SkipTest(
                     f"Skip verify dynamic shapes test for FX. {reason}"
-                )
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
-def skip_load_checkpoint_after_model_creation(reason: str):
-    """Skip loading checkpoint right after model initialization.
-
-    Args:
-        reason: The reason for skipping dynamic exporting test.
-
-    Returns:
-        A decorator for skipping dynamic exporting test.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if self.load_checkpoint_during_init:
-                raise unittest.SkipTest(
-                    f"Skip loading checkpoint during model initialization for FX tests. {reason}"
                 )
             return func(self, *args, **kwargs)
 

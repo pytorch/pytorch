@@ -50,24 +50,13 @@ struct Vec2 {
     std::tie(v0, v1) = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
     return {v0, v1};
   }
-  static Vec2 loadu(const float* ptr) {
-    return {Vectorized<float>::loadu(ptr), Vectorized<float>::loadu(ptr + Vectorized<float>::size())};
-  }
   void store(BFloat16* ptr) const {
     Vectorized<BFloat16> val = convert_float_bfloat16(val0, val1);
     val.store(ptr);
   }
-  void store(float* ptr) const {
-    val0.store(ptr);
-    val1.store(ptr + Vectorized<float>::size());
-  }
 };
 inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.val0 + b.val0, a.val1 + b.val1}; }
 inline Vec2 operator*(const Vec2& a, const Vec2& b) { return {a.val0 * b.val0, a.val1 * b.val1}; }
-inline Vec2 operator-(const Vec2& a, const Vec2& b) { return {a.val0 - b.val0, a.val1 - b.val1}; }
-inline Vec2 operator/(const Vec2& a, const Vec2& b) { return {a.val0 / b.val0, a.val1 / b.val1}; }
-inline Vec2 maximum(const Vec2& a, const Vec2& b) { return {vec::maximum(a.val0, b.val0), vec::maximum(a.val1, b.val1)}; }
-inline Vec2 minimum(const Vec2& a, const Vec2& b) { return {vec::minimum(a.val0, b.val0), vec::minimum(a.val1, b.val1)}; }
 
 template <typename scalar_t> struct VectorizedType { using type = Vectorized<scalar_t>; };
 template <> struct VectorizedType<BFloat16> { using type = Vec2; };

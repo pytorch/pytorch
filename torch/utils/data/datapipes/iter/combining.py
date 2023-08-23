@@ -56,7 +56,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return sum(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
 @functional_datapipe('fork')
@@ -421,7 +421,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe_exhausted = False
         self._child_stop: List[bool] = [True for _ in range(num_instances)]
 
-    def _find_next(self, instance_id: int) -> T_co:  # type: ignore[type-var]
+    def _find_next(self, instance_id: int) -> T_co:
         while True:
             if self.main_datapipe_exhausted or self._child_stop[instance_id]:
                 raise StopIteration
@@ -567,7 +567,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
-            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
     def reset(self) -> None:
         self.buffer = []
@@ -627,4 +627,4 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return min(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

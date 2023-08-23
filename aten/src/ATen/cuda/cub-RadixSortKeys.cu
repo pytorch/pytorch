@@ -2,7 +2,9 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/cub.cuh>
 
-namespace at::cuda::cub {
+namespace at {
+namespace cuda {
+namespace cub {
 
 template <typename key_t>
 void radix_sort_keys(
@@ -52,4 +54,6 @@ void radix_sort_keys(
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTATIATE_CUB_TEMPLATES)
 
-} // namespace at::cuda::cub
+} // namespace cub
+} // namespace cuda
+} // namespace at

@@ -20,7 +20,7 @@ namespace at::native {
 namespace mps {
 
 // Produces a shape with the `dim` dimension set to 0.
-static std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
+std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
   const int sz = sizes.size();
   if (sz == 0) {
     return {0};
@@ -35,7 +35,7 @@ static std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_)
   return numbers;
 }
 
-static void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
+void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
   int first_dims = first.dim();
   int second_dims = second.dim();
   TORCH_CHECK(

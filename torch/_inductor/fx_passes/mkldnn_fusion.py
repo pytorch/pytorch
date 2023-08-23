@@ -1,5 +1,4 @@
 import functools
-import operator
 from functools import reduce
 
 import torch
@@ -9,14 +8,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols
 from .. import ir
 
 from ..lowering import lowerings as L
-from ..pattern_matcher import (
-    Arg,
-    CallFunction,
-    filter_nodes,
-    get_arg_value,
-    KeywordArg,
-    MULTIPLE,
-)
+from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -636,12 +628,7 @@ if torch._C._has_mkldnn:
                 aten.reshape.default,
                 CallFunction(
                     mkldnn._linear_pointwise.default,
-                    CallFunction(
-                        aten.reshape.default,
-                        Arg(),
-                        KeywordArg("reshape_1"),
-                        _users=MULTIPLE,
-                    ),
+                    CallFunction(aten.reshape.default, Arg(), KeywordArg("reshape_1")),
                     Arg(),
                     Arg(),
                     Arg(),
@@ -654,19 +641,14 @@ if torch._C._has_mkldnn:
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
-            reshape_2 = kwargs.get("reshape_2")
+            reshape_2 = kwargs.get("reshape_1")
             graph = match.graph
             node = match.output_node()
             if reshape_1[0] == reduce(lambda x, y: x * y, reshape_2[:-1]):
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
                 repl.meta.update(node.meta)
                 node.replace_all_uses_with(repl)
-                old_linear_node = node.args[0]
-                reshape_1_node = old_linear_node.args[0]
-                graph.erase_node(node)
-                graph.erase_node(old_linear_node)
-                if reshape_1_node.users == 0:
-                    graph.erase_node(reshape_1_node)
+                match.erase_nodes(graph)
 
         def is_linear_add_bias(match):
             add_node = match.output_node()
@@ -703,38 +685,6 @@ if torch._C._has_mkldnn:
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
             match.erase_nodes(graph)
-
-    def _is_packable_mkldnn_rnn_layer(match):
-        lstm_node = match.output_node()
-        POS_WEIGHTS = [1, 2]
-        POS_INPUTS = [0, 5, 6]
-        POS_ARGS = POS_WEIGHTS + POS_INPUTS
-        # Weights should be Constant
-        if any(
-            lstm_node.args[POS_WEIGHT].op != "get_attr" for POS_WEIGHT in POS_WEIGHTS
-        ):
-            return False
-
-        # Meta info for weights and inputs should be available
-        if any(lstm_node.args[POS_ARG].meta.get("val") is None for POS_ARG in POS_ARGS):
-            return False
-
-        # Check device
-        if any(
-            lstm_node.args[POS_ARG].meta.get("val").device.type != "cpu"
-            for POS_ARG in POS_ARGS
-        ):
-            return False
-
-        # Check dtype
-        if any(
-            lstm_node.args[POS_ARG].meta.get("val").dtype == torch.bfloat16
-            and not mkldnn._is_mkldnn_bf16_supported()
-            for POS_ARG in POS_ARGS
-        ):
-            return False
-
-        return True
 
     def _is_packable_convolution(match):
         """
@@ -796,8 +746,8 @@ if torch._C._has_mkldnn:
             return False
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
-        # for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        if not is_bf16_weight and (free_symbols(batch_size) or (not torch._C.has_mkl)):
+        # for fp32, batch_size should not be a free symbol.
+        if not is_bf16_weight and free_symbols(batch_size):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
@@ -834,25 +784,6 @@ if torch._C._has_mkldnn:
         KeywordArg("is_transposed"),
         Arg(),
         Arg(),
-    )
-
-    _aten_mkldnn_rnn_layer_args = (
-        Arg(),  # input
-        Arg(),  # weight0
-        Arg(),  # weight1
-        Arg(),  # weight2
-        Arg(),  # weight3
-        Arg(),  # hx_
-        Arg(),  # cx_
-        KeywordArg("reverse"),  # reverse
-        Arg(),  # batch_sizes
-        Arg(),  # mode
-        Arg(),  # hidden_size
-        Arg(),  # num_layers
-        Arg(),  # has_biases
-        Arg(),  # bidirectional
-        Arg(),  # batch_first
-        Arg(),  # train
     )
 
     def _register_weight_pack_pass():
@@ -898,57 +829,6 @@ if torch._C._has_mkldnn:
                 graph.erase_node(conv_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
-            extra_check=_is_packable_mkldnn_rnn_layer,
-        )
-        def mkldnn_rnn_layer(match, *args, **kwargs):
-            def get_item(graph, node, index):
-                return graph.call_function(operator.getitem, (node, index))
-
-            graph = match.graph
-            lstm_node = match.output_node()
-            input = args[0]
-            weight0, weight1 = args[1:3]
-            reverse = kwargs.get("reverse")
-            packed_lstm_op = aten.mkldnn_rnn_layer.default
-            hidden_size = args[9]
-            has_biases = args[11]
-            batch_first = args[13]
-            with graph.inserting_before(lstm_node):
-                packed_weight_op = mkldnn._reorder_mkldnn_rnn_layer_weight.default
-                packed_weight_inputs = (
-                    weight0,
-                    weight1,
-                    hidden_size,
-                    reverse,
-                    has_biases,
-                    batch_first,
-                )
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, packed_weight_inputs, {}, "name"
-                )
-                packed_weight_items = [
-                    get_item(graph, packed_weight_node, i) for i in range(2)
-                ]
-                pack_lstm_inputs = (
-                    args[0],
-                    *packed_weight_items,
-                    args[3],
-                    args[4],
-                    args[5],
-                    args[6],
-                    reverse,
-                    *args[7:],
-                )
-
-                packed_lstm_node = graph.create_node(
-                    "call_function", packed_lstm_op, args=pack_lstm_inputs
-                )
-                lstm_node.replace_all_uses_with(packed_lstm_node)
-                packed_lstm_node.meta.update(lstm_node.meta)
-                graph.erase_node(lstm_node)
-
-        @register_freezing_graph_pattern(
             CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
             extra_check=_is_packable_linear,
         )
@@ -966,30 +846,22 @@ if torch._C._has_mkldnn:
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
-                weight_dtype = weight.meta.get("val").dtype
-                is_bf16_weight = weight_dtype == torch.bfloat16
+                is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                if free_symbols(batch_size):
-                    assert (
-                        is_bf16_weight
-                    ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
-                packed_weight_inputs = (
-                    transpose_weight_node,
-                    batch_size.node.shape_env.size_hint(batch_size.node.expr)
-                    if free_symbols(batch_size)
-                    else batch_size,
-                )
-                packed_weight_inputs = (transpose_weight_node, batch_size)
-                packed_weight_op = (
-                    mkldnn._reorder_linear_weight
-                    if is_bf16_weight
-                    else torch.ops.mkl._mkl_reorder_linear_weight
-                )
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
-
+                if not free_symbols(batch_size):
+                    packed_weight_inputs = (transpose_weight_node, batch_size)
+                    packed_weight_op = (
+                        mkldnn._reorder_linear_weight
+                        if is_bf16_weight
+                        else torch.ops.mkl._mkl_reorder_linear_weight
+                    )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                else:
+                    assert is_bf16_weight
+                    # For dynamic shape case, we need to pack weight in runtime.
+                    packed_weight_node = transpose_weight_node
                 packed_linear_inputs = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
@@ -1020,16 +892,12 @@ if torch._C._has_mkldnn:
         """
         if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
             return gm
-
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
-            mkldnn._reorder_mkldnn_rnn_layer_weight,
+            torch.ops.mkl._mkl_reorder_linear_weight,
         ]
-        if torch._C.has_mkl:
-            packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
-
         for node in gm.graph.nodes:
             if node.target in packed_weight_ops and len(node.args[0].users) > 1:
                 for user_node in list(node.args[0].users.keys()):

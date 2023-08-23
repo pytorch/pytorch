@@ -7,9 +7,8 @@ import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple, Union
 
+from execution.work import PYTHON_CMD, SHELL, InProgress, WorkOrder
 from worker.main import WorkerFailure, WorkerOutput
-
-from execution.work import InProgress, PYTHON_CMD, SHELL, WorkOrder
 
 
 CPU_COUNT: int = multiprocessing.cpu_count()
@@ -17,7 +16,6 @@ CPU_COUNT: int = multiprocessing.cpu_count()
 
 class WorkerFailed(Exception):
     """Raised in the main process when a worker failure is detected."""
-
     def __init__(self, cmd: str, wrapped_trace: Optional[str] = None) -> None:
         self.cmd: str = cmd
         self.wrapped_trace: Optional[str] = wrapped_trace
@@ -37,7 +35,6 @@ class CorePool:
     This falls short of full architecture awareness, and instead tries to find
     a balance between rigor and engineering complexity.
     """
-
     def __init__(self, min_core_id: int, max_core_id: int) -> None:
         assert min_core_id >= 0
         assert max_core_id >= min_core_id
@@ -49,8 +46,7 @@ class CorePool:
         print(f"Core pool created: cores {self._min_core_id}-{self._max_core_id}")
 
         self._available: List[bool] = [
-            True for _ in range(min_core_id, min_core_id + self._num_cores)
-        ]
+            True for _ in range(min_core_id, min_core_id + self._num_cores)]
 
         self._reservations: Dict[str, Tuple[int, ...]] = {}
         self._lock = threading.Lock()
@@ -103,7 +99,7 @@ class Runner:
         self._currently_processed: Optional[WorkOrder] = None
 
         if len(work_items) != len(set(work_items)):
-            raise ValueError("Duplicate work items.")
+            raise ValueError('Duplicate work items.')
 
     def run(self) -> Dict[WorkOrder, WorkerOutput]:
         try:
@@ -120,13 +116,13 @@ class Runner:
             raise
 
         except WorkerFailed as e:
-            print("Shutting down all outstanding jobs before re-raising.")
+            print('Shutting down all outstanding jobs before re-raising.')
             self._force_shutdown(verbose=True)
             print(f"Cmd: {e.cmd}")
             if e.wrapped_trace:
                 print(e.wrapped_trace)
             else:
-                print("Unknown failure. (Worker did not report exception contents.)")
+                print('Unknown failure. (Worker did not report exception contents.)')
             raise
 
         except BaseException:
@@ -207,17 +203,12 @@ class Runner:
             job.proc.interrupt()
 
         if verbose and self._currently_processed is not None:
-            print(
-                textwrap.dedent(
-                    f"""
+            print(textwrap.dedent(f"""
                 Failed when processing the following Job:
                   Label:      {self._currently_processed.label}
                   AutoLabels: {self._currently_processed.autolabels}
                   Source cmd: {self._currently_processed.source_cmd}
-            """
-                ).strip()
-                + "\n"
-            )
+            """).strip() + "\n")
 
         if self._active_jobs:
             time.sleep(0.5)
@@ -225,22 +216,22 @@ class Runner:
         remaining_jobs = [j for j in self._active_jobs if j.proc.poll() is None]
         if remaining_jobs:
             print(
-                f"SIGINT sent to {len(self._active_jobs)} jobs, "
-                f"{len(remaining_jobs)} have not yet exited.\n"
-                "Entering short cleanup loop, after which stragglers will "
-                "be forcibly terminated."
+                f'SIGINT sent to {len(self._active_jobs)} jobs, '
+                f'{len(remaining_jobs)} have not yet exited.\n'
+                'Entering short cleanup loop, after which stragglers will '
+                'be forcibly terminated.'
             )
 
             for _ in range(5):
                 time.sleep(2.0)
                 remaining_jobs = [j for j in remaining_jobs if j.proc.poll() is None]
                 if remaining_jobs:
-                    print(f"{len(remaining_jobs)} still remain.")
+                    print(f'{len(remaining_jobs)} still remain.')
                 else:
-                    print("All remaining jobs have gracefully terminated.")
+                    print('All remaining jobs have gracefully terminated.')
                     return
 
-            print(f"{len(remaining_jobs)} jobs refused to exit. Forcibly terminating.")
+            print(f'{len(remaining_jobs)} jobs refused to exit. Forcibly terminating.')
             for j in remaining_jobs:
                 j.proc.terminate()
 
@@ -251,7 +242,7 @@ class Runner:
             if w.source_cmd is not None:
                 source_cmds.add(f"{w.source_cmd} && ")
 
-        for source_cmd in source_cmds or {""}:
+        for source_cmd in (source_cmds or {""}):
             cmd = f'{source_cmd}{PYTHON_CMD} -c "import torch"'
             proc = subprocess.run(
                 cmd,
@@ -264,5 +255,4 @@ class Runner:
 
             if proc.returncode:
                 raise ImportError(
-                    f"Failed to import torch in subprocess: {cmd}\n{proc.stdout}"
-                )
+                    f'Failed to import torch in subprocess: {cmd}\n{proc.stdout}')

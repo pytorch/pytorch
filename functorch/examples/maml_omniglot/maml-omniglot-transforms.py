@@ -27,44 +27,39 @@ Our MAML++ fork and experiments are available at:
 https://github.com/bamos/HowToTrainYourMAMLPytorch
 """
 
-import argparse
-import functools
-import time
-
-import matplotlib as mpl
+from support.omniglot_loaders import OmniglotNShot
+from torch.func import vmap, grad, functional_call
+import torch.optim as optim
+import torch.nn.functional as F
+from torch import nn
+import torch
 import matplotlib.pyplot as plt
-import numpy as np
+import argparse
+import time
+import functools
 
 import pandas as pd
-import torch
-import torch.nn.functional as F
-import torch.optim as optim
-from support.omniglot_loaders import OmniglotNShot
-from torch import nn
-from torch.func import functional_call, grad, vmap
-
-mpl.use("Agg")
-plt.style.use("bmh")
+import numpy as np
+import matplotlib as mpl
+mpl.use('Agg')
+plt.style.use('bmh')
 
 
 def main():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--n-way", "--n_way", type=int, help="n way", default=5)
+    argparser.add_argument('--n-way', '--n_way', type=int, help='n way', default=5)
     argparser.add_argument(
-        "--k-spt", "--k_spt", type=int, help="k shot for support set", default=5
-    )
+        '--k-spt', '--k_spt', type=int, help='k shot for support set', default=5)
     argparser.add_argument(
-        "--k-qry", "--k_qry", type=int, help="k shot for query set", default=15
-    )
-    argparser.add_argument("--device", type=str, help="device", default="cuda")
+        '--k-qry', '--k_qry', type=int, help='k shot for query set', default=15)
     argparser.add_argument(
-        "--task-num",
-        "--task_num",
+        '--device', type=str, help='device', default='cuda')
+    argparser.add_argument(
+        '--task-num', '--task_num',
         type=int,
-        help="meta batch size, namely task num",
-        default=32,
-    )
-    argparser.add_argument("--seed", type=int, help="random seed", default=1)
+        help='meta batch size, namely task num',
+        default=32)
+    argparser.add_argument('--seed', type=int, help='random seed', default=1)
     args = argparser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -75,7 +70,7 @@ def main():
     # Set up the Omniglot loader.
     device = args.device
     db = OmniglotNShot(
-        "/tmp/omniglot-data",
+        '/tmp/omniglot-data',
         batchsz=args.task_num,
         n_way=args.n_way,
         k_shot=args.k_spt,
@@ -100,8 +95,7 @@ def main():
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         nn.Flatten(),
-        nn.Linear(64, args.n_way),
-    ).to(device)
+        nn.Linear(64, args.n_way)).to(device)
 
     net.train()
 
@@ -138,7 +132,8 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
     # These will be used to update the model's meta-parameters.
     qry_logits = functional_call(net, (new_params, buffers), x_qry)
     qry_loss = F.cross_entropy(qry_logits, y_qry)
-    qry_acc = (qry_logits.argmax(dim=1) == y_qry).sum() / querysz
+    qry_acc = (qry_logits.argmax(
+        dim=1) == y_qry).sum() / querysz
 
     return qry_loss, qry_acc
 
@@ -168,23 +163,21 @@ def train(db, net, device, meta_opt, epoch, log):
 
         meta_opt.step()
         qry_losses = qry_losses.detach().sum() / task_num
-        qry_accs = 100.0 * qry_accs.sum() / task_num
+        qry_accs = 100. * qry_accs.sum() / task_num
         i = epoch + float(batch_idx) / n_train_iter
         iter_time = time.time() - start_time
         if batch_idx % 4 == 0:
             print(
-                f"[Epoch {i:.2f}] Train Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f} | Time: {iter_time:.2f}"
+                f'[Epoch {i:.2f}] Train Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f} | Time: {iter_time:.2f}'
             )
 
-        log.append(
-            {
-                "epoch": i,
-                "loss": qry_losses,
-                "acc": qry_accs,
-                "mode": "train",
-                "time": time.time(),
-            }
-        )
+        log.append({
+            'epoch': i,
+            'loss': qry_losses,
+            'acc': qry_accs,
+            'mode': 'train',
+            'time': time.time(),
+        })
 
 
 def test(db, net, device, epoch, log):
@@ -201,7 +194,7 @@ def test(db, net, device, epoch, log):
     qry_accs = []
 
     for batch_idx in range(n_test_iter):
-        x_spt, y_spt, x_qry, y_qry = db.next("test")
+        x_spt, y_spt, x_qry, y_qry = db.next('test')
         task_num, setsz, c_, h, w = x_spt.size()
 
         # TODO: Maybe pull this out into a separate module so it
@@ -214,28 +207,28 @@ def test(db, net, device, epoch, log):
                 spt_logits = functional_call(net, (new_params, buffers), x_spt[i])
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params.values())
-                new_params = {
-                    k: new_params[k] - g * 1e-1 for k, g, in zip(new_params, grads)
-                }
+                new_params = {k: new_params[k] - g * 1e-1 for k, g, in zip(new_params, grads)}
 
             # The query loss and acc induced by these parameters.
             qry_logits = functional_call(net, (new_params, buffers), x_qry[i]).detach()
-            qry_loss = F.cross_entropy(qry_logits, y_qry[i], reduction="none")
+            qry_loss = F.cross_entropy(
+                qry_logits, y_qry[i], reduction='none')
             qry_losses.append(qry_loss.detach())
-            qry_accs.append((qry_logits.argmax(dim=1) == y_qry[i]).detach())
+            qry_accs.append(
+                (qry_logits.argmax(dim=1) == y_qry[i]).detach())
 
     qry_losses = torch.cat(qry_losses).mean().item()
-    qry_accs = 100.0 * torch.cat(qry_accs).float().mean().item()
-    print(f"[Epoch {epoch+1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
-    log.append(
-        {
-            "epoch": epoch + 1,
-            "loss": qry_losses,
-            "acc": qry_accs,
-            "mode": "test",
-            "time": time.time(),
-        }
+    qry_accs = 100. * torch.cat(qry_accs).float().mean().item()
+    print(
+        f'[Epoch {epoch+1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}'
     )
+    log.append({
+        'epoch': epoch + 1,
+        'loss': qry_losses,
+        'acc': qry_accs,
+        'mode': 'test',
+        'time': time.time(),
+    })
 
 
 def plot(log):
@@ -244,20 +237,20 @@ def plot(log):
     df = pd.DataFrame(log)
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    train_df = df[df["mode"] == "train"]
-    test_df = df[df["mode"] == "test"]
-    ax.plot(train_df["epoch"], train_df["acc"], label="Train")
-    ax.plot(test_df["epoch"], test_df["acc"], label="Test")
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Accuracy")
+    train_df = df[df['mode'] == 'train']
+    test_df = df[df['mode'] == 'test']
+    ax.plot(train_df['epoch'], train_df['acc'], label='Train')
+    ax.plot(test_df['epoch'], test_df['acc'], label='Test')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
     ax.set_ylim(70, 100)
-    fig.legend(ncol=2, loc="lower right")
+    fig.legend(ncol=2, loc='lower right')
     fig.tight_layout()
-    fname = "maml-accs.png"
-    print(f"--- Plotting accuracy to {fname}")
+    fname = 'maml-accs.png'
+    print(f'--- Plotting accuracy to {fname}')
     fig.savefig(fname)
     plt.close(fig)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

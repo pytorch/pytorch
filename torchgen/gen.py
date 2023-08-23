@@ -212,7 +212,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 def parse_tags_yaml(path: str) -> Set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
-        with open(path) as f:
+        with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
             _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
 
@@ -233,7 +233,7 @@ def parse_native_yaml(
 
         # if a loaded yaml is provided, use that instead of reading from path
         if loaded_yaml is None:
-            with open(path) as f:
+            with open(path, "r") as f:
                 es = yaml.load(f, Loader=LineLoader)
         else:
             es = loaded_yaml
@@ -1846,13 +1846,13 @@ def gen_per_operator_headers(
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
-    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(list)
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
 
     grouped_functions_by_root_name: Dict[
         str, List[Union[NativeFunction, NativeFunctionsGroup]]
-    ] = defaultdict(list)
+    ] = defaultdict(lambda: [])
     for group in grouped_native_functions:
         name = group.root_name
         grouped_functions_by_root_name[name].append(group)

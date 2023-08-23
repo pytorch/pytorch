@@ -288,20 +288,7 @@ at::Tensor from_vulkan(vTensor& v_src) {
   at::TensorOptions opt(at::kCPU);
   opt = opt.dtype(v_src.dtype());
 
-  c10::MemoryFormat v_src_memory_format;
-
-  switch (v_src.gpu_memory_layout()) {
-    case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-      v_src_memory_format = c10::MemoryFormat::Contiguous;
-      break;
-    case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-      v_src_memory_format = c10::MemoryFormat::ChannelsLast;
-      break;
-    default:
-      TORCH_CHECK(false, "No corresponding memory format");
-  }
-
-  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src_memory_format);
+  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src.memory_format());
   ops::pack_vulkan_to_cpu(v_src, ret);
   return ret;
 }

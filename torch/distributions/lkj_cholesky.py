@@ -10,12 +10,11 @@ Original copyright notice:
 import math
 
 import torch
-from torch.distributions import Beta, constraints
+from torch.distributions import constraints, Beta
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
-__all__ = ["LKJCholesky"]
-
+__all__ = ['LKJCholesky']
 
 class LKJCholesky(Distribution):
     r"""
@@ -55,25 +54,19 @@ class LKJCholesky(Distribution):
     Daniel Lewandowski, Dorota Kurowicka, Harry Joe.
     Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
-    arg_constraints = {"concentration": constraints.positive}
+    arg_constraints = {'concentration': constraints.positive}
     support = constraints.corr_cholesky
 
-    def __init__(self, dim, concentration=1.0, validate_args=None):
+    def __init__(self, dim, concentration=1., validate_args=None):
         if dim < 2:
-            raise ValueError(
-                f"Expected dim to be an integer greater than or equal to 2. Found dim={dim}."
-            )
+            raise ValueError(f'Expected dim to be an integer greater than or equal to 2. Found dim={dim}.')
         self.dim = dim
-        (self.concentration,) = broadcast_all(concentration)
+        self.concentration, = broadcast_all(concentration)
         batch_shape = self.concentration.size()
         event_shape = torch.Size((dim, dim))
         # This is used to draw vectorized samples from the beta distribution in Sec. 3.2 of [1].
         marginal_conc = self.concentration + 0.5 * (self.dim - 2)
-        offset = torch.arange(
-            self.dim - 1,
-            dtype=self.concentration.dtype,
-            device=self.concentration.device,
-        )
+        offset = torch.arange(self.dim - 1, dtype=self.concentration.dtype, device=self.concentration.device)
         offset = torch.cat([offset.new_zeros((1,)), offset])
         beta_conc1 = offset + 0.5
         beta_conc0 = marginal_conc.unsqueeze(-1) - 0.5 * offset
@@ -86,9 +79,7 @@ class LKJCholesky(Distribution):
         new.dim = self.dim
         new.concentration = self.concentration.expand(batch_shape)
         new._beta = self._beta.expand(batch_shape + (self.dim,))
-        super(LKJCholesky, new).__init__(
-            batch_shape, self.event_shape, validate_args=False
-        )
+        super(LKJCholesky, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
@@ -100,12 +91,12 @@ class LKJCholesky(Distribution):
         #   the correlation matrix instead of the correlation matrix itself. As such,
         #   we only need to generate `w`.
         y = self._beta.sample(sample_shape).unsqueeze(-1)
-        u_normal = torch.randn(
-            self._extended_shape(sample_shape), dtype=y.dtype, device=y.device
-        ).tril(-1)
+        u_normal = torch.randn(self._extended_shape(sample_shape),
+                               dtype=y.dtype,
+                               device=y.device).tril(-1)
         u_hypersphere = u_normal / u_normal.norm(dim=-1, keepdim=True)
         # Replace NaNs in first row
-        u_hypersphere[..., 0, :].fill_(0.0)
+        u_hypersphere[..., 0, :].fill_(0.)
         w = torch.sqrt(y) * u_hypersphere
         # Fill diagonal elements; clamp for numerical stability
         eps = torch.finfo(w.dtype).tiny

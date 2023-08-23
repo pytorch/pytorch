@@ -253,7 +253,7 @@ def _validate_loaded_sparse_tensors():
                 )
             else:
                 raise NotImplementedError(
-                    f"_validate_loaded_sparse_tensors for layout `{t.layout}`"
+                    "_validate_loaded_sparse_tensors for layout `%s`" % (t.layout)
                 )
 
     finally:
@@ -299,7 +299,7 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
+    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -375,7 +375,9 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
+        raise RuntimeError(
+            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
+        )
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -674,7 +676,9 @@ class ExceptionWrapper:
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
+        msg = "Caught {} {}.\nOriginal {}".format(
+            self.exc_type.__name__, self.where, self.exc_msg
+        )
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -767,7 +771,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError(f"Expected a non cpu device, but got: {device}")
+            raise ValueError("Expected a non cpu device, but got: {}".format(device))
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device
@@ -784,7 +788,8 @@ def _get_device_index(
                 device_idx = _get_current_device_index()
         else:
             raise ValueError(
-                f"Expected a torch.device with a specified index or an integer, but got:{device}"
+                "Expected a torch.device with a specified index "
+                "or an integer, but got:{}".format(device)
             )
     return device_idx
 

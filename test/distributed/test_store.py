@@ -354,7 +354,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def _create_client(self, index, addr, port, world_size):
         client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
-        self.assertEqual(b"value", client_store.get("key"))
+        self.assertEqual("value".encode(), client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
         self.assertEqual(f"next_value{index}".encode(),
                          client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))

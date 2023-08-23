@@ -1,42 +1,36 @@
-import inspect
-import warnings
-from functools import wraps
-from itertools import chain
-
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
-
 import torch
-import torch._prims_common as utils
 from torch._prims_common import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
     NumberType,
-    ShapeType,
     TensorLike,
     TensorLikeType,
+    ShapeType,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
+import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
+import inspect
+from functools import wraps
+import warnings
+from itertools import chain
 
 @overload
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
-
 @overload
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
-
 
 @overload
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
-
 @overload
 def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
     pass
-
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(a, dtype):
@@ -53,15 +47,19 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    raise ValueError(
+        "Received type {0} that is neither a tensor or a number!".format(type(a))
+    )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
     if not isinstance(a, Number):
-        msg = f"Found unknown type {type(a)} when trying to convert scalars!"
+        msg = "Found unknown type {0} when trying to convert scalars!".format(type(a))
         raise ValueError(msg)
     if not utils.is_weakly_lesser_type(type(a), typ):
-        msg = f"Scalar {a} of type {type(a)} cannot be safely cast to type {typ}!"
+        msg = "Scalar {0} of type {1} cannot be safely cast to type {2}!".format(
+            a, type(a), typ
+        )
         raise ValueError(msg)
 
     return typ(a)
@@ -99,7 +97,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Optional[Sequence[str]] = None,
+        type_promoting_args: Sequence[str] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
@@ -171,7 +169,7 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
             copy_from.device, copy_to.device
         )
         raise RuntimeError(msg)
@@ -293,9 +291,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.ADInplaceOrView
-            )
+            old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):
@@ -311,9 +307,7 @@ def backwards_not_supported(prim):
     @wraps(prim)
     def _autograd_impl(*args, **kwargs):
         flat_args, args_spec = tree_flatten((args, kwargs))
-        if torch.is_grad_enabled() and any(
-            a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)
-        ):
+        if torch.is_grad_enabled() and any(a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)):
             # TODO: There is a subtle bug here: prims like copy_to
             # return their input argument after mutating it; and custom
             # autograd function will incorrectly turn the result into

@@ -11,6 +11,7 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 
 
@@ -293,7 +294,7 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
+        elif isinstance(obj, (ShardedTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)
@@ -301,15 +302,13 @@ def create_default_local_save_plan(
 
 def create_default_global_save_plan(
     all_plans: List[SavePlan],
-    rewrite_index_hints: bool = True,
 ) -> Tuple[List[SavePlan], Metadata]:
     """
     Create the global plan and metadata used by DefaultSavePlanner.
 
     Metadata is produced by concatenating the metadata of all ``WriteItem`` from the supplied plans.
 
-    The only global planning change is to update index hints in all ``MetadataIndex`` objects if
-    ``rewrite_index_hints`` is True.
+    The only global planning change is to update index hints in all ``MetadataIndex`` objects.
     """
     md: Dict[str, STORAGE_TYPES] = {}
     new_plans = []
@@ -335,12 +334,10 @@ def create_default_global_save_plan(
                         ),
                     ),
                 )
-                new_item = item
-                if rewrite_index_hints:
-                    new_index = dataclasses.replace(
-                        item.index, index=len(tensor_md.chunks)
-                    )
-                    new_item = dataclasses.replace(item, index=new_index)
+                new_index = dataclasses.replace(
+                    item.index, index=len(tensor_md.chunks)
+                )
+                new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
                 assert (

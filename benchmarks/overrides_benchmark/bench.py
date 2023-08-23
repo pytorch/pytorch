@@ -1,9 +1,8 @@
-import argparse
-import time
-
 import torch
+import time
+import argparse
 
-from common import SubTensor, SubWithTorchFunction, WithTorchFunction
+from common import SubTensor, WithTorchFunction, SubWithTorchFunction
 
 NUM_REPEATS = 1000
 NUM_REPEAT_OF_REPEATS = 1000
@@ -52,14 +51,14 @@ def main():
     types = torch.tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
 
     for t in types:
-        tensor_1 = t([1.0])
-        tensor_2 = t([2.0])
+        tensor_1 = t([1.])
+        tensor_2 = t([2.])
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(
-            "Type {} had a minimum time of {} us"
-            " and a standard deviation of {} us.".format(
-                t.__name__, (10**6 * bench_min), (10**6) * bench_std
+            "Type {0} had a minimum time of {1} us"
+            " and a standard deviation of {2} us.".format(
+                t.__name__, (10 ** 6 * bench_min), (10 ** 6) * bench_std
             )
         )
 

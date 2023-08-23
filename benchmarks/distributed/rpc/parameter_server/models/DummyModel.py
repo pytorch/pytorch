@@ -10,7 +10,7 @@ class DummyModel(nn.Module):
         dense_input_size: int,
         dense_output_size: int,
         dense_layers_count: int,
-        sparse: bool,
+        sparse: bool
     ):
         r"""
         A dummy model with an EmbeddingBag Layer and Dense Layer.
@@ -23,13 +23,10 @@ class DummyModel(nn.Module):
             sparse (bool): if True, gradient w.r.t. weight matrix will be a sparse tensor
         """
         super().__init__()
-        self.embedding = nn.EmbeddingBag(num_embeddings, embedding_dim, sparse=sparse)
-        self.dense = nn.Sequential(
-            *[
-                nn.Linear(dense_input_size, dense_output_size)
-                for _ in range(dense_layers_count)
-            ]
+        self.embedding = nn.EmbeddingBag(
+            num_embeddings, embedding_dim, sparse=sparse
         )
+        self.dense = nn.Sequential(*[nn.Linear(dense_input_size, dense_output_size) for _ in range(dense_layers_count)])
 
     def forward(self, x):
         x = self.embedding(x)

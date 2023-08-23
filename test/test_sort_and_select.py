@@ -33,12 +33,12 @@ class TestSortAndSelect(TestCase):
                 # see above
                 return ((b != b) | (a <= b)).all().item()
         else:
-            error(f'unknown order "{order}", must be "ascending" or "descending"')
+            error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
         are_ordered = True
         for k in range(1, SIZE):
             self.assertTrue(check_order(mxx[:, k - 1], mxx[:, k]),
-                            f'torch.sort ({order}) values unordered for {task}')
+                            'torch.sort ({}) values unordered for {}'.format(order, task))
 
         seen = set()
         indicesCorrect = True
@@ -51,7 +51,7 @@ class TestSortAndSelect(TestCase):
             seen.clear()
             for j in range(size):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
-                                 msg=f'torch.sort ({order}) indices wrong for {task}')
+                                 msg='torch.sort ({}) indices wrong for {}'.format(order, task))
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 

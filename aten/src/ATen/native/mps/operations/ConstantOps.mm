@@ -1,12 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/fill_native.h>
-#include <ATen/ops/zero_native.h>
 
 namespace at::native {
 
-static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
+Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   using namespace mps;
 
   if (self.numel() == 0) {
@@ -68,7 +66,7 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
 }
 
 // returns false if tensor cannot be filled with fillBuffer()
-static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
+bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   if (self.is_contiguous()) {
     MPSStream* stream = getCurrentMPSStream();
     auto storage_byte_offset = self.storage_offset() * self.itemsize();

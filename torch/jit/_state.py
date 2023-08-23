@@ -5,11 +5,9 @@ This module stores various pieces of Python-global state relating to the JIT.
 This is not intended to be imported directly; please the exposed
 functionalities in `torch.jit`.
 """
+import torch
 import os
 import weakref
-
-import torch
-
 
 class EnabledProxy:
     """Stores whether the JIT is enabled or not.
@@ -36,7 +34,7 @@ class EnabledProxy:
         elif value == "0v":
             print(false_message)
             return False
-        raise ValueError(f"Unknown setting of {name}. Try using 0 or 1.")
+        raise ValueError("Unknown setting of {}. Try using 0 or 1.".format(name))
 
     def __bool__(self):
         return self.enabled
@@ -96,7 +94,6 @@ def _clear_class_state():
 _jit_caching_layer: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _jit_function_overload_caching: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
-
 def _try_get_jit_cached_overloads(key):
     qual_names = _jit_function_overload_caching.get(key, None)
     if qual_names:
@@ -104,10 +101,8 @@ def _try_get_jit_cached_overloads(key):
     else:
         return None
 
-
 def _set_jit_overload_cache(key, compiled_fns):
     _jit_function_overload_caching[key] = [fn.qualified_name for fn in compiled_fns]
-
 
 def _try_get_jit_cached_function(key):
     if getattr(key, "__disable_jit_function_caching__", False) is True:
@@ -117,7 +112,6 @@ def _try_get_jit_cached_function(key):
         return _python_cu.find_function(qual_name)
     else:
         return None
-
 
 def _set_jit_function_cache(key, value):
     # only free functions currently supported

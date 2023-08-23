@@ -105,14 +105,5 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     pip_install -r /opt/conda/requirements-docs.txt
   fi
 
-  # HACK HACK HACK
-  # gcc-9 for ubuntu-18.04 from http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu
-  # Pulls llibstdc++6 13.1.0-8ubuntu1~18.04 which is too new for conda
-  # So remove libstdc++6.so.3.29 installed by https://anaconda.org/anaconda/libstdcxx-ng/files?version=11.2.0
-  # Same is true for gcc-12 from Ubuntu-22.04
-  if grep -e [12][82].04.[62] /etc/issue >/dev/null; then
-    rm /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/libstdc++.so.6
-  fi
-
   popd
 fi

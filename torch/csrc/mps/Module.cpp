@@ -105,7 +105,7 @@ static PyObject* MPSModule_currentAllocatedMemory(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(
+  return PyLong_FromUnsignedLongLong(
       at::detail::getMPSHooks().getCurrentAllocatedMemory());
   END_HANDLE_TH_ERRORS
 }
@@ -114,7 +114,7 @@ static PyObject* MPSModule_driverAllocatedMemory(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(
+  return PyLong_FromUnsignedLongLong(
       at::detail::getMPSHooks().getDriverAllocatedMemory());
   END_HANDLE_TH_ERRORS
 }
@@ -143,74 +143,6 @@ static PyObject* MPSModule_profilerStopTrace(
   HANDLE_TH_ERRORS
   at::detail::getMPSHooks().profilerStopTrace();
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_acquireEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const bool enable_timing = THPUtils_unpackBool(args);
-  return THPUtils_packUInt32(
-      at::detail::getMPSHooks().acquireEvent(enable_timing));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_releaseEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().releaseEvent(event_id);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_recordEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().recordEvent(event_id);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_waitForEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().waitForEvent(event_id);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_synchronizeEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().synchronizeEvent(event_id);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_queryEvent(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-
-  if (at::detail::getMPSHooks().queryEvent(event_id)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* MPSModule_elapsedTimeOfEvents(
-    PyObject* _unused,
-    PyObject* args) {
-  HANDLE_TH_ERRORS
-  PyObject* start_event_o = nullptr;
-  PyObject* end_event_o = nullptr;
-  if (!PyArg_ParseTuple(args, "OO", &start_event_o, &end_event_o)) {
-    return nullptr;
-  }
-  const uint32_t start_event_id = THPUtils_unpackUInt32(start_event_o);
-  const uint32_t end_event_id = THPUtils_unpackUInt32(end_event_o);
-  return PyFloat_FromDouble(at::detail::getMPSHooks().elapsedTimeOfEvents(
-      start_event_id, end_event_id));
   END_HANDLE_TH_ERRORS
 }
 
@@ -249,16 +181,6 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_profilerStopTrace",
      MPSModule_profilerStopTrace,
      METH_NOARGS,
-     nullptr},
-    {"_mps_acquireEvent", MPSModule_acquireEvent, METH_O, nullptr},
-    {"_mps_releaseEvent", MPSModule_releaseEvent, METH_O, nullptr},
-    {"_mps_recordEvent", MPSModule_recordEvent, METH_O, nullptr},
-    {"_mps_waitForEvent", MPSModule_waitForEvent, METH_O, nullptr},
-    {"_mps_synchronizeEvent", MPSModule_synchronizeEvent, METH_O, nullptr},
-    {"_mps_queryEvent", MPSModule_queryEvent, METH_O, nullptr},
-    {"_mps_elapsedTimeOfEvents",
-     MPSModule_elapsedTimeOfEvents,
-     METH_VARARGS,
      nullptr},
     {nullptr}};
 

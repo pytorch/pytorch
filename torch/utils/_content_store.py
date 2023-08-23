@@ -47,11 +47,21 @@ from torch.multiprocessing.reductions import StorageWeakRef
 # SHA-1 if stable_hash=True, otherwise it will consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
+    # TODO: factor this into a helper
     import torch._dynamo
-    from torch._dynamo.utils import is_compile_supported
 
+    compile_supported = torch._dynamo.is_dynamo_supported()
     device_type = storage.device.type
-    if stable_hash or not is_compile_supported(device_type):
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+
+    if stable_hash or not compile_supported:
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary

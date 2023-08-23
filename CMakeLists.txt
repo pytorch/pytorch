@@ -207,9 +207,6 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-    USE_CUSPARSELT "Use cuSPARSELt" ON
-    "USE_CUDA" OFF)
-cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -1153,10 +1150,6 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
-      DESTINATION share/cmake/Caffe2/
-      COMPONENT dev)
-  install(FILES
-      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 

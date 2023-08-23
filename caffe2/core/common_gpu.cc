@@ -186,15 +186,28 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_ARCH_MISMATCH";
   case CUBLAS_STATUS_INTERNAL_ERROR:
     return "CUBLAS_STATUS_INTERNAL_ERROR";
+#if !defined(USE_ROCM)
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
     return "CUBLAS_STATUS_EXECUTION_FAILED";
   case CUBLAS_STATUS_NOT_SUPPORTED:
     return "CUBLAS_STATUS_NOT_SUPPORTED";
-#if !defined(USE_ROCM)
   case CUBLAS_STATUS_LICENSE_ERROR:
     return "CUBLAS_STATUS_LICENSE_ERROR";
+#else
+  case rocblas_status_invalid_size:
+    return "rocblas_status_invalid_size";
+  case rocblas_status_perf_degraded:
+    return "rocblas_status_perf_degraded";
+  case rocblas_status_size_query_mismatch:
+    return "rocblas_status_size_query_mismatch";
+  case rocblas_status_size_increased:
+    return "rocblas_status_size_increased";
+  case rocblas_status_size_unchanged:
+    return "rocblas_status_size_unchanged";
+  default:
+    return "unrecognized_rocblas_error";
 #endif
   }
   // To suppress compiler warning.

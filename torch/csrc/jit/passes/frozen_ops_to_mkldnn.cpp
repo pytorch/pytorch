@@ -223,7 +223,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
-// This is a factory function that creates an Operation that takes
+// This is a factory function that creates an Operation that that takes
 // MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other

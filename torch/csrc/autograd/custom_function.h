@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <c10/util/variant.h>
 #include <vector>
 
 namespace torch {
@@ -156,6 +157,15 @@ struct TORCH_API AutogradContext {
   friend struct CppNode;
 };
 
+struct TORCH_API NestedSizeInfo {
+  explicit NestedSizeInfo(c10::SymInt numel_, const Variable& nested_size_);
+
+  c10::SymInt numel;
+  Variable nested_size;
+};
+
+using VariableInfoSizeType = c10::variant<std::vector<c10::SymInt>, NestedSizeInfo>;
+
 struct TORCH_API VariableInfo {
   explicit VariableInfo();
   explicit VariableInfo(const Variable& var);
@@ -165,7 +175,7 @@ struct TORCH_API VariableInfo {
   at::Layout layout = at::Layout::Strided;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
-  std::vector<c10::SymInt> size;
+  VariableInfoSizeType size;
   bool requires_grad;
   bool is_empty;
 };

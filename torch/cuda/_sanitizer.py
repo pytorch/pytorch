@@ -168,7 +168,7 @@ class _TensorsAccessed:
                 "Found tensor with pointer: %s, but no matching tensor "
                 "allocation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr,
+                data_ptr
             )
             self.create_tensor(data_ptr, None)
 
@@ -179,7 +179,7 @@ class _TensorsAccessed:
                 "pointer: %s. Assuming the trace for tensor deallocation "
                 "wasn't caught and backfilling it now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr,
+                data_ptr
             )
             self.delete_tensor(data_ptr)
 
@@ -226,7 +226,7 @@ class StreamSynchronizations:
                 "Found Stream with id: %s, but no matching stream "
                 "creation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                stream,
+                stream
             )
             self.create_stream(stream)
 
@@ -236,7 +236,7 @@ class StreamSynchronizations:
                 "Found Event with id: %s, but no matching event "
                 "creation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                event,
+                event
             )
             self.create_event(event)
 
@@ -247,7 +247,7 @@ class StreamSynchronizations:
                 "id: %s. Assuming the trace for event deletion wasn't caught "
                 "and backfilling it now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                event,
+                event
             )
             self.delete_event(event)
 
@@ -257,7 +257,7 @@ class StreamSynchronizations:
                 "Found duplicate Stream creation in the trace for Stream with "
                 "id: %s. PyTorch Streams are only created once, so this "
                 "trace entry is ignored.",
-                stream,
+                stream
             )
         else:
             self.host_sync_state[stream] = 0

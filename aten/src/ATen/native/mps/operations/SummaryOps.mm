@@ -1,10 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/bincount_native.h>
 namespace at::native {
 
-static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& output) {
+Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& output) {
   using namespace mps;
 
   struct CachedGraph : public MPSCachedGraph {

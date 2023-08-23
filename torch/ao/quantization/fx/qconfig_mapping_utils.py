@@ -217,13 +217,13 @@ def _compare_prepare_convert_qconfig_mappings(
     ]
     dict_names = [_OBJECT_TYPE_DICT_KEY, _MODULE_NAME_DICT_KEY, _MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
-        for name in prepare_dicts[i].keys():
-            assert name in convert_dicts[i], f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
-                when it was present in prepare"
+        for name, qconfig in prepare_dicts[i].items():
+            assert name in convert_dicts[i], "Missing key {} {} in convert QConfigMapping \
+                when it was present in prepare".format(dict_names[i], name)
             assert convert_dicts[i][name] is None \
                 or qconfig_equals(prepare_dicts[i][name], convert_dicts[i][name]), \
-                f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
-                prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
+                "Expected convert QConfigMapping to have the same qconfig as prepare for key {} {}; \
+                prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
 def _is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
     for dtype_config in dtype_configs:

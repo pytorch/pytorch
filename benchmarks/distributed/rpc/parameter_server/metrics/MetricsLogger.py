@@ -3,6 +3,7 @@ from .CUDAMetric import CUDAMetric
 
 
 class MetricsLogger:
+
     def __init__(self, rank=None):
         self.rank = rank
         self.metrics = {}
@@ -25,9 +26,7 @@ class MetricsLogger:
         if type not in self.metrics or key not in self.metrics[type]:
             raise RuntimeError(f"metric_type={type} with key={key} not found")
         if self.metrics[type][key].get_end() is not None:
-            raise RuntimeError(
-                f"end for metric_type={type} with key={key} already exists"
-            )
+            raise RuntimeError(f"end for metric_type={type} with key={key} already exists")
         self.metrics[type][key].record_end()
 
     def clear_metrics(self):

@@ -3,13 +3,10 @@ from contextlib import contextmanager
 try:
     from torch._C import _nvtx
 except ImportError:
-
     class _NVTXStub:
         @staticmethod
         def _fail(*args, **kwargs):
-            raise RuntimeError(
-                "NVTX functions not installed. Are you sure you have a CUDA build?"
-            )
+            raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
 
         rangePushA = _fail
         rangePop = _fail

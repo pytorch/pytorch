@@ -10,7 +10,7 @@
 
 // Opt limit checker is enabled on a per file basis (hence per pass). For
 // example, in `constant_propagation.cpp`, `PYTORCH_JIT_OPT_LIMIT` should be set
-// to `constant_propagation=<opt_limit>` or, simply, to
+// to `constant_propagation=<opt_limt>` or, simply, to
 // `constant_propagation=<opt_limit>` where <opt_limit> is the number of
 // optimizations you want to make for the pass. (i.e.
 // `PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>"`).

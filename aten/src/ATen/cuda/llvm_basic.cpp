@@ -12,7 +12,8 @@
 #include <string>
 #include <ATen/cuda/llvm_jit_strings.h>
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 // copy-pasted from some llvm files:
 // - https://github.com/llvm/llvm-project/blob/main/libcxx/include/type_traits
@@ -320,4 +321,4 @@ const std::string &get_cmath_string() {
     return cmath;
 }
 
-} // namespace at::cuda
+}} // namespace at::cuda

@@ -16,15 +16,15 @@ class Adam(Optimizer):
                  maximize: bool = False, capturable: bool = False,
                  differentiable: bool = False, fused: Optional[bool] = None):
         if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
@@ -49,6 +49,15 @@ class Adam(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Support AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -206,7 +215,7 @@ Adam.__doc__ = r"""Implements Adam algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-    """ + fr"""
+    """ + r"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -219,17 +228,18 @@ Adam.__doc__ = r"""Implements Adam algorithm.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        {_foreach_doc}
-        {_maximize_doc}
-        {_capturable_doc}
-        {_differentiable_doc}
-        {_fused_doc}
+        {foreach}
+        {maximize}
+        {capturable}
+        {differentiable}
+        {fused}
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, capturable=_capturable_doc,
+               differentiable=_differentiable_doc, fused=_fused_doc)
 
 
 def adam(params: List[Tensor],
@@ -345,8 +355,6 @@ def _single_tensor_adam(params: List[Tensor],
             grad = torch.view_as_real(grad)
             exp_avg = torch.view_as_real(exp_avg)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
-            if amsgrad:
-                max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
             param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
@@ -367,12 +375,10 @@ def _single_tensor_adam(params: List[Tensor],
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
                 if differentiable:
-                    max_exp_avg_sq = max_exp_avg_sqs[i].clone()
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i].clone()
                 else:
-                    max_exp_avg_sq = max_exp_avg_sqs[i]
-
-                max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
-
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i]
+                max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sqs_i, exp_avg_sq))
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
@@ -394,17 +400,12 @@ def _single_tensor_adam(params: List[Tensor],
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
-
                 # Use the max. for normalizing running avg. of gradient
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
             param.addcdiv_(exp_avg, denom, value=-step_size)
-
-        # Lastly, switch back to complex view
-        if amsgrad and torch.is_complex(params[i]):
-            max_exp_avg_sqs[i] = torch.view_as_complex(max_exp_avg_sqs[i])
 
 
 def _multi_tensor_adam(params: List[Tensor],
@@ -449,13 +450,12 @@ def _multi_tensor_adam(params: List[Tensor],
     ), _) in grouped_tensors.values():
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
 
         # Handle complex parameters
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
         device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
         device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps

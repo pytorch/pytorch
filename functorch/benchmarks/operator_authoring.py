@@ -1,8 +1,7 @@
-import timeit
 from functools import partial
-
 import numpy as np
 import pandas as pd
+import timeit
 import torch
 from functorch.compile import pointwise_operator
 
@@ -114,7 +113,7 @@ def test_out(make_args, out, nnc=nnc_add, aten=torch.add):
 def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
     def backwards_setup(n):
         args = make_args(n)
-        (grad_var,) = (a for a in args if a.requires_grad)
+        (grad_var,) = [a for a in args if a.requires_grad]
         aten(*args).sum().backward()
         correct = grad_var.grad.clone()
         grad_var.grad.zero_()

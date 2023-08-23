@@ -131,7 +131,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
-        remote_device = f"{dst_worker_name}/cpu"
+        remote_device = "{}/cpu".format(dst_worker_name)
         args = (1,)
         kwargs = dict(first_kwarg=2)
 
@@ -575,7 +575,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
         dst_worker_name = dist_utils.worker_name(dst_rank)
 
         for remote_module in self._create_remote_module_iter(
-            f"{dst_worker_name}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             device = rpc.rpc_sync(
                 dst_worker_name, remote_device, (remote_module.module_rref,)
@@ -585,7 +585,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         # Test rank works as well.
         for remote_module in self._create_remote_module_iter(
-            f"rank:{dst_rank}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+            "rank:{}/cuda:0".format(dst_rank), modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             device = rpc.rpc_sync(
                 dst_worker_name, remote_device, (remote_module.module_rref,)
@@ -607,7 +607,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             [
                 m.forward()
                 for m in self._create_remote_module_iter(
-                    f"{dst_worker_name}/foo",
+                    "{}/foo".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             ]
@@ -618,7 +618,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             [
                 m.forward()
                 for m in self._create_remote_module_iter(
-                    f"{dst_worker_name}/cuda:100",
+                    "{}/cuda:100".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             ]
@@ -627,7 +627,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             [
                 m.forward()
                 for m in self._create_remote_module_iter(
-                    f"{dst_worker_name}/cpu2",
+                    "{}/cpu2".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             ]
@@ -636,7 +636,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             [
                 m.forward()
                 for m in self._create_remote_module_iter(
-                    f"{dst_worker_name}/",
+                    "{}/".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             ]
@@ -648,7 +648,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             [
                 m.forward()
                 for m in self._create_remote_module_iter(
-                    f"{dst_worker_name}/cuda:0/cuda:1",
+                    "{}/cuda:0/cuda:1".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             ]
@@ -692,7 +692,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         # Only test Python nn.Module, because script module methods don't support taking kwargs.
         for remote_module in self._create_remote_module_iter(
-            f"{dst_worker_name}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             ret_fut = remote_module.forward_async(*args, **kwargs)
             ret = ret_fut.wait()
@@ -716,7 +716,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         scripted_remote_module = next(
             self._create_remote_module_iter(
-                f"{dst_worker_name}/cuda:0",
+                "{}/cuda:0".format(dst_worker_name),
                 modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE],
             )
         )

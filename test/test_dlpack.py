@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: tests"]
 
 import torch

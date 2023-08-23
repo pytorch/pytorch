@@ -5,7 +5,9 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-namespace at::cuda::sparse {
+namespace at {
+namespace cuda {
+namespace sparse {
 
 #if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
@@ -206,4 +208,6 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
 
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
-} // namespace at::cuda::sparse
+} // namespace sparse
+} // namespace cuda
+} // namespace at

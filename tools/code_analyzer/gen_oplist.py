@@ -18,7 +18,7 @@ from torchgen.selective_build.selector import (
 
 def extract_all_operators(selective_builder: SelectiveBuilder) -> Set[str]:
     ops = []
-    for op_name in selective_builder.operators.keys():
+    for op_name, op in selective_builder.operators.items():
         ops.append(op_name)
     return set(ops)
 
@@ -74,12 +74,12 @@ SupportedMobileModelCheckerRegistry register_model_versions;
         if "debug_info" in model_dict:
             debug_info = json.loads(model_dict["debug_info"][0])
             if debug_info["is_new_style_rule"]:
-                for asset_info in debug_info["asset_info"].values():
+                for asset, asset_info in debug_info["asset_info"].items():
                     md5_hashes.update(asset_info["md5_hash"])
 
     supported_hashes = ""
     for md5 in md5_hashes:
-        supported_hashes += f'"{md5}",\n'
+        supported_hashes += '"{}",\n'.format(md5)
     with open(
         os.path.join(output_dir, "SupportedMobileModelsRegistration.cpp"), "wb"
     ) as out_file:

@@ -1,11 +1,9 @@
-import os
-
-import pathlib
-
 import torch
 
 from torch.jit._serialization import validate_map_location
 
+import pathlib
+import os
 
 def _load_for_lite_interpreter(f, map_location=None):
     r"""
@@ -40,21 +38,18 @@ def _load_for_lite_interpreter(f, map_location=None):
     """
     if isinstance(f, str):
         if not os.path.exists(f):
-            raise ValueError(f"The provided filename {f} does not exist")
+            raise ValueError("The provided filename {} does not exist".format(f))
         if os.path.isdir(f):
-            raise ValueError(f"The provided filename {f} is a directory")
+            raise ValueError("The provided filename {} is a directory".format(f))
 
     map_location = validate_map_location(map_location)
 
     if isinstance(f, (str, pathlib.Path)):
         cpp_module = torch._C._load_for_lite_interpreter(f, map_location)
     else:
-        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
-            f.read(), map_location
-        )
+        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(f.read(), map_location)
 
     return LiteScriptModule(cpp_module)
-
 
 class LiteScriptModule:
     def __init__(self, cpp_module):
@@ -73,14 +68,12 @@ class LiteScriptModule:
     def run_method(self, method_name, *input):
         return self._c.run_method(method_name, input)
 
-
 def _export_operator_list(module: LiteScriptModule):
     r"""
-    return a set of root operator names (with overload name) that are used by any method
-    in this mobile module.
+        return a set of root operator names (with overload name) that are used by any method
+        in this mobile module.
     """
     return torch._C._export_operator_list(module._c)
-
 
 def _get_model_bytecode_version(f_input) -> int:
     r"""
@@ -108,11 +101,10 @@ def _get_model_bytecode_version(f_input) -> int:
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
+    if (isinstance(f_input, (str, pathlib.Path))):
         return torch._C._get_model_bytecode_version(str(f_input))
     else:
         return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
-
 
 def _get_mobile_model_contained_types(f_input) -> int:
     r"""
@@ -139,11 +131,10 @@ def _get_mobile_model_contained_types(f_input) -> int:
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
+    if (isinstance(f_input, (str, pathlib.Path))):
         return torch._C._get_mobile_model_contained_types(str(f_input))
     else:
         return torch._C._get_mobile_model_contained_types_from_buffer(f_input.read())
-
 
 def _backport_for_mobile(f_input, f_output, to_version):
     r"""
@@ -161,15 +152,11 @@ def _backport_for_mobile(f_input, f_output, to_version):
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if (isinstance(f_input, (str, pathlib.Path))) and (
-        isinstance(f_output, (str, pathlib.Path))
-    ):
+    if ((isinstance(f_input, (str, pathlib.Path))) and (
+            isinstance(f_output, (str, pathlib.Path)))):
         return torch._C._backport_for_mobile(str(f_input), str(f_output), to_version)
     else:
-        return torch._C._backport_for_mobile_from_buffer(
-            f_input.read(), str(f_output), to_version
-        )
-
+        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output), to_version)
 
 def _backport_for_mobile_to_buffer(f_input, to_version):
     r"""
@@ -184,13 +171,10 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
+    if (isinstance(f_input, (str, pathlib.Path))):
         return torch._C._backport_for_mobile_to_buffer(str(f_input), to_version)
     else:
-        return torch._C._backport_for_mobile_from_buffer_to_buffer(
-            f_input.read(), to_version
-        )
-
+        return torch._C._backport_for_mobile_from_buffer_to_buffer(f_input.read(), to_version)
 
 def _get_model_ops_and_info(f_input):
     r"""
@@ -227,7 +211,7 @@ def _get_model_ops_and_info(f_input):
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
+    if (isinstance(f_input, (str, pathlib.Path))):
         return torch._C._get_model_ops_and_info(str(f_input))
     else:
         return torch._C._get_model_ops_and_info(f_input.read())

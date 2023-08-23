@@ -12,10 +12,9 @@ from .types import contextArg
 @dataclass(frozen=True)
 class ExecutorchCppSignature:
     """
-    This signature is merely a CppSignature with Executorch types (optionally
-    contains KernelRuntimeContext as well). The inline definition of
-    CppSignature is generated in Functions.h and it's used by unboxing
-    functions.
+    This signature is merely a CppSignature with Executorch types (optionally contains
+    RuntimeContext as well). The inline definition of CppSignature is generated in Functions.h
+    and it's used by unboxing functions.
     """
 
     # The schema this signature is derived from

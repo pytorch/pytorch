@@ -66,12 +66,23 @@ class TorchDispatchMode:
 
 def _get_current_dispatch_mode():
     stack_len = _len_torch_dispatch_stack()
-    return _get_dispatch_stack_at(stack_len - 1) if stack_len > 0 else None
+    # Return a user mode on the stack if there are any
+    if stack_len > 0:
+        return _get_dispatch_stack_at(stack_len - 1)
+    # Check our proxy mode slot
+    mb_proxy = torch._C._get_proxy_tensor_mode()
+    if mb_proxy is not None:
+        return mb_proxy
+    # Check our fake mode slot
+    return torch._C._get_fake_tensor_mode()
 
 
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
-    return [_get_dispatch_stack_at(i) for i in range(stack_len)]
+    user_modes = [_get_dispatch_stack_at(i) for i in range(stack_len)]
+    mb_proxy = [] if torch._C._get_proxy_tensor_mode() is None else [torch._C._get_proxy_tensor_mode()]
+    mb_fake = [] if torch._C._get_fake_tensor_mode() is None else [torch._C._get_fake_tensor_mode()]
+    return user_modes + mb_proxy + mb_fake
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):
     if k is not None:
@@ -108,11 +119,19 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
 def _disable_current_modes():
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
+
+    # Manually disable proxy and fake modes, if any are active
+    mb_proxy = [] if torch._C._get_proxy_tensor_mode() is None else [torch._C._unset_proxy_tensor_mode()]
+    mb_fake = [] if torch._C._get_fake_tensor_mode() is None else [torch._C._unset_fake_tensor_mode()]
     try:
-        yield old_modes
+        yield old_modes + mb_proxy + mb_fake
     finally:
         for mode in reversed(old_modes):
             _push_mode(mode)
+        if mb_proxy:
+            torch._C._set_proxy_tensor_mode(mb_proxy[0])
+        if mb_fake:
+            torch._C._set_fake_tensor_mode(mb_fake[0])
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
@@ -121,19 +140,20 @@ class BaseTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         return func(*args, **kwargs)
 
-
 def is_traceable_wrapper_subclass(t):
     # In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
     # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
+    tensor_like = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    return tensor_like and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
-    return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
-
-def transform_subclass(t, callback):
-    assert is_traceable_wrapper_subclass(t), f"Expects traceable wrapper subclass but got {type(t)}"
+def transform_subclass(t, callback, source=None):
+    assert is_traceable_wrapper_subclass(t)
     # convert the tensor subclass into its constituent dense tensors,
     # and apply a transformation to each dense tensor.
     from torch.utils._pytree import tree_map_only
     flattened_tensors, ctx = type(t).__tensor_flatten__(t)
     transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
-    return type(t).__tensor_unflatten__(transformed_tensors, ctx)
+    return type(t).__tensor_unflatten__(transformed_tensors, ctx, source=source)
+
+# TODO: this.
+#def set_subclass_output_aliasing(func, outputs

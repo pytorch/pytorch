@@ -856,7 +856,7 @@ def prepare_n_shadows_model(
         create_n_transformed_and_logged_copies_of_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
-            custom_prepare_fn, custom_prepare_kwargs  # type: ignore[arg-type]
+            custom_prepare_fn, custom_prepare_kwargs
         )
 
     return mt

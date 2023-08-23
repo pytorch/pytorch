@@ -34,8 +34,6 @@ __all__ = [
     "DefaultDeviceType",
 ]
 
-_DEFAULT_DETERMINISM_MODE = "default"
-
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -68,7 +66,7 @@ def _get_device_module(device="cuda"):
     return device_module
 
 
-class DefaultDeviceType:
+class DefaultDeviceType(object):
     r"""
     A class that manages the default device type for checkpointing.
     If no non-CPU tensors are present, the default device type will
@@ -313,7 +311,7 @@ def checkpoint(
     *args,
     use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    determinism_check: str = "default",
     debug: bool = False,
     **kwargs
 ):
@@ -985,7 +983,7 @@ def _default_meta_extractor(x: torch.Tensor) -> Dict[str, Any]:
     }
 
 _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
-    _DEFAULT_DETERMINISM_MODE: _default_meta_extractor,
+    "default": _default_meta_extractor,
     "none": lambda _: None,
 }
 
@@ -1104,7 +1102,7 @@ def _checkpoint_without_reentrant_generator(
     fn,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    determinism_check: str = "default",
     debug: bool = False,
     *args,
     **kwargs

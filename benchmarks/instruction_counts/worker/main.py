@@ -20,10 +20,10 @@ import dataclasses
 import io
 import os
 import pickle
-import sys
 import timeit
 import traceback
-from typing import Any, Tuple, TYPE_CHECKING, Union
+from typing import Any, Tuple, Union, TYPE_CHECKING
+import sys
 
 
 if TYPE_CHECKING:
@@ -31,9 +31,7 @@ if TYPE_CHECKING:
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
     from torch.utils.benchmark.utils.timer import Language, Timer
-    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
-        CallgrindStats,
-    )
+    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 
 else:
     from torch.utils.benchmark import CallgrindStats, Language, Timer
@@ -69,7 +67,6 @@ class WorkerTimerArgs:
     controlling workers. `Timer` is not pickleable, so instead the main process
     will pass `WorkerTimerArgs` instances to workers for processing.
     """
-
     stmt: str
     setup: str = "pass"
     global_setup: str = ""
@@ -130,12 +127,12 @@ class WorkerUnpickler(pickle.Unpickler):
 # == Execution ================================================================
 # =============================================================================
 
-
 def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
     timer = Timer(
         stmt=timer_args.stmt,
         setup=timer_args.setup or "pass",
         global_setup=timer_args.global_setup,
+
         # Prevent NotImplementedError on GPU builds and C++ snippets.
         timer=timeit.default_timer,
         num_threads=timer_args.num_threads,
@@ -153,7 +150,7 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
 
     return WorkerOutput(
         wall_times=tuple(m.times),
-        instructions=tuple(s.counts(denoise=True) for s in stats),
+        instructions=tuple(s.counts(denoise=True) for s in stats)
     )
 
 
@@ -184,8 +181,8 @@ def main(communication_file: str) -> None:
         pickle.dump(result, f)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--communication-file", "--communication_file", type=str)
+    parser.add_argument('--communication-file', '--communication_file', type=str)
     communication_file = parser.parse_args().communication_file
     main(communication_file)

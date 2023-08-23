@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
-import itertools
 import os
 import tempfile
 import unittest
@@ -11,20 +10,16 @@ from typing import Callable, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.fsdp._wrap_utils import _validate_frozen_params
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     CPUOffload,
     FullyShardedDataParallel as FSDP,
-    MixedPrecision,
-    ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
+    _FSDPPolicy,
     _or_policy,
-    _Policy,
     _wrap_module_cls_individually,
     always_wrap_policy,
-    CustomPolicy,
     enable_wrap,
     ModuleWrapPolicy,
     size_based_auto_wrap_policy,
@@ -60,56 +55,6 @@ class BatchNormNet(nn.Module):
         self.bn2 = nn.BatchNorm2d(10)
         self.bn3 = nn.BatchNorm3d(10)
         self.sync_bn = nn.SyncBatchNorm(10)
-
-
-class LoraModel(nn.Module):
-    """This is a toy LoRA decoder model."""
-
-    def __init__(self):
-        super().__init__()
-        self.embed_tokens = nn.Embedding(100, 32)
-        self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
-        self.norm = nn.LayerNorm(32)
-        self.embed_tokens.weight.requires_grad_(False)
-        self.norm.weight.requires_grad_(False)
-        self.norm.bias.requires_grad_(False)
-
-
-class LoraDecoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.attn = LoraAttention()
-        self.mlp = LoraMLP()
-        self.inp_layernorm = nn.LayerNorm(32)
-        self.post_attn_layernorm = nn.LayerNorm(32)
-        self.inp_layernorm.weight.requires_grad_(False)
-        self.inp_layernorm.bias.requires_grad_(False)
-        self.post_attn_layernorm.weight.requires_grad_(False)
-        self.post_attn_layernorm.bias.requires_grad_(False)
-
-
-class LoraAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.q_proj = nn.Linear(32, 32, bias=False)
-        self.lora_A = nn.Linear(32, 8, bias=False)
-        self.lora_B = nn.Linear(8, 32, bias=False)
-        self.k_proj = nn.Linear(32, 32, bias=False)
-        self.v_proj = nn.Linear(32, 32, bias=False)
-        self.o_proj = nn.Linear(32, 32, bias=False)
-        self.q_proj.weight.requires_grad_(False)
-        self.k_proj.weight.requires_grad_(False)
-        self.v_proj.weight.requires_grad_(False)
-        self.o_proj.weight.requires_grad_(False)
-
-
-class LoraMLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.proj1 = nn.Linear(32, 128, bias=False)
-        self.proj2 = nn.Linear(128, 32, bias=False)
-        self.proj1.weight.requires_grad_(False)
-        self.proj2.weight.requires_grad_(False)
 
 
 class WrapMethod(Enum):
@@ -460,7 +405,9 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
-    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
+    def _test_transformer_wrapping(
+        self, auto_wrap_policy: Union[Callable, _FSDPPolicy]
+    ):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -478,109 +425,6 @@ class TestAutoWrap(TestCase):
                 or module in decoder_layers
             ):
                 self.assertTrue(isinstance(module, FSDP))
-            else:
-                self.assertFalse(isinstance(module, FSDP))
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
-    def test_custom_policy(self):
-        """
-        Tests ``CustomPolicy`` with both a lambda function that uses uniform
-        kwargs (so only returns ``False`` or ``True``) and a lambda function
-        that uses non-uniform kwargs (so returns a dict to override the root
-        kwargs).
-        """
-        for use_uniform_kwargs in [False, True]:
-            self._test_custom_policy(use_uniform_kwargs)
-
-    def _test_custom_policy(self, use_uniform_kwargs: bool):
-        print(f"use_uniform_kwargs={use_uniform_kwargs}")
-        model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            {},
-        )
-
-        if use_uniform_kwargs:
-
-            def lambda_fn(module: nn.Module):
-                if module is model.bn:
-                    return True
-                elif isinstance(
-                    module, (TransformerEncoderLayer, TransformerDecoderLayer)
-                ):
-                    return True
-                return False
-
-        else:
-
-            def lambda_fn(module: nn.Module):
-                if module is model.bn:
-                    return {"sharding_strategy": ShardingStrategy.NO_SHARD}
-                elif isinstance(module, TransformerEncoderLayer):
-                    return True
-                elif isinstance(module, TransformerDecoderLayer):
-                    return {
-                        "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
-                        "backward_prefetch": BackwardPrefetch.BACKWARD_POST,
-                    }
-                return False
-
-        policy = CustomPolicy(lambda_fn)
-        # Use a size-2 dummy PG to avoid clamping the sharding strategy to
-        # `NO_SHARD` as for a size-1 PG
-        process_group = DummyProcessGroup(rank=0, size=2)
-        fp16_mp = MixedPrecision(param_dtype=torch.float16)
-        fp32_mp = MixedPrecision()
-        model = FSDP(
-            model,
-            process_group=process_group,
-            auto_wrap_policy=policy,
-            mixed_precision=fp16_mp,
-        )
-        encoder_layers = set(model.module.transformer.encoder.layers)
-        decoder_layers = set(model.module.transformer.decoder.layers)
-        bn = model.module.bn
-        bn_strategy = (
-            ShardingStrategy.FULL_SHARD
-            if use_uniform_kwargs
-            else ShardingStrategy.NO_SHARD
-        )
-        bn_prefetch = BackwardPrefetch.BACKWARD_PRE
-        encoder_strategy = root_strategy = ShardingStrategy.FULL_SHARD
-        encoder_prefetch = root_prefetch = BackwardPrefetch.BACKWARD_PRE
-        decoder_strategy = (
-            ShardingStrategy.FULL_SHARD
-            if use_uniform_kwargs
-            else ShardingStrategy.SHARD_GRAD_OP
-        )
-        decoder_prefetch = (
-            BackwardPrefetch.BACKWARD_PRE
-            if use_uniform_kwargs
-            else BackwardPrefetch.BACKWARD_POST
-        )
-        for module in model.modules():
-            if module is bn:
-                self.assertTrue(isinstance(module, FSDP))
-                self.assertEqual(module.sharding_strategy, bn_strategy)
-                self.assertEqual(module.backward_prefetch, bn_prefetch)
-                # We currently override batch norm modules to use fp32
-                self.assertEqual(module.mixed_precision, fp32_mp)
-            elif module in encoder_layers:
-                self.assertTrue(isinstance(module, FSDP))
-                self.assertEqual(module.sharding_strategy, encoder_strategy)
-                self.assertEqual(module.backward_prefetch, encoder_prefetch)
-                self.assertEqual(module.mixed_precision, fp16_mp)
-            elif module in decoder_layers:
-                self.assertTrue(isinstance(module, FSDP))
-                self.assertEqual(module.sharding_strategy, decoder_strategy)
-                self.assertEqual(module.backward_prefetch, decoder_prefetch)
-                self.assertEqual(module.mixed_precision, fp16_mp)
-            elif module is model:
-                self.assertTrue(isinstance(module, FSDP))
-                self.assertEqual(module.sharding_strategy, root_strategy)
-                self.assertEqual(module.backward_prefetch, root_prefetch)
-                self.assertEqual(module.mixed_precision, fp16_mp)
             else:
                 self.assertFalse(isinstance(module, FSDP))
 
@@ -805,138 +649,6 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[2], nn.Sequential))
         self.assertTrue(isinstance(model.module[2][0], nn.Linear))
         self.assertTrue(isinstance(model.module[2][1], nn.Linear))
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
-    def test_frozen_params(self):
-        """
-        Tests that mixing frozen/non-frozen parameters in an FSDP instance
-        raises for ``use_orig_params=False`` and warns for ``True``.
-        """
-        module_classes = (LoraAttention, LoraMLP, LoraDecoder)
-        module_wrap_policy = ModuleWrapPolicy(module_classes)
-
-        def lambda_fn_uniform(module: nn.Module):
-            return isinstance(module, module_classes)
-
-        def lambda_fn_nonuniform(module: nn.Module):
-            if isinstance(module, LoraAttention):
-                return {"sharding_strategy": ShardingStrategy.SHARD_GRAD_OP}
-            elif isinstance(module, module_classes):
-                return True
-            return False
-
-        lambda_wrap_policy_uniform = CustomPolicy(lambda_fn_uniform)
-        lambda_wrap_policy_nonuniform = CustomPolicy(lambda_fn_nonuniform)
-
-        for use_orig_params, policy in itertools.product(
-            [True, False],
-            [
-                module_wrap_policy,
-                lambda_wrap_policy_uniform,
-                lambda_wrap_policy_nonuniform,
-            ],
-        ):
-            self._test_frozen_params(use_orig_params, policy)
-
-    def _test_frozen_params(self, use_orig_params: bool, policy: _Policy):
-        model = LoraModel().cuda()
-        msg = "layers.0.attn has both parameters with requires_grad=True and False. "
-        if use_orig_params:
-            msg += "We do not recommend wrapping such modules"
-            ctx = self.assertWarnsRegex(UserWarning, msg)
-        else:
-            msg += "FSDP does not support wrapping such modules when use_orig_params=False."
-            ctx = self.assertRaisesRegex(ValueError, msg)
-        with ctx:
-            FSDP(
-                model,
-                process_group=self.process_group,
-                auto_wrap_policy=policy,
-                use_orig_params=use_orig_params,
-            )
-
-
-class TestWrapUtils(TestCase):
-    def test_validate_frozen_params(self):
-        """Tests the method ``_validate_frozen_params()``."""
-        for use_orig_params in [True, False]:
-            self._test_validate_frozen_params(use_orig_params)
-
-    def _test_validate_frozen_params(self, use_orig_params: bool):
-        model = LoraModel()
-        # Wrap only LoRA modules
-        modules_to_wrap = {
-            module
-            for module_name, module in model.named_modules()
-            if "lora_A" in module_name or "lora_B" in module_name
-        }
-        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
-        # Additionally wrap attention
-        for module in model.modules():
-            if isinstance(module, LoraAttention):
-                modules_to_wrap.add(module)
-        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
-        # Additionally wrap decoders
-        for module in model.modules():
-            if isinstance(module, LoraDecoder):
-                modules_to_wrap.add(module)
-        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
-        # Do not wrap the LoRA-A modules (meaning mixed frozen/non-frozen)
-        for module_name, module in model.named_modules():
-            if "lora_A" in module_name:
-                modules_to_wrap.remove(module)
-        regex = "layers.0.attn has both parameters with requires_grad=True and False."
-        if use_orig_params:
-            # Wrapping the attention manages all parameters except those from
-            # the LoRA-B module, which is separately wrapped and all nonfrozen
-            lorab_numel = sum(
-                p.numel() for p in model.layers[0].attn.lora_B.parameters()
-            )
-            attn_frozen_param_numel = sum(
-                p.numel()
-                for p in model.layers[0].attn.parameters()
-                if not p.requires_grad
-            )
-            attn_nonfrozen_param_numel = (
-                sum(
-                    p.numel()
-                    for p in model.layers[0].attn.parameters()
-                    if p.requires_grad
-                )
-                - lorab_numel
-            )
-            attn_total_param_numel = (
-                attn_frozen_param_numel + attn_nonfrozen_param_numel
-            )
-            regex += (
-                " We do not recommend wrapping such modules since the "
-                r"gradient memory usage will be higher than expected \("
-                f"{attn_total_param_numel} numel instead of {attn_nonfrozen_param_numel} numel "
-                r"before sharding via reduce-scatter\). "
-            )
-        else:
-            regex += " FSDP does not support wrapping such modules when use_orig_params=False. "
-        regex += "If possible, wrap the frozen parameters with FSDP separately.\n"
-        regex += (
-            "The following parameters have requires_grad=True:\n"
-            r"\['layers.0.attn.lora_A.weight'\]\n"
-            "The following parameters have requires_grad=False:\n"
-            r"\['layers.0.attn.q_proj.weight', 'layers.0.attn.k_proj.weight', "
-            r"'layers.0.attn.v_proj.weight', 'layers.0.attn.o_proj.weight'\]"
-        )
-        if use_orig_params:
-            ctx = self.assertWarnsRegex(UserWarning, regex)
-        else:
-            ctx = self.assertRaisesRegex(ValueError, regex)
-        with ctx:
-            _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
-        # Now ignore those LoRA-A modules' parameters
-        ignored_params = set()
-        for module_name, module in model.named_modules():
-            if "lora_A" in module_name:
-                for param in module.parameters():
-                    ignored_params.add(param)
-        _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 
 instantiate_parametrized_tests(TestFSDPWrap)

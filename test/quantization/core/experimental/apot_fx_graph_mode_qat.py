@@ -40,7 +40,7 @@ b=8, k=2
 prepared_model = prepare_qat_linear(uniform_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #1 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #1 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
 Prepare model with uniform activation, uniform weight
@@ -50,7 +50,7 @@ b=4, k=2
 prepared_model = prepare_qat_linear(uniform_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #1 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #1 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
 Prepare model with uniform activation, APoT weight
@@ -60,7 +60,7 @@ Prepare model with uniform activation, APoT weight
 prepared_model = prepare_qat_linear(apot_weights_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #2 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #2 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
 Prepare model with uniform activation, APoT weight
@@ -70,7 +70,7 @@ Prepare model with uniform activation, APoT weight
 prepared_model = prepare_qat_linear(apot_weights_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #2 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #2 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 
 """
@@ -81,7 +81,7 @@ Prepare model with APoT activation and weight
 prepared_model = prepare_qat_linear(apot_qconfig_8bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #3 Evaluation accuracy on test dataset (b=8, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #3 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
 Prepare model with APoT activation and weight
@@ -91,4 +91,4 @@ Prepare model with APoT activation and weight
 prepared_model = prepare_qat_linear(apot_qconfig_4bit)
 
 top1, top5 = evaluate(prepared_model, criterion, data_loader_test)
-print(f"Model #3 Evaluation accuracy on test dataset (b=4, k=2): {top1.avg:2.2f}, {top5.avg:2.2f}")
+print("Model #3 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))

@@ -38,7 +38,6 @@ if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
-  set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
   set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
@@ -58,23 +57,10 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
-    if(CAFFE2_USE_CUSPARSELT)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
-    else()
-      caffe2_update_option(USE_CUSPARSELT OFF)
-    endif()
     if(CAFFE2_USE_TENSORRT)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
     else()
       caffe2_update_option(USE_TENSORRT OFF)
-    endif()
-    find_program(SCCACHE_EXECUTABLE sccache)
-    if(SCCACHE_EXECUTABLE)
-      # Using RSP/--options-file renders output noncacheable by sccache
-      # as they fall under `multiple input files` non-cacheable rule
-      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES 0)
-      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES 0)
-      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS 0)
     endif()
   else()
     message(WARNING
@@ -82,12 +68,10 @@ if(USE_CUDA)
       "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
     caffe2_update_option(USE_CUDNN OFF)
-    caffe2_update_option(USE_CUSPARSELT OFF)
     caffe2_update_option(USE_NVRTC OFF)
     caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
-    set(CAFFE2_USE_CUSPARSELT OFF)
     set(CAFFE2_USE_NVRTC OFF)
     set(CAFFE2_USE_TENSORRT OFF)
   endif()
@@ -1314,9 +1298,17 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
-
+    # Note [rocblas & rocfft cmake bug]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+    else()
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
+    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1327,10 +1319,15 @@ if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
-  include_directories(SYSTEM ${HIPFFT_PATH}/include)
+  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
+    include_directories(SYSTEM ${HIPFFT_PATH}/include)
+  else()
+    include_directories(SYSTEM ${ROCFFT_PATH}/include)
+  endif()
   include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
   include_directories(SYSTEM ${HIPRAND_PATH}/include)
+  include_directories(SYSTEM ${ROCRAND_PATH}/include)
   include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
@@ -1382,8 +1379,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_options(-DTORCH_USE_LIBUV)
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library

@@ -10,7 +10,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
+    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
@@ -75,7 +75,7 @@ def generate_code(
 def get_selector_from_legacy_operator_selection_list(
     selected_op_list_path: str,
 ) -> Any:
-    with open(selected_op_list_path) as f:
+    with open(selected_op_list_path, "r") as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
         selected_op_list = {

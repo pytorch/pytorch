@@ -836,7 +836,7 @@ void initTensorExprBindings(PyObject* module) {
                 value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
               }
             }
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
             if (py::len(values) != self.buffer_args().size()) {
               throw malformed_input("bad args in CodeGen.call function");
             }
@@ -862,9 +862,7 @@ void initTensorExprBindings(PyObject* module) {
                 value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
               }
             }
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
             self.call(value_ptrs);
           })
       .def(

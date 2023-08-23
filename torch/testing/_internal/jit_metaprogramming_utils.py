@@ -17,7 +17,8 @@ import math  # noqa: F401
 # Testing utils
 from torch import inf
 
-assert torch.get_default_dtype() == torch.float32
+# TODO: include files like this should not set the default dtype
+torch.set_default_dtype(torch.double)
 
 L = 20
 M = 10
@@ -35,7 +36,7 @@ class dont_convert(tuple):
 
 non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.float, device=None):
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
@@ -60,9 +61,17 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         # double check casting
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
+                if arg.tensor.dtype == torch.float:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
+                if arg.tensor.dtype == torch.cfloat:
+                    return conjugate(maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device)))
                 return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
             return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
         elif isinstance(arg, torch.Tensor):
+            if arg.dtype == torch.float:
+                arg = arg.double()
+            if arg.dtype == torch.cfloat:
+                arg = arg.to(torch.cdouble)
             if arg.is_complex() != dtype.is_complex:
                 raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
                                    "which is not supported for now")
@@ -338,11 +347,11 @@ def get_call(method_name, func_type, args, kwargs):
     argument_str += kwargs_str
 
     if func_type == 'functional' or func_type == 'function':
-        call = f'torch.{method_name}({argument_str})'
+        call = 'torch.{}({})'.format(method_name, argument_str)
     elif func_type == 'method':
-        call = f'{self_arg}.{method_name}({argument_str})'
+        call = '{}.{}({})'.format(self_arg, method_name, argument_str)
     elif func_type == 'nn_functional':
-        call = f'torch.nn.functional.{method_name}({argument_str})'
+        call = 'torch.nn.functional.{}({})'.format(method_name, argument_str)
     else:
         raise TypeError('Unsupported function type')
 
@@ -361,17 +370,17 @@ def get_script_args(args):
     actuals: List[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
-            name = f'i{len(formals)}'
+            name = 'i{}'.format(len(formals))
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
         elif is_iterable_of_tensors(arg):
-            name = f'i{len(formals)}'
+            name = 'i{}'.format(len(formals))
             formals.append(name + ': List[torch.Tensor]')
             actuals.append(name)
             tensors.append(list(arg))
         elif isinstance(arg, str):
-            actuals.append(f"'{arg}'")
+            actuals.append("'{}'".format(arg))
         else:
             actuals.append(str(get_constant(arg)))
     return (formals, tensors, actuals)
@@ -399,7 +408,7 @@ def create_script_fn(self, method_name, func_type):
         return output
     return script_fn
 
-class SplitInputs:
+class SplitInputs():
     all_tensors: List[Any]
     tensor_args: List[Any]
     nontensor_args: List[Any]
@@ -584,7 +593,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
 
         method_args = ', '.join(['self'] + actuals)
         call_args_str = ', '.join(actuals)
-        call = f"self.submodule({call_args_str})"
+        call = "self.submodule({})".format(call_args_str)
         script = script_method_template.format(method_args, call)
 
         submodule_constants = []
@@ -639,8 +648,8 @@ def get_nn_mod_test_name(**kwargs):
     else:
         test_name = get_nn_module_name_from_kwargs(**kwargs)
         if 'desc' in kwargs:
-            test_name = f"{test_name}_{kwargs['desc']}"
-    return f'test_nn_{test_name}'
+            test_name = "{}_{}".format(test_name, kwargs['desc'])
+    return 'test_nn_{}'.format(test_name)
 
 def get_nn_module_class_from_kwargs(**kwargs):
     name = get_nn_module_name_from_kwargs(**kwargs)
@@ -659,7 +668,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
     test_name = name
     if 'desc' in kwargs:
-        test_name = f"{test_name}_{kwargs['desc']}"
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
     test_name = get_nn_mod_test_name(**kwargs)
 
     if test_name in EXCLUDE_SCRIPT_MODULES:

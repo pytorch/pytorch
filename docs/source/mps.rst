@@ -26,11 +26,3 @@ MPS Profiler
     profiler.start
     profiler.stop
     profiler.profile
-
-MPS Event
-------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    event.Event

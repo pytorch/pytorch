@@ -431,7 +431,7 @@ Tensor get_clamped_target_length(
 }
 
 Tensor get_clamped_target_length(
-    const Tensor & target_lengths,
+    Tensor target_lengths,
     const TensorOptions& options) {
   return target_lengths.clamp_min(1);
 }

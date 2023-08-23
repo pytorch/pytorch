@@ -1,25 +1,19 @@
-import dis
-import inspect
-from typing import Sequence, Union
-
 import torch
-
-import functorch._C
-from functorch._C import dim as _C
+from typing import Union, Sequence
+import inspect
+import dis
 from .tree_map import tree_flatten, tree_map
 from .wrap_type import wrap_type
-
+import functorch._C
+from functorch._C import dim as _C
 _C._patch_tensor_class()
 dims, DimList, dimlists = _C.dims, _C.DimList, _C.dimlists
-
 
 class DimensionMismatchError(Exception):
     pass
 
-
 class DimensionBindError(Exception):
     pass
-
 
 from . import op_properties
 
@@ -30,10 +24,10 @@ use_c = True
 if not use_c:
     from . import reference
 
-
 class _Tensor:
     # fast path around slow wrapping/unwrapping logic for simply queries used
     # by the implementation...
+
 
     @property
     def dims(self):
@@ -53,11 +47,10 @@ class _Tensor:
 
     def __repr__(self):
         tensor, levels, ndim = self._tensor, self._levels, self.ndim
-        return f"{tensor}\nwith dims={tuple(l + ndim if isinstance(l, int) else l for l in levels)} sizes={tuple(tensor.size())}"
+        return f'{tensor}\nwith dims={tuple(l + ndim if isinstance(l, int) else l for l in levels)} sizes={tuple(tensor.size())}'
 
 
 TensorLike = (_Tensor, torch.Tensor)
-
 
 class Dim(_C.Dim, _Tensor):
     # note that _C.Dim comes before tensor because we want the Dim API for things like size to take precendence.
@@ -75,7 +68,6 @@ class Tensor(_Tensor, _C.Tensor):
 def cat(tensors, dim, new_dim):
     n = dims()
     return stack(tensors, n, dim).index([n, dim], new_dim)
-
 
 if use_c:
     _wrap = _C._wrap
@@ -115,41 +107,41 @@ if use_c:
 else:
     _Tensor.order = reference.positional
 
-_def("mean")
-_def("sum")
-_def("all")
-_def("amax")
-_def("amin")
-_def("aminmax")
-_def("any")
-_def("count_nonzero")
-_def("logsumexp")
-_def("nanmean")
-_def("nansum")
-_def("prod")
-_def("std", keepdim_offset=2)
-_def("var", keepdim_offset=2)
-_def("max", single_dim=True)
-_def("min", single_dim=True)
-_def("argmax", single_dim=True)
-_def("argmin", single_dim=True)
-_def("kthvalue", single_dim=True)
-_def("median", single_dim=True)
-_def("nanmedian", single_dim=True)
-_def("mode", single_dim=True)
-_def("sort", reduce=False)
-_def("argsort", reduce=False)
-_def("unbind", single_dim=True)
-_def("chunk", dim_offset=1, reduce=False)
-_def("cummax", single_dim=True, reduce=False)
-_def("cummin", single_dim=True, reduce=False)
-_def("cumprod", single_dim=True, reduce=False)
-_def("cumprod_", single_dim=True, reduce=False)
-_def("cumsum", single_dim=True, reduce=False)
-_def("cumsum_", single_dim=True, reduce=False)
-_def("logcumsumexp", single_dim=True, reduce=False)
-_def("renorm", dim_offset=1, single_dim=True, reduce=False)
-_def("softmax", single_dim=True, reduce=False)
+_def('mean')
+_def('sum')
+_def('all')
+_def('amax')
+_def('amin')
+_def('aminmax')
+_def('any')
+_def('count_nonzero')
+_def('logsumexp')
+_def('nanmean')
+_def('nansum')
+_def('prod')
+_def('std', keepdim_offset=2)
+_def('var', keepdim_offset=2)
+_def('max', single_dim=True)
+_def('min', single_dim=True)
+_def('argmax', single_dim=True)
+_def('argmin', single_dim=True)
+_def('kthvalue', single_dim=True)
+_def('median', single_dim=True)
+_def('nanmedian', single_dim=True)
+_def('mode', single_dim=True)
+_def('sort', reduce=False)
+_def('argsort', reduce=False)
+_def('unbind', single_dim=True)
+_def('chunk', dim_offset=1, reduce=False)
+_def('cummax', single_dim=True, reduce=False)
+_def('cummin', single_dim=True, reduce=False)
+_def('cumprod', single_dim=True, reduce=False)
+_def('cumprod_', single_dim=True, reduce=False)
+_def('cumsum', single_dim=True, reduce=False)
+_def('cumsum_', single_dim=True, reduce=False)
+_def('logcumsumexp', single_dim=True, reduce=False)
+_def('renorm', dim_offset=1, single_dim=True, reduce=False)
+_def('softmax', single_dim=True, reduce=False)
 softmax = _wrap(torch.nn.functional.softmax, single_dim=True, reduce=False)
 
 # stuff to handle in the future, because they require special

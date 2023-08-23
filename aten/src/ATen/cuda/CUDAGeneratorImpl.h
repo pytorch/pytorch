@@ -128,11 +128,13 @@ private:
   std::atomic_flag no_reset_rnn_state_;
 };
 
-namespace cuda::detail {
+namespace cuda {
+namespace detail {
 
 TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
     DeviceIndex device_index = -1);
 TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
-} // namespace cuda::detail
+} // namespace detail
+} // namespace cuda
 } // namespace at

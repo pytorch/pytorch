@@ -1,10 +1,10 @@
 import os
-from collections import OrderedDict
 from pathlib import Path
 
 import torch
-import torch._prims as prims
+from collections import OrderedDict
 from torchgen.gen import parse_native_yaml
+import torch._prims as prims
 
 ROOT = Path(__file__).absolute().parent.parent.parent.parent
 NATIVE_FUNCTION_YAML_PATH = ROOT / Path("aten/src/ATen/native/native_functions.yaml")
@@ -38,6 +38,7 @@ def get_aten():
 def get_prims():
     op_schema_pairs = []
     for op_name in prims.__all__:
+
         op_overload = getattr(prims, op_name, None)
 
         if not isinstance(op_overload, torch._ops.OpOverload):
@@ -51,7 +52,6 @@ def get_prims():
         op_schema_pairs.append((op_name, schema))
 
     return op_schema_pairs
-
 
 def main():
     aten_ops_list = get_aten()
@@ -70,5 +70,5 @@ def main():
             f.write(f'"``{name}``","{schema}"\n')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

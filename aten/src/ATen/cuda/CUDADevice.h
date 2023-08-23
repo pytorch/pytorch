@@ -5,7 +5,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 inline Device getDeviceFromPtr(void* ptr) {
   cudaPointerAttributes attr{};
@@ -20,4 +21,4 @@ inline Device getDeviceFromPtr(void* ptr) {
   return {c10::DeviceType::CUDA, static_cast<DeviceIndex>(attr.device)};
 }
 
-} // namespace at::cuda
+}} // namespace at::cuda

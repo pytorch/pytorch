@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1"]
 
 
-ROCM_ARCHES = ["5.5", "5.6"]
+ROCM_ARCHES = ["5.4.2", "5.5"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
@@ -49,7 +49,7 @@ WHEEL_CONTAINER_IMAGES = {
     },
     "cpu": "pytorch/manylinux-builder:cpu",
     "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
+    "cpu-aarch64": "quay.io/pypa/manylinux2014_aarch64",
 }
 
 CONDA_CONTAINER_IMAGES = {

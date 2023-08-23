@@ -13,13 +13,13 @@ namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
-static void addc_mul_div_out_mps(const Tensor& self,
-                                 const Tensor& tensor1,
-                                 const Tensor& tensor2,
-                                 const Scalar& value_opt, // default value = 1.0
-                                 const Tensor& output,
-                                 const bool is_div,
-                                 const string op_name) {
+void addc_mul_div_out_mps(const Tensor& self,
+                          const Tensor& tensor1,
+                          const Tensor& tensor2,
+                          const Scalar& value_opt, // default value = 1.0
+                          const Tensor& output,
+                          const bool is_div,
+                          const string op_name) {
   if (value_opt.toDouble() == 0.0) {
     output.copy_(self);
     return;

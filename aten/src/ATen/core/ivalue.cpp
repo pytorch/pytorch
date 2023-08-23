@@ -488,9 +488,9 @@ template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
-    const std::string& start,
-    const std::string& finish,
-    const IValueFormatter& formatter) {
+    const std::string start,
+    const std::string finish,
+    IValueFormatter formatter) {
   out << start;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
@@ -506,16 +506,16 @@ std::ostream& printList(
 std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
-    const IValueFormatter& formatter) {
+    IValueFormatter formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", formatter);
+    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", formatter);
+    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
   }
 }
 
@@ -523,7 +523,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    const IValueFormatter& formatter) {
+    IValueFormatter formatter) {
   out << "{";
 
   bool first = true;
@@ -547,14 +547,14 @@ std::ostream& printDict(
 static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
-    const IValueFormatter& formatter) {
+    IValueFormatter formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), formatter);
+    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
   }
   return out;
 }
@@ -872,29 +872,26 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
 
-IValue IValue::deepcopy(c10::optional<at::Device> device) const {
+
+IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo, device);
+  return deepcopy(memo);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+    IValue::HashAliasedIValueMap& memo) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
   IValue copy;
   switch(tag) {
-    case IValue::Tag::Tensor: {
-      const at::Tensor& src_tensor = toTensor();
-      copy = device.has_value() && !src_tensor.device().is_meta()
-          ? IValue(src_tensor.to(*device))
-          : IValue(src_tensor.clone());
-    } break;
+    case IValue::Tag::Tensor:
+      copy = IValue(toTensor().clone());
+      break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.emplace_back(e.deepcopy(memo, device));
+        copied_tuple.emplace_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
@@ -903,7 +900,7 @@ IValue IValue::deepcopy(
       auto list = toList();
       auto copied_list = c10::impl::GenericList(list.elementType());
       for (IValue v : list) {
-        copied_list.push_back(v.deepcopy(memo, device));
+        copied_list.push_back(v.deepcopy(memo));
       }
       copy = IValue(copied_list);
     }
@@ -912,9 +909,7 @@ IValue IValue::deepcopy(
       auto dict = toGenericDict();
       auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
       for (const auto& entry : dict) {
-        copied_dict.insert(
-            entry.key().deepcopy(memo, device),
-            entry.value().deepcopy(memo, device));
+        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
       }
       copy = IValue(copied_dict);
     }
@@ -929,7 +924,7 @@ IValue IValue::deepcopy(
         auto state = class_type->getMethod("__getstate__")({*this});
         class_type->getMethod("__setstate__")({copy, std::move(state)});
       } else {
-        copy = IValue(toObject()->deepcopy(memo, device));
+        copy = IValue(toObject()->deepcopy(memo));
       }
     } break;
     case IValue::Tag::Enum: {
@@ -937,7 +932,7 @@ IValue IValue::deepcopy(
       copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
           enum_holder->type(),
           enum_holder->name(),
-          enum_holder->value().deepcopy(memo, device)));
+          enum_holder->value().deepcopy(memo)));
     } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
@@ -1010,15 +1005,12 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
   return object;
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    c10::optional<at::Device> device) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo, device);
+  return deepcopy(memo);
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -1036,7 +1028,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
             "this class.";
       AT_ERROR(err.str());
     }
-    object->setSlot(i, slots_[i].deepcopy(memo, device));
+    object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
 }

@@ -6,7 +6,7 @@ namespace c10 {
 ThreadPool::ThreadPool(
     int pool_size,
     int numa_node_id,
-    const std::function<void()>& init_thread)
+    std::function<void()> init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),

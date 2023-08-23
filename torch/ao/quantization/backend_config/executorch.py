@@ -416,16 +416,6 @@ def _get_cat_configs() -> List[BackendPatternConfig]:
         .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
         .set_dtype_configs(dtype_configs)
     )
-    cat_configs.append(
-        BackendPatternConfig(torch.concat)
-        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
-        .set_dtype_configs(dtype_configs)
-    )
-    cat_configs.append(
-        BackendPatternConfig(torch.concatenate)
-        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
-        .set_dtype_configs(dtype_configs)
-    )
     return cat_configs
 
 

@@ -466,7 +466,9 @@ def gen_foreach_derivativeinfo(
         DifferentiabilityInfo(
             name=foreach_function.func.name.name.base,
             func=foreach_function,
-            op=f"Foreach{ref_diff_info.op}{foreach_function.func.name.overload_name}",
+            op="Foreach{}{}".format(
+                ref_diff_info.op, foreach_function.func.name.overload_name
+            ),
             derivatives=modified_derivative_formulas,
             forward_derivatives=[],
             all_saved_inputs=tuple(set(all_saved_inputs)),

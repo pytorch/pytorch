@@ -28,7 +28,6 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
@@ -50,7 +49,6 @@ from .source import (
     ConstantSource,
     GlobalStateSource,
     is_constant_source,
-    is_from_local_source,
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
@@ -64,9 +62,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
-    get_instruction_source_311,
     graph_break_reasons,
-    increment_op_count,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
@@ -88,7 +84,6 @@ log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
-trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
 class OutputGraphState(NamedTuple):
@@ -228,7 +223,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         f_code,
     ):
         super().__init__()
-        self.tracers = [SubgraphTracer(self, export_root=export)]
+        self.tracers = [SubgraphTracer(self)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -241,22 +236,20 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
         self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
-        # TODO: maybe should just pass the entire f_code in here?  Not
-        # sure...
-        self.co_fields = {
-            "co_name": f_code.co_name,
-            "co_filename": f_code.co_filename,
-            "co_firstlineno": f_code.co_firstlineno,
-        }
-
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
+        fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-                co_fields=self.co_fields,
+                # TODO: maybe should just pass the entire f_code in here?  Not
+                # sure...
+                co_fields={
+                    "co_name": f_code.co_name,
+                    "co_filename": f_code.co_filename,
+                    "co_firstlineno": f_code.co_firstlineno,
+                },
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
@@ -308,24 +301,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
-        # Given a source, what are the user stacks of all locations that
-        # accessed it?
-        #
-        # For efficiency, we only populate this:
-        #   - During export, and
-        #   - If the source could potentially lead to a spurious export input
-        #
-        # Feel free to populate this more frequently if other use-cases arise,
-        # but be aware that we have to generate full stacks for each
-        # recording!
-        self.source_to_user_stacks: Dict[Source, List[traceback.StackSummary]] = {}
-
         self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
         # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086
@@ -518,10 +500,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
             proxy = self.root_tracer.create_graph_input(
-                str(s.node.expr),
-                torch.SymInt,
-                before=True,
-                source=prop(arg.source),
+                str(s.node.expr), torch.SymInt, before=True
             )
             proxy.node.meta["grapharg"] = GraphArg(
                 prop(arg.source),
@@ -966,14 +945,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tot += 1
             if node.op == "placeholder":
                 placeholders.append(node)
-        increment_op_count(tot)
+        torch._dynamo.utils.increment_op_count(tot)
         for pl in placeholders:
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
 
         gm._param_name_to_source = self.param_name_to_source
-        gm._source_to_user_stacks = self.source_to_user_stacks
 
         try:
             name = (
@@ -985,6 +963,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
+
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
@@ -992,18 +971,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
             ) from None
-
-        signpost_event(
-            "dynamo",
-            "OutputGraph.call_user_compiler",
-            {
-                **self.co_fields,
-                "op_count": tot,
-                "node_count": len(gm.graph.nodes),
-                "input_count": len(placeholders),
-            },
-        )
-
         return compiled_fn
 
     def example_inputs(self) -> List[torch.Tensor]:
@@ -1105,16 +1072,10 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph, parent=None, export_root=False):
-        super().__init__()
+    def __init__(self, output_graph, parent=None):
+        super(SubgraphTracer, self).__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
-        # The export is only ever set for the ROOT tracer.  It controls
-        # whether or not certain inputs are allowed to be added or not.
-        # Look at call sites of create_graph_input to see how it is used.
-        if export_root:
-            assert parent is None
-        self.export_root = export_root
         # Map from graph input name to its placeholder proxy object, where the
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
@@ -1138,7 +1099,6 @@ class SubgraphTracer(fx.Tracer):
         # This is a OrderedDict so that we can
         # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
-        self.prev_inst = None
 
     def create_proxy(
         self,
@@ -1184,13 +1144,13 @@ class SubgraphTracer(fx.Tracer):
         #   higher-order-op subgraph until we hit the subgraph where the free
         #   variable is bound
         if self.parent is not None:
-            flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
-            new_flat_args = []
+            flat_args, tree_spec = pytree.tree_flatten(args)
+            new_args = []
             for arg in flat_args:
                 maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
-                new_flat_args.append(maybe_new_arg)
+                new_args.append(maybe_new_arg)
 
-            args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
+            args = pytree.tree_unflatten(new_args, tree_spec)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
@@ -1198,24 +1158,6 @@ class SubgraphTracer(fx.Tracer):
 
         # append stack trace to fx node
         tx = self.output_graph.current_tx
-
-        # log detailed location of line of code in 3.11
-        if sys.version_info >= (3, 11) and kind in (
-            "call_function",
-            "call_method",
-            "call_module",
-        ):
-            cur_inst = tx.current_instruction
-            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
-                tx_code = tx.f_code
-                header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
-
-                def get_trace_call_log_str():
-                    line = get_instruction_source_311(tx_code, cur_inst).rstrip()
-                    return f"TRACE FX call {rv.node.name} from {header}\n{line}"
-
-                trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
-                self.prev_inst = cur_inst
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -1288,26 +1230,7 @@ class SubgraphTracer(fx.Tracer):
     # for SymInts that may occur in the tensor argument.
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False, source=None):
-        if source is None:
-            assert (
-                self.parent is not None
-            ), "you are required to provide a source for inputs on the root tracer"
-
-        # In eager, we are generally OK with adding graph inputs whenever we
-        # want, because we take care of writing the bytecode that knows how
-        # to source all the inputs.
-        #
-        # In export, this is bad, because you want a self-contained export
-        # object which only depends on the inputs you explicitly passed to it.
-        # So we are a bit more strict about what sources can become inputs
-        # in export
-        if self.export_root:
-            if not is_from_local_source(source, allow_cell_or_freevar=False):
-                self.output_graph.source_to_user_stacks.setdefault(source, []).append(
-                    TracingContext.extract_stack()
-                )
-
+    def create_graph_input(self, name, type_expr=None, before=False):
         # unique
         if name in self.input_name_to_proxy:
             for i in itertools.count():

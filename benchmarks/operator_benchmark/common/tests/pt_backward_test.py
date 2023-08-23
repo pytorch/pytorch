@@ -3,9 +3,11 @@ import torch
 
 
 add_configs = op_bench.cross_product_configs(
-    M=[8, 1], N=[8, 2], K=[8, 4], tags=["short"]
+    M=[8, 1],
+    N=[8, 2],
+    K=[8, 4],
+    tags=["short"]
 )
-
 
 # This benchmark uses the auto_set to automatically set requires_grad
 # for both inputs. The test name can also be used for filtering.

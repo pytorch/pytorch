@@ -67,7 +67,7 @@ inline bool compute_requires_grad(Args&&... args) {
 inline void set_history(
     at::Tensor& variable,
     const std::shared_ptr<Node>& grad_fn) {
-  TORCH_CHECK(grad_fn != nullptr);
+  AT_ASSERT(grad_fn);
   if (variable.defined()) {
     // If the codegen triggers this, you most likely want to add your newly
     // added function to the DONT_REQUIRE_DERIVATIVE list in

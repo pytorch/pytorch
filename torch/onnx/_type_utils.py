@@ -184,14 +184,6 @@ class JitScalarType(enum.IntEnum):
                 return cls.from_dtype(value.type().getElementType().dtype())
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
-        if isinstance(value.type(), torch._C.OptionalType):
-            if value.type().getElementType().dtype() is None:
-                if isinstance(default, JitScalarType):
-                    return default
-                raise errors.OnnxExporterError(
-                    "default value must be a JitScalarType object."
-                )
-            return cls.from_dtype(value.type().getElementType().dtype())
 
         scalar_type = None
         if value.node().kind() != "prim::Constant" or not isinstance(

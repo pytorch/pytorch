@@ -1,7 +1,7 @@
-import torch
-import torch.nn.functional as F
 
 import operator_benchmark as op_bench
+import torch
+import torch.nn.functional as F
 
 
 """Microbenchmarks for instancenorm operator."""
@@ -22,11 +22,12 @@ class InstanceNormBenchmark(op_bench.TorchBenchmarkBase):
             "input": (torch.rand(*dims) - 0.5) * 256,
             "weight": torch.rand(num_channels, dtype=torch.float),
             "bias": torch.rand(num_channels, dtype=torch.float),
-            "eps": 1e-5,
+            "eps": 1e-5
         }
 
     def forward(self, input, weight, bias, eps: float):
-        return F.instance_norm(input, weight=weight, bias=bias, eps=eps)
+        return F.instance_norm(
+            input, weight=weight, bias=bias, eps=eps)
 
 
 op_bench.generate_pt_test(instancenorm_configs_short, InstanceNormBenchmark)

@@ -25,7 +25,6 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.optim.swa_utils import AveragedModel
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
@@ -890,38 +889,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
             inp = torch.randn(3, 10, device="cuda")
             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
+
             for buf in fsdp_model.buffers():
                 self.assertEqual(torch.float16, buf.dtype)
-
             # model.eval() + forward pass should make the buffers in full prec again
-            # Add pre-forward hooks
-            def verify_eval_buffer_dtype(module, input):
-                expected_dtype = (
-                    _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
-                )
-                for buf in module.buffers():
-                    self.assertEqual(expected_dtype, buf.dtype)
-
-            def _get_underlying_module(m):
-                return m.module if isinstance(m, FSDP) else m
-
-            hook_handles = []
-            hook_handles.append(
-                _get_underlying_module(fsdp_model[0]).register_forward_pre_hook(
-                    verify_eval_buffer_dtype
-                )
-            )
-            hook_handles.append(
-                _get_underlying_module(fsdp_model[1]).register_forward_pre_hook(
-                    verify_eval_buffer_dtype
-                )
-            )
-
             fsdp_model.eval()
             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
-            for hook_handle in hook_handles:
-                hook_handle.remove()
-
+            # TODO: this test would be more robust if the buffer dtype was
+            # validated in the nn.Module pre-forward hook to ensure that the
+            # buffer computation takes place in the right precision.
+            # https://github.com/pytorch/pytorch/issues/104740
             expected_dtype = (
                 _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
             )
@@ -1278,89 +1255,6 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs["model_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
-
-
-class TestFSDPTrainEval(FSDPTest):
-    @property
-    def world_size(self):
-        return 2
-
-    @skip_if_lt_x_gpu(2)
-    def test_train_ema_eval_flow(self):
-        """
-        Tests a train -> EMA update -> eval flow with mixed precision enabled.
-        """
-        self.run_subtests(
-            {
-                "sharding_strategy": [
-                    # We mainly want to test `SHARD_GRAD_OP` since it surfaced
-                    # the original bug of not using the right EMA parameters
-                    # for eval, but we also test the others for completeness
-                    ShardingStrategy.SHARD_GRAD_OP,
-                    ShardingStrategy.FULL_SHARD,
-                    ShardingStrategy.NO_SHARD,
-                ]
-            },
-            self._test_train_ema_eval_flow,
-        )
-
-    def _test_train_ema_eval_flow(self, sharding_strategy: ShardingStrategy):
-        class TransformerWithEMA(nn.Module):
-            def __init__(self, device: torch.device):
-                super().__init__()
-                self.module = nn.Transformer(device=device)
-                self.ema_module = AveragedModel(
-                    nn.Transformer(device=device),
-                    multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(),
-                    use_buffers=True,
-                )
-
-            def forward(self, *args, **kwargs):
-                # Use main copy for training and EMA copy for eval
-                if self.training:
-                    return self.module(*args, **kwargs)
-                return self.ema_module(*args, **kwargs)
-
-        device = torch.device("cuda")
-        model = TransformerWithEMA(device=device)
-        policy = ModuleWrapPolicy(
-            {nn.Transformer, nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
-        )
-        mixed_precision = MixedPrecision(param_dtype=torch.float16)
-        fsdp_model = FSDP(
-            model,
-            auto_wrap_policy=policy,
-            mixed_precision=mixed_precision,
-            sharding_strategy=sharding_strategy,
-        )
-        optim = torch.optim.Adam(fsdp_model.module.parameters(), lr=1e-2)
-        if self.rank == 0:
-            print(fsdp_model)
-        torch.manual_seed(1 + self.rank)
-        eval_src = torch.randn((8, 1, 512), device=device)
-        eval_tgt = torch.randn((16, 1, 512), device=device)
-        eval_out_sums: List[torch.Tensor] = []
-        # An iteration consists of training forward/backward/optimizer,
-        # updating the EMA copy with the main copy, and eval forward
-        for _ in range(3):
-            fsdp_model.train()
-            train_src = torch.randn((8, 4, 512), device=device)
-            train_tgt = torch.randn((16, 4, 512), device=device)
-            train_out = fsdp_model(train_src, train_tgt)
-            train_out.sum().backward()
-            optim.step()
-            optim.zero_grad()
-            with FSDP.summon_full_params(fsdp_model):
-                fsdp_model.ema_module.update_parameters(fsdp_model.module)
-            fsdp_model.eval()
-            with torch.no_grad():
-                eval_out = fsdp_model(eval_src, eval_tgt)
-            eval_out_sums.append(eval_out.sum())
-        # Check that the eval outputs differ from iteration to iteration as a
-        # proxy for eval using the correct EMA parameters
-        for i in range(len(eval_out_sums) - 1):
-            self.assertNotEqual(eval_out_sums[i], eval_out_sums[i + 1])
-        self.assertNotEqual(eval_out_sums[0], eval_out_sums[-1])
 
 
 if __name__ == "__main__":

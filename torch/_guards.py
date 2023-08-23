@@ -4,7 +4,6 @@ import dataclasses
 import enum
 import functools
 import logging
-import threading
 import traceback
 import unittest.mock
 import weakref
@@ -441,7 +440,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
-_TLS = threading.local()
+_CURRENT_TRACING_CONTEXT = None
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -472,7 +471,7 @@ class TracingContext:
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
-        return getattr(_TLS, "tracing_context", None)
+        return _CURRENT_TRACING_CONTEXT
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -480,12 +479,6 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
-        # This is morally part of frame_summary_stack, but it is kept separate
-        # for clarity.  As we process a frame, this variable gets updated
-        # to keep track of what line we are in the function.  We make a
-        # function call, this gets cleared and the frame location is pushed
-        # to frame_summary_stack (prepping this variable for the inner frame's
-        # progress)
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
@@ -523,53 +516,20 @@ class TracingContext:
         with unittest.mock.patch.object(
             tc, "frame_summary_stack", []
         ), unittest.mock.patch.object(tc, "loc_in_frame", None):
-            try:
-                yield
-            except Exception as e:
-                # Prevent real_stack from getting attached
-                #
-                # The invariant is that if an Exception as real_stack, we've
-                # appropriately attached a user stack and we no longer need to
-                # attach anything. Because we cannot conveniently interpose
-                # when an exception is thrown, we instead interpose everywhere
-                # we set what the user stack is set (using the context
-                # manager). However, our compiler stack does "tail calls"
-                # (when it calls into user compiler), at which point the
-                # parent exception frames would incorrectly attach an
-                # incorrect frame.
-                #
-                # However, if, somehow, someone raised an exception with this
-                # scope that had a stack (for example, because they are
-                # restoring the user stack state appropriately as they process
-                # node by node), we should respect it. Thus, we cannot
-                # unconditionally set None.
-                if not hasattr(e, "real_stack"):
-                    e.real_stack = None  # type: ignore[attr-defined]
-                raise
+            yield
 
     @staticmethod
     @contextlib.contextmanager
     def current_frame(frame_summary):
-        # frame_summary can be None to solely take advantage of real_stack
-        # attachment to thrown exceptions
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Frame context manager must be called within an ongoing trace."
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        tc.loc_in_frame = None
+        tc.frame_summary_stack.append(frame_summary)
         try:
             yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
         finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
+            tc.frame_summary_stack.pop()
 
     @staticmethod
     @contextlib.contextmanager
@@ -603,16 +563,13 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    old_context = getattr(_TLS, "tracing_context", None)
-    _TLS.tracing_context = context
+    global _CURRENT_TRACING_CONTEXT
+    old_context = _CURRENT_TRACING_CONTEXT
+    _CURRENT_TRACING_CONTEXT = context
     try:
-        yield context
-    except Exception as e:
-        if not hasattr(e, "real_stack"):
-            e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
-        raise
+        yield _CURRENT_TRACING_CONTEXT
     finally:
-        _TLS.tracing_context = old_context
+        _CURRENT_TRACING_CONTEXT = old_context
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -681,11 +638,23 @@ def detect_fake_mode(inputs: Any = None):
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert fake_mode is m, (
-                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
-            )
+            assert (
+                fake_mode is m
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
         return fake_mode
     else:
         return None
+
+
+EXPORT_FAKE_MODE = None
+
+
+@contextlib.contextmanager
+def export_fake_mode(fake_mode):
+    global EXPORT_FAKE_MODE
+    assert EXPORT_FAKE_MODE is None
+    EXPORT_FAKE_MODE = fake_mode
+    try:
+        yield
+    finally:
+        EXPORT_FAKE_MODE = None

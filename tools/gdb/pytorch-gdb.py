@@ -48,11 +48,11 @@ class TensorRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
             return
         name = args[0]
         with DisableBreakpoints():
-            res = gdb.parse_and_eval(f"torch::gdb::tensor_repr({name})")
-            print(f"Python-level repr of {name}:")
+            res = gdb.parse_and_eval("torch::gdb::tensor_repr(%s)" % name)
+            print("Python-level repr of %s:" % name)
             print(res.string())
             # torch::gdb::tensor_repr returns a malloc()ed buffer, let's free it
-            gdb.parse_and_eval(f"(void)free({int(res)})")
+            gdb.parse_and_eval("(void)free(%s)" % int(res))
 
 
 TensorRepr()

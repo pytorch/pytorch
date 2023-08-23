@@ -237,7 +237,7 @@ class Freezer:
         module_mangled_name = "__".join(module_qualname)
         c_name = "M_" + module_mangled_name
 
-        with open(path) as src_file:
+        with open(path, "r") as src_file:
             co = self.compile_string(src_file.read())
 
         bytecode = marshal.dumps(co)

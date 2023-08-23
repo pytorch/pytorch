@@ -443,7 +443,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     example_inputs: Any,
     last_added_shadow_node_list: List[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -575,7 +575,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     qconfig_mappings: List[QConfigMapping],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -704,7 +704,7 @@ def create_add_loggers_graph(
     from torch.ao.ns._numeric_suite_fx import OutputLogger, OutputComparisonLogger
 
     def _get_subgraph_containing_node(node, subgraphs_dedup):
-        for subgraph in subgraphs_dedup.values():
+        for name, subgraph in subgraphs_dedup.items():
             if node in subgraph:
                 return subgraph
         return None
@@ -756,7 +756,7 @@ def create_add_loggers_graph(
             create_n_transformed_and_logged_copies_of_subgraph(
                 model, cur_subgraph_idx, match_name, maybe_subgraph,
                 [qconfig_mapping], [node_name_to_qconfig],
-                None, None  # type: ignore[arg-type]
+                None, None
             )
             # find the created shadow module and record it so we
             # can find it easily in step 2
@@ -1289,7 +1289,7 @@ def print_n_shadows_summary(
         return
 
     results = []
-    for subgraph_data in results_comparison.values():
+    for subgraph_name, subgraph_data in results_comparison.items():
         mean_all_candidates = [
             candidate['cmp_mean']
             for candidate_name, candidate in subgraph_data['candidates'].items()

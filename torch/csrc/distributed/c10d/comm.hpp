@@ -10,7 +10,7 @@ namespace c10d {
 
 // Broadcast many tensors to all processes in the process group.
 TORCH_API void broadcast_coalesced(
-    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank = 0);

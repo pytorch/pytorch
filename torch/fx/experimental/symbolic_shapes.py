@@ -34,8 +34,8 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
-from torch.utils._sympy.solve import try_solve
-from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
 from torch._utils_internal import signpost_event
 
@@ -374,10 +374,6 @@ def constrain_range_int(a, *, min, max):
     - During tracing the traced symbol is resolved as a static integer (see
       PR #101655 for more details).
     """
-    if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
 
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
@@ -475,16 +471,6 @@ def eval_guards(gm, *args, ignore_static=True):
 
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
-
-def _assert_bound_is_rational(expr: sympy.Expr, bound: ValueRanges):
-    """
-    We assert that the bounds are either Boolean, or not finite, or can be computed
-    in exact prevision via rational arithmetic.
-    The only exception to this is the rare case when the user calls `sqrt(s0)`
-    sqrt is turned into sympy.Pow so we just match for that (it matches more things, but still)
-    """
-    assert bound.lower.is_rational or bound.lower.is_Boolean or not bound.lower.is_finite or expr.has(sympy.Pow), (bound, expr)
-    assert bound.upper.is_rational or bound.upper.is_Boolean or not bound.upper.is_finite or expr.has(sympy.Pow), (bound, expr)
 
 class DimDynamic(Enum):
     """
@@ -666,7 +652,7 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if _translation_validation_enabled() else None
+        self.fx_node = fx_node if _translation_validator_enabled() else None
 
     @property
     def expr(self):
@@ -704,12 +690,6 @@ class SymNode:
                 return self._hint
         else:
             return self._hint
-
-    def maybe_as_int(self):
-        if self.expr.free_symbols:
-            return None
-        else:
-            return int(self.expr)
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
@@ -1407,9 +1387,9 @@ del method
 del func
 
 
-def _translation_validation_enabled() -> bool:
-    from torch.fx.experimental.validator import translation_validation_enabled
-    return translation_validation_enabled()
+def _translation_validator_enabled() -> bool:
+    from torch.fx.experimental.validator import translation_validator_enabled
+    return translation_validator_enabled()
 
 
 def _lru_cache(fn, maxsize=None):
@@ -1493,7 +1473,7 @@ class DynamicDimConstraintPrinter(StrPrinter):
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
-        return '{} {} {}'.format(
+        return '%s %s %s' % (
             self.parenthesize(expr.lhs, precedence(expr)),
             expr.rel_op,
             self.parenthesize(expr.rhs, precedence(expr))
@@ -1892,7 +1872,7 @@ TLS = threading.local()
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
-        return f"{self.extra['envid']}: {msg}", kwargs
+        return '%s: %s' % (self.extra['envid'], msg), kwargs
 
 
 ENV_COUNTER = collections.Counter()
@@ -1932,26 +1912,26 @@ class ShapeEnv:
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
         # practice
-        self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
-        self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
-        self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
+        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
+        self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
+        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
-        self.var_to_guards: Dict[sympy.Symbol, Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
+        self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
-        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
+        self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
-        self.divisible: Set[sympy.Expr] = set()
+        self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, sympy.Expr] = {}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {}
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1983,7 +1963,7 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
@@ -1996,7 +1976,7 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not _translation_validation_enabled():
+        if not _translation_validator_enabled():
             return None
         srcname = source.name()
         if source not in self.source_to_symbol:
@@ -2004,20 +1984,51 @@ class ShapeEnv:
         return self.source_to_symbol[srcname]
 
     def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_var(symbol, type)
 
     def _add_target_expr(self, expr) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_target_expr(expr)
 
     def _add_assertion(self, expr) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if _translation_validation_enabled():
-            self.validator.validate()
+        if not _translation_validator_enabled():
+            return
+
+        result = self.validator.validate()
+
+        if result.success:
+            return
+
+        if result.model is None:
+            reason = "no answer"
+            source_exprs = self.validator._source_exprs
+            failed = ""
+        else:
+            assert result.failed_source_expr is not None
+            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
+            source_exprs = result.failed_source_expr
+            failed = "Failed "
+
+        def exprs_to_str(exprs):
+            return "\n".join(f"==> {e}" for e in exprs)
+
+        assertions = self.validator._assertions
+        target_exprs = self.validator._target_exprs
+
+        raise RuntimeError(f"""translation validation failed with {reason}.
+Assertions:
+{exprs_to_str(assertions)}
+
+Target Guards:
+{exprs_to_str(target_exprs)}
+
+{failed}Source Guards:
+{exprs_to_str(source_exprs)}""")
 
     def create_fx_call_function(
             self,
@@ -2027,7 +2038,7 @@ class ShapeEnv:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
 
-        if _translation_validation_enabled() and node_key not in self.fx_node_cache:
+        if _translation_validator_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
@@ -2050,7 +2061,7 @@ class ShapeEnv:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not _translation_validation_enabled():
+        if not _translation_validator_enabled():
             return None
 
         node_key = (self.graph.placeholder, (symbol,))
@@ -2203,7 +2214,7 @@ class ShapeEnv:
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
-        return sym_sizes, sym_stride, sym_storage_offset
+        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
@@ -2215,7 +2226,7 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if _translation_validation_enabled() and source is not None:
+        if _translation_validator_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2612,7 +2623,7 @@ class ShapeEnv:
 
         if not _simplified:
             for source, expr in input_guards:
-                if _translation_validation_enabled():
+                if _translation_validator_enabled():
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
@@ -2795,7 +2806,7 @@ class ShapeEnv:
             },
         )
 
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             from torch.fx.experimental.validator import PopulateValidator
 
             # Add value range bound guards for all symbols with no trivial bounds.
@@ -2904,10 +2915,7 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if (
-                vr.lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
-            ):
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -2920,7 +2928,7 @@ class ShapeEnv:
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
             offset = vr.lower - 1
             new_shape_env[k] = s + offset
-            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+            new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
 
         def replace(expr, repl):
             return expr.xreplace(repl)
@@ -2942,9 +2950,7 @@ class ShapeEnv:
             return new_expr
 
         # Check if the range can solve it statically
-        out = bound_sympy(new_expr, new_range_env)
-        _assert_bound_is_rational(new_expr, out)
-
+        out = sympy_interp(ValueRangeAnalysis, new_range_env, new_expr)
         if out.is_singleton():
             return out.lower
 
@@ -2966,6 +2972,62 @@ class ShapeEnv:
         self.divisible = new_divisible
 
     @_lru_cache
+    def try_isolate_symbol_lhs(self, expr: "sympy.Expr") -> "sympy.Expr":
+        def get_added_const(expr):
+            """
+            Returns an integer constant being added at the top-level of this expression.
+            """
+            if isinstance(expr, sympy.Add):
+                for a in expr.args:
+                    if isinstance(a, sympy.Integer):
+                        return a
+            return None
+
+        # Move any constants in the left-hand side to the right-hand side.
+        if isinstance(expr, sympy.Rel):
+            lhs_const = get_added_const(expr.lhs)
+            if lhs_const is not None:
+                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
+
+        # a // b == expr
+        # => a >= (b * expr) and a < ((b + 1) * expr)
+        if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
+            numerator, denominator = expr.lhs.args
+            expr = sympy.And(
+                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
+                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
+            )
+        # a // b != expr
+        # => a < (b * expr) or a >= ((b + 1) * expr)
+        if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
+            numerator, denominator = expr.lhs.args
+            expr = sympy.Or(
+                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
+                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
+            )
+
+        # The transformations below only work if b is positive.
+        # Note: we only have this information for constants.
+        def is_floordiv_with_positive_denominator(e) -> bool:
+            if not isinstance(e, FloorDiv):
+                return False
+            number = e.args[1]
+            return isinstance(number, sympy.Integer) and bool(number > 0)
+
+        # a // b > expr  => a >= (b + 1) * expr
+        # a // b >= expr => a >= b * expr
+        if isinstance(expr, (sympy.Gt, sympy.Ge)) and is_floordiv_with_positive_denominator(expr.lhs):
+            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore[arg-type]
+            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
+        # a // b < expr  => a < b * expr
+        # a // b <= expr => a < (b + 1) * expr
+        if isinstance(expr, (sympy.Lt, sympy.Le)) and is_floordiv_with_positive_denominator(expr.lhs):
+            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore[arg-type]
+            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
+
+        return expr
+
+    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
@@ -2981,8 +3043,8 @@ class ShapeEnv:
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
                     base1, divisor1 = divisor.args
-                    if self.replace(Mod(base, divisor)) in self.divisible and \
-                            base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
+                    if self.replace(base % divisor) in self.divisible and \
+                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
                         div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
@@ -2992,7 +3054,7 @@ class ShapeEnv:
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
-                if self.replace(Mod(base, divisor)) in self.divisible:
+                if self.replace(base % divisor) in self.divisible:
                     div_replacements[fd] = base / divisor
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
@@ -3017,12 +3079,6 @@ class ShapeEnv:
                 return r
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
-
-    # NB: keep in sync with size_hint
-    @lru_cache(256)
-    def has_hint(self, expr: "sympy.Expr"):
-        result_expr = safe_expand(expr).xreplace(self.var_to_val)
-        return len(result_expr.free_symbols) == 0 or self._maybe_evaluate_static(result_expr) is not None
 
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
@@ -3107,9 +3163,12 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0], floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    new_var = self._find(r[1])
+                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+                if len(solutions) != 1:
+                    return
+                solution = solutions[0][free[0]]
+                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                    new_var = self._find(solution)
                     self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
@@ -3119,8 +3178,8 @@ class ShapeEnv:
         if expr.has(Mod):
             mod_expr = tuple(expr.atoms(Mod))[0]
             try:
-                r = try_solve(expr, mod_expr, floordiv_inequality=False)
-                if r is not None and r[1] == 0:
+                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
                     self.divisible.add(mod_expr)
             except NotImplementedError:
                 pass
@@ -3169,7 +3228,7 @@ class ShapeEnv:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         if (
-                _translation_validation_enabled()
+                _translation_validator_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
@@ -3184,9 +3243,6 @@ class ShapeEnv:
 
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert orig_expr == hint, f"{orig_expr} != {hint}"
             return orig_expr
 
         expr = orig_expr
@@ -3194,9 +3250,6 @@ class ShapeEnv:
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-            # NB: don't test float as there may be precision issues
-            if isinstance(hint, (int, bool)):
-                assert static_expr == hint, f"{static_expr} != {hint}"
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -3215,9 +3268,6 @@ class ShapeEnv:
                 {
                     **self.co_fields,
                     "ignored_guard": f"{expr} == {concrete_val}",
-                    # no version = original state (this signpost is expected)
-                    # version 2 = dynamic backwards is eagerly compiled
-                    "version": 2,
                 },
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
@@ -3295,25 +3345,65 @@ class ShapeEnv:
     #   2. Compute the value range of the right-hand side
     #   3. Update the value range of the variable, if better
     def refine_ranges(self, guard: ShapeGuard) -> None:
-        expr = self.simplify(guard.expr)
+        def simplify(expr: sympy.Expr) -> sympy.Expr:
+            """
+            Simplification specialized for range refinement.
+            """
+            return self.try_isolate_symbol_lhs(self.simplify(expr))
 
-        for symbol in expr.free_symbols:
-            assert isinstance(symbol, sympy.Symbol)
+        def simplify_until(expr: sympy.Expr, max_iterations: int = 10) -> sympy.Expr:
+            """
+            Calls 'simplify' either until it does not change or until it reaches the
+            maximum number of iterations.
+            """
+            for _ in range(max_iterations):
+                previous, expr = expr, simplify(expr)
+                if expr == previous:
+                    break
+            return expr
 
-            r = try_solve(expr, symbol)
+        RELOP_MIRROR = {
+            sympy.Ge: sympy.Le,
+            sympy.Gt: sympy.Lt,
+            sympy.Le: sympy.Ge,
+            sympy.Lt: sympy.Gt,
+        }
 
-            if r is None or not (symbol.is_integer and r[1].is_integer):
-                # Range refinement only supports integer symbols for now.
-                # There are lots of SymPy bugs when it comes to comparing
-                # reals and integers, so we skip that for now.
+        # List of expressions to be processed.
+        # Here, we try considering both LHS and RHS by mirroring the
+        # original expression: a < b ==> b > a
+        exprs = [guard.expr]
+
+        if type(guard.expr) in RELOP_MIRROR:
+            exprs.append(RELOP_MIRROR[type(guard.expr)](guard.expr.rhs, guard.expr.lhs))  # type: ignore[arg-type]
+
+        for expr in exprs:
+            # First, try to simplify the left-hand side.
+            expr = simplify_until(expr)
+
+            # Filter the guards that are not:
+            #   1. are relational operations
+            #   2. have a symbol as the left-hand side
+            #   3. already have a range
+            if not (
+                isinstance(expr, sympy.Rel)
+                and isinstance(expr.lhs, sympy.Symbol)
+                and expr.lhs in self.var_to_range
+            ):
                 continue
 
-            r_expr, rhs = r
+            # Use only univariate functions.
+            if len(expr.rhs.free_symbols) > 0:
+                continue
+
+            # Update the value range of the left-hand side, if the
+            # right-hand side provides a better range.
+            symbol = expr.lhs
+
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = bound_sympy(rhs, self.var_to_range)
-            _assert_bound_is_rational(rhs, rhs_vr)
+            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore[arg-type]
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
@@ -3325,13 +3415,13 @@ class ShapeEnv:
             # sympy.Eq may update both lower and upper bounds.
             # sympy.G{t,e} may update the lower bound, only.
             # sympy.L{t,e} may update the upper bound, only.
-            if lower < rhs_vr.lower and isinstance(r_expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
+            if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
-                lower = rhs_vr.lower + int(isinstance(r_expr, sympy.Gt))
+                lower = rhs_vr.lower + int(isinstance(expr, sympy.Gt))
                 lower_guard = guard
-            if upper > rhs_vr.upper and isinstance(r_expr, (sympy.Eq, sympy.Le, sympy.Lt)):
-                upper = rhs_vr.upper - int(isinstance(r_expr, sympy.Lt))
+            if upper > rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
+                upper = rhs_vr.upper - int(isinstance(expr, sympy.Lt))
                 upper_guard = guard
 
             # Do nothing if the new value range is no better than what we already have.

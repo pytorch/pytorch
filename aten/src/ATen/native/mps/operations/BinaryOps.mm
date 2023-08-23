@@ -13,18 +13,13 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
-#include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
 #include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
-#include <ATen/ops/lerp_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
-#include <ATen/ops/logical_and_native.h>
-#include <ATen/ops/logical_or_native.h>
-#include <ATen/ops/logical_xor_native.h>
 #include <ATen/ops/lt_native.h>
 #include <ATen/ops/maximum_native.h>
 #include <ATen/ops/minimum_native.h>
@@ -51,13 +46,13 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-// alpha is always 1.0 except when this function is called from add_sub_lerp_template()
-static void binaryOpTensor(const Tensor& self,
-                           const Tensor& other,
-                           const Scalar& alpha,
-                           const Tensor& output_,
-                           std::string op_name,
-                           BinaryOpBlock binaryBlock) {
+// alpha is always 1.0 except when this function is called from add_sub_template()
+void binaryOpTensor(const Tensor& self,
+                    const Tensor& other,
+                    const Scalar& alpha,
+                    const Tensor& output_,
+                    std::string op_name,
+                    BinaryOpBlock binaryBlock) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support binary op with uint8 natively starting from macOS 13.0");
   TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
@@ -178,7 +173,7 @@ static void binaryOpTensor(const Tensor& self,
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
-    // 'cachedGraph->alphaTensor' is not nil only if add_sub_lerp_template() was called with an alpha value != 1.0
+    // 'cachedGraph->alphaTensor' is not nil only if add_sub_template() was called with an alpha value != 1.0
     if (cachedGraph->alphaTensor) {
       alpha_scalar = getMPSScalar(alpha, other.scalar_type());
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha_scalar);
@@ -195,20 +190,20 @@ static void binaryOpTensor(const Tensor& self,
   }
 }
 
-static void binaryOpScalar(const Tensor& self,
-                           const Scalar& other,
-                           const Scalar& alpha,
-                           const Tensor& output,
-                           std::string op_name,
-                           BinaryOpBlock binaryBlock) {
+void binaryOpScalar(const Tensor& self,
+                    const Scalar& other,
+                    const Scalar& alpha,
+                    const Tensor& output,
+                    std::string op_name,
+                    BinaryOpBlock binaryBlock) {
   binaryOpTensor(self, wrapped_scalar_tensor(other), alpha, output, op_name, binaryBlock);
 }
 
-static void div_mode_template(const Tensor& self,
-                              const Tensor& other,
-                              c10::optional<c10::string_view> rounding_mode,
-                              const Tensor& output,
-                              const string op_name) {
+void div_mode_template(const Tensor& self,
+                       const Tensor& other,
+                       c10::optional<c10::string_view> rounding_mode,
+                       const Tensor& output,
+                       const string op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
     TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
   }
@@ -260,14 +255,14 @@ static void div_mode_template(const Tensor& self,
                  div_mode_op_block);
 }
 
-static void add_sub_lerp_template(const Tensor& self,
-                                  const Tensor& other,
-                                  const Scalar& alpha,
-                                  const Tensor& output,
-                                  std::string op_name) {
+void add_sub_template(const Tensor& self,
+                      const Tensor& other,
+                      const Scalar& alpha,
+                      const Tensor& output,
+                      std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
-      output.copy_(self);
+      const_cast<Tensor&>(output) = self.clone();
     }
     return;
   }
@@ -278,22 +273,9 @@ static void add_sub_lerp_template(const Tensor& self,
     at::native::alpha_check(commonDtype, alpha);
   }
 
-  if (!alpha_has_value && op_name == "lerp") {
-    if (!self.is_alias_of(other)) { // if inplace, no-op
-      output.copy_(other);
-    }
-    return;
-  }
-
-  BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+  BinaryOpBlock add_sub_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     MPSGraphTensor* secondaryTensor = secondaryCastTensor;
-
-    if (op_name == "lerp") {
-      secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor:secondaryCastTensor
-                                                   secondaryTensor:primaryCastTensor
-                                                              name:nil];
-    }
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
     if (alpha_has_value) {
@@ -302,7 +284,7 @@ static void add_sub_lerp_template(const Tensor& self,
                                                   secondaryTensor:cachedGraph->alphaTensor
                                                              name:nil];
     }
-    if (op_name == "add" || op_name == "lerp")
+    if (op_name == "add")
       return [mpsGraph additionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
     else
       return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
@@ -313,7 +295,7 @@ static void add_sub_lerp_template(const Tensor& self,
                  alpha,
                  output,
                  op_name + "_out_mps:" + (alpha_has_value ? getMPSTypeString(alpha.type()) : ""),
-                 add_sub_lerp_op_block);
+                 add_sub_op_block);
 }
 
 } // namespace mps
@@ -407,11 +389,11 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_lerp_template(self, other, alpha, output, "add");
+  mps::add_sub_template(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_lerp_template(self, other, alpha, output, "sub");
+  mps::add_sub_template(self, other, alpha, output, "sub");
 }
 
 TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const Tensor& out) {
@@ -510,7 +492,4 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "xlogy_out_mps", xlogy_op_block);
 }
 
-TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
-  mps::add_sub_lerp_template(self, end, weight, out, "lerp");
-}
 } // namespace at::native

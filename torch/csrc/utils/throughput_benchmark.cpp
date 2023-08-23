@@ -39,7 +39,7 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs) {
   }
 }
 
-ThroughputBenchmark::ThroughputBenchmark(const jit::Module& script_module)
+ThroughputBenchmark::ThroughputBenchmark(jit::Module script_module)
     : script_module_(script_module) {}
 
 ThroughputBenchmark::ThroughputBenchmark(py::object module)

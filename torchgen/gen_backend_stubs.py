@@ -47,7 +47,7 @@ def parse_backend_yaml(
         )
     }
 
-    with open(backend_yaml_path) as f:
+    with open(backend_yaml_path, "r") as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -253,9 +253,9 @@ def error_on_missing_kernels(
     full_codegen: Optional[List[OperatorName]] = None,
 ) -> None:
     try:
-        with open(kernel_defn_file_path) as f:
+        with open(kernel_defn_file_path, "r") as f:
             backend_defns = f.read()
-    except OSError as e:
+    except IOError as e:
         raise AssertionError(
             f"Unable to read from the specified impl_path file: {kernel_defn_file_path}"
         ) from e

@@ -71,8 +71,6 @@ def _gather_state_dict(
             else:
                 tensor = output_tensor
         elif isinstance(tensor, DTensor):
-            if tensor.device != tensor.device_mesh.device_type:
-                tensor = tensor.to(tensor.device_mesh.device_type)
             tensor = tensor.redistribute(
                 device_mesh=tensor.device_mesh, placements=[Replicate()]
             )

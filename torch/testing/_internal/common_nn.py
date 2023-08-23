@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck
+    TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -178,7 +178,7 @@ def poissonnllloss_no_reduce_test():
 
 
 def bceloss_no_reduce_test():
-    t = Variable(torch.randn(15, 10).gt(0).to(torch.get_default_dtype()))
+    t = Variable(torch.randn(15, 10).gt(0).double())
     return dict(
         fullname='BCELoss_no_reduce',
         constructor=wrap_functional(
@@ -193,7 +193,7 @@ def bceloss_no_reduce_test():
 
 
 def bceloss_no_reduce_scalar_test():
-    t = torch.randn(()).gt(0).to(torch.get_default_dtype())
+    t = torch.randn(()).gt(0).double()
     return dict(
         fullname='BCELoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -207,7 +207,7 @@ def bceloss_no_reduce_scalar_test():
 
 
 def bceloss_weights_no_reduce_test():
-    t = Variable(torch.randn(15, 10).gt(0).to(torch.get_default_dtype()))
+    t = Variable(torch.randn(15, 10).gt(0).double())
     weights = torch.rand(10)
     return dict(
         fullname='BCELoss_weights_no_reduce',
@@ -226,7 +226,7 @@ def bceloss_weights_no_reduce_test():
 
 
 def bceloss_weights_no_reduce_scalar_test():
-    t = torch.randn(()).gt(0).to(torch.get_default_dtype())
+    t = torch.randn(()).gt(0).double()
     weights = torch.rand(())
     return dict(
         fullname='BCELoss_weights_no_reduce_scalar',
@@ -244,7 +244,7 @@ def bceloss_weights_no_reduce_scalar_test():
 
 
 def bce_with_logistic_legacy_enum_test():
-    t = Variable(torch.randn(15, 10).gt(0).to(torch.get_default_dtype()))
+    t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_legacy_enum',
@@ -261,7 +261,7 @@ def bce_with_logistic_legacy_enum_test():
 
 
 def bce_with_logistic_no_reduce_test():
-    t = Variable(torch.randn(15, 10).gt(0).to(torch.get_default_dtype()))
+    t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_no_reduce',
@@ -278,7 +278,7 @@ def bce_with_logistic_no_reduce_test():
 
 
 def bce_with_logistic_no_reduce_scalar_test():
-    t = torch.randn(()).gt(0).to(torch.get_default_dtype())
+    t = torch.randn(()).gt(0).double()
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_no_reduce_scalar',
@@ -813,7 +813,7 @@ def multilabelmarginloss_no_reduce_test():
 
 
 def hingeembeddingloss_no_reduce_test():
-    t = Variable(torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1))
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
     return dict(
         fullname='HingeEmbeddingLoss_no_reduce',
         constructor=wrap_functional(
@@ -829,7 +829,7 @@ def hingeembeddingloss_no_reduce_test():
 
 
 def hingeembeddingloss_margin_no_reduce_test():
-    t = Variable(torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1))
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
     return dict(
         fullname='HingeEmbeddingLoss_margin_no_reduce',
         constructor=wrap_functional(
@@ -1372,7 +1372,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1384,7 +1384,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2304,6 +2304,87 @@ new_module_tests = [
         test_cuda=False,
     ),
     dict(
+        fullname='Padding12_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({1, 2}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, *_: padding1d_circular(i, (1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding31_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 1), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({3, 1}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, *_: padding1d_circular(i, (3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding33_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({3, 3}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, *_: padding1d_circular(i, (3, 3)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding1221_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({1, 2, 2, 1}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, *_: padding2d_circular(i, (1, 2, 2, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding2322_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(2, 3, 2, 2), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({2, 3, 2, 2}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, *_: padding2d_circular(i, (2, 3, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding3331_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 3, 1), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({3, 3, 3, 1}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(9, out=torch.DoubleTensor()).reshape([1, 1, 3, 3]),
+        reference_fn=lambda i, *_: padding2d_circular(i, (3, 3, 3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding122112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1, 1, 2), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, *_: padding3d_circular(i, (1, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding322112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 2, 2, 1, 1, 2), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({3, 2, 2, 1, 1, 2}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, *_: padding3d_circular(i, (3, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding332122_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 2, 1, 2, 2), mode='circular'),
+        cpp_options_args='F::PadFuncOptions({3, 3, 2, 1, 2, 2}).mode(torch::kCircular)',
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, *_: padding3d_circular(i, (3, 3, 2, 1, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
         module_name='PairwiseDistance',
         input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
     ),
@@ -2399,7 +2480,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.03,
+        tf32_precision=0.02,
     ),
     dict(
         module_name='Linear',
@@ -2459,19 +2540,19 @@ for padding_mode, cpp_padding_mode in zip(
         output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
         new_module_tests.append(
             dict(
-                module_name=f'Conv{d}d',
+                module_name='Conv{}d'.format(d),
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
+                cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
                                         .stride(2)
-                                        .padding({cpp_padding})
+                                        .padding({})
                                         .dilation(1)
                                         .groups(1)
                                         .bias(true)
-                                        .padding_mode({cpp_padding_mode})''',
+                                        .padding_mode({})'''.format(d, cpp_padding, cpp_padding_mode),
                 input_size=input_size,
                 output_size=output_size,
                 cudnn=True,
-                desc=f'{padding_mode}_stride2_pad2',
+                desc='{}_stride2_pad2'.format(padding_mode),
                 with_tf32=True,
                 tf32_precision=0.05
             ),
@@ -2858,6 +2939,77 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
     return output
 
 
+def padding1d_circular(input, pad):
+    r""" input:
+            [[[0., 1., 2.],
+              [3., 4., 5.]]]
+          pad: (1, 2)
+          output:
+            [[[2., 0., 1., 2., 0., 1.],
+              [5., 3., 4., 5., 3., 4.]]]
+    """
+    return torch.cat([input[:, :, -pad[0]:], input,
+                      input[:, :, 0:pad[1]]], dim=2)
+
+
+def padding2d_circular(input, pad):
+    r"""input:
+             [[[[0., 1., 2],
+                [3., 4., 5.]]]]
+            pad: (1, 2, 2, 1)
+    output:
+        [[[[2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.]]]]
+    """
+    input = torch.cat([input[:, :, -pad[2]:], input, input[:, :, 0:pad[3]]], dim=2)
+    return torch.cat([input[:, :, :, -pad[0]:], input, input[:, :, :, 0:pad[1]]], dim=3)
+
+
+def padding3d_circular(input, pad):
+    r"""input:
+            [[[[[ 0.,  1.,  2.],
+                [ 3.,  4.,  5.]],
+               [[ 6.,  7.,  8.],
+                [ 9., 10., 11.]]]]]
+        pad: (1, 2, 2, 1, 1, 2)
+        output: [[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]]]]]
+    """
+    input = torch.cat([input[:, :, -pad[4]:], input, input[:, :, 0:pad[5]]], dim=2)
+    input = torch.cat([input[:, :, :, -pad[2]:], input, input[:, :, :, 0:pad[3]]], dim=3)
+    return torch.cat([input[:, :, :, :, -pad[0]:], input, input[:, :, :, :, 0:pad[1]]], dim=4)
+
+
 loss_reference_fns: Dict['str', Callable] = {
     'KLDivLoss': kldivloss_reference,
     'KLDivLoss_log_target': kldivloss_log_target_reference,
@@ -2968,7 +3120,7 @@ criterion_tests = [
     dict(
         module_name='BCELoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_bfloat16=True,
@@ -2978,7 +3130,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
@@ -3000,7 +3152,7 @@ criterion_tests = [
     dict(
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
-        target_fn=lambda: torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
+        target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
@@ -3010,7 +3162,7 @@ criterion_tests = [
         constructor_args=(0.5,),
         cpp_constructor_args='torch::nn::HingeEmbeddingLossOptions().margin(0.5)',
         input_size=(10,),
-        target_fn=lambda: torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
+        target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
@@ -3090,9 +3242,9 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10).to(torch.get_default_dtype())),
+        constructor_args=(1, 1., torch.rand(10).double()),
         cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
-        legacy_constructor_args=(1, torch.rand(10).to(torch.get_default_dtype())),
+        legacy_constructor_args=(1, torch.rand(10).double()),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
@@ -3168,14 +3320,14 @@ criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
     ),
     dict(
         module_name='BCEWithLogitsLoss',
         constructor_args=(torch.rand(10),),
         cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights',
     ),
     dict(
@@ -3183,7 +3335,7 @@ criterion_tests = [
         constructor_args=(torch.rand(()),),
         cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.randn(()).gt(0).double(),
         desc='scalar_weights'
     ),
     dict(
@@ -3581,7 +3733,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(()),),
         cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.rand(()).gt(0).to(torch.get_default_dtype()),
+        target_fn=lambda: torch.rand(()).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
@@ -3592,7 +3744,7 @@ criterion_tests = [
         constructor_args=(0.5,),
         cpp_constructor_args='torch::nn::HingeEmbeddingLossOptions().margin(0.5)',
         input_size=(),
-        target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
+        target_fn=lambda: torch.randn(()).gt(0).double().mul_(2).sub(1),
         desc='scalar_margin',
         check_sum_reduction=True,
     ),
@@ -3754,7 +3906,7 @@ regression_criterion_no_batch = [
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname=f"{name}_no_batch_dim_{reduction}",
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
@@ -3779,7 +3931,7 @@ for reduction in reductions:
 # Check that classification criterion work with no batch dimensions
 # List of tuples of (name, input_fn, target_fn)
 classification_criterion_no_batch = [
-    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9).gt(0).to(torch.get_default_dtype())),
+    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9).gt(0).double()),
     ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
     ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
@@ -3807,7 +3959,7 @@ reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
     classification_test_info = dict(
-        fullname=f"{name}_no_batch_dim_{reduction}",
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
@@ -4000,7 +4152,7 @@ class TestBase:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
                 assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -4129,7 +4281,7 @@ class ModuleTest(TestBase):
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
 
-        is_any_input_complex = any(isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple)
+        is_any_input_complex = any((isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple))
 
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 

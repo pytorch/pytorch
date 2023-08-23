@@ -772,7 +772,8 @@ class QuantizationTestCase(TestCase):
 
             self.assertTrue(
                 len(matched_subgraph_pairs) == len(expected_types),
-                f'Expected length of results to match, but got {len(matched_subgraph_pairs)} and {len(expected_types)}'
+                'Expected length of results to match, but got %d and %d' %
+                (len(matched_subgraph_pairs), len(expected_types))
             )
             for k, v in expected_types.items():
                 expected_types_a, expected_types_b = v
@@ -790,9 +791,8 @@ class QuantizationTestCase(TestCase):
                     (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
-                    'Type mismatch at {}: expected {}, got {}'.format(
-                        k,
-                        (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
+                    'Type mismatch at %s: expected %s, got %s' %
+                    (k, (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
                         (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
                 )
 
@@ -1601,7 +1601,7 @@ class NormalizationTestModel(torch.nn.Module):
         super().__init__()
         self.quant = torch.ao.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm(8)
+        self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
         self.instance_norm1d = torch.nn.InstanceNorm1d(8)
         self.instance_norm2d = torch.nn.InstanceNorm2d(8)
@@ -2218,7 +2218,6 @@ class ModelWithFunctionals(torch.nn.Module):
         self.mycat = nnq.FloatFunctional()
         self.myadd = nnq.FloatFunctional()
         self.myadd_relu = nnq.FloatFunctional()
-        self.mymatmul = nnq.FloatFunctional()
         # Tracing doesnt work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # self.my_scalar_add = nnq.FloatFunctional()
@@ -2228,12 +2227,11 @@ class ModelWithFunctionals(torch.nn.Module):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
         w = self.myadd_relu.add_relu(z, z)
-        u = self.mymatmul.matmul(w, w.T)
         # Tracing doesnt work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # w = self.my_scalar_add.add_scalar(w, -0.5)
         # w = self.my_scalar_mul.mul_scalar(w, 0.5)
-        return u
+        return w
 
 
 class ResNetBase(torch.nn.Module):

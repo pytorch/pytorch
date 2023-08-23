@@ -10,11 +10,11 @@ from torch.testing._internal.common_utils import IS_FBCODE
 class MutationExportTests(torch._dynamo.test_case.TestCase):
     def check_failure_on_export(self, mod, *args):
         with self.assertRaises(AssertionError):
-            torch._dynamo.export(mod)(*args)
+            torch._dynamo.export(mod, *args)
 
     def check_same_with_export(self, mod, arg):
         real_result = mod(arg)
-        graph, _ = torch._dynamo.export(mod)(arg)
+        graph, _ = torch._dynamo.export(mod, arg)
         result = graph(arg)
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 

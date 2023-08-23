@@ -88,7 +88,7 @@ def parallel_apply(
         except Exception:
             with lock:
                 results[i] = ExceptionWrapper(
-                    where=f"in replica {i} on device {device}")
+                    where="in replica {} on device {}".format(i, device))
 
     if len(modules) > 1:
         threads = [threading.Thread(target=_worker,

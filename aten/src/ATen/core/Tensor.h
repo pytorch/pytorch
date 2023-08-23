@@ -49,24 +49,6 @@ class TORCH_API OptionalTensorRef {
   Tensor ref_;
 };
 
-// Use to convert a TensorBase (that may be undefined) to an at::Tensor
-// without bumping refcount.
-class TORCH_API TensorRef {
- public:
-  ~TensorRef() {
-    ref_.unsafeReleaseTensorImpl();
-  }
-
-  TensorRef(const TensorBase& src)
-      : ref_(Tensor::unsafe_borrow_t{}, src) {}
-
-  const Tensor& operator*() const & {
-    return ref_;
-  }
- private:
-  Tensor ref_;
-};
-
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
@@ -74,7 +56,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
                 "Expected hook to return void");
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
-    TensorRef grad(grad_base);
+    OptionalTensorRef grad(grad_base);
     fn(*grad);
     return Tensor();
   });
@@ -83,7 +65,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
-    TensorRef grad(grad_base);
+    OptionalTensorRef grad(grad_base);
     Tensor ret = fn(*grad);
     return TensorBase(std::move(ret));
   });

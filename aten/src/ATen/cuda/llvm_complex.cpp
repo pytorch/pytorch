@@ -14,7 +14,8 @@
 #include <ATen/cuda/llvm_jit_strings.h>
 
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 const std::string complex_body = R"ESCAPE(
 
@@ -1176,4 +1177,4 @@ const std::string &get_complex_math_string() {
   return complex_math;
 }
 
-} // namespace at::cuda
+}} // namespace at::cuda

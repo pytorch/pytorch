@@ -5,7 +5,8 @@
 #include <cuda.h>
 #include <library_types.h>
 
-namespace at::cuda {
+namespace at {
+namespace cuda {
 
 template <typename scalar_t>
 cudaDataType getCudaDataType() {
@@ -86,16 +87,11 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_R_64I;
     case c10::ScalarType::BFloat16:
       return CUDA_R_16BF;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
-    case c10::ScalarType::Float8_e4m3fn:
-      return CUDA_R_8F_E4M3;
-    case c10::ScalarType::Float8_e5m2:
-      return CUDA_R_8F_E5M2;
-#endif
 #endif
     default:
       TORCH_INTERNAL_ASSERT(false, "Cannot convert ScalarType ", scalar_type, " to cudaDataType.")
   }
 }
 
-} // namespace at::cuda
+} // namespace cuda
+} // namespace at

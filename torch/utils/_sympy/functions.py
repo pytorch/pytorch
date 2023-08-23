@@ -69,8 +69,6 @@ class FloorDiv(sympy.Function):
             return sympy.floor(base / divisor)
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
-        if isinstance(divisor, sympy.Rational) and divisor.p == 1:
-            return sympy.floor(base * divisor.q)
 
         if isinstance(base, sympy.Add):
             for a in base.args:

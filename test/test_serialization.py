@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: serialization"]
 
 import torch
@@ -507,7 +508,7 @@ class SerializationMixin:
             torch.device('cuda', 0)
         ]
         gpu_last_map_locations = [
-            f'cuda:{torch.cuda.device_count() - 1}',
+            'cuda:{}'.format(torch.cuda.device_count() - 1),
         ]
 
         def check_map_locations(map_locations, tensor_class, intended_device):
@@ -814,7 +815,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
 
-        tmpmodule_name = f'tmpmodule{unique_key}'
+        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
 
         def import_module(name, filename):
             import importlib.util
@@ -3908,7 +3909,7 @@ class TestSerialization(TestCase, SerializationMixin):
             state_dict = m.state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True)
-            for v in result.values():
+            for k, v in result.items():
                 self.assertTrue(v.is_cuda)
 
     def run(self, *args, **kwargs):

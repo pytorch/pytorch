@@ -177,7 +177,7 @@ class WeightNormSparsifier(BaseSparsifier):
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(
-                "Number of zeros per block cannot be more than the total number of elements in that block."
+                "Number of zeros per block cannot be more than " "the total number of elements in that block."
             )
         if zeros_per_block < 0:
             raise ValueError("Number of zeros per block should be positive.")

@@ -114,8 +114,8 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def observe_quant_params(self):
-        print(f'_LearnableFakeQuantize Scale: {self.scale.detach()}')
-        print(f'_LearnableFakeQuantize Zero Point: {self.zero_point.detach()}')
+        print('_LearnableFakeQuantize Scale: {}'.format(self.scale.detach()))
+        print('_LearnableFakeQuantize Zero Point: {}'.format(self.zero_point.detach()))
 
     @torch.jit.export
     def calculate_qparams(self):

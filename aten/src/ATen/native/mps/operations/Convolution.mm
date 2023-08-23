@@ -2,22 +2,18 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/_mps_convolution_native.h>
-#include <ATen/ops/_mps_convolution_transpose_native.h>
-#include <ATen/ops/mps_convolution_backward_native.h>
-#include <ATen/ops/mps_convolution_transpose_backward_native.h>
 
 namespace at::native {
 
-static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
-                                     NSUInteger strideInX,
-                                     NSUInteger strideInY,
-                                     NSUInteger dilationRateInX,
-                                     NSUInteger dilationRateInY,
-                                     NSUInteger paddingHorizontal,
-                                     NSUInteger paddingVertical,
-                                     c10::MemoryFormat memory_format,
-                                     NSUInteger groups) {
+void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
+                              NSUInteger strideInX,
+                              NSUInteger strideInY,
+                              NSUInteger dilationRateInX,
+                              NSUInteger dilationRateInY,
+                              NSUInteger paddingHorizontal,
+                              NSUInteger paddingVertical,
+                              c10::MemoryFormat memory_format,
+                              NSUInteger groups) {
   descriptor_.strides =
       @[ @1, [[NSNumber alloc] initWithInteger:strideInY], [[NSNumber alloc] initWithInteger:strideInX] ];
   descriptor_.dilationRates =
@@ -36,15 +32,15 @@ static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor*
 }
 
 // Create convolution descriptor
-static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
-                           NSUInteger strideInX,
-                           NSUInteger strideInY,
-                           NSUInteger dilationRateInX,
-                           NSUInteger dilationRateInY,
-                           NSUInteger paddingHorizontal,
-                           NSUInteger paddingVertical,
-                           c10::MemoryFormat memory_format,
-                           NSUInteger groups) {
+void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
+                    NSUInteger strideInX,
+                    NSUInteger strideInY,
+                    NSUInteger dilationRateInX,
+                    NSUInteger dilationRateInY,
+                    NSUInteger paddingHorizontal,
+                    NSUInteger paddingVertical,
+                    c10::MemoryFormat memory_format,
+                    NSUInteger groups) {
   descriptor_.strideInX = strideInX;
   descriptor_.strideInY = strideInY;
   descriptor_.dilationRateInX = dilationRateInX;
@@ -66,14 +62,14 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-static Tensor _mps_convolution_impl(const Tensor& input_t,
-                                    const Tensor& weight_t,
-                                    const c10::optional<Tensor>& bias_opt,
-                                    IntArrayRef padding,
-                                    IntArrayRef stride,
-                                    IntArrayRef dilation,
-                                    int64_t groups,
-                                    c10::optional<IntArrayRef> input_shape) {
+Tensor _mps_convolution_impl(const Tensor& input_t,
+                             const Tensor& weight_t,
+                             const c10::optional<Tensor>& bias_opt,
+                             IntArrayRef padding,
+                             IntArrayRef stride,
+                             IntArrayRef dilation,
+                             int64_t groups,
+                             c10::optional<IntArrayRef> input_shape) {
   TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
@@ -250,14 +246,14 @@ Tensor _mps_convolution(const Tensor& input_t,
   return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, c10::nullopt);
 }
 
-static Tensor mps_convolution_backward_input(IntArrayRef input_size,
-                                             const Tensor& grad_output_t,
-                                             const Tensor& weight_t,
-                                             IntArrayRef padding,
-                                             IntArrayRef stride,
-                                             IntArrayRef dilation,
-                                             int64_t groups,
-                                             bool bias_defined) {
+Tensor mps_convolution_backward_input(IntArrayRef input_size,
+                                      const Tensor& grad_output_t,
+                                      const Tensor& weight_t,
+                                      IntArrayRef padding,
+                                      IntArrayRef stride,
+                                      IntArrayRef dilation,
+                                      int64_t groups,
+                                      bool bias_defined) {
   using namespace at::native::mps;
   using namespace mps;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
@@ -387,14 +383,14 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   return *grad_input;
 }
 
-static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
-                                               const Tensor& grad_output_t,
-                                               const Tensor& input_t,
-                                               IntArrayRef padding,
-                                               IntArrayRef stride,
-                                               IntArrayRef dilation,
-                                               int64_t groups,
-                                               bool bias_defined) {
+Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
+                                        const Tensor& grad_output_t,
+                                        const Tensor& input_t,
+                                        IntArrayRef padding,
+                                        IntArrayRef stride,
+                                        IntArrayRef dilation,
+                                        int64_t groups,
+                                        bool bias_defined) {
   using namespace at::native::mps;
   using namespace mps;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
@@ -557,13 +553,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> mps_convolution_backward(const at
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-static Tensor mps_convolution_transpose_forward(const Tensor& grad_output,
-                                                const Tensor& weight,
-                                                IntArrayRef padding,
-                                                IntArrayRef output_padding,
-                                                IntArrayRef stride,
-                                                IntArrayRef dilation,
-                                                int64_t groups) {
+Tensor mps_convolution_transpose_forward(const Tensor& grad_output,
+                                         const Tensor& weight,
+                                         IntArrayRef padding,
+                                         IntArrayRef output_padding,
+                                         IntArrayRef stride,
+                                         IntArrayRef dilation,
+                                         int64_t groups) {
   auto input_size =
       conv_input_size(grad_output.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
   return mps_convolution_backward_input(input_size, grad_output, weight, padding, stride, dilation, groups, false);
@@ -583,23 +579,23 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
   return output_t;
 }
 
-static Tensor mps_convolution_transpose_backward_input(const Tensor& grad_output_t,
-                                                       const Tensor& weight_t,
-                                                       IntArrayRef padding,
-                                                       IntArrayRef stride,
-                                                       IntArrayRef dilation,
-                                                       int64_t groups,
-                                                       IntArrayRef input_shape) {
+Tensor mps_convolution_transpose_backward_input(const Tensor& grad_output_t,
+                                                const Tensor& weight_t,
+                                                IntArrayRef padding,
+                                                IntArrayRef stride,
+                                                IntArrayRef dilation,
+                                                int64_t groups,
+                                                IntArrayRef input_shape) {
   return _mps_convolution_impl(grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups, input_shape);
 }
 
-static Tensor mps_convolution_transpose_backward_weight(IntArrayRef weight_size,
-                                                        const Tensor& grad_output_t,
-                                                        const Tensor& input_t,
-                                                        IntArrayRef padding,
-                                                        IntArrayRef stride,
-                                                        IntArrayRef dilation,
-                                                        int64_t groups) {
+Tensor mps_convolution_transpose_backward_weight(IntArrayRef weight_size,
+                                                 const Tensor& grad_output_t,
+                                                 const Tensor& input_t,
+                                                 IntArrayRef padding,
+                                                 IntArrayRef stride,
+                                                 IntArrayRef dilation,
+                                                 int64_t groups) {
   return mps_convolution_backward_weights(
       weight_size, input_t, grad_output_t, padding, stride, dilation, groups, false);
 }

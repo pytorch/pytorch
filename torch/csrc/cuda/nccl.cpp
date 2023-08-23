@@ -124,7 +124,9 @@ ncclRedOp_t to_nccl_red_op(int var) {
   return (ncclRedOp_t)(var);
 }
 
-namespace torch::cuda::nccl {
+namespace torch {
+namespace cuda {
+namespace nccl {
 
 using namespace at;
 
@@ -1116,4 +1118,6 @@ void scatter(
 #endif
 }
 
-} // namespace torch::cuda::nccl
+} // namespace nccl
+} // namespace cuda
+} // namespace torch
