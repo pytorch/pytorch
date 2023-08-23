@@ -458,7 +458,7 @@ def _make_elementwise_unary_reference(
                 extra_meta(a)
 
             output = prim(a)
-            return handle_noncontiguous_outputs([a],output)
+            return handle_noncontiguous_outputs([a], output)
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -980,7 +980,7 @@ def _make_elementwise_binary_reference(
             )
             a, b = _maybe_broadcast(a, b)
             output = prim(a, b)
-            return handle_noncontiguous_outputs([a,b],output)
+            return handle_noncontiguous_outputs([a,b], output)
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -1686,7 +1686,7 @@ def sub(
             b = b * alpha
 
     output = prims.sub(a, b)
-    return  handle_noncontiguous_outputs([a,b],output)
+    return  handle_noncontiguous_outputs([a,b], output)
 
 
 # TODO: add docstring
@@ -4808,7 +4808,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     if output.stride() != stride:
         output = prims.copy_strided(output, stride)
 
-    return handle_noncontiguous_outputs(inputs,output)
+    return handle_noncontiguous_outputs(inputs, output)
 
 
 @register_decomposition(aten.linspace)
