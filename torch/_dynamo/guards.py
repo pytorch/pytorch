@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import builtins
 import collections
@@ -174,7 +176,7 @@ class GuardBuilder(GuardBuilderBase):
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
-        check_fn_manager: "CheckFunctionManager",
+        check_fn_manager: CheckFunctionManager,
         *,
         local: bool,
     ):
@@ -300,10 +302,14 @@ class GuardBuilder(GuardBuilderBase):
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
         if self.local and isinstance(guard.originating_source, LocalSource):
-            local_name = guard.originating_source.local_name
-            weak_id = self.lookup_weakrefs(val)
-            if weak_id is not None:
-                self.id_matched_objs[local_name] = weak_id
+            # TODO(janimesh) - This is currently restricted to nn.Module objects
+            # because many other ID_MATCH'd objects fail - like DeviceMesh.
+            # Increase the scope of ID_MATCH'd objects.
+            if isinstance(val, torch.nn.Module):
+                local_name = guard.originating_source.local_name
+                weak_id = self.lookup_weakrefs(val)
+                if weak_id is not None:
+                    self.id_matched_objs[local_name] = weak_id
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -806,7 +812,7 @@ class PyExprCSEPass:
         expr_to_name: Dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
-        def __init__(self, config: "PyExprCSEPass.Config") -> None:
+        def __init__(self, config: PyExprCSEPass.Config) -> None:
             self._config = config
 
         def visit(self, node: ast.AST) -> Any:
@@ -817,7 +823,7 @@ class PyExprCSEPass:
     class Replacer(ast.NodeTransformer):
         def __init__(
             self,
-            config: "PyExprCSEPass.Config",
+            config: PyExprCSEPass.Config,
             gen_name: Callable[[], str],
         ) -> None:
             super().__init__()
