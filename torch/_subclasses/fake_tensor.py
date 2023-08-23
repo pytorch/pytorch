@@ -170,17 +170,10 @@ def is_fake(x):
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
-    elif is_fakified_functional_tensor(x):
-        return True
-    return False
-
-
-def is_fakified_functional_tensor(x):
-    if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+    elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
-        return isinstance(
-            torch._C._functorch._unwrap_functional_tensor(x, reapply_views), FakeTensor
-        )
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return is_fake(unwrapped)
     return False
 
 
