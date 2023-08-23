@@ -3186,7 +3186,7 @@ exit(2)
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
-    @unittest.skip("Corrupts process, only works as stand alone test")
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_cuda_graph_error_options(self):
         def fn():
             x = torch.zeros([2000], device="cuda")
@@ -3237,7 +3237,9 @@ exit(2)
 
         self.assertFalse(throws_on_cuda_event("thread_local"))
         self.assertFalse(throws_on_cuda_event("relaxed"))
-        self.assertTrue(throws_on_cuda_event("global"))
+
+        # Exception would Corrupt Process and make other tests fail
+        # self.assertTrue(throws_on_cuda_event("global"))
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
