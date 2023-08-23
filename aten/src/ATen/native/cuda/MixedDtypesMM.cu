@@ -120,7 +120,7 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
       typename DefaultGemmKernel::ThreadblockSwizzle,
       SmArch,
       DefaultGemmKernel::kSplitKSerial>;
-  
+
   using Gemm = cutlass::gemm::device::GemmUniversalBase<GemmKernel>;
 
   auto result = self.new_empty({length_m, length_n});
