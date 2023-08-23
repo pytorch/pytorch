@@ -1,8 +1,9 @@
 import argparse
 import os
 import pickle
+
 import numpy as np
-from torch._inductor.autotuner.model import AutotunerModel, ModelType
+from torch._inductor.autotuner.model import ModelType
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data-dir", type=str, default="./")
@@ -82,7 +83,9 @@ def main(args):
                 X_group = np.array(X_group)
                 X_group = tuple(Xg[X_group].to("cuda") for Xg in X)
                 autotuner.model.eval()
-                scores = autotuner.model.forward_(X_group).squeeze().cpu().detach().numpy()
+                scores = (
+                    autotuner.model.forward_(X_group).squeeze().cpu().detach().numpy()
+                )
                 if autotuner.model_type == ModelType.NN_POINTWISE:
                     scores = scores * -1
 

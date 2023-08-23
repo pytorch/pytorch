@@ -1,13 +1,13 @@
-import numpy as np
-import tqdm
-import pickle
+import argparse
 import json
 import pickle
-import argparse
+from os import listdir
+from os.path import isdir, isfile, join
+
+import numpy as np
+import tqdm
 from torch._inductor.autotuner.model import AutotunerModel, ModelType
 from triton import Config
-from os import listdir
-from os.path import join, isdir, isfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_dir", type=str, required=True)
@@ -19,7 +19,7 @@ parser.add_argument("--seed", type=int, default=0)
 
 
 def get_baseline_config_num(logpath: str) -> int:
-    with open(logpath, "r") as file:
+    with open(logpath) as file:
         line = file.readlines()[0]
         startpos = line.find("CachingAutotuner gets ")
         assert startpos != -1
@@ -63,7 +63,7 @@ def main(args):
                     continue
 
                 # skip graph python file
-                with open(py_path, "r") as file:
+                with open(py_path) as file:
                     src = file.read()
                     if "AsyncCompile()" in src:
                         continue
@@ -102,7 +102,7 @@ def main(args):
                 # Get the baseline timing (best max autotune) from log
                 baseline_config_num = get_baseline_config_num(log_path)
                 baseline_timing = 1e6
-                with open(all_config_path, "r") as file:
+                with open(all_config_path) as file:
                     all_configs = json.load(file)
                     for config in all_configs[:baseline_config_num]:
                         baseline_timing = min(baseline_timing, config["timing"])
@@ -110,7 +110,7 @@ def main(args):
                 # Read all the configs
                 config_list = list()
                 y_list = list()
-                with open(all_config_path, "r") as file:
+                with open(all_config_path) as file:
                     all_config = json.load(file)
                     # use only max autotune configs for NN_PAIRWISE_SMALL
                     for config in (

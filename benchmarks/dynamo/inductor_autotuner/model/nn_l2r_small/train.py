@@ -1,9 +1,10 @@
 import argparse
-import tqdm
 import os
 import pickle
+
 import numpy as np
 import torch
+import tqdm
 from torch._inductor.autotuner.model import AutotunerModel, ModelType
 
 parser = argparse.ArgumentParser()
