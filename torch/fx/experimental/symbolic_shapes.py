@@ -8,7 +8,6 @@ import math
 import operator
 import re
 import sys
-import textwrap
 import threading
 import traceback
 from collections import defaultdict
@@ -36,7 +35,7 @@ from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
-from torch.utils._traceback import format_frame
+from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
 InputList = List
@@ -744,8 +743,7 @@ class SymNode:
 
     @property
     def expr(self):
-        self._update_expr()
-        return self._expr
+        return self.shape_env.replace(self._expr)
 
     # Check if we have replacements hint_expr that would allow us to
     # simplify it into a hint
@@ -784,9 +782,6 @@ class SymNode:
             return None
         else:
             return int(self.expr)
-
-    def _update_expr(self):
-        self._expr = self.shape_env.replace(self._expr)
 
     def is_int(self):
         return self.pytype is int
@@ -1059,11 +1054,6 @@ def error():
     raise AssertionError("shouldn't be hit")
 
 
-def get_debugging_stack(num_frames_to_cut=2):
-    # cut this frame and the caller's frame by default
-    return ''.join(traceback.format_list(traceback.extract_stack()[:-num_frames_to_cut]))
-
-
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
         aa = a.args
@@ -1305,14 +1295,11 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
-        other_expr = other.expr
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
-        other_expr = self.shape_env.replace(other_expr)
         try:
-            out = func(expr, other_expr)
+            out = func(self.expr, other.expr)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, expr, other_expr)
+            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1334,7 +1321,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
@@ -1342,7 +1329,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
+        expr = self.expr
         if method == "floor" or method == "ceiling":
             expr = self.shape_env._simplify_floor_div(expr)
 
@@ -1364,7 +1351,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_magic_methods:
@@ -2032,7 +2019,7 @@ class ShapeEnv:
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
         self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
-        self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
+        self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
@@ -2143,9 +2130,11 @@ class ShapeEnv:
             self,
             op: Callable,
             args: Tuple,
-    ) -> Optional[torch.fx.Node]:
+    ) -> Tuple[Optional[torch.fx.Node], bool]:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
+        # Flags whether the returned node was cached or not.
+        fresh = False
 
         if _translation_validation_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
@@ -2155,7 +2144,9 @@ class ShapeEnv:
                 # We check if we are not mixing SymNode that should not be ignored
                 # (fx_node is not None) with those that should (fx_node is None).
                 assert all(not isinstance(a, torch.fx.Node) for a in args)
-                return None
+                return None, fresh
+
+            fresh = True
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
@@ -2163,7 +2154,7 @@ class ShapeEnv:
             lifted_op = z3op(op, self.validator)
             self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
 
-        return self.fx_node_cache.get(node_key, None)
+        return self.fx_node_cache.get(node_key, None), fresh
 
     def create_fx_placeholder_and_z3var(
             self,
@@ -2377,7 +2368,7 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges.unknown()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2388,7 +2379,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = self._default_unspecified_value_range()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2399,7 +2390,7 @@ class ShapeEnv:
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
-        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
+        self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges(0, 1)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
@@ -2637,9 +2628,11 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
+            if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
+                val = val.node.maybe_as_int()
+
             if isinstance(val, SymInt):
                 s = val.node.expr
-
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
@@ -2824,7 +2817,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                self.log.warning("Failing guard allocated at: \n%s", guard.stack)
+                self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
         # First, issue all the non-trivial guards.
@@ -3015,7 +3008,7 @@ class ShapeEnv:
         def format_tb(tb):
             if not verbose:
                 return ""
-            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
+            return f"\n   Guarded at:\n{''.join('   ' + l for l in tb.format())}"
 
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
@@ -3190,7 +3183,7 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            stacktrace = ''.join(traceback.format_list(self.var_to_stack[s]))
+            stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
@@ -3332,11 +3325,22 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
-    def _log_guard(self, prefix: str, g, tb):
+    def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
-            for frame in reversed(tb):
-                if frame.filename not in uninteresting_files():
-                    break
+            fsummary = None
+            frame = inspect.currentframe()
+            try:
+                while frame is not None:
+                    if frame.f_code.co_filename not in uninteresting_files():
+                        fsummary = traceback.FrameSummary(
+                            frame.f_code.co_filename,
+                            frame.f_lineno,
+                            frame.f_code.co_name,
+                        )
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame
 
             # NB: this stack is truncated, but it's fine because the main
             # stack_info will give you the rest of the info you need
@@ -3357,7 +3361,7 @@ class ShapeEnv:
                 "eval %s [guard added]%s (%s)%s",
                 g,
                 maybe_user_loc,
-                format_frame(frame),
+                format_frame(fsummary),
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
@@ -3380,19 +3384,20 @@ class ShapeEnv:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
+        fresh = False
         if (
                 _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
             if concrete_val is sympy.true:
-                node = self.create_fx_call_function(torch._assert, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
-                neg = self.create_fx_call_function(operator.not_, (fx_node,))
-                node = self.create_fx_call_function(torch._assert, (neg,))
+                neg, _ = self.create_fx_call_function(operator.not_, (fx_node,))
+                node, fresh = self.create_fx_call_function(torch._assert, (neg,))
             else:
-                eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
-                node = self.create_fx_call_function(torch._assert, (eql,))
+                eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
+                node, fresh = self.create_fx_call_function(torch._assert, (eql,))
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
@@ -3460,25 +3465,36 @@ class ShapeEnv:
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if not self._suppress_guards_tls():
-                tb = traceback.extract_stack()[:-1]
-                stack = ''.join(traceback.format_list(tb))
+                stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
         except Exception:
-            self.remove_fx_node(node)
+            if fresh:
+                self.remove_fx_node(node)
             raise
         else:
             if not self._suppress_guards_tls():
                 assert guard is not None
-                assert tb is not None
 
                 self.refine_ranges(guard)
 
-                self._log_guard("eval", g, tb)
+                self._log_guard("eval", g)
             else:
                 self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
+
+    def cleanup(self):
+        # Break reference cycles.
+        # This destroys the stacks. If you really want to keep them, we
+        # just need some way to break references on code objects.
+        for g in self.guards:
+            g.stack.cleanup()
+        for s in self.var_to_stack.values():
+            s.cleanup()
+        for ras in self.deferred_runtime_asserts.values():
+            for ra in ras:
+                ra.stack.cleanup()
 
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         expr = orig_expr
@@ -3511,8 +3527,7 @@ class ShapeEnv:
         # here)
 
         if not self._suppress_guards_tls():
-            tb = traceback.extract_stack()[:-1]
-            stack = ''.join(traceback.format_list(tb))
+            stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
@@ -3524,7 +3539,7 @@ class ShapeEnv:
             # in ranges.  For example, i0 <= s0 is un-rangeable, because
             # we can't put s0 in the range.  So this is not very high
             # priority at the moment.
-            self._log_guard("runtime_assert", expr, tb)
+            self._log_guard("runtime_assert", expr)
         else:
             self.log.debug("runtime_assert %s [guard suppressed]", expr)
 

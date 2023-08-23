@@ -1593,6 +1593,8 @@ def load_inline(name,
     if use_pch is True:
         # Using PreCompile Header('torch/extension.h') to reduce compile time.
         _check_and_build_extension_h_precompiler_headers(extra_cflags, extra_include_paths)
+    else:
+        remove_extension_h_precompiler_headers()
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
