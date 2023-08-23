@@ -53,7 +53,7 @@ class PairwiseParallel(ParallelStyle):
     .. warning::
         PairwiseParallel does not support ``nn.MultiheadAttention``,
         ``nn.Transformer`` well at this moment. One workaround is to
-        use `ColwiseParallel` and `RowwiseParallel` directly. We recommend to
+        use ``ColwiseParallel`` and ``RowwiseParallel`` directly. We recommend to
         use `PairwiseParallel` only for even-number-layer MLP for now.
     """
 
