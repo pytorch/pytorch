@@ -303,6 +303,9 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
       "specifying inputs= with .backward() not yet implemented for compiled autograd")
+  TORCH_CHECK(
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+      "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
@@ -414,6 +417,7 @@ variable_list compiled_autograd(
 
       SwapSavedVariables saved(compiler_call, state);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      saved.debug_asserts();
       saved.before(call.node->next_edges());
       validate_outputs(
           call.node->next_edges(), outputs, [&](const std::string& msg) {
@@ -423,6 +427,7 @@ variable_list compiled_autograd(
             return ss.str();
           });
       saved.after(call.node->next_edges());
+      saved.debug_asserts();
 
       if (call.post_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));

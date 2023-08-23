@@ -193,19 +193,20 @@ def decide_compile_threads():
     elif sys.platform == "win32" or is_fbcode():
         return 1
     else:
-        return min(
-            32,
+        cpu_count = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")
-            else os.cpu_count(),
+            else os.cpu_count()
         )
+        assert cpu_count
+        return min(32, cpu_count)
 
 
 compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
+    from libfb.py import parutil  # type: ignore[import]
 
     try:
         if __package__:
