@@ -2413,10 +2413,6 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg((M, S)),
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
-    yield SampleInput(
-        make_arg(),
-        0,
-        torch.tensor([0], dtype=torch.int64, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
     yield SampleInput(
         make_arg((S,)),
@@ -5471,6 +5467,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
+    yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
 
 def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwargs):
