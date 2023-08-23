@@ -2,7 +2,7 @@
 
 
 import torch
-from torch._dynamo.backends.registry import register_backend
+import torch._inductor.compile_fx
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
