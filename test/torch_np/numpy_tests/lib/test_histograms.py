@@ -843,15 +843,14 @@ class TestHistogramdd:
     @pytest.mark.xfail(reason="pytorch does not support bins = [int, int, array]")
     def test_inf_edges(self):
         # Test using +/-inf bin edges works. See #1788.
-        with np.errstate(invalid="ignore"):
-            x = np.arange(6).reshape(3, 2)
-            expected = np.array([[1, 0], [0, 1], [0, 1]])
-            h, e = np.histogramdd(x, bins=[3, [-np.inf, 2, 10]])
-            assert_allclose(h, expected)
-            h, e = np.histogramdd(x, bins=[3, np.array([-1, 2, np.inf])])
-            assert_allclose(h, expected)
-            h, e = np.histogramdd(x, bins=[3, [-np.inf, 3, np.inf]])
-            assert_allclose(h, expected)
+        x = np.arange(6).reshape(3, 2)
+        expected = np.array([[1, 0], [0, 1], [0, 1]])
+        h, e = np.histogramdd(x, bins=[3, [-np.inf, 2, 10]])
+        assert_allclose(h, expected)
+        h, e = np.histogramdd(x, bins=[3, np.array([-1, 2, np.inf])])
+        assert_allclose(h, expected)
+        h, e = np.histogramdd(x, bins=[3, [-np.inf, 3, np.inf]])
+        assert_allclose(h, expected)
 
     def test_rightmost_binedge(self):
         # Test event very close to rightmost binedge. See Github issue #4266
