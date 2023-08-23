@@ -140,19 +140,10 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def _linear_node_can_be_fused(self, node):
-        input = get_arg_value(node, 0, "input")
-        weight = get_arg_value(node, 1, "weight")
-        return (
-            is_node_meta_valid(node)
-            and len(input.meta["example_value"].shape) == 2
-            and len(weight.meta["example_value"].shape) == 2
-        )
-
     def match(self, node):
         if CallFunctionVarArgs(torch.nn.functional.linear).match(
             node
-        ) and self._linear_node_can_be_fused(node):
+        ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             bias = get_arg_value(node, 2, "bias")
             group_key = ("batch_linear_lhs", bias is None, input)
@@ -216,6 +207,86 @@ def is_node_meta_valid(node):
     if "example_value" not in node.meta:
         return False
     return True
+
+
+def is_linear_node_can_be_fused(node):
+    input = get_arg_value(node, 0, "input")
+    weight = get_arg_value(node, 1, "weight")
+    return (
+        is_node_meta_valid(node)
+        and len(input.meta["example_value"].shape) == 2
+        and len(weight.meta["example_value"].shape) == 2
+    )
+
+
+class BatchLinearFusion(BatchFusion):
+    """
+    Batch linear fusion in pre grad pass.
+    Fuse linear with same size with torch.baddmm
+    """
+
+    def _getitem_args(self, getitem_node: torch.fx.Node):
+        if getitem_node.target != operator.__getitem__ or (
+            getitem_node.op != "call_function"
+        ):
+            return None
+        return getitem_node.args[0]
+
+    def match(self, node):
+        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+            node
+        ) and is_linear_node_can_be_fused(node):
+            input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
+            bias = get_arg_value(node, 2, "bias")
+            group_key = (
+                "batch_linear_pre_grad",
+                self._getitem_args(input),
+                str(input.meta["example_value"].shape),
+                str(weight.meta["example_value"].shape),
+                bias is None,
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph, subset):
+        batch_nodes = []
+        batch_inputs = []
+        batch_weights = []
+        batch_biases = []
+        for node in subset:
+            batch_nodes.append(node)
+            batch_inputs.append(get_arg_value(node, 0, "input"))
+            batch_weights.append(get_arg_value(node, 1, "weight"))
+            batch_biases.append(get_arg_value(node, 2, "bias"))
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
+            stack_weights = graph.call_function(torch.stack, args=(batch_weights, 0))
+            transpose_weight = graph.call_function(
+                torch.transpose, args=(stack_weights, 1, 2)
+            )
+            if all(bias is None for bias in batch_biases):
+                bmm = graph.call_function(
+                    torch.bmm,
+                    args=(stack_inputs, transpose_weight),
+                )
+            else:
+                stack_biases = graph.call_function(torch.stack, args=(batch_biases, 0))
+                unsqueeze_biases = graph.call_function(torch.unsqueeze, args=(stack_biases, 1))
+                bmm = graph.call_function(
+                    torch.baddbmm,
+                    args=(unsqueeze_biases, stack_inputs, transpose_weight),
+                )
+
+            bmm = graph.call_function(torch.unbind, args=(bmm,), kwargs={"dim": 0})
+            for i, linear in enumerate(batch_nodes):
+                with graph.inserting_after(bmm):
+                    getitem = graph.call_function(operator.getitem, args=(bmm, i))
+                linear.replace_all_uses_with(getitem)
+                getitem.meta.update(linear.meta)
+                graph.erase_node(linear)
 
 
 class BatchLayernormFusion(BatchFusion):
@@ -434,9 +505,7 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
     fusions = []
-
     if config.batch_fusion:
-        fusions += [BatchLinearLHSFusion(), BatchLayernormFusion()]
-
+        fusions += [BatchLinearLHSFusion(), BatchLinearFusion(), BatchLayernormFusion()]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)

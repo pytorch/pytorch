@@ -62,7 +62,6 @@ def pre_grad_passes(gm, example_inputs):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
-
     return gm
 
 
