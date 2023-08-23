@@ -980,7 +980,7 @@ def _make_elementwise_binary_reference(
             )
             a, b = _maybe_broadcast(a, b)
             output = prim(a, b)
-            return handle_noncontiguous_outputs([a,b], output)
+            return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -1686,7 +1686,7 @@ def sub(
             b = b * alpha
 
     output = prims.sub(a, b)
-    return  handle_noncontiguous_outputs([a,b], output)
+    return  handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
