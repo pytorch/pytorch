@@ -3,12 +3,12 @@ from typing import Dict
 
 import torch
 import torch._dynamo.test_case
-from torch._dynamo.testing import CompileCounter
 from torch import nn
+from torch._dynamo.testing import CompileCounter
 
 try:
-    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
     from torchrec.datasets.random import RandomRecDataset
+    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
 
     HAS_TORCHREC = True
 except ImportError:
@@ -21,12 +21,12 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
         tables = [
             (nn.EmbeddingBag(2000, 8), ["a0", "b0"]),
             (nn.EmbeddingBag(2000, 8), ["a1", "b1"]),
-            (nn.EmbeddingBag(2000, 8), ["b2"])
+            (nn.EmbeddingBag(2000, 8), ["b2"]),
         ]
 
         embedding_groups = {
-            'a': ['a0', 'a1'],
-            'b': ['b0', 'b1', 'b2'],
+            "a": ["a0", "a1"],
+            "b": ["b0", "b1", "b2"],
         }
 
         counter = CompileCounter()
@@ -40,19 +40,23 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
                 features_dict = id_list_jt_dict
                 for feature_name in feature_names:
                     f = features_dict[feature_name]
-                    pooled_embeddings[feature_name] = emb_module(f.values(), f.offsets())
+                    pooled_embeddings[feature_name] = emb_module(
+                        f.values(), f.offsets()
+                    )
 
             pooled_embeddings_by_group = {}
             for group_name, group_embedding_names in embedding_groups.items():
                 group_embeddings = [
                     pooled_embeddings[name] for name in group_embedding_names
                 ]
-                pooled_embeddings_by_group[group_name] = torch.cat(group_embeddings, dim=1)
+                pooled_embeddings_by_group[group_name] = torch.cat(
+                    group_embeddings, dim=1
+                )
 
             return pooled_embeddings_by_group
 
         dataset = RandomRecDataset(
-            keys=['a0', 'a1', 'b0', 'b1', 'b2'],
+            keys=["a0", "a1", "b0", "b1", "b2"],
             batch_size=4,
             hash_size=2000,
             ids_per_feature=3,
@@ -80,7 +84,6 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gm(d2), r1)
         self.assertEqual(gm(d3), r1)
         """
-
 
     @unittest.expectedFailure
     def test_simple(self):
