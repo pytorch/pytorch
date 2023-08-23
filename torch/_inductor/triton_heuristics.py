@@ -10,7 +10,6 @@ import os
 import os.path
 import re
 import threading
-import numpy as np
 from enum import auto, Enum
 from typing import List, Set
 
@@ -580,7 +579,7 @@ def cached_autotune(
                 "timing": timing,
             }
             if os.path.exists(whole_cache_filename):
-                with open(whole_cache_filename, "r") as fd:
+                with open(whole_cache_filename) as fd:
                     records = json.loads(fd.read())
                 records.append(record)
             else:
