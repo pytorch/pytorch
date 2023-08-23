@@ -6,8 +6,6 @@
 
 #include <c10/util/irange.h>
 
-#include <iostream>
-
 namespace torch::jit::tensorexpr {
 
 std::string IRPrinter::dtypeToCppString(const Dtype& dtype) {
