@@ -127,11 +127,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import (
-    KeyedJaggedTensorVariable,
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 log = logging.getLogger(__name__)
@@ -620,16 +616,6 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif KeyedJaggedTensorVariable.is_matching_object(value):
-            result = KeyedJaggedTensorVariable(
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-            )
-            # TODO: this doing it manually is bad
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
