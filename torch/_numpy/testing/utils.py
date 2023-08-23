@@ -1410,8 +1410,8 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     ret = nulp_diff(a, b, dtype)
     if not np.all(ret <= maxulp):
         raise AssertionError(
-            "Arrays are not almost equal up to {:g} "
-            "ULP (max difference is {:g} ULP)".format(maxulp, np.max(ret))
+            f"Arrays are not almost equal up to {maxulp:g} "
+            f"ULP (max difference is {np.max(ret):g} ULP)"
         )
     return ret
 
