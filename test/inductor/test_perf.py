@@ -5,19 +5,13 @@ from unittest.mock import patch
 import functorch
 
 import torch
-import torch._inductor.config as config
-from torch._dynamo.backends.registry import register_backend
-from torch._inductor import metrics
 import torch._inductor.compile_fx
+import torch._inductor.config as config
+from torch._inductor import metrics
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
-
-
-@register_backend
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
 if not IS_WINDOWS:

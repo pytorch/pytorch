@@ -76,9 +76,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     stable_topological_sort(gm.graph)
 
-    # Keep this last, since it introduces
-    # mutation.
     fake_tensor_updater.incremental_update()
+    # Keep this last, since it introduces mutation. Look at
+    # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
@@ -524,6 +524,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
     for node in graph.nodes:
         if node.target in (aten.alias.default, aten.clone.default):
             src = node.args[0]
+            # See fx_passes/README.md for a discussion of why this is
+            # necessary.
             if (
                 get_node_storage(node) in output_storages
                 and get_node_storage(src) in input_storages
