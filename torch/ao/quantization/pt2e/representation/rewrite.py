@@ -84,13 +84,11 @@ def _reference_quantized_conv2d(
         x_i16 - x_zero_point,
         weight_i16 - weight_zero_point,
         None, stride, padding, dilation, transposed, output_padding, groups)
-    # TODO: change to mul.Scalar
     # Note: we are quantizing bias with these scales without signal from user, but it might be OK
     bias_scale = x_scale * weight_scale
-    bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale / out_scale)
-    acc_i32 = acc_i32 + bias_i32
+    bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale)
     # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
-    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
+    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32 + bias_i32, x_scale * weight_scale / out_scale) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
@@ -362,6 +360,9 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
         literal_to_ph_idx={1: 3, -128: 4, 127: 5}
     )
 
+def _replace_ph_qconv(gm: torch.fx.GraphModule):
+    return _replace_literals_with_new_placeholders(gm, merge_dup=True, exclude_literals=[1])
+
 @dataclass
 class _RewriteInfo:
     """Data needed for rewrite, this includes example inputs, pattern and replacement functions
@@ -381,8 +382,8 @@ _REWRITE_INFO_LIST = [
         _QUANTIZED_CONV2d_EXAMPLE_INPUTS,
         _qdq_quantized_conv2d,
         _reference_quantized_conv2d,
-        _replace_literals_with_new_placeholders,
-        _replace_literals_with_new_placeholders
+        _replace_ph_qconv,
+        _replace_ph_qconv
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
@@ -451,5 +452,6 @@ def reference_representation_rewrite(model: GraphModule) -> GraphModule:
             replacement = replacement_post_trans(replacement)
         pattern.recompile()  # type: ignore[attr-defined]
         replacement.recompile()  # type: ignore[attr-defined]
+        print("pattern:", pattern, " replacement:", replacement)
         matches = replace_pattern(model, pattern, replacement)
     return model

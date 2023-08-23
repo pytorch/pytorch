@@ -74,6 +74,7 @@ from torch.ao.quantization import (
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch._higher_order_ops.out_dtype import out_dtype
+import unittest
 
 # TODO: Move to common utils or use existing quant utils to fetch model instances
 class TestHelperModules:
@@ -509,6 +510,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
+        output_scale_idx: int = 3,
     ) -> torch.nn.Module:
         """ TODO: need to implement output checking based on output_scale once
         torchdynamo issue is resolved
@@ -538,15 +540,17 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
         pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        output_scale = None
         idx = 0
         for n in model_copy.graph.nodes:
             if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
                 idx += 1
-                if idx == 3:
+                if idx == output_scale_idx:
                     output_scale = n.args[1]
         assert output_scale is not None
 
+        print("model copy:", model_copy)
+        print("diff:", torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)))
+        print("out scale:", output_scale)
         # make sure the result is off by one at most in the quantized integer representation
         self.assertTrue(
             torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
@@ -1980,6 +1984,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             M(), example_inputs, is_per_channel=True, verify_convert=True,
         )
 
+    # @unittest.skip("conv2d before after rewrite may not be matching")
     def test_representation_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2123,12 +2128,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default
                 ): 1,
             }
+
             self._test_representation(
                 M().eval(),
                 example_inputs,
                 quantizer,
                 ref_node_occurrence,
-                non_ref_node_occurrence
+                non_ref_node_occurrence,
+                output_scale_idx=2,
             )
 
     def test_representation_quantize_dequantize(self):
