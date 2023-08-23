@@ -482,7 +482,7 @@ def help_message(verbose=False):
     if verbose:
         heading = "All registered names"
     else:
-        heading = "Visible registered names (use TORCH_LOGS='help' for full list)"
+        heading = "Visible registered names (use TORCH_LOGS='+help' for full list)"
     lines = (
         ["all"]
         + list(log_registry.log_alias_to_log_qname.keys())
