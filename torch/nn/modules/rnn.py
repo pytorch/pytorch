@@ -453,17 +453,30 @@ class RNN(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
-    def __init__(self, *args, **kwargs):
-        if 'proj_size' in kwargs:
-            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        nonlinearity: str = 'tanh',
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.,
+        bidirectional: bool = False,
+        device=None,
+        dtype=None
+    ) -> None:
+        self.nonlinearity = nonlinearity
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
             raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'")
-        super().__init__(mode, *args, **kwargs)
+        super().__init__(
+            mode, input_size, hidden_size, num_layers, bias, batch_first, dropout, bidirectional,
+            device=device, dtype=dtype)
+
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
@@ -731,8 +744,22 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__('LSTM', *args, **kwargs)
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.,
+        bidirectional: bool = False,
+        proj_size: int = 0,
+        device=None,
+        dtype=None
+    ) -> None:
+        super().__init__(
+            'LSTM', input_size, hidden_size, num_layers, bias, batch_first, dropout, bidirectional,
+            proj_size, device, dtype)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -988,10 +1015,21 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
-    def __init__(self, *args, **kwargs):
-        if 'proj_size' in kwargs:
-            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        super().__init__('GRU', *args, **kwargs)
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.,
+        bidirectional: bool = False,
+        device=None,
+        dtype=None
+    ) -> None:
+        super().__init__(
+            'GRU', input_size, hidden_size, num_layers, bias, batch_first, dropout, bidirectional,
+            device=device, dtype=dtype)
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
