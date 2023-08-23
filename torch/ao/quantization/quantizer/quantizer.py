@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -17,9 +17,6 @@ __all__ = [
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
     "QuantizationAnnotation",
-    "QuantizationConfig",
-    "OperatorPatternType",
-    "OperatorConfig",
 ]
 
 # TODO: maybe remove torch.float32
@@ -125,34 +122,6 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     qscheme: Optional[torch.qscheme] = None
 
 
-# In the absence of better name, just winging it with QuantizationConfig
-@dataclass(eq=True, frozen=True)
-class QuantizationConfig:
-    input_activation: Optional[QuantizationSpec]
-    output_activation: Optional[QuantizationSpec]
-    weight: Optional[QuantizationSpec]
-    bias: Optional[QuantizationSpec]
-    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
-    is_qat: bool = False
-
-
-OperatorPatternType = List[Callable]
-OperatorPatternType.__module__ = "torch.ao.quantization.quantizer.quantizer"
-
-
-class OperatorConfig(NamedTuple):
-    # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
-    # Basically we are mapping a quantization config to some list of patterns.
-    # a pattern is defined as a list of nn module, function or builtin function names
-    # e.g. [nn.Conv2d, torch.relu, torch.add]
-    # We have not resolved whether fusion can be considered internal details of the
-    # quantizer hence it does not need communication to user.
-    # Note this pattern is not really informative since it does not really
-    # tell us the graph structure resulting from the list of ops.
-    config: QuantizationConfig
-    operators: List[OperatorPatternType]
-
-
 @dataclass
 class QuantizationAnnotation:
     """How are input arguemnt or output should be quantized,
@@ -181,11 +150,4 @@ class Quantizer(ABC):
     # validate the annotated graph is supported by the backend
     @abstractmethod
     def validate(self, model: torch.fx.GraphModule) -> None:
-        pass
-
-    # annotate nodes in the graph with observer or fake quant constructors
-    # to convey the desired way of quantization
-    @classmethod
-    @abstractmethod
-    def get_supported_operators(cls) -> List[OperatorConfig]:
         pass

@@ -5,10 +5,12 @@ import copy
 import dataclasses
 import dis
 import enum
+import itertools
 import logging
 import math
 import operator
 import os
+import random
 import sys
 import traceback
 import typing
@@ -19,6 +21,7 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 import sympy
 import torch
 
@@ -27,12 +30,13 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    CompileCounterWithBackend,
     expectedFailureDynamic,
-    requires_numpy_pytorch_interop,
     same,
     skipIfNotPy311,
     unsupported,
@@ -44,11 +48,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    FloorDiv,
-    Mod,
-)
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -56,7 +56,8 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE, TEST_Z3
+from torch.testing._internal.common_methods_invocations import sample_inputs_gather
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -86,6 +87,25 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    def test_get_cache_entry(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(5, 5, 5))
+        entries = _debug_get_cache_entry_list(f.__code__)
+        self.assertTrue(len(entries) > 0)
+
+        def g(x):
+            return x + 2
+
+        entries = _debug_get_cache_entry_list(g.__code__)
+        self.assertTrue(len(entries) == 0)
+
+        try:
+            _debug_get_cache_entry_list(1)
+        except TypeError as e:
+            self.assertIn("expected a code object!", str(e))
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -144,6 +164,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(AssertionError, lambda: opt_fn(a, b, c, AssertionError))
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
+
+    def test_module_not_callable(self):
+        def fn(x):
+            return torch.fft(x)
+
+        counter = CompileCounter()
+        a = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertRaisesRegex(
+            TypeError, "'module' object is not callable", lambda: opt_fn(a)
+        )
 
     def test_inplace(self):
         def inplace1(a, b):
@@ -680,10 +711,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_tensor_dict3(self):
+        def fn(inputs_a, inputs_b):
+            total = torch.zeros(1)
+            input_keys = inputs_a.keys() | inputs_b.keys()
+            for k in input_keys:
+                if k in inputs_a:
+                    total += inputs_a[k]
+                if k in inputs_b:
+                    total += inputs_b[k]
+            return total
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(
+            opt_fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+            fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
     def test_tensor_dict2(self):
         def fn1(inputs):
@@ -707,9 +760,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts)(fn1)
-        opt_fn2 = torch._dynamo.optimize(cnts)(fn2)
-        opt_fn3 = torch._dynamo.optimize(cnts)(fn3)
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
@@ -1225,7 +1278,60 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @requires_numpy_pytorch_interop
+    def test_numpy_take_along_axis(self):
+        def fn(x, a, i):
+            return np.take_along_axis(x, i, a)
+
+        def sample_to_args(s):
+            args = (s.input, *sample.args)
+            return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
+
+        samples = list(
+            sample_inputs_gather(
+                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+            )
+        )
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        i = 1
+        for sample in samples:
+            args = sample_to_args(sample)
+            self.assertEqual(fn(*args), opt_fn(*args))
+            self.assertEqual(cnts.frame_count, i)
+            i += 1
+
+    def test_numpy_torch_operators(self):
+        def fn(op, t1, t2):
+            return op(t1, t2)
+
+        from torch._dynamo.variables.builtin import BuiltinVariable
+
+        operators = BuiltinVariable._fx_graph_functions()
+
+        for op, t1_np, t2_np in itertools.product(
+            operators, (True, False), (True, False)
+        ):
+            if op is operator.getitem:
+                # skip
+                # Did you know that tensor[ndarray_of_floats] works?
+                continue
+            t1 = torch.rand(5)
+            if t1_np:
+                t1 = t1.numpy()
+            t2 = torch.rand(5)
+            if t2_np:
+                t2 = t2.numpy()
+            try:
+                # TODO try a bit harder
+                result = op(t1, t2)
+            except (RuntimeError, TypeError, IndexError):
+                continue
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
+            self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
+            torch._dynamo.reset()
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
@@ -1243,7 +1349,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_numpy_ndarray_graph_break_with_multiple_outputs(self):
         def fn(x, y):
             a = x.numpy()
@@ -1258,10 +1363,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_tensor_interacts_with_numpy_ndarray(self):
         def fn(x, y):
             a = x.numpy()
@@ -1278,10 +1382,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_numpy_ndarray_works_with_builtin_function(self):
         def fn(x):
             v = x.sum() / len(x)
@@ -1293,10 +1396,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = np.random.randn(2, 3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
-    @requires_numpy_pytorch_interop
+    def test_numpy_no_raise(self):
+        def _inf_nan_preprocess(t, t_np):
+            t_np = np.nan_to_num(t_np)
+            return t, t_np
+
+        def fn():
+            # shape, dims format
+            test_cases = (
+                (3, 3),
+                (4, 4),
+                (5, 5),
+            )
+
+            for shape in test_cases:
+                t = torch.randn(shape, dtype=torch.complex64)
+                t_np = np.random.randn(*shape).astype(np.complex64)
+
+                _, t_np = _inf_nan_preprocess(t, t_np)
+                print(t, t_np)  # Just a side effect so that compilation kicks in
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn = torch._dynamo.optimize(cnt)(fn)
+        fn()
+        self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):
             # Define the boundaries of the complex plane
@@ -1327,29 +1454,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
         for _ in range(10):
-            x = torch.randint(100, (1,))
-            ref = mandelbrot_numpy(x.item())
-            res = opt_fn(x.item())
-            self.assertTrue(same(ref, res))
+            x = random.randint(2, 30)
+            ref = mandelbrot_numpy(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+        # We need to specialise the number as it's in a forloop
+        self.assertEqual(cnts.frame_count, 10)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    @requires_numpy_pytorch_interop
-    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
-    def test_numpy_on_cuda(self):
-        x = np.arange(10)
-
-        @torch.compile
-        def fn(x):
-            return x**2
-
-        with torch.device("cuda"):
-            r = fn(x)
-
-        self.assertEqual(type(r), np.ndarray)
-        self.assertEqual(r, x**2)
-
-    @requires_numpy_pytorch_interop
-    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
     def test_numpy_as_global(self):
         global x
         x = np.arange(10)
@@ -1362,6 +1473,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(r, x * 3)
         del x
+
+    def test_numpy_gt(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(y):
+            return y >= 3
+
+        r = fn(x)
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(r, x >= 3)
+
+    def test_numpy_min(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(y):
+            return min(y, 3), min(y, y - 1)
+
+        r1, r2 = fn(x)
+        self.assertEqual(type(r1), np.ndarray)
+        self.assertEqual(type(r2), np.ndarray)
+        self.assertEqual(r1, np.minimum(x, 3))
+        self.assertEqual(r2, np.minimum(x, x - 1))
 
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
@@ -1378,10 +1513,36 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 2, x])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
-        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
-        #     tensor = torch.tensor(ndarray, dtype=torch.long)
-        self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(ref, res)
+        # It's all traced once with x = 1, x = 2 and then x = ks0
+        # For dynamic it's x=1 and x=ks0
+        self.assertEqual(cnts.frame_count, ifdynstaticdefault(3, 2))
+
+    def test_numpy_with_builtin_type(self):
+        x = np.random.rand(5)
+
+        def fn(x):
+            return (x * 5).astype(bool).astype(float).astype(int) + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn(x)
+        self.assertEqual(r.dtype, int)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_with_builtin_type(self):
+        x = torch.randn(5)
+
+        def fn(x):
+            return (x * 5).to(bool).to(float).to(int) + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn(x)
+        self.assertEqual(r.dtype, torch.int64)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
@@ -3168,6 +3329,11 @@ def fn():
         res = opt_fn(x, m)
         self.assertEqual(ref, res)
 
+        # Test now the other path
+        ref = fn(x, x)
+        res = opt_fn(x, x)
+        self.assertEqual(ref, res)
+
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
@@ -3760,18 +3926,17 @@ def fn():
         opt_mod = torch._dynamo.optimize("inductor")(module)
         opt_mod(query, key, value)
 
+    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/106207")
     def test_generate_tensor_from_list_of_numpy_primitive_type(self):
         # Test sth like torch.LongTensor(list(np.int64, np.int64, ...))
         def fn():
             x = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
             y = [x[0], x[2], x[4]]
-            z = torch.LongTensor(y)
-            return z
+            return torch.LongTensor(y)
 
         ref = fn()
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        res = opt_fn()
-        self.assertTrue(same(ref, res))
+        res = torch.compile(fullgraph=True)(fn)()
+        self.assertEqual(ref, res)
 
     def test_object_classmethod(self):
         class C:
@@ -4609,6 +4774,43 @@ def fn():
                 self.assertExpectedInline(cnt.frame_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
+
+    def test_patched_builtin_functions(self):
+        import builtins
+
+        # Cache the original builtin function ids
+        torch._dynamo.allowed_functions._builtin_function_ids()
+
+        class MyClass:
+            pass
+
+        builtin_isinstance = builtins.isinstance
+
+        def patched_isinstance(obj, classinfo) -> bool:
+            if builtin_isinstance(obj, MyClass):
+                return False
+            else:
+                return builtin_isinstance(obj, classinfo)
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        y = MyClass()
+
+        try:
+            ref = fn(x, y)
+            # Monkey patch builtin function
+            builtins.isinstance = patched_isinstance
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, x + 1))
+            self.assertTrue(same(res, x - 1))
+        finally:
+            builtins.isinstance = builtin_isinstance
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
@@ -5543,7 +5745,8 @@ def fn():
 
         @contextlib.contextmanager
         def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
+            if frame_summary is not None:
+                seen_frames.append(frame_summary)
             yield
 
         with mock.patch(
@@ -5578,7 +5781,8 @@ def fn():
 
         @contextlib.contextmanager
         def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
+            if frame_summary is not None:
+                seen_frames.append(frame_summary)
             yield
 
         with mock.patch(
@@ -5988,8 +6192,8 @@ def ___make_guard_fn():
                 self.jitter_val = jitter_val
 
             def roll_tensor(self, input):
-                h_shift = np.int_(self.jitter_val - 1)
-                w_shift = np.int_(self.jitter_val + 1)
+                h_shift = self.jitter_val - 1
+                w_shift = self.jitter_val + 1
                 return torch.roll(
                     torch.roll(input, shifts=h_shift, dims=2), shifts=w_shift, dims=3
                 )
@@ -6159,132 +6363,20 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
-    def _prepare_for_translation_validation(self):
-        from torch.fx.experimental.validator import TranslationValidator
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_symint(self):
+        from torch._export.constraints import constrain_as_size
 
-        validator = TranslationValidator()
+        @torch.compile(backend="eager")
+        def f(lengths, values):
+            sizes = lengths.tolist()
+            for s in sizes:
+                constrain_as_size(s, min=2, max=100)
+            return torch.split(values, sizes)
 
-        # SymPy symbols.
-        s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
-
-        # Z3 symbols.
-        [validator.add_var(s, int) for s in (s0, s1, s2)]
-        z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
-
-        return (s0, s1, s2), (z0, z1, z2), validator
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_sympy_to_z3_translation(self):
-        import z3
-        from torch.fx.experimental.validator import SympyToZ3
-
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        test_cases = [
-            # Integer constants.
-            (sympy.S.Zero, z3.IntVal(0)),
-            (sympy.S.One, z3.IntVal(1)),
-            (sympy.S.NegativeOne, z3.IntVal(-1)),
-            (sympy.Integer(2), z3.IntVal(2)),
-            (
-                s0,
-                z0,
-            ),
-            # Arithmetic operations.
-            *[
-                (op(s0, s1), op(z0, z1))
-                for op in (
-                    operator.add,
-                    operator.mul,
-                    operator.pow,
-                )
-            ],
-            # Logical operations.
-            *[
-                (sympy_op(s0, s1), z3_op(z0, z1))
-                for sympy_op, z3_op in (
-                    (sympy.Eq, operator.eq),
-                    (sympy.Ne, operator.ne),
-                    (sympy.Lt, operator.lt),
-                    (sympy.Le, operator.le),
-                    (sympy.Gt, operator.gt),
-                    (sympy.Ge, operator.ge),
-                )
-            ],
-            # Other operations.
-            (
-                s0 - s1,
-                z0 + z3.IntVal(-1) * z1,
-            ),
-            (
-                s0 / s1,
-                z3.ToReal(z0) * (z1**-1),
-            ),
-            (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
-            (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
-            (
-                Mod(s2, (s0 / s1)),
-                z2
-                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
-                * (z3.ToReal(z0) * z1**-1),
-            ),
-            (
-                Mod(s2, s0**3),
-                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
-            ),
-        ]
-
-        toZ3 = SympyToZ3(validator)
-        for sympy_expr, z3_expr in test_cases:
-            result = toZ3.run(sympy_expr)
-            self.assertTrue(
-                z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
-            )
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validation_sat(self):
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        validator.add_source_expr(z0 > 5)
-        validator.add_source_expr(z1 / 2 > z0)
-
-        # Solutions for target is a subset of the solutions for the source.
-        validator.add_target_expr(s0 > 20)
-        validator.add_target_expr(s1 > s0**2)
-
-        r = validator.validate()
-        self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
-        self.assertIsNone(r.model)
-        self.assertIsNone(r.failed_source_expr)
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validation_unsat(self):
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        validator.add_source_expr(z0 > 5)
-        validator.add_source_expr(z1 / 2 > z0)
-
-        # Solutions for target is NOT a subset of the solutions for the source.
-        validator.add_target_expr(s0 > 20)
-        # This expression is less restrictive than its counterpart.
-        validator.add_target_expr(s1 > s0 + 2)
-
-        r = validator.validate()
-        self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
-        self.assertIsNotNone(r.model)
-        self.assertIsNotNone(r.failed_source_expr)
+        f(torch.tensor([2, 3, 4]), torch.randn(9))
 
     def test_simple_set_usage(self):
         def foo(x, y):
@@ -6531,6 +6623,156 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         # Nothing to compile here
         self.assertEqual(counter.frame_count, 0)
+
+    def test_inline_closure_not_loaded_by_parent(self):
+        def outer(a):
+            return a + 1
+
+        def indirect(x):
+            return direct(x)
+
+        def direct(x):
+            def deep2(c):
+                return outer(c)
+
+            def deep(c):
+                return deep2(c)
+
+            return deep(x)
+
+        x = torch.randn(3)
+        eager = indirect(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(indirect)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_input(self):
+        a = torch.randn([2, 3])
+        b = torch.randn([2, 3])
+        d1 = collections.deque([a, b])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([a, b])
+        d2.insert(0, "foo")
+
+        def fn(q):
+            a = q.pop()
+            b = q.pop()
+            return a * b
+
+        eager = fn(d1)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_append_left(self):
+        d1 = collections.deque([10, 10])
+        d1.insert(0, "foo")
+
+        d2 = collections.deque([10, 10])
+        d2.insert(0, "foo")
+
+        def fn(q, a, b):
+            q.appendleft(a)
+            q.appendleft(b)
+            return q.popleft() * q.popleft()
+
+        a = torch.randn([3, 3])
+        b = torch.randn([3, 3])
+        eager = fn(d1, a, b)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(d2, a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertTrue(isinstance(compiled, torch.Tensor))
+
+    def test_yield_from(self):
+        def yield_from_fn(t_list, k):
+            def yield_from_gen(l):
+                l2 = [t * k for t in l]
+                yield from l2
+
+            return [t * k for t in yield_from_gen(t_list)]
+
+        t_list = [torch.randn([2, 3])] * 3
+        multiplier = torch.tensor([10])
+        eager = yield_from_fn(t_list, 2)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_gen_and_from(self):
+        def populate_and_multiply_sequence(n, multiplier):
+            # Inline generator
+            def tensor_generator():
+                for i in range(n):
+                    yield torch.tensor([i])
+
+            # Use 'yield from' to iterate over tensors and multiply
+            t_list = [tensor * multiplier for tensor in tensor_generator()]
+
+            def yield_from_gen():
+                yield from t_list
+
+            return [t for t in yield_from_gen()]
+
+        multiplier = torch.tensor([10])
+        eager = populate_and_multiply_sequence(5, multiplier)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(populate_and_multiply_sequence)(
+            5, multiplier
+        )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_send_to_subgenerator_graph_break(self):
+        def subgenerator(tensor):
+            multiplier = yield
+            yield tensor * multiplier
+
+        def main_generator(t_list):
+            for tensor in t_list:
+                subgen = subgenerator(tensor)
+                next(subgen)
+                yield from subgen.send(torch.tensor([10]))
+
+        t_list = [torch.tensor([i]) for i in range(5)]
+        eager = list(main_generator(t_list))
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(main_generator)
+        compiled = list(compiled_fn(t_list))
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_derpy_nn_module_usage(self):
+        def ff1(x):
+            self = mod1
+            return torch.sigmoid(self.mod2(x) + self.param1)
+
+        def ff2(x):
+            self = mod2
+            return torch.cos(torch.sin(x) * self.param2 + 10)
+
+        mod1 = torch.nn.Module()
+        mod2 = torch.nn.Module()
+        mod1.register_module("mod2", mod2)
+        mod1.register_parameter("param1", torch.nn.Parameter(torch.randn(10)))
+        mod1.forward = ff1
+        mod2.register_parameter("param2", torch.nn.Parameter(torch.randn(10)))
+        mod2.forward = ff2
+        mod1.eval()
+
+        x = torch.randn(10)
+        expected = mod1(x)
+        counter = CompileCounter()
+        actual = torch.compile(mod1, backend=counter, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counter.op_count, 6)
 
 
 class TestTracer(JitTestCase):

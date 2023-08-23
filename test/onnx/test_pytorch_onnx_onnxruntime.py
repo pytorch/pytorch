@@ -1461,6 +1461,69 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    def test_maxpool_1d_ceil_corner(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=False
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_2d_ceil_corner(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_3d_ceil_corner(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_1d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=True
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_2d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_3d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)

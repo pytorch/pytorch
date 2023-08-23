@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/static_tracepoint.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -32,6 +33,9 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+TORCH_SDT_DEFINE_SEMAPHORE(malloc)
+TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
@@ -1210,7 +1214,7 @@ class DeviceCachingAllocator {
   bool record_history = false;
   std::atomic<CreateContextFn> context_recorder_;
   size_t alloc_trace_next = 0;
-  bool alloc_trace_record_context_ = false;
+  RecordContext record_context_ = RecordContext::NEVER;
   size_t alloc_trace_max_entries_ = 1;
   std::vector<TraceEntry>*
       alloc_trace; // pointer because we need to intentionally leak this on
@@ -1249,12 +1253,13 @@ class DeviceCachingAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) {
+      RecordContext when) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
-    alloc_trace_record_context_ = alloc_trace_record_context;
+    record_context_ = enabled ? when : RecordContext::NEVER;
     alloc_trace_next = 0;
     alloc_trace->clear();
   }
@@ -1293,9 +1298,11 @@ class DeviceCachingAllocator {
   }
 
   // Must be called outside of `mutex` or deadlocks are possible with Python
-  std::shared_ptr<GatheredContext> maybeGatherContext() {
-    CreateContextFn context_recorder = context_recorder_.load();
-    return context_recorder ? context_recorder() : nullptr;
+  std::shared_ptr<GatheredContext> maybeGatherContext(RecordContext level) {
+    if (record_context_ < level) {
+      return nullptr;
+    }
+    return context_recorder_.load()();
   }
 
   // All public methods (except the above) acquire the allocator mutex.
@@ -1304,7 +1311,7 @@ class DeviceCachingAllocator {
   Block* malloc(int device, size_t orig_size, cudaStream_t stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
-    auto context = maybeGatherContext();
+    auto context = maybeGatherContext(RecordContext::STATE);
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -1319,7 +1326,7 @@ class DeviceCachingAllocator {
       //    Dumb simple solution: defer reclaiming these allocations until after
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
-      process_events();
+      process_events(context);
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -1349,7 +1356,8 @@ class DeviceCachingAllocator {
           || (release_available_cached_blocks(params) &&
               alloc_block(params, false, context))
           // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
+          || (C10_LIKELY(captures_underway == 0) &&
+              release_cached_blocks(context) &&
               alloc_block(params, true, context));
     }
 
@@ -1558,6 +1566,8 @@ class DeviceCachingAllocator {
   }
 
   void free(Block* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     block->allocated = false;
@@ -1580,7 +1590,7 @@ class DeviceCachingAllocator {
           int64_t(block->ptr),
           block->requested_size,
           block->stream,
-          block->context_when_allocated);
+          context ? context : block->context_when_allocated);
     }
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
@@ -1596,7 +1606,7 @@ class DeviceCachingAllocator {
         insert_events(block);
       }
     } else {
-      free_block(block);
+      free_block(block, context);
     }
 
     c10::reportMemoryUsageToProfiler(
@@ -1648,8 +1658,9 @@ class DeviceCachingAllocator {
 
   /** returns cached blocks to the system allocator **/
   void emptyCache() {
+    auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks();
+    release_cached_blocks(context);
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -1905,9 +1916,8 @@ class DeviceCachingAllocator {
     // following `done outside the lock because we don't know what locks the
     // recorder needs to have...`
 
-    CreateContextFn context_recorder = context_recorder_.load();
     std::shared_ptr<GatheredContext> context =
-        context_recorder ? context_recorder() : nullptr;
+        maybeGatherContext(RecordContext::STATE);
 
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
@@ -2342,7 +2352,9 @@ class DeviceCachingAllocator {
   }
 
   /** moves a block into a pool of cached free blocks */
-  void free_block(Block* block) {
+  void free_block(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
@@ -2352,9 +2364,9 @@ class DeviceCachingAllocator {
           int64_t(block->ptr),
           block->requested_size,
           block->stream,
-          block->context_when_allocated);
-      block->context_when_allocated = nullptr;
+          context ? context : block->context_when_allocated);
     }
+    block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
 
@@ -2755,10 +2767,10 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool release_cached_blocks() {
+  bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context) {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
-    synchronize_and_free_events();
+    synchronize_and_free_events(context);
 
     // Free all non-split cached blocks to system allocator
     release_blocks(large_blocks);
@@ -2918,7 +2930,8 @@ class DeviceCachingAllocator {
     return event_pool->get(idx);
   }
 
-  void synchronize_and_free_events() {
+  void synchronize_and_free_events(
+      const std::shared_ptr<GatheredContext>& context) {
     // Synchronize on outstanding events and then free associated blocks.
 
     // This function syncs, so capture should not be underway. Might as well
@@ -2935,7 +2948,7 @@ class DeviceCachingAllocator {
 
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
       }
     }
@@ -2973,7 +2986,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  void process_events() {
+  void process_events(const std::shared_ptr<GatheredContext>& context) {
     insert_events_deferred_until_no_capture();
 
     // Process outstanding cudaEvents. Events that are completed are
@@ -3003,7 +3016,7 @@ class DeviceCachingAllocator {
 
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
         it->second.pop_front();
       }
@@ -3037,7 +3050,7 @@ class DeviceCachingAllocator {
         addr,
         size,
         stream,
-        alloc_trace_record_context_ ? std::move(context) : nullptr);
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
     if (alloc_trace->size() < alloc_trace_max_entries_) {
       alloc_trace->emplace_back(te);
     } else {
@@ -3162,14 +3175,11 @@ class NativeCachingAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->recordHistory(
-        enabled,
-        context_recorder,
-        alloc_trace_max_entries,
-        alloc_trace_record_context);
+      RecordContext when) override {
+    for (auto& allocator : device_allocator) {
+      allocator->recordHistory(
+          enabled, context_recorder, alloc_trace_max_entries, when);
+    }
   }
 
   bool isHistoryEnabled() override {
@@ -3187,9 +3197,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
+    for (auto& allocator : device_allocator) {
+      allocator->attachOutOfMemoryObserver(std::move(observer));
+    }
   }
 
   void emptyCache() override {
@@ -3300,6 +3310,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
+      if (TORCH_SDT_IS_ENABLED(malloc)) {
+        TORCH_SDT_WITH_SEMAPHORE(malloc, &r, device, size, 0);
+      }
+
       // Allocator declars allocate const!?
       const_cast<NativeCachingAllocator*>(this)->malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
@@ -3477,6 +3491,10 @@ class NativeCachingAllocator : public CUDAAllocator {
 NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
+  if (TORCH_SDT_IS_ENABLED(free)) {
+    TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+  }
+
   allocator.free(ptr);
 }
 

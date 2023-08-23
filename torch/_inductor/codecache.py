@@ -11,6 +11,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -535,9 +536,11 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_path = input_path[:-3] + "so"
-            build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
+            build_cmd = shlex.split(
+                cpp_compile_command(
+                    input_path, output_path, warning_all=False, vec_isa=self
+                )
+            )
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
@@ -647,6 +650,10 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
+def cpp_wrapper_flags():
+    return "-DTORCH_INDUCTOR_CPP_WRAPPER"
+
+
 def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
     if config.is_fbcode():
@@ -683,10 +690,27 @@ def use_fb_internal_macros():
         return ""
 
 
+def use_standard_sys_dir_headers():
+    if config.is_fbcode():
+        return "-nostdinc"
+    else:
+        return ""
+
+
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
+    if (
+        config.is_fbcode()
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
+
+    if aot_mode and config.is_fbcode():
+        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
+        cuda = True
 
     macros = ""
     if sys.platform == "linux" and (
@@ -712,6 +736,8 @@ def get_include_and_linking_paths(
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
+            if aot_mode:
+                ipaths += [os.path.dirname(cpp_prefix_path())]
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -765,6 +791,13 @@ def get_include_and_linking_paths(
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
+        ipaths.append(build_paths.gcc_include())
+        ipaths.append(build_paths.libgcc())
+        ipaths.append(build_paths.libgcc_arch())
+        ipaths.append(build_paths.libgcc_backward())
+        ipaths.append(build_paths.glibc())
+        ipaths.append(build_paths.linux_kernel())
+        ipaths.append(build_paths.gcc_install_tools_include())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -796,21 +829,23 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = os.path.basename(input)
             out_name = os.path.basename(output)
-        linker_path = f"-B{os.path.dirname(build_paths.ld())}"
+        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
+        linker_paths = " ".join(["-B" + p for p in linker_paths])
     else:
         inp_name = input
         out_name = output
-        linker_path = ""  # let the compiler pick
+        linker_paths = ""  # let the compiler pick
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_path}
+            {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
+            {use_standard_sys_dir_headers()}
             -o {out_name}
         """,
     ).strip()
@@ -864,18 +899,24 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path,
+                            output=output_so,
+                            vec_isa=picked_vec_isa,
+                            cuda=cuda,
+                            aot_mode=graph.aot_mode,
+                        )
+                    )
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
+                else:
+                    log.debug(
+                        "aot_inductor dynamic library already exist: %s", output_so
+                    )
 
                 cls.cache[key] = output_so
 
@@ -947,7 +988,13 @@ def compile_file(input_path, output_path, cmd) -> None:
         else:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+        output = e.output.decode("utf-8")
+        if "'omp.h' file not found" in output and sys.platform == "darwin":
+            output = (
+                output
+                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+            )
+        raise exc.CppCompileError(cmd, output) from e
 
 
 class CppCodeCache:
@@ -986,9 +1033,11 @@ class CppCodeCache:
             with lock:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
-                    cmd = cpp_compile_command(
-                        input=input_path, output=output_path, vec_isa=picked_vec_isa
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                        )
+                    )
                     compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -997,7 +1046,7 @@ class CppCodeCache:
 
 
 class PyCodeCache:
-    cache = dict()
+    cache: Dict[Any, types.ModuleType] = dict()
     linemaps = dict()
     clear = staticmethod(cache.clear)
 
@@ -1093,8 +1142,10 @@ class CppWrapperCodeCache:
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
+                    _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
+                    {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
@@ -1111,6 +1162,7 @@ class CppWrapperCodeCache:
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
                         extra_include_paths=[extra_include_paths],
+                        use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
                 else:

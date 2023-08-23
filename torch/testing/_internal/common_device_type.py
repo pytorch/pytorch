@@ -959,6 +959,12 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
 
+# Skips a test on Lazy if the condition is true.
+class skipLazyIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='lazy')
+
 # Skips a test on Meta if the condition is true.
 class skipMetaIf(skipIf):
 
@@ -1103,7 +1109,7 @@ class deviceCountAtLeast:
 
         return multi_fn
 
-# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+# Only runs the test on the native device type (currently CPU, CUDA, Meta and PRIVATEUSE1)
 def onlyNativeDeviceTypes(fn):
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
@@ -1195,7 +1201,7 @@ class dtypes:
                 assert isinstance(arg, (list, tuple)), \
                     "When one dtype variant is a tuple or list, " \
                     "all dtype variants must be. " \
-                    "Received non-list non-tuple dtype {}".format(str(arg))
+                    f"Received non-list non-tuple dtype {str(arg)}"
                 assert all(isinstance(dtype, torch.dtype) for dtype in arg), f"Unknown dtype in {str(arg)}"
         else:
             assert all(isinstance(arg, torch.dtype) for arg in args), f"Unknown dtype in {str(args)}"
@@ -1229,6 +1235,11 @@ class dtypesIfMPS(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type='mps')
 
+class dtypesIfPRIVATEUSE1(dtypes):
+
+    def __init__(self, *args):
+        super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
+
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)
 
@@ -1247,6 +1258,17 @@ def onlyPRIVATEUSE1(fn):
         reason = f"Skip as torch has no module of {device_type}"
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
+
+def onlyCUDAAndPRIVATEUSE1(fn):
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type not in ('cuda', torch._C._get_privateuse1_backend_name()):
+            reason = f"onlyCUDAAndPRIVATEUSE1: doesn't run on {self.device_type}"
+            raise unittest.SkipTest(reason)
+
+        return fn(self, *args, **kwargs)
+
+    return only_fn
 
 def disablecuDNN(fn):
 
@@ -1339,8 +1361,13 @@ def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
-def skipCUDAIfRocm(fn):
-    return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipCUDAIfRocm: {msg}"
+        return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 # Skips a test on CUDA when not using ROCm.
 def skipCUDAIfNotRocm(fn):
@@ -1435,6 +1462,9 @@ def skipCUDAIfMiopen(fn):
 
 def skipCUDAIfNoMiopen(fn):
     return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
+
+def skipLazy(fn):
+    return skipLazyIf(True, "test doesn't work with lazy tensors")(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
