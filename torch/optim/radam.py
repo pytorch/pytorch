@@ -177,7 +177,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
     (where the weight_decay is applied to the gradient) or the one from AdamW (where weight_decay is applied
     to the weight) through the decoupled_weight_decay option. When decoupled_weight_decay is set to False
     (default), it uses the original Adam style weight decay, otherwise, it uses the AdamW style which
-    corresponds more closely to the `author's implementation in the RAdam paper`_. Further information
+    corresponds more closely to the `author's implementation`_ in the RAdam paper. Further information
     about decoupled weight decay can be found in `Decoupled Weight Decay Regularization`_.
 
     """ + fr"""
