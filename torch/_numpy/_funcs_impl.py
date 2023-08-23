@@ -801,65 +801,6 @@ def tri(
     return torch.tril(tensor, diagonal=k)
 
 
-# ### nanfunctions ###
-
-
-def nanmean():
-    raise NotImplementedError
-
-
-def nanmin():
-    raise NotImplementedError
-
-
-def nanmax():
-    raise NotImplementedError
-
-
-def nanvar():
-    raise NotImplementedError
-
-
-def nanstd():
-    raise NotImplementedError
-
-
-def nanargmin():
-    raise NotImplementedError
-
-
-def nanargmax():
-    raise NotImplementedError
-
-
-def nansum():
-    raise NotImplementedError
-
-
-def nanprod():
-    raise NotImplementedError
-
-
-def nancumsum():
-    raise NotImplementedError
-
-
-def nancumprod():
-    raise NotImplementedError
-
-
-def nanmedian():
-    raise NotImplementedError
-
-
-def nanquantile():
-    raise NotImplementedError
-
-
-def nanpercentile():
-    raise NotImplementedError
-
-
 # ### equality, equivalence, allclose ###
 
 
@@ -945,7 +886,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.take_along_dim(arr, indices, axis)
+    return torch.gather(arr, axis, indices)
 
 
 def put(
@@ -1446,6 +1387,8 @@ def _sort_helper(tensor, axis, kind, order):
 
 
 def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     # `order` keyword arg is only relevant for structured dtypes; so not supported here.
     a, axis, stable = _sort_helper(a, axis, kind, order)
     result = torch.sort(a, dim=axis, stable=stable)
@@ -1453,6 +1396,8 @@ def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     a, axis, stable = _sort_helper(a, axis, kind, order)
     return torch.argsort(a, dim=axis, stable=stable)
 
@@ -1460,6 +1405,9 @@ def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
+    if a.dtype.is_complex:
+        return NotImplemented
+
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
 
