@@ -130,7 +130,7 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
         dtypes=(torch.float32,)
     )
-    def test_with_zero_size_tensors(self, device, dtype, op):
+    def test_zero_size_tensor_inputs(self, device, dtype, op):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
@@ -1005,99 +1005,6 @@ class TestForeach(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        dtypes=OpDTypes.supported,
-        allowed_dtypes=(torch.float64, torch.complex128),
-    )
-    def test_outplace_forward_mode_AD(self, device, dtype, op):
-        if not op.supports_forward_ad:
-            self.skipTest("forward AD not supported")
-
-        # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
-        if dtype == torch.float64 and op.name in (
-            "_foreach_acos", "_foreach_asin", "_foreach_log10", "_foreach_log1p", "_foreach_log2",
-            "_foreach_log", "_foreach_pow", "_foreach_sqrt",
-        ):
-            value_range = {"low": 0.5, "high": 1.0}
-        else:
-            value_range = {}
-        for sample in op.sample_inputs(
-            device, dtype, requires_grad=True, num_input_tensors=[5], **value_range,
-        ):
-            # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
-            if op.name == "_foreach_pow" and isinstance(sample.input, Number):
-                continue
-
-            def func(*tensorlist):
-                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
-                return op.method_variant(tensorlist, *sample.args, **kwargs)
-
-            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, False)
-            if not working_sample:
-                if not err_msg_pattern:
-                    # lhs of float64 and rhs of complex.
-                    continue
-                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
-                    gradcheck(
-                        func,
-                        sample.input,
-                        raise_exception=True,
-                        check_forward_ad=True,
-                        check_batched_forward_grad=False,
-                        check_backward_ad=False,
-                        check_batched_grad=False,
-                    )
-            else:
-                gradcheck(
-                    func,
-                    sample.input,
-                    raise_exception=True,
-                    check_forward_ad=True,
-                    check_backward_ad=False,
-                    check_batched_grad=False,
-                )
-
-    @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        dtypes=OpDTypes.supported,
-        allowed_dtypes=(torch.float64, torch.complex128),
-    )
-    def test_inplace_forward_mode_AD(self, device, dtype, op):
-        if not op.supports_forward_ad:
-            self.skipTest("forward AD not supported")
-
-        for sample in op.sample_inputs(
-            device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
-        ):
-            # Call `clone` to avoid inplace modifications likewise
-            # `torch.testing._internal.common_utils.TestGradients._get_safe_inplace`
-            def inplace_func(*tensorlist):
-                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
-                op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
-                return tensorlist
-
-            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, True)
-            if not working_sample:
-                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
-                    gradcheck(
-                        inplace_func,
-                        sample.input,
-                        raise_exception=True,
-                        check_forward_ad=True,
-                        check_backward_ad=False,
-                        check_batched_grad=False,
-                    )
-            else:
-                gradcheck(
-                    inplace_func,
-                    sample.input,
-                    raise_exception=True,
-                    check_forward_ad=True,
-                    check_backward_ad=False,
-                    check_batched_grad=False,
-                )
-
     @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
     def test_tensors_grouping(self):
         num_tensors_per_list = 10
@@ -1163,12 +1070,84 @@ class TestForeach(TestCase):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
 
+    @onlyCUDA
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=(torch.float64, torch.complex128),
+    )
+    @parametrize("inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace")
+    def test_forward_mode_ad(self, device, dtype, op, inplace):
+        if not op.supports_forward_ad:
+            self.skipTest("forward AD not supported")
+        if (not inplace) and op.has_no_out_of_place:
+            self.skipTest("out-of-place not implemented")
+        if inplace and op.has_no_in_place:
+            self.skipTest("in-place not implemented")
+
+        # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
+        if (not inplace) and dtype == torch.float64 and op.name in (
+            "_foreach_acos", "_foreach_asin", "_foreach_log10", "_foreach_log1p", "_foreach_log2",
+            "_foreach_log", "_foreach_pow", "_foreach_sqrt",
+        ):
+            value_range = {"low": 0.5, "high": 1.0}
+        else:
+            value_range = {}
+        for sample in op.sample_inputs(
+            device, dtype, requires_grad=True, num_input_tensors=[5], **value_range,
+        ):
+            # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
+            if op.name == "_foreach_pow" and isinstance(sample.input, Number):
+                continue
+
+            func = None
+            if inplace:
+                # Call `clone` to avoid inplace modifications likewise
+                # `torch.testing._internal.common_utils.TestGradients._get_safe_inplace`
+                def inplace_func(*tensorlist):
+                    kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
+                    op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
+                    return tensorlist
+                func = inplace_func
+            else:
+                def outplace_func(*tensorlist):
+                    kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
+                    return op.method_variant(tensorlist, *sample.args, **kwargs)
+                func = outplace_func
+
+            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, inplace)
+            if not working_sample:
+                if not err_msg_pattern:
+                    # lhs of float64 and rhs of complex.
+                    continue
+                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
+                    gradcheck(
+                        func,
+                        sample.input,
+                        raise_exception=True,
+                        check_forward_ad=True,
+                        check_batched_forward_grad=False,
+                        check_backward_ad=False,
+                        check_batched_grad=False,
+                    )
+            else:
+                gradcheck(
+                    func,
+                    sample.input,
+                    raise_exception=True,
+                    check_forward_ad=True,
+                    check_backward_ad=False,
+                    check_batched_grad=False,
+                )
+
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`
 # so that we can use this function as something like the first argument of `filter` function.
 # Even after moving this function to testing, I personally think it'd be better to check the error message.
 def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
+    if op.name == "_foreach_abs" and is_inplace and dtype == torch.complex128:
+        return False, "In-place abs is not supported for complex tensors."
     if (
         op.name == "_foreach_sub"
         and (
@@ -1177,6 +1156,8 @@ def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
         )
     ):
         return False, _BOOL_SUB_ERR_MSG
+    if op.name == "_foreach_norm" and (not is_inplace):
+        return False, "Trying to set a forward gradient that has a different size than"
     rhs_arg_has_complex_number = sample.args and ((
         isinstance(sample.args[0], list)
         and any(isinstance(a, complex) for a in sample.args[0])

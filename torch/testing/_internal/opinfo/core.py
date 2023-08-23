@@ -2716,6 +2716,7 @@ class ForeachFuncInfo(OpInfo):
         self.supports_alpha_param = supports_alpha_param
         self.backward_requires_result = backward_requires_result
         self.has_no_out_of_place = has_no_out_of_place
+        self.has_no_in_place = self.inplace_variant is None
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
