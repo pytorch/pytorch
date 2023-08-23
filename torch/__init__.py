@@ -251,9 +251,6 @@ class SymInt:
         # class has a field named node that stores SymNode
         self.node = node
 
-    def __hash__(self):
-        return id(self)
-
     def __bool__(self):
         return builtins.bool(self != 0)
 
