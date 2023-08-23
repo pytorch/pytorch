@@ -266,7 +266,7 @@ class DebugContext:
         return open(os.path.join(self._path, filename), "w")
 
     def filename(self, suffix):
-        return os.path.join(self._path, suffix)
+        return os.path.join(self._path, suffix) # type: ignore[arg-type]
 
     def upload_tar(self):
         if config.trace.upload_tar is not None:
@@ -329,7 +329,7 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self):
-        self._prof.dump_stats(self.filename("compile.prof"))
+        self._prof.dump_stats(self.filename("compile.prof")) # type: ignore[union-attr]
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
             stats.strip_dirs()
