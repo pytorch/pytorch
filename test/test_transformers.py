@@ -2389,6 +2389,8 @@ class TestSDPACudaOnly(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str):
 
+        if isSM86or89Device and head_dim in range(193, 256 + 1):
+            self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
