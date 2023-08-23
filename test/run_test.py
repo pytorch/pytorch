@@ -1619,7 +1619,9 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    test_prioritization: TestPrioritizations = TestPrioritizations(unranked_relevance = selected_tests.copy())
+    test_prioritization: TestPrioritizations = TestPrioritizations(
+        unranked_relevance=selected_tests.copy()
+    )
     metrics_dict = {}
     if IS_CI:
         # downloading test cases configuration to local environment
