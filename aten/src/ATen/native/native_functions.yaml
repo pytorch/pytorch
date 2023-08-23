@@ -6845,7 +6845,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_mask
-    SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_compressed
   autogen: sparse_mask.out
 
 - func: _sparse_mask_projection(Tensor self, Tensor mask, bool accumulate_matches=False) -> Tensor
