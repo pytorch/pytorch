@@ -147,7 +147,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export,
+        torch.export.export,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
@@ -1202,6 +1202,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.mT.__get__: lambda self: -1,
         Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._post_accumulate_grad_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,
@@ -1325,6 +1326,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.record_stream: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
+        Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
@@ -1574,9 +1576,9 @@ def handle_torch_function(
 
     func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
-        "no implementation found for '{}' on types that implement "
-        '__torch_function__: {}'
-    ).format(func_name, [type(arg) for arg in overloaded_args])
+        f"no implementation found for '{func_name}' on types that implement "
+        f'__torch_function__: {[type(arg) for arg in overloaded_args]}'
+    )
     if _is_torch_function_mode_enabled():
         msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)
