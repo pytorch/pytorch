@@ -97,7 +97,7 @@ class FakeTensorUpdater:
             return False
 
         for node in self.graph.nodes:
-            if self.hash_node(node) in old_hash:
+            if self.hash_node(node) in self.processed_hashes:
                 continue
 
             def get_fake_tensor(x):
@@ -113,8 +113,8 @@ class FakeTensorUpdater:
                     updating_node = processing.pop()
                     if updating_node in processed:
                         continue
-                    if node.op != "call_function" or not isinstance(
-                        node.target, torch._ops.OpOverload
+                    if updating_node.op != "call_function" or not isinstance(
+                        updating_node.target, torch._ops.OpOverload
                     ):
                         continue
 
@@ -129,7 +129,7 @@ class FakeTensorUpdater:
                     for user in updating_node.users:
                         processing.append(user)
 
-                old_hash.add(self.hash_node(updating_node))
+                self.processed_hashes.add(self.hash_node(updating_node))
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
