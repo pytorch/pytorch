@@ -180,7 +180,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     if (!obj_iter)
       throw python_error();
     THPObjectPtr item;
-    for (const auto i : c10::irange(length)) {
+    for (auto i = 0; i < length; ++i) {
       item = THPObjectPtr(PyIter_Next(obj_iter.get()));
       if (!item)
         throw python_error();
@@ -261,7 +261,7 @@ void recursive_store(
   if (!obj_iter)
     throw python_error();
   THPObjectPtr item;
-  for (const auto i : c10::irange(n)) {
+  for (auto i = 0; i < n; ++i) {
     item = THPObjectPtr(PyIter_Next(obj_iter.get()));
     if (!item)
       throw python_error();

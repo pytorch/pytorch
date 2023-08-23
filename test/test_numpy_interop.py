@@ -273,8 +273,7 @@ class TestNumPyInterop(TestCase):
                           [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
 
         # expected shape is `[1, 2, 3]`, hence we try to iterate over 0-D array
-        # leading to type error : not a sequence.
-        with self.assertRaisesRegex(TypeError, "not a sequence"):
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[np.random.random(size=(3)), np.random.random()]], device=device)
 
         # list of list or numpy array.
