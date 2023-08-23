@@ -320,10 +320,11 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
-    for name in dir(cls):
+    for name in cls.__dict__.keys():
         if name.startswith("test_"):
             fn = getattr(cls, name)
             if not callable(fn):
+                setattr(DummyTestClass, name, getattr(cls, name))
                 continue
             new_name = f"{name}{fn_suffix}"
             new_fn = _make_fn_with_patches(fn, *patches)
@@ -332,7 +333,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
                 new_fn = unittest.expectedFailure(new_fn)
             setattr(DummyTestClass, new_name, new_fn)
         # NB: Doesn't handle slots correctly, but whatever
-        elif name in cls.__dict__:
+        elif name not in DummyTestClass.__dict__:
             setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
