@@ -740,8 +740,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
+    def push_none(self):
+        self.stack.append(None)
+
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(
+        assert isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)
@@ -1006,7 +1009,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack.append(BlockStackEntry(inst.target))
 
     def BEGIN_FINALLY(self, inst):
-        self.push(None)
+        self.push_none()
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
@@ -1016,7 +1019,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def WITH_CLEANUP_FINISH(self, inst):
         self.popn(2)
-        self.push(None)
+        self.push_none()
 
     def END_FINALLY(self, inst):
         tos = self.pop()
@@ -1177,7 +1180,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(obj)
         else:
             self.push(obj)
-            self.push(None)
+            self.push_none()
 
     def CALL_METHOD(self, inst):
         args = self.popn(inst.argval)
