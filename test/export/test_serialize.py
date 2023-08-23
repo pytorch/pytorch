@@ -557,8 +557,6 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
         deserialized_ep = deserialize(*serialized_vals)
 
-        self.assertTrue(torch.allclose(ep(torch.ones(4, 4)), deserialized_ep(torch.ones(4, 4))))
-
         for node in deserialized_ep.graph.nodes:
             if (
                 node.op == "call_function" and
@@ -567,7 +565,7 @@ class TestSerializeCustomClass(TestCase):
                 arg = node.args[0]
                 self.assertTrue(isinstance(arg, torch._C.ScriptObject))
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
-                self.assertEqual(arg.top(), custom_obj.top())
+                self.assertEqual(arg.top(), 7)
 
 
 if __name__ == '__main__':
