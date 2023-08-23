@@ -29,19 +29,19 @@ parser.add_argument(
 
 
 def main(args):
-    LOG_DIR = args.log_dir
-    DATA_DIR = args.data_dir
-    DTYPE_LIST = args.dtype.split(",")
-    MODE_LIST = args.mode.split(",")
-    BENCHMARK_PY = args.benchmark
-    MODEL_LIST_PATH = args.model_csv
+    log_dir = args.log_dir
+    data_dir = args.data_dir
+    dtype_list = args.dtype.split(",")
+    mode_list = args.mode.split(",")
+    benchmark_py = args.benchmark
+    model_list_path = args.model_csv
 
-    if not os.path.exists(LOG_DIR):
-        os.mkdir(LOG_DIR)
+    if not os.path.exists(log_dir):
+        os.mkdir(log_dir)
 
-    for DTYPE in DTYPE_LIST:
-        for MODE in MODE_LIST:
-            model_list_path = MODEL_LIST_PATH
+    for dtype in dtype_list:
+        for mode in mode_list:
+            model_list_path = model_list_path
             model_names = []
             with open(model_list_path) as f:
                 for line in f.readlines()[1:]:
@@ -50,9 +50,9 @@ def main(args):
             print(model_names)
 
             for model_name in model_names:
-                cache_dir = os.path.join(DATA_DIR, f"{DTYPE}_{MODE}_{model_name}")
+                cache_dir = os.path.join(data_dir, f"{dtype}_{mode}_{model_name}")
                 log_file = os.path.join(
-                    LOG_DIR, f"{DTYPE}_{MODE}_{model_name}.kernels.log"
+                    log_dir, f"{dtype}_{mode}_{model_name}.kernels.log"
                 )
 
                 # if cache_dir exists, remove .pkl (raw data) and .best_config (best config) in it
@@ -74,7 +74,7 @@ def main(args):
                 my_env["TORCHINDUCTOR_DUMP_AUTOTUNER_DATA"] = "1"
                 my_env["TORCH_LOGS"] = "+inductor"
                 my_env["TORCHINDUCTOR_BENCHMARK_KERNEL"] = "1"
-                cmd = f"""python3 {BENCHMARK_PY} --{DTYPE} --performance --{MODE} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
+                cmd = f"""python3 {benchmark_py} --{dtype} --performance --{mode} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
                 print(cmd)
                 try:
                     pro = subprocess.Popen(
