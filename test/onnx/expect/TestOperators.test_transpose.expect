@@ -8,7 +8,7 @@ graph {
     name: "Identity_0"
     op_type: "Identity"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Identity_0"
     type {

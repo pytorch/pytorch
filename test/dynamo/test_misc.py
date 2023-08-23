@@ -1286,10 +1286,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             args = (s.input, *sample.args)
             return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
 
-        # The last sample from gather does not work in np.take_along_axis
         samples = list(
-            sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False)
-        )[:-1]
+            sample_inputs_gather(
+                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+            )
+        )
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         i = 1
@@ -6747,6 +6748,31 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 0)
+
+    def test_derpy_nn_module_usage(self):
+        def ff1(x):
+            self = mod1
+            return torch.sigmoid(self.mod2(x) + self.param1)
+
+        def ff2(x):
+            self = mod2
+            return torch.cos(torch.sin(x) * self.param2 + 10)
+
+        mod1 = torch.nn.Module()
+        mod2 = torch.nn.Module()
+        mod1.register_module("mod2", mod2)
+        mod1.register_parameter("param1", torch.nn.Parameter(torch.randn(10)))
+        mod1.forward = ff1
+        mod2.register_parameter("param2", torch.nn.Parameter(torch.randn(10)))
+        mod2.forward = ff2
+        mod1.eval()
+
+        x = torch.randn(10)
+        expected = mod1(x)
+        counter = CompileCounter()
+        actual = torch.compile(mod1, backend=counter, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counter.op_count, 6)
 
 
 class TestTracer(JitTestCase):
