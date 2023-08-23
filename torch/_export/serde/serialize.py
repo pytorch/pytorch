@@ -585,11 +585,15 @@ class GraphModuleSerializer:
             return Argument.create(as_memory_format=_TORCH_TO_SERIALIZE_MEMORY_FORMAT[arg])
         elif isinstance(arg, torch.layout):
             return Argument.create(as_layout=_TORCH_TO_SERIALIZE_LAYOUT[arg])
-        elif (
-            isinstance(arg, torch._C.ScriptObject) and
-            hasattr(type(arg), "__getstate__") and
-            hasattr(type(arg), "__setstate__")
-        ):
+        elif isinstance(arg, torch._C.ScriptObject):
+            if not (
+                hasattr(type(arg), "__getstate__") and
+                hasattr(type(arg), "__setstate__")
+            ):
+                raise SerializeError(
+                    f"Unable to serialize ScriptObject {arg}. Please define "
+                    "serialization methods via def_pickle()."
+                )
             # Custom objects through torchind are serializable with pickle,
             # through implementing the .def_pickle function.  This should result
             # in the object containing a __getstate__ and __setstate__
@@ -962,7 +966,13 @@ class GraphModuleDeserializer:
         sig = deserialize_signature(serialized_graph_module.signature)
         call_spec = deserialize_call_spec(serialized_graph_module.call_spec)
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
-        return torch.fx.GraphModule(self.module, self.graph), sig, call_spec, module_call_graph, self.symbol_name_to_symbol
+        return (
+            ep._create_graph_module_for_export(self.module, self.graph),
+            sig,
+            call_spec,
+            module_call_graph,
+            self.symbol_name_to_symbol,
+        )
 
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
@@ -1007,7 +1017,7 @@ class GraphModuleDeserializer:
             assert isinstance(value, GraphArgument)
             with self.save_graph_module():
                 self.deserialize_graph(value.graph)
-                submodule = torch.fx.GraphModule(self.module, self.graph)
+                submodule = ep._create_graph_module_for_export(self.module, self.graph)
             self.module.register_module(value.name, submodule)
             return self.graph.create_node(
                 "get_attr",

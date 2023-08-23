@@ -14,14 +14,12 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
-    GraphModuleDeserializer,
-    GraphModuleSerializer,
     deserialize,
     serialize,
     SerializeError,
 )
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -547,26 +545,29 @@ class TestSerializeCustomClass(TestCase):
         # Replace one of the values with an instance of our custom class
         for node in ep.graph.nodes:
             if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-                arg0, arg1 = node.args
-                node.args = (arg0, custom_obj)
+                with ep.graph.inserting_before(node):
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_an_instance.default,
+                        (custom_obj,),
+                    )
+                    custom_node.meta["val"] = torch.ones(4, 4)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
 
-        # Since the exported program is not runnable with our custom obj, we
-        # cannot deserialize the exported program fully since deserializing
-        # requires it to be runnable.
-        serialized_graph = GraphModuleSerializer(
-            ep.graph_signature, ep.call_spec, ep.module_call_graph,
-        ).serialize_graph(ep.graph_module)
+        serialized_vals = serialize(ep)
+        deserialized_ep = deserialize(*serialized_vals)
 
-        deserializer = GraphModuleDeserializer()
-        deserializer.fake_tensor_mode = FakeTensorMode(shape_env=ShapeEnv())
-        deserializer.deserialize_graph(serialized_graph)
+        self.assertTrue(torch.allclose(ep(torch.ones(4, 4)), deserialized_ep(torch.ones(4, 4))))
 
-        for node in deserializer.graph.nodes:
-            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-                arg0, arg1 = node.args
-                self.assertTrue(isinstance(arg1, torch._C.ScriptObject))
-                self.assertEqual(arg1.__getstate__(), custom_obj.__getstate__())
-                self.assertEqual(arg1.top(), custom_obj.top())
+        for node in deserialized_ep.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.target == torch.ops._TorchScriptTesting.take_an_instance.default
+            ):
+                arg = node.args[0]
+                self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
+                self.assertEqual(arg.top(), custom_obj.top())
 
 
 if __name__ == '__main__':
