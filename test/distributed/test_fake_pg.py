@@ -159,6 +159,7 @@ class TestFakePG(TestCase):
 
         tensor = torch.ones(3, 3)
         dist.send(tensor, 1)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
 
     def test_recv(self):
         store = FakeStore()
