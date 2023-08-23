@@ -28,6 +28,10 @@ echo "Environment variables:"
 env
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+ # Flash Attention if OOming lets try reducing the max jobs
+  # MAX_JOBS=$(nproc --ignore=4)
+  MAX_JOBS=1
+  export MAX_JOBS
   echo "NVCC version:"
   nvcc --version
 fi
@@ -157,6 +161,17 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   echo "TORCH_CUDA_ARCH_LIST must be defined"
   exit 1
+fi
+
+# Set USE_FLASH_ATTENTION=0 if TORCH_CUDA_ARCH_LIST contains 5.2 or lower
+# Since this will cause: `Feature '.f16x2 packed data-type' requires .target sm_53 or higher`
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  if [[ "$TORCH_CUDA_ARCH_LIST" == *"5.2"* ]]; then
+    export USE_FLASH_ATTENTION=0
+  else
+    # FlashAttention .cu files require large amounts of memory to build and will OOM
+    export MAX_JOBS=3
+  fi
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
