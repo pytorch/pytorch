@@ -348,8 +348,8 @@ def pad_sequence(
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
     and pads them to equal length. For example, if the input is a list of
-    sequences with size ``L x *`` and if batch_first is False, the output is
-    the size of ``T x B x *``.
+    sequences with size ``L x *`` and ``batch_first`` is False, the output is
+    of size ``T x B x *``.
 
     `B` is batch size. It is equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.
