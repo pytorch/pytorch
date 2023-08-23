@@ -1133,7 +1133,7 @@ class CheckFunctionManager:
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
-    def invalidate(self, ref):
+    def invalidate(self):
         # A weakref is no longer valid, self.check_fn should return false
         self.valid = False
 
@@ -1141,7 +1141,11 @@ class CheckFunctionManager:
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._weakrefs:
-                self._weakrefs[id(obj)] = weakref.ref(obj, self.invalidate)
+                # We will clear the _weakrefs dict at the end of __init__
+                # function, which will delete the callbacks as well. Therefore,
+                # we are using a finalizer which is kept alive.
+                self._weakrefs[id(obj)] = weakref.ref(obj)
+                weakref.finalize(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
