@@ -134,9 +134,7 @@ class BaseSchedulerNode:
         result: Dict[int, NodeUser] = {}
         for use in users:
             if id(use.node) in result:
-                result[id(use.node)] = NodeUser(
-                    use.node, result[id(use.node)].can_inplace and use.can_inplace
-                )
+                result[id(use.node)] = use.merge(result[id(use.node)])
             else:
                 result[id(use.node)] = use
         self.users = list(result.values())
@@ -190,6 +188,17 @@ class BaseSchedulerNode:
             if dep.name not in self.scheduler.available_buffer_names
         }
 
+    def prune_weak_deps(self):
+        # Prune weak dependencies on buffers that have been removed
+        def should_prune(dep):
+            return (
+                isinstance(dep, WeakDep)
+                and dep.name in V.graph.removed_buffers
+            )
+
+        to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
+        self.set_read_writes(self.read_writes.remove_reads(to_remove))
+
     def prune_redundant_deps(self, name_to_fused_node):
         """
         Prunes stardeps intended for mutation ordering
@@ -206,17 +215,17 @@ class BaseSchedulerNode:
                 name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
 
         def should_prune(dep):
-            if isinstance(dep, WeakDep):
-                is_redundant = (
-                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
-                )
-                # These can occur because fused nodes always gather deps from their snodes
-                # If B has a weakdep on A
-                # B gets fused with C, then any time BC is fused, the weakdep will reappear
-                is_self_dep = name_to_fused_node[dep.name] == self
-                return is_redundant or is_self_dep
-            else:
+            if not isinstance(dep, WeakDep):
                 return False
+
+            is_redundant = (
+                name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
+            )
+            # These can occur because fused nodes always gather deps from their snodes
+            # If B has a weakdep on A
+            # B gets fused with C, then any time BC is fused, the weakdep will reappear
+            is_self_dep = name_to_fused_node[dep.name] == self
+            return is_redundant or is_self_dep
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
         self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
@@ -933,8 +942,20 @@ class NodeUser:
     node: BaseSchedulerNode
     can_inplace: bool = False
 
+    # A weak user must be scheduled after a given node, but doesn't actually
+    # use the result
+    is_weak: bool = False
+
     def get_name(self):
         return self.node.get_name()
+
+    def merge(self, other: "NodeUser") -> "NodeUser":
+        assert self.node is other.node
+        return NodeUser(
+            self.node,
+            self.can_inplace and other.can_inplace,
+            self.is_weak and other.is_weak,
+        )
 
 
 class Scheduler:
@@ -970,8 +991,8 @@ class Scheduler:
 
         self.compute_dependencies()
         self.topological_sort_schedule()
-        self.compute_predecessors()
         self.dead_node_elimination()
+        self.compute_predecessors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1087,8 +1108,8 @@ class Scheduler:
                     reachable_names.update(dep_closure(read_dep.name))
             return reachable_names
 
-        def add_user(used_by_name, user_node, can_inplace=False):
-            name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
+        def add_user(used_by_name, user_node, can_inplace=False, is_weak=False):
+            name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace, is_weak))
 
         for node in self.nodes:
             # a node will mutate either 0 or 1 buffers
@@ -1105,11 +1126,12 @@ class Scheduler:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
                         node.add_mutation_dep(WeakDep(other_name))
-                        add_user(other_name, node)
+                        add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
-                add_user(read.name, node, node.can_inplace(read))
+                is_weak = isinstance(read, WeakDep)
+                add_user(read.name, node, node.can_inplace(read), is_weak)
 
             node.update_mutated_names(self.mutation_renames)
 
@@ -1155,11 +1177,19 @@ class Scheduler:
         while again:
             updated_nodes = []
             for node in self.nodes:
-                if (
-                    any(n.get_name() not in V.graph.removed_buffers for n in node.users)
-                    or node.has_side_effects()
-                ):
-                    updated_nodes.append(node)
+                def can_eliminate_user(user: NodeUser):
+                    return (
+                        user.get_name() in V.graph.removed_buffers
+                        or user.is_weak
+                    )
+
+                can_eliminate = (
+                    not node.has_side_effects()
+                    and all(can_eliminate_user(u) for u in node.users)
+                )
+
+                if not can_eliminate:
+                     updated_nodes.append(node)
                 else:
                     # dead code
                     log.debug("removed dead node: %s", node.get_name())
@@ -1167,6 +1197,10 @@ class Scheduler:
 
             again = len(self.nodes) > len(updated_nodes)
             self.nodes = updated_nodes
+
+        # Prune any WeakDeps no longer needed
+        for node in self.nodes:
+            node.prune_weak_deps()
 
     def topological_sort_schedule(self):
         """
