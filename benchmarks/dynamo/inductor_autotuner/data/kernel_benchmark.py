@@ -14,12 +14,12 @@ parser.add_argument("--end-model", type=str, default=None)
 
 
 def main(args):
-    KERNEL_DIR = args.kernel_dir
+    kernel_dir = args.kernel_dir
 
     seen_kernels = set()
 
-    for model in sorted(listdir(KERNEL_DIR)):
-        model_path = join(KERNEL_DIR, model)
+    for model in sorted(listdir(kernel_dir)):
+        model_path = join(kernel_dir, model)
         if not isdir(model_path):
             continue
 
