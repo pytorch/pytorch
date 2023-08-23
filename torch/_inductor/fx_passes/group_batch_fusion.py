@@ -260,7 +260,6 @@ class BatchLinearFusion(BatchFusion):
             batch_inputs.append(get_arg_value(node, 0, "input"))
             batch_weights.append(get_arg_value(node, 1, "weight"))
             batch_biases.append(get_arg_value(node, 2, "bias"))
-
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
             stack_weights = graph.call_function(torch.stack, args=(batch_weights, 0))
@@ -287,6 +286,59 @@ class BatchLinearFusion(BatchFusion):
                 linear.replace_all_uses_with(getitem)
                 getitem.meta.update(linear.meta)
                 graph.erase_node(linear)
+
+
+class BatchTanhFusion(BatchFusion):
+    """
+    Batch tanh fusion in pre grad pass.
+    We only fuse the tahn if the input is after same split node.
+    """
+
+    def _getitem_args(self, getitem_node: torch.fx.Node):
+        if getitem_node.target != operator.__getitem__ or (
+            getitem_node.op != "call_function"
+        ):
+            return None
+        return getitem_node.args[0]
+
+    def match(self, node):
+        input = get_arg_value(node, 0, "input")
+        if CallFunctionVarArgs(torch.tanh).match(node) and is_node_meta_valid(node):
+            group_key = (
+                "batch_tanh",
+                self._getitem_args(input),
+                str(input.meta["example_value"].shape),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph, subset):
+        batch_nodes = []
+        batch_inputs = []
+
+        for node in subset:
+            batch_nodes.append(node)
+            batch_inputs.append(get_arg_value(node, 0, "input"))
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
+
+            batch_tanh = graph.call_function(
+                torch.tanh,
+                args=(stack_inputs,),
+            )
+            unbind_tanh = graph.call_function(
+                torch.unbind, args=(batch_tanh,), kwargs={"dim": 0}
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_tanh):
+                    getitem = graph.call_function(
+                        operator.getitem, args=(unbind_tanh, i)
+                    )
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)
 
 
 class BatchLayernormFusion(BatchFusion):
@@ -506,6 +558,11 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
     fusions = []
     if config.batch_fusion:
-        fusions += [BatchLinearLHSFusion(), BatchLinearFusion(), BatchLayernormFusion()]
+        fusions += [
+            BatchLinearLHSFusion(),
+            BatchLinearFusion(),
+            BatchLayernormFusion(),
+            BatchTanhFusion(),
+        ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
