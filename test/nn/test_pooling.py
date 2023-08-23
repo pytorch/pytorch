@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
-    TEST_WITH_ROCM, expectedFailureCUDA, onlyCUDAAndPRIVATEUSE1
+    TEST_WITH_ROCM, onlyCUDAAndPRIVATEUSE1
 from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
@@ -551,12 +551,10 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True),
             name='case1',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True),
             name='case2',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False),
@@ -565,7 +563,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True),
             name='case4',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False),
@@ -574,11 +571,10 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True),
             name='case6',
-            decorators=[expectedFailureCUDA]),
+        ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True),
             name='case7',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False),
@@ -587,7 +583,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True),
             name='case9',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False),
