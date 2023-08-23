@@ -20,7 +20,6 @@ from typing import Any, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
-from torch._dynamo.stream import StreamAPIContainer
 from torch.types import Device
 from .. import device as _device
 from .._utils import classproperty
@@ -561,7 +560,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    _set_stream(
+    set_stream_by_id(
         stream_id=stream.stream_id,
         device_index=stream.device_index,
         device_type=stream.device_type,
@@ -1286,15 +1285,6 @@ def _register_triton_kernels():
 
 
 _lazy_call(_register_triton_kernels)
-
-
-# register stream API for dynamo stream capture
-StreamAPIObject = StreamAPIContainer()
-StreamAPIObject.register_create_stream_method('cuda', torch.cuda.streams.Stream)
-StreamAPIObject.register_create_stream_context_method('cuda', torch.cuda.stream)
-StreamAPIObject.register_current_stream_method('cuda', torch.cuda.current_stream)
-StreamAPIObject.register_set_stream_method('cuda', torch.cuda.set_stream)
-StreamAPIObject.register_set_stream_by_id_method('cuda', torch.cuda.set_stream_by_id)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse

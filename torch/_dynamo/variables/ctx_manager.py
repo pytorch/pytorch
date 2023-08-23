@@ -5,7 +5,7 @@ import torch._C
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..stream import StreamAPIContainer
+from ..stream import StreamMethodContainer
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -363,8 +363,7 @@ class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
-
-        current_stream_method = StreamAPIContainer().get_current_stream_method(target_value.device.type)
+        current_stream_method = StreamMethodContainer().get_one_method('current_stream_method', target_value.device)
         current_stream = wrap_fx_proxy_cls(
             StreamVariable,
             tx,
@@ -387,13 +386,14 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
+        self.set_stream_func = StreamMethodContainer().get_one_method('set_stream_method', self.device)
 
     def enter(self, tx):
         # stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
-                StreamAPIContainer().get_set_stream_method(self.device),
+                self.set_stream_func,
                 (self.target_values[0].as_proxy(),),
                 {},
             )
@@ -402,11 +402,11 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamAPIContainer().get_set_stream_by_id_method(self.device),
+                StreamMethodContainer().get_one_method('set_stream_by_id_method', self.device),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamAPIContainer().get_set_stream_method(self.device)(self.target_values[0].value)
+        StreamMethodContainer().get_one_method('set_stream_method', self.device)(self.target_values[0].value)
 
     def exit(self, tx, *args):
         tx.output.create_proxy(

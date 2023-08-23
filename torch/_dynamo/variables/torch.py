@@ -13,7 +13,7 @@ import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
-from ..stream import StreamAPIContainer
+from ..stream import StreamMethodContainer
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..source import GeneratorStateSource
@@ -331,23 +331,29 @@ class TorchVariable(VariableTracker):
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
         elif any(
-            [self.value is method for method in StreamAPIContainer().get_all_create_stream_context_method()]
+            [self.value is method for method in
+             StreamMethodContainer().get_all_methods('create_stream_context_method')]
         ):
             log.warning(
-                str(StreamAPIContainer().get_create_stream_context_method(args[0].device)) + 
+                str(StreamMethodContainer().get_one_method('create_stream_context_method', args[0].device)) +
                 "not fully supported, streams may be ignored"
             )
             assert len(args) == 1
             return StreamContextVariable.create(tx, args[0], **options)
         elif any(
-            [self.value is method for method in StreamAPIContainer().get_all_create_stream_method()]
+            [self.value is method for method in
+             StreamMethodContainer().get_all_methods('create_stream_method')]
         ):
+            match_device = None
+            for device, method in StreamMethodContainer().create_stream_method.items():
+                if self.value is method[0]:
+                    match_device = device
             return wrap_fx_proxy_cls(
                 StreamVariable,
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    StreamAPIContainer().get_create_stream_method(self.value.device.type),
+                    StreamMethodContainer().get_one_method('create_stream_method', match_device),
                     (),
                     {},
                 ),
