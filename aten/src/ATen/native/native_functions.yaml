@@ -3248,6 +3248,10 @@
   dispatch:
     CUDA: _sparse_semi_structured_linear
 
+- func: _fp16_uint8_mm(Tensor self, Tensor mat2, Tensor scale, Tensor bias) -> Tensor
+  dispatch:
+    CUDA: _fp16_uint8_mm
+
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
