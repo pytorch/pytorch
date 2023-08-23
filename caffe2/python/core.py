@@ -8,6 +8,7 @@
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
 from itertools import chain
+from typing import Dict
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
@@ -1445,7 +1446,7 @@ def _recover_record_by_prefix(names, prefix=''):
 
 
 class Net:
-    _net_names_used = set()
+    _net_names_used_counters: Dict[str, int] = {}
     operator_registry_ = {}
 
     @staticmethod
@@ -1455,16 +1456,15 @@ class Net:
         return builder.name if builder else ''
 
     @staticmethod
+    def _reset_used_names() -> None:
+        Net._net_names_used_counters = {}
+
+    @staticmethod
     def _get_next_net_name(basename):
-        name = basename = '/'.join(
-            x for x in [Net.current_prefix(), basename] if x
-        )
-        next_idx = 1
-        while name in Net._net_names_used:
-            name = basename + '_' + str(next_idx)
-            next_idx += 1
-        Net._net_names_used |= set([name])
-        return name
+        basename = "/".join(x for x in [Net.current_prefix(), basename] if x)
+        next_idx = Net._net_names_used_counters.get(basename, 0)
+        Net._net_names_used_counters[basename] = next_idx + 1
+        return basename if next_idx == 0 else f"{basename}_{next_idx}"
 
     def __init__(self, name_or_proto, inplace=False):
         """
