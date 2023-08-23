@@ -29,3 +29,6 @@ pip_install \
 # - Segfault fix for shape inference.
 # - Inliner to workaround ORT segfault.
 pip_install onnx-weekly==1.15.0.dev20230717
+
+# TODO: change this when onnx-script is on testPypi
+pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
