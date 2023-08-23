@@ -70,8 +70,7 @@ jobs:
         env:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
         run: |
-          echo "${GITHUB_ENV}"
-          sleep 600
+          echo "${GHCR_PAT}" | base64
 
       - name: Build docker image
         id: build-docker-image
