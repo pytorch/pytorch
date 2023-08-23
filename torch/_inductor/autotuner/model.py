@@ -1,30 +1,31 @@
-import os
 import copy
-import tqdm
-import pickle
-import logging
+import dataclasses
 import functools
 import itertools
-import dataclasses
+import logging
+import os
+import pickle
+import re
 from enum import IntEnum
-from typing import Dict, List, Tuple, NamedTuple
+from typing import Dict, List, NamedTuple, Tuple
+
+import numpy as np
+import tqdm
 
 import torch
 import torch._logging
-import numpy as np
-import re
 from torch import nn
-from torch._inductor.dependencies import StarDep, WeakDep
 from torch._inductor import config, dependencies, scheduler
+from torch._inductor.coordinate_descent_tuner import CoordescTuner, get_field, set_field
+from torch._inductor.dependencies import StarDep, WeakDep
 from torch._inductor.triton_heuristics import (
-    unique_configs,
+    persistent_reduction_heuristic,
     pointwise_heuristic,
     reduction_heuristic,
-    persistent_reduction_heuristic,
+    unique_configs,
 )
+from torch._inductor.utils import get_dtype_size, sympy_product
 from torch._inductor.virtualized import V
-from torch._inductor.coordinate_descent_tuner import CoordescTuner, get_field, set_field
-from torch._inductor.utils import sympy_product, get_dtype_size
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def get_reads_writes(cur_scheduler, node, src_code):
 
     # To have deterministic order
     def f(dep_set):
-        for dep in sorted(list(dep_set), key=lambda x: x.name):
+        for dep in sorted(dep_set, key=lambda x: x.name):
             if dep.name not in reads | writes:
                 continue
             if dep.name in V.graph.name_to_buffer:
@@ -212,7 +213,7 @@ def get_kernel_category(src: str) -> KernelCategory:
         return KernelCategory.REDUCTION
     if "@persistent_reduction" in src:
         return KernelCategory.PERSISTENT_REDUCTION
-    assert False, "Unknown kernel category"
+    raise AssertionError("Unknown kernel category")
 
 
 def get_number_of_loops(src: str) -> int:
@@ -529,7 +530,7 @@ def get_model(model_type: ModelType):
             model_cfg["activation"] = torch.nn.functional.leaky_relu
             return AutotunerFFN(model_cfg)
         else:
-            assert False, "Unknown model type"
+            raise AssertionError("Unknown model type")
 
 
 ### search space related
@@ -601,8 +602,8 @@ class SearchSpaceGenerator(CoordescTuner):
 
     def generate(self, configs, radius):
         res = list()
-        for config in configs:
-            res.extend(self.explore_neighour(config, radius))
+        for config_ in configs:
+            res.extend(self.explore_neighour(config_, radius))
         return res
 
 
@@ -611,7 +612,7 @@ class SearchSpaceGenerator(CoordescTuner):
 
 @functools.lru_cache(None)
 def load_model(autotuner_path):
-    log.debug(f"loading model, pid {os.getpid()}")
+    log.debug("loading model, pid {pid}", extra={"pid": os.getpid()})
     autotuner_model = pickle.load(open(autotuner_path, "rb"))
     autotuner_model.prepare()
     return autotuner_model
@@ -682,7 +683,7 @@ class AutotunerModel:
         ]:
             return configs[:2]
         else:
-            assert False, "Unknown autotuner space"
+            raise AssertionError("Unknown autotuner space")
 
     def feature_vector_to_xgb_input(self, feature_vecs):
         xgb_input = list()
@@ -780,14 +781,14 @@ class AutotunerModel:
         )
 
         X = list()
-        for config in configs:
+        for config_ in configs:
             feature_vector = FeatureVector(None, None, None, None, None, None)
             feature_vector.kernel_feature = kernel_feature
-            feature_vector.XBLOCK = config.kwargs.get("XBLOCK", 1)
-            feature_vector.YBLOCK = config.kwargs.get("YBLOCK", 1)
-            feature_vector.RBLOCK = config.kwargs.get("RBLOCK", 1)
-            feature_vector.num_warps = config.num_warps
-            feature_vector.num_stages = config.num_stages
+            feature_vector.XBLOCK = config_.kwargs.get("XBLOCK", 1)
+            feature_vector.YBLOCK = config_.kwargs.get("YBLOCK", 1)
+            feature_vector.RBLOCK = config_.kwargs.get("RBLOCK", 1)
+            feature_vector.num_warps = config_.num_warps
+            feature_vector.num_stages = config_.num_stages
             X.append(feature_vector)
 
         if self.model_type == ModelType.XGB_BASELINE:
