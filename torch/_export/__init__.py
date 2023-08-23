@@ -1,7 +1,10 @@
 import dataclasses
 import inspect
+import io
 import re
+import pathlib
 import weakref
+import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -19,6 +22,7 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
@@ -55,40 +59,7 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 )
 from .wrappers import _wrap_submodules
 
-# Note - [On Export Dynamic Dimension UX]
-#
-# After a lot of discussion, we have settled on a dynamic marking API
-# for export that meets the following constraints:
-# 1) Stateless
-# 2) Safe for numerous .export calls within a single process
-# 3) Simple to use
-# 4) Can be extended to constraints easily
-#
-# While the underlying API is still torch._dynamo.mark_dynamic, we offer a higher
-# level API that meets the constraints above.
-#
-# This API produces an object that is meant to be passed into torch._dynamo.export
-# constraints field. See docs on torch._dynamo.export for more details.
-#
-# Note - The output type and structure here is NOT BC and NOT A CONTRACT, we reserve
-# the right to change the output here at any time, and will do so as we extend the API.
-#
-# result = torch._dynamo.export(
-#     my_model,
-#     constraints=[
-#         # if you do only dynamic_dim, this is sugar for
-#         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
-#         # permit direct int->bool conversion
-#         dynamic_dim(blah, 0),
-#         # operator overloading because it makes it clear whether
-#         # or not you’re inclusive-exclusive range or not
-#         0 <= dynamic_dim(blah, 1) <= 100,
-#         # NB: But we actually truncate ranges to be >= 2, because of
-#         # 0/1 specialization
-#     ]
-# )(
-#     *sixtyfour_tensors,
-# )
+
 def dynamic_dim(t: torch.Tensor, index: int):
     if not isinstance(t, torch.Tensor):
         raise UserError(
@@ -351,9 +322,21 @@ def export(
                 backward_signature=export_backward_signature
             )
 
-            # TODO unfortunately preserving meta at graph level is not
+            # NOTE: aot_export adds symint metadata for placeholders with int values;
+            # since these become specialized, we replace such metadata with the original values
+            # TODO: we should add runtime assertions for them
+            for node in gm.graph.nodes:
+                if node.op == "placeholder" and "val" in node.meta:
+                    s = node.meta['val']
+                    if (
+                        isinstance(s, torch.SymInt) and
+                        isinstance(fake_mode.shape_env.var_to_sources[s.node.expr][0], ConstantSource)
+                    ):
+                        node.meta['val'] = s.node.hint
+
+            # TODO unfortunately preserving graph-level metadata is not
             # working well with aot_export. So we manually copy it.
-            # The node level meta is preserved.
+            # (The node-level meta is addressed above.)
             for key, val in gm_torch_level.meta.items():
                 gm.meta[key] = val
 
@@ -423,6 +406,153 @@ def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dic
     return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args):]})
 
 
+def save(
+    ep: ExportedProgram,
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    opset_version: Optional[Dict[str, int]] = None,
+) -> None:
+    """
+    Saves an :class:`ExportedProgram` to a file-like object. It can then be
+    loaded using the Python API :func:`torch._export.load <torch._export.load>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+            implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): Map from filename to contents
+            which will be stored as part of f.
+
+        opset_version (Optional[Dict[str, int]]): A map of opset names
+            to the version of this opset
+
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        import torch._export
+        import io
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        ep = torch._export.export(MyModule(), torch.randn(5))
+
+        # Save to file
+        torch._export.save(ep, 'exported_program.pt2')
+
+        # Save to io.BytesIO buffer
+        buffer = io.BytesIO()
+        torch._export.save(ep, buffer)
+
+        # Save with extra files
+        extra_files = {'foo.txt': b'bar'}
+        torch._export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+    """
+    from .serde.serialize import serialize
+    from .serde.schema import SCHEMA_VERSION
+    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+
+    if isinstance(f, (str, pathlib.Path)):
+        f = str(f)
+
+    with zipfile.ZipFile(f, 'w') as zipf:
+        # Save serialized_ep and serialized_state_dict to the zip file
+        zipf.writestr('serialized_exported_program.json', serialized_program)
+        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        zipf.writestr('version', str(SCHEMA_VERSION))
+
+        # Add extra files if provided
+        if extra_files:
+            for extra_file_name, content in extra_files.items():
+                encoded_content = content.encode('utf-8')
+                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
+
+
+def load(
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    expected_opset_version: Optional[Dict[str, int]] = None,
+) -> ExportedProgram:
+    """
+    Loads an :class:`ExportedProgram` previously saved with
+    :func:`torch._export.save <torch._export.save>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+            implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): The extra filenames given in
+            this map would be loaded and their content would be stored in the
+            provided map.
+
+        expected_opset_version (Optional[Dict[str, int]]): A map of opset names
+            to expected opset versions
+
+    Returns:
+        An :class:`ExportedProgram` object
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        import torch._export
+        import io
+
+        # Load ExportedProgram from file
+        ep = torch._export.load('exported_program.pt2')
+
+        # Load ExportedProgram from io.BytesIO object
+        with open('exported_program.pt2', 'rb') as f:
+            buffer = io.BytesIO(f.read())
+        buffer.seek(0)
+        ep = torch._export.load(buffer)
+
+        # Load with extra files.
+        extra_files = {'foo.txt': ''}  # values will be replaced with data
+        ep = torch._export.load('exported_program.pt2', extra_files=extra_files)
+        print(extra_files['foo.txt'])
+    """
+    if isinstance(f, (str, pathlib.Path)):
+        f = str(f)
+
+    with zipfile.ZipFile(f, 'r') as zipf:
+        # Check the version
+        version = int(zipf.read('version'))
+        from .serde.schema import SCHEMA_VERSION
+
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Serialized version {version} does not match our current "
+                f"schema version {SCHEMA_VERSION}."
+            )
+
+        # Load serialized_ep and serialized_state_dict from the zip file
+        serialized_ep = zipf.read('serialized_exported_program.json')
+        serialized_state_dict = zipf.read('serialized_state_dict.json')
+
+        # Deserialize ExportedProgram
+        from .serde.serialize import deserialize
+        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+
+        # Populate extra_files map
+        if extra_files is not None:
+            for filename in extra_files.keys():
+                extra_files[filename] = zipf.read(f"extra_files/{filename}").decode('utf-8')
+
+        return ep
+
+
 def aot_compile(
     f: Callable,
     args: Tuple[Any],
@@ -467,9 +597,5 @@ def aot_compile(
     )
     all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = compile_fx_aot(
-        ep.graph_module,
-        all_args,  # type: ignore[arg-type]
-        config_patches=options,
-    )
+    so_path = torch._inductor.aot_compile(ep.graph_module, list(all_args), options)
     return so_path, ep
