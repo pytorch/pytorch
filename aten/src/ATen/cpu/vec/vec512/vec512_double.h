@@ -163,6 +163,9 @@ public:
   Vectorized<double> atan() const {
     return Vectorized<double>(Sleef_atand8_u10(values));
   }
+  Vectorized<double> atanh() const {
+    return Vectorized<double>(Sleef_atanhd8_u10(values));
+  }
   Vectorized<double> atan2(const Vectorized<double> &b) const {
     return Vectorized<double>(Sleef_atan2d8_u10(values, b));
   }

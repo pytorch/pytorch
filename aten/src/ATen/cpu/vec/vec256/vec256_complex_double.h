@@ -214,6 +214,9 @@ public:
     return _mm256_sub_pd(pi_2, asin());
   }
   Vectorized<c10::complex<double>> atan() const;
+  Vectorized<c10::complex<double>> atanh() const {
+    return map(std::atanh);
+  }
   Vectorized<c10::complex<double>> atan2(const Vectorized<c10::complex<double>>&) const {
     AT_ERROR("not supported for complex numbers");
   }

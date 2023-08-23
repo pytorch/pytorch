@@ -399,9 +399,10 @@ static void asinh_kernel(TensorIteratorBase& iter) {
 
 static void atanh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "atanh_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::atanh(a); });
+        [=](scalar_t a) -> scalar_t { return std::atanh(a); },
+        [=](Vectorized<scalar_t> self_vec){return self_vec.atanh();});
     });
 }
 

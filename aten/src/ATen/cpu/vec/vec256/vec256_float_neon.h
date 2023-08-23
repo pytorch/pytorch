@@ -352,6 +352,12 @@ public:
       map(std::atan)
     );
   }
+  Vectorized<float> atanh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_atanhf4_u10(values.val[0]), Sleef_atanhf4_u10(values.val[1])),
+      map(std::atanh)
+    );
+  }
   Vectorized<float> atan2(const Vectorized<float> &exp) const {
     USE_SLEEF(
       {
