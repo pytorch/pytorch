@@ -35,7 +35,7 @@
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
 #if PY_VERSION_HEX >= 0x030C0000 // 3.12
-// Spoiler alert: They don't!
+// Spoiler alert: They don't! This will be done in a follow up.
 // #error "Please ensure that the functions below still match the CPython implementation for 3.12"
 #endif
 
