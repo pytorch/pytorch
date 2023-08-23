@@ -344,9 +344,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            len(torch._dynamo.utils.counters["graph_break"]), 0
-        )
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 0)
 
     @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
