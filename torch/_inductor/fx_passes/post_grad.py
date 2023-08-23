@@ -79,7 +79,6 @@ class FakeTensorUpdater:
         Todo things:
         1. We probably want to persist this across more passes.
         """
-        return
         processed = set()
         existing_tensors = defaultdict(int)
         for node in self.graph.nodes:
