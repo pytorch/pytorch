@@ -149,8 +149,8 @@ void multi_margin_loss_shape_check(
 
     TORCH_CHECK(
         target.dim() <= 1 && target.numel() == nframe,
-        "inconsistent target size, expected ", nframe, " but got ",
-        target.sizes());
+        "MultiMarginLoss: The size of input tensor ", nframe, " must match the size of target tensor ",
+        target.sizes(), " at non-singleton dimension ", ndims - 1);
     if (weight && weight->defined()) {
       TORCH_CHECK(
           weight->dim() <= 1 && weight->numel() == dim,

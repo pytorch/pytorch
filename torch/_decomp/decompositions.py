@@ -3715,7 +3715,8 @@ def multi_margin_loss(
     )
     torch._check(
         target.ndim == 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
+        lambda: f"MultiMarginLoss: The size of input tensor {nframe} "
+                f"must match the size of target tensor {target.shape} at non-singleton dimension {input.dim() - 1}",
     )
     if weight is not None:
         weight = torch.atleast_1d(weight)
