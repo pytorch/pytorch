@@ -39,10 +39,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& value,
     const Tensor& out,
     const Tensor& logsumexp,
-    const c10::optional<Tensor>& cumulative_sequence_length_q,
-    const c10::optional<Tensor>& cumulative_sequence_length_k,
-    c10::optional<int64_t> max_seqlen_batch_q,
-    c10::optional<int64_t> max_seqlen_batch_k,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     const Tensor& philox_seed,
@@ -53,9 +53,6 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
-  // Tensor dq = at::empty_like(query);
-  // Tensor dk = at::empty_like(key);
-  // Tensor dv = at::empty_like(value);
 
   c10::optional<at::Tensor> dq{c10::nullopt};
   c10::optional<at::Tensor> dk{c10::nullopt};
@@ -64,19 +61,11 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  TORCH_CHECK(
-      cumulative_sequence_length_q.has_value() ==
-          cumulative_sequence_length_k.has_value(),
-      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
-  TORCH_CHECK(
-      max_seqlen_batch_q.has_value() == max_seqlen_batch_k.has_value(),
-      "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
-
-  if (cumulative_sequence_length_q.value().defined()) {
-    TORCH_CHECK(
-        max_seqlen_batch_q.has_value(),
-        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
-    TORCH_CHECK(false, "dont go down this path yet");
+  // We check the whether the cumulative_sequence_length_q is defined
+  // in order to determine whether we are using varlen or dense forward
+  if (cumulative_sequence_length_q.defined()) {
+    // Varlen forward
+    TORCH_CHECK(false, "Dont go down this path yet");
     auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_varlen_bwd(
         contiguous_grad_out,
         query,
@@ -87,10 +76,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dq,
         dk,
         dv,
-        cumulative_sequence_length_q.value(),
-        cumulative_sequence_length_k.value(),
-        max_seqlen_batch_q.value(),
-        max_seqlen_batch_k.value(),
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_k,
+        max_seqlen_batch_q,
+        max_seqlen_batch_k,
         dropout_p,
         softmax_scale,
         false /*zero_tensors*/,
@@ -99,6 +88,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
   } else {
+    // Dense forward
     auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_bwd(
         contiguous_grad_out,
         query,
@@ -526,10 +516,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
-
-  const int64_t batch_size = query.size(0);
-  const int64_t num_heads = query.size(1);
-  const int64_t head_dim = query.size(3);
 
   Tensor q_t = query.transpose(1, 2);
   Tensor k_t = key.transpose(1, 2);
