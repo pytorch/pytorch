@@ -20,7 +20,7 @@ graph {
     name: "Mul_1"
     op_type: "Mul"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Mul_0"
     type {

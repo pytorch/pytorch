@@ -533,7 +533,7 @@ def corrcoef(
         raise NotImplementedError
     xy_tensor = _xy_helper_corrcoef(x, y, rowvar)
 
-    is_half = dtype == torch.float16
+    is_half = (xy_tensor.dtype == torch.float16) and xy_tensor.is_cpu
     if is_half:
         # work around torch's "addmm_impl_cpu_" not implemented for 'Half'"
         dtype = torch.float32
@@ -563,7 +563,7 @@ def cov(
     if ddof is None:
         ddof = 1 if bias == 0 else 0
 
-    is_half = dtype == torch.float16
+    is_half = (m.dtype == torch.float16) and m.is_cpu
     if is_half:
         # work around torch's "addmm_impl_cpu_" not implemented for 'Half'"
         dtype = torch.float32
@@ -886,7 +886,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.take_along_dim(arr, indices, axis)
+    return torch.gather(arr, axis, indices)
 
 
 def put(
@@ -1143,7 +1143,7 @@ def vdot(a: ArrayLike, b: ArrayLike, /):
         t_b = t_b.flatten()
 
     dtype = _dtypes_impl.result_type_impl(t_a, t_b)
-    is_half = dtype == torch.float16
+    is_half = dtype == torch.float16 and (t_a.is_cpu or t_b.is_cpu)
     is_bool = dtype == torch.bool
 
     # work around torch's "dot" not implemented for 'Half', 'Bool'
@@ -1198,7 +1198,7 @@ def dot(a: ArrayLike, b: ArrayLike, out: Optional[OutArray] = None):
 
 def inner(a: ArrayLike, b: ArrayLike, /):
     dtype = _dtypes_impl.result_type_impl(a, b)
-    is_half = dtype == torch.float16
+    is_half = dtype == torch.float16 and (a.is_cpu or b.is_cpu)
     is_bool = dtype == torch.bool
 
     if is_half:
@@ -1334,7 +1334,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     target_dtype = _dtypes_impl.result_type_impl(*tensors) if dtype is None else dtype
 
     # work around 'bmm' not implemented for 'Half' etc
-    is_half = target_dtype == torch.float16
+    is_half = target_dtype == torch.float16 and all(t.is_cpu for t in tensors)
     if is_half:
         target_dtype = torch.float32
 
@@ -1387,6 +1387,8 @@ def _sort_helper(tensor, axis, kind, order):
 
 
 def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     # `order` keyword arg is only relevant for structured dtypes; so not supported here.
     a, axis, stable = _sort_helper(a, axis, kind, order)
     result = torch.sort(a, dim=axis, stable=stable)
@@ -1394,6 +1396,8 @@ def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
+    if a.dtype.is_complex:
+        return NotImplemented
     a, axis, stable = _sort_helper(a, axis, kind, order)
     return torch.argsort(a, dim=axis, stable=stable)
 
@@ -1401,6 +1405,9 @@ def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
+    if a.dtype.is_complex:
+        return NotImplemented
+
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
 

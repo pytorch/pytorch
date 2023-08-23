@@ -122,7 +122,6 @@ class ModuleCallEntry:
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
     buffer_name_to_node = {}
-    print(gm.graph)
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -292,6 +291,7 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
         ep.graph_signature.buffers_to_mutate,
         ep.graph_signature.user_outputs,
     )
+    new_gm.meta.update(ep.graph_module.meta)
     return new_gm
 
 
@@ -310,6 +310,8 @@ class ExportedProgram:
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         self._graph_module = torch.fx.GraphModule(root, graph)
+        if isinstance(root, torch.fx.GraphModule):
+            self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._call_spec: CallSpec = call_spec
