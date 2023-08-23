@@ -674,7 +674,7 @@ class ReplacementPatternEntry(PatternEntry):
                     # args in the replacement graph.
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
-                    # recomputable tags. It is possible in some scenrios that we
+                    # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
                     if "recompute" in old.meta:
                         percolate_tags(new, old.meta["recompute"])
