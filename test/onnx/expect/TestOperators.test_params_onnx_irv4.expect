@@ -34,7 +34,7 @@ graph {
     name: "Neg_4"
     op_type: "Neg"
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 2
     dims: 2

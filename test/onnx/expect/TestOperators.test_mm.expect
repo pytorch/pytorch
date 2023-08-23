@@ -19,7 +19,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Gemm_0"
     type {
