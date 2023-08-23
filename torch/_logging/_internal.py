@@ -505,7 +505,7 @@ Examples:
   TORCH_LOGS="+some.random.module,schedule" will set the log level of some.random.module to logging.DEBUG and enable the schedule artifact
 """
     msg = f"""
-TORCH_LOGS Infor
+TORCH_LOGS Info
 {examples}
 
 {heading}
