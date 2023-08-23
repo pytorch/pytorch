@@ -4327,7 +4327,7 @@ class CommonTemplate:
 
         opt_fn = torch._dynamo.optimize()(fn)
 
-        a = torch.zeros((10,), dtype=torch.int64, device=self.device)
+        a = torch.zeros((), dtype=torch.int64, device=self.device)
         a_expect = a.clone()
         expect = fn(a_expect)
 
