@@ -82,28 +82,28 @@ class CacheSize:
         default_factory=defaultdict(int)
     )
 
-    # Sources of objects with ID_MATCH guards
-    id_guarded_sources: Set[str] = field(default_factory=set)
+    # local_names of objects with ID_MATCH guards
+    id_matched_local_names: Set[str] = field(default_factory=set)
 
 
 def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
     # Walk the linked list to calculate the cache size
     cache_size_per_id_matched_obj = defaultdict(int)
     total = 0
-    sources = set()
+    local_names = set()
     while cache_entry:
         total += 1
-        for source, weak_id in cache_entry.check_fn.id_matched_objs.items():
+        for local_name, weak_id in cache_entry.check_fn.id_matched_objs.items():
             if weak_id() is not None:
                 cache_size_per_id_matched_obj[weak_id] += 1
-                sources.add(source)
+                local_names.add(local_name)
         cache_entry = cache_entry.next
 
-    return CacheSize(total, cache_size_per_id_matched_obj, sources)
+    return CacheSize(total, cache_size_per_id_matched_obj, local_names)
 
 
-def _get_weakref_from_f_locals(frame: types.FrameType, source: str):
-    obj = frame.f_locals.get(source, None)
+def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
+    obj = frame.f_locals.get(local_name, None)
     weak_id = None
     try:
         weak_id = weakref.ref(obj)
@@ -113,14 +113,15 @@ def _get_weakref_from_f_locals(frame: types.FrameType, source: str):
 
 
 def is_recompilation(frame: types.FrameType, cache_size: CacheSize) -> bool:
-    sources = cache_size.id_guarded_sources
+    local_names = cache_size.id_matched_local_names
 
-    if not sources:
+    # If there is no ID_MATCH guard, just check the total cache size
+    if not local_names:
         return cache_size.total >= 1
 
     per_id_guarded_obj = cache_size.per_id_guarded_obj
-    for source in sources:
-        weak_id = _get_weakref_from_f_locals(frame, source)
+    for local_name in local_names:
+        weak_id = _get_weakref_from_f_locals(frame, local_name)
         if (
             weak_id
             and weak_id in per_id_guarded_obj
@@ -131,18 +132,18 @@ def is_recompilation(frame: types.FrameType, cache_size: CacheSize) -> bool:
 
 
 def exceeds_cache_size(frame: types.FrameType, cache_size: CacheSize) -> bool:
-    sources = cache_size.id_guarded_sources
+    local_names = cache_size.id_matched_local_names
     per_id_guarded_obj = cache_size.per_id_guarded_obj
     accumulated_limit = config.accumulated_cache_size_limit
     limit = config.cache_size_limit
 
     # If there are no id_guarded_obj, we want to limit the number of
     # cache_entries.
-    if not sources:
+    if not local_names:
         return cache_size.total >= limit
 
-    for source in sources:
-        weak_id = _get_weakref_from_f_locals(frame, source)
+    for local_name in local_names:
+        weak_id = _get_weakref_from_f_locals(frame, local_name)
         if (
             weak_id
             and weak_id in per_id_guarded_obj

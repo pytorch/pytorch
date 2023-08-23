@@ -172,7 +172,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[Type[object]], WeakIdRef],
+        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
         check_fn_manager: "CheckFunctionManager",
         *,
@@ -225,7 +225,10 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_guards: List[Guard] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
-        self.id_matched_objs: Dict[str, WeakIdRef] = {}
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -289,8 +292,18 @@ class GuardBuilder(GuardBuilderBase):
                 )
             )
 
-        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        code = f"___check_obj_id({ref}, {self.id_ref(val)})"
         self._produce_guard_code(guard, [code])
+
+        # Keep track of ID_MATCH'd objects. This will be used to modify the
+        # cache size logic
+        if self.local and isinstance(guard.originating_source, LocalSource):
+            local_name = guard.originating_source.local_name
+            weak_id = self.lookup_weakrefs(val)
+            if weak_id is not None:
+                self.id_matched_objs[local_name] = weak_id
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -414,17 +427,6 @@ class GuardBuilder(GuardBuilderBase):
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-
-        # Keep track of ID_MATCH'd nn module objects. This will be used to
-        # modify the cache size logic
-        if self.local and isinstance(guard.originating_source, LocalSource):
-            local_name = guard.originating_source.local_name
-            if local_name in self.scope["L"]:
-                weak_id = self.lookup_weakrefs(val)
-                assert (
-                    weak_id is not None
-                ), "ID_MATCH is not called on the NN_MODULE guard"
-                self.id_matched_objs[local_name] = weak_id
 
         def setup_guard():
             assert istype(val.training, bool)
@@ -952,6 +954,14 @@ class CheckFunctionManager:
             local_builder, global_builder, guards, guard_fail_fn
         )
         self._weakrefs.clear()
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        # TODO(janimesh) - Currently this information is stored as an attr on
+        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # eval_frame.c. In future, we should probably replace check_fn with a
+        # queryable data structure such that this information is already present
+        # in some form.
         self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
@@ -1176,6 +1186,7 @@ class CheckFunctionManager:
         return id(obj)
 
     def lookup_weakrefs(self, obj):
+        """Lookup the _weakrefs created in id_ref function for ID_MATCH'd objects"""
         if id(obj) in self._weakrefs:
             return self._weakrefs[id(obj)]
         return None
