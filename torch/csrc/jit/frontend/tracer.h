@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
