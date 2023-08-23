@@ -17,14 +17,14 @@
 
 namespace c10d {
 
-using c10::DistBackendError;
+using c10::DistNetworkError;
 
-class TORCH_API SocketError : public DistBackendError {
-  using DistBackendError::DistBackendError;
+class TORCH_API SocketError : public DistNetworkError {
+  using DistNetworkError::DistNetworkError;
 };
 
-class TORCH_API TimeoutError : public DistBackendError {
-  using DistBackendError::DistBackendError;
+class TORCH_API TimeoutError : public DistNetworkError {
+  using DistNetworkError::DistNetworkError;
 };
 
 } // namespace c10d

@@ -21,6 +21,8 @@ if is_available() and not torch._C._c10d_init():
 
 # Custom Runtime Errors thrown from the distributed package
 DistBackendError = torch._C._DistBackendError
+DistNetworkError = torch._C._DistNetworkError
+DistStoreError = torch._C._DistStoreError
 
 if is_available():
     from torch._C._distributed_c10d import (

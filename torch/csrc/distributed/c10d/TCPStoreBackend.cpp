@@ -472,7 +472,7 @@ void TCPStoreMasterDaemon::run() {
     if (fds[0].revents != 0) {
       if (!(fds[0].revents & POLLIN)) {
         C10_THROW_ERROR(
-            DistBackendError,
+            DistStoreError,
             Unexpected poll revent on the
                 master's listening socket: " + std::to_string(fds[0].revents));
       }
@@ -513,7 +513,7 @@ void TCPStoreMasterDaemon::run() {
     if (fds[0].revents != 0) {
       if (fds[0].revents ^ POLLIN) {
         C10_THROW_ERROR(
-            DistBackendError,
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -529,7 +529,7 @@ void TCPStoreMasterDaemon::run() {
       // joining the background thread
       if (fds[1].revents & ~(POLLIN | POLLHUP)) {
         C10_THROW_ERROR(
-            DistBackendError,
+            DistStoreError,
             "Unexpected poll revent on the control pipe's reading fd: " +
                 std::to_string(fds[1].revents));
       }

@@ -522,9 +522,9 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        C10_THROW_ERROR(DistBackendError, "Socket Timeout");              \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
       } else {                                                            \
-        C10_THROW_ERROR(DistBackendError, std::strerror(errno_local));    \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
       }                                                                   \
     } else {                                                              \
       break;                                                              \
@@ -539,9 +539,9 @@ using SizeType = uint64_t;
       if (errno == EINTR) {                                      \
         continue;                                                \
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
-        C10_THROW_ERROR(DistBackendError, "Socket Timeout");     \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
       } else {                                                   \
-        C10_THROW_ERROR(DistBackendError, std::strerror(errno)); \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
       }                                                          \
     } else {                                                     \
       break;                                                     \
@@ -590,7 +590,7 @@ void sendBytes(
         bytesSent =
             ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistBackendError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
 
     bytesToSend -= bytesSent;
@@ -613,7 +613,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistBackendError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
 
     bytesToReceive -= bytesReceived;

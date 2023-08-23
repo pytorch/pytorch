@@ -29,7 +29,7 @@
 
 #define SYSASSERT(rv, ...)                                   \
   if ((rv) < 0) {                                            \
-    C10_THROW_ERROR(DistBackendError, std::strerror(errno)); \
+    C10_THROW_ERROR(DistStoreError, std::strerror(errno)); \
   }
 
 #ifdef _WIN32
