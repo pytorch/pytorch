@@ -290,8 +290,8 @@ class C10_API DistStoreError : public DistError {
   using DistError::DistError;
 };
 
-// Used for errors originating from the TCP/IP stack and not from collective libraries.
-// These turn into DistNetworkError when they cross into Python.
+// Used for errors originating from the TCP/IP stack and not from collective
+// libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
 };

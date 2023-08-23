@@ -27,8 +27,8 @@
 
 #include <c10/util/Exception.h>
 
-#define SYSASSERT(rv, ...)                                   \
-  if ((rv) < 0) {                                            \
+#define SYSASSERT(rv, ...)                                 \
+  if ((rv) < 0) {                                          \
     C10_THROW_ERROR(DistStoreError, std::strerror(errno)); \
   }
 

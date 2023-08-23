@@ -12,7 +12,7 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistBackendError, 
+    *THPException_OutOfMemoryError, *THPException_DistBackendError,
     *THPException_DistNetworkError, *THPException_DistStoreError;
 
 #define ASSERT_TRUE(cond) \

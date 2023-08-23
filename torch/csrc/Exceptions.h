@@ -63,34 +63,33 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   }
 
 // Only catch torch-specific exceptions
-#define CATCH_CORE_ERRORS(retstmnt)                                     \
-  catch (python_error & e) {                                            \
-    e.restore();                                                        \
-    retstmnt;                                                           \
-  }                                                                     \
-  catch (py::error_already_set & e) {                                   \
-    e.restore();                                                        \
-    retstmnt;                                                           \
-  }                                                                     \
-  _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
-  _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
-  _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
-  _CATCH_GENERIC_ERROR(                                                 \
-      NotImplementedError, PyExc_NotImplementedError, retstmnt)         \
-  _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
-  _CATCH_GENERIC_ERROR(                                                 \
-      OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
-  _CATCH_GENERIC_ERROR(                                                 \
-      DistBackendError, THPException_DistBackendError, retstmnt)        \
-  _CATCH_GENERIC_ERROR(                                                 \
-      DistNetworkError, THPException_DistNetworkError, retstmnt)        \
-  _CATCH_GENERIC_ERROR(                                                 \
-      DistStoreError, THPException_DistStoreError, retstmnt)            \
-  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
-  catch (torch::PyTorchError & e) {                                     \
-    auto msg = torch::processErrorMsg(e.what());                        \
-    PyErr_SetString(e.python_type(), msg);                              \
-    retstmnt;                                                           \
+#define CATCH_CORE_ERRORS(retstmnt)                                           \
+  catch (python_error & e) {                                                  \
+    e.restore();                                                              \
+    retstmnt;                                                                 \
+  }                                                                           \
+  catch (py::error_already_set & e) {                                         \
+    e.restore();                                                              \
+    retstmnt;                                                                 \
+  }                                                                           \
+  _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)                \
+  _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)                \
+  _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
+  _CATCH_GENERIC_ERROR(                                                       \
+      NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
+  _CATCH_GENERIC_ERROR(                                                       \
+      OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistBackendError, THPException_DistBackendError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistNetworkError, THPException_DistNetworkError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
+  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
+  catch (torch::PyTorchError & e) {                                           \
+    auto msg = torch::processErrorMsg(e.what());                              \
+    PyErr_SetString(e.python_type(), msg);                                    \
+    retstmnt;                                                                 \
   }
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
@@ -100,7 +99,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     PyErr_SetString(PyExc_TimeoutError, msg);    \
     retstmnt;                                    \
   }                                              \
-  catch (const c10::DistError& e) {       \
+  catch (const c10::DistError& e) {              \
     auto msg = torch::processErrorMsg(e.what()); \
     PyErr_SetString(PyExc_RuntimeError, msg);    \
     retstmnt;                                    \
@@ -157,8 +156,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistBackendError, 
-    *THPException_DistNetworkError, *THPException_DistStoreError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError,
+    THPException_DistNetworkError, *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -430,3 +429,4 @@ auto wrap_pybind_function_no_gil(Func&& f) {
 }
 
 } // namespace torch
+ 
