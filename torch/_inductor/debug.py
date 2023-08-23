@@ -329,7 +329,9 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self):
-        self._prof.dump_stats(self.filename("compile.prof")) # type: ignore[union-attr]
+        if not isinstance(self._prof, cProfile.Profile):
+            raise TypeError("_prof must be a Profiler")
+        self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
             stats.strip_dirs()
