@@ -29,6 +29,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
+    is_welford_reduction,
     next_power_of_2,
     sympy_product,
     sympy_subs,
@@ -49,7 +50,7 @@ from .common import (
     PythonPrinter,
     SizeArg,
 )
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_of, signature_to_meta
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -258,11 +259,14 @@ class TritonOverrides(OpOverrides):
     def libdevice_sin(x):
         return f"tl.math.sin({x})"
 
-    @staticmethod
-    def index_expr(expr, dtype):
+    @classmethod
+    def index_expr(cls, expr, dtype):
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
         # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
+
+        if dtype not in {torch.int32, torch.int64}:
+            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
         var.mask_vars = mask_vars
         return var
 
@@ -474,8 +478,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        left = ops.where(ops.lt("0", x), 1, 0)
-        right = ops.where(ops.lt(x, "0"), 1, 0)
+        def to_int(s):
+            return f"{s}.to(tl.int8)"
+
+        left = to_int(ops.lt("0", x))
+        right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 
@@ -820,11 +827,14 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        names = list(
+            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
+        ) + ["rindex"]
         for i in range(len(self.numels)):
+            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
         for tree in self.range_trees:
@@ -1392,9 +1402,14 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
+    @staticmethod
+    def _map_tuple_or_scalar(fn, value):
+        if isinstance(value, tuple):
+            return tuple(map(fn, value))
+        return fn(value)
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1403,6 +1418,20 @@ class TritonKernel(Kernel):
         reduction_range_prefix = self.range_trees[-1].prefix
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
+
+        # Say we have
+        #     tmp0 = ops.constant(1, torch.int64)
+        #     tmp1 = ops.reduction(torch.int64, torch.int64, "sum", tmp0)
+        # tmp0 in the triton code is either a scalar, or single-element tensor
+        # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
+        # To avoid this, we broadcast to the expected shape first.
+        dense_size_str = self.dense_size_str()
+        value = self._map_tuple_or_scalar(
+            lambda v: self.cse.generate(
+                self.compute, f"tl.broadcast_to({v}, {dense_size_str})"
+            ),
+            value,
+        )
 
         def final_reduction(value):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
@@ -1421,6 +1450,10 @@ class TritonKernel(Kernel):
                 """
             )
 
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(src_dtype)
         result_var = self.cse.newvar()
@@ -1428,50 +1461,64 @@ class TritonKernel(Kernel):
         cond = " & ".join(masks)
 
         if self.persistent_reduction:
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
-            )
+            default = ir.Reduction.default_value(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
+
+            def _mask_value(value, default):
+                return self.cse.generate(
+                    self.compute, f"tl.where({cond}, {value}, {default})"
+                )
+
+            if isinstance(value, tuple):
+                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+            else:
+                masked_value = _mask_value(value, default)
+
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = self.cse.generate(
                     self.compute,
                     f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
                 )
-                result_var = self.cse.newvar()
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
-            elif reduction_type == "var_unnormalized":
+            elif reduction_type == "welford_reduce":
                 # For persistent reductions, don't bother with
                 # welford's algorithm since it uses more registers, and
                 # taking two reductions doesn't increase memory usage.
-                sum_ = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
-                )
-                rnumel = ops.index_expr(self.numels[-1], self.index_dtype)
-                rnumel = self.cse.generate(self.compute, f"{rnumel}.to({acc_type})")
+                sum_ = ops.reduction(dtype, dtype, "sum", value)
+                self.inside_reduction = False
+                rnumel = ops.index_expr(self.numels[-1], dtype)
                 mean = ops.div(sum_, rnumel)
 
-                dx = ops.sub(masked_value, mean)
+                self.inside_reduction = True
+                dx = ops.sub(value, mean)
                 dx2 = ops.mul(dx, dx)
-                dx2_masked = self.cse.generate(
-                    self.compute, f"tl.where({cond}, {dx2}, 0.0)"
-                )
-                result_var = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(f"tl.sum({dx2_masked}, {dim})"),
+                m2 = ops.reduction(dtype, dtype, "sum", dx2)
+                result_var = (mean, m2, rnumel)
+            elif reduction_type == "welford_combine":
+                mean, m2, weight = masked_value
+                welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
+                mean, m2, weight = (self.cse.newvar() for _ in range(3))
+                self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
+
+                result_var = tuple(
+                    self.cse.generate(self.compute, self.reduction_resize(var_name))
+                    for var_name in (mean, m2, weight)
                 )
             else:
                 result_var = self.cse.generate(
                     self.compute, final_reduction(masked_value)
                 )
-        elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
+        else:
             accumulator = f"_{result_var}"
-            self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
-            )
+            default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
+            if not isinstance(default, tuple):
+                self.body.writeline(
+                    f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
+                )
 
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
@@ -1491,9 +1538,13 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
-            elif reduction_type == "var_unnormalized":
-                accumulator_m2 = f"_{result_var}_m2"
-                accumulator_weight = f"_{result_var}_weight"
+            elif is_welford_reduction(reduction_type):
+                accumulator = f"{result_var}_mean"
+                accumulator_m2 = f"{result_var}_m2"
+                accumulator_weight = f"{result_var}_weight"
+                self.body.writeline(
+                    f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
                 self.body.writeline(
                     f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
@@ -1501,26 +1552,48 @@ class TritonKernel(Kernel):
                     f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
 
+                if reduction_type == "welford_combine":
+                    mean, m2, weight = value
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
+                        {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {mean}, {m2}, {weight}
+                    )
+                    """
+                    )
+                else:
+                    assert reduction_type == "welford_reduce"
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                    )
+                    """
+                    )
+
                 self.compute.splice(
                     f"""\
-                {value}_delta = {value} - {accumulator}
-                {accumulator_weight}_next = {accumulator_weight} + ({cond}).to({acc_type})
-                {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
-                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator}_next)
-
                 {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
                 {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
                 {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
                 """
                 )
+
+                result_mean = result_var
+                result_m2 = self.cse.newvar()
+                result_weight = self.cse.newvar()
                 self.suffix.splice(
                     f"""\
-                _, {result_var}_tmp, _ = triton_helpers.welford(
+                {result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp = triton_helpers.welford(
                     {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
                 )
-                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                {result_mean} = {self.reduction_resize(f'{result_mean}_tmp')}
+                {result_m2} = {self.reduction_resize(f'{result_m2}_tmp')}
+                {result_weight} = {self.reduction_resize(f'{result_weight}_tmp')}
                 """
                 )
+                result_var = result_mean, result_m2, result_weight
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -1544,11 +1617,14 @@ class TritonKernel(Kernel):
                     self.suffix.writeline(
                         f"{result_var} = {final_reduction(accumulator)}"
                     )
+
+        self.cse.reduction_cache[cache_key] = result_var
+
+        if isinstance(result_var, tuple):
+            self.outside_loop_vars |= set(result_var)
         else:
-            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
-            self.suffix.writeline(f"{result_var} = {var_name}")
-            result_var.mask_vars = var_name.mask_vars
-        self.outside_loop_vars.add(result_var)
+            self.outside_loop_vars.add(result_var)
+
         return result_var
 
     def store_reduction(self, name, index, value):
@@ -1766,7 +1842,7 @@ class TritonKernel(Kernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
@@ -1778,7 +1854,9 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(
+                    sizearg, size_dtype=self.index_dtype
+                )
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -1894,6 +1972,13 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
+
+        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
+            sizes[0:3] = reversed(sizes[0:3])
+
+        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
+            sizes[0:2] = reversed(sizes[0:2])
+
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):

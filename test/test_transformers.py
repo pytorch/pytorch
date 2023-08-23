@@ -12,7 +12,6 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
-from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Union, Optional
 from torch.testing._internal.common_nn import NNTestCase
@@ -29,7 +28,7 @@ from torch.testing._internal.common_utils import (
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -147,7 +146,7 @@ class TestTransformers(NNTestCase):
 
         query = torch.rand(batch_size, tgt_len, embed_dim, device=device)  # [N, T, D]
         attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, 0.0)
 
         attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
 
@@ -1505,13 +1504,96 @@ class TestSDPA(NNTestCase):
 
     @onlyCPU
     @parametrize("type", ["dense", "nested"])
-    def test_fused_sdp_choice_cpu(self, device, type: str):
+    @parametrize("dropout", [0.0, 0.7])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
+    def test_fused_sdp_choice_cpu(self, device, type: str, dropout: float, dtype: torch.dtype):
         # Test that cpu and nestedtensor cpu return MATH backend
-        for dtype in floating_types_and_half():
-            make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
-            size = (2, 2, 3, 4)
-            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
+        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
+        size = (2, 128, 8, 64)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        if type == "nested" \
+                or dropout > 0.0 \
+                or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+        else:
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
+
+    @onlyCPU
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("batch_size", [2, 12])
+    @parametrize("seq_len", [267, 1030])
+    @parametrize("n_head", [1, 3])
+    @parametrize("head_dim", [8, 16])
+    @parametrize("causal", [True, False])
+    @parametrize("train", [True, False])
+    def test_scaled_dot_product_fused_attention_vs_math_cpu(
+        self,
+        device,
+        fused_kernel,
+        dtype,
+        batch_size,
+        seq_len,
+        n_head,
+        head_dim,
+        causal,
+        train,
+    ):
+        atol = 1e-5
+        rtol = 5e-6
+        if dtype is torch.bfloat16:
+            atol = 2e-2
+            rtol = 2e-2
+
+        n_embd = n_head * head_dim
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
+        shape = (batch_size, seq_len, n_head, head_dim)
+        x = make_tensor(shape)
+        x2 = x.clone()
+
+        if train:
+            x.requires_grad_(True)
+            x2.requires_grad_(True)
+
+        q, k, v = x.split(n_embd, dim=2)
+        q2, k2, v2 = x2.split(n_embd, dim=2)
+
+        if dtype is torch.bfloat16:
+            q2 = q2.float()
+            k2 = k2.float()
+            v2 = v2.float()
+
+        # (B, nh, T, hs)
+        k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        k2 = k2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q2 = q2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+
+        with sdp_kernel(**backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=causal)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                q2, k2, v2, attn_mask=None, dropout_p=0.0, is_causal=causal)
+
+        if dtype is torch.bfloat16:
+            math_ref = math_ref.bfloat16()
+
+        self.assertEqual(actual, math_ref, atol=atol, rtol=rtol)
+
+        if train:
+            actual.sum().backward()
+            math_ref.sum().backward()
+
+            grad_x, grad_x2 = x.grad, x2.grad
+            grad_q_actual, grad_k_actual, grad_v_actual = grad_x.split(n_embd, dim=2)
+            grad_q_ref, grad_k_ref, grad_v_ref = grad_x2.split(n_embd, dim=2)
+
+            self.assertEqual(grad_q_actual, grad_q_ref, atol=atol, rtol=rtol)
+            self.assertEqual(grad_k_actual, grad_k_ref, atol=atol, rtol=rtol)
+            self.assertEqual(grad_v_actual, grad_v_ref, atol=atol, rtol=rtol)
 
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
@@ -1896,7 +1978,6 @@ class TestSDPACudaOnly(NNTestCase):
         rtol = 7e-4 if dtype == torch.float16 else 7e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
-
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
         if PLATFORM_SUPPORTS_FUSED_SDPA:
@@ -1911,7 +1992,7 @@ class TestSDPACudaOnly(NNTestCase):
             value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
             key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-            if SM80OrLater and not type == "nested":
+            if SM75OrLater and not type == "nested":
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
             else:
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
