@@ -1285,10 +1285,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             args = (s.input, *sample.args)
             return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
 
-        # The last sample from gather does not work in np.take_along_axis
+        # The last 2 samples from gather do not work in np.take_along_axis
         samples = list(
             sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False)
-        )[:-1]
+        )[:-2]
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         i = 1

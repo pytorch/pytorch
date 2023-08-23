@@ -2418,6 +2418,11 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg((S,)),
         0,
         torch.tensor([], dtype=torch.uint8, device=device))
+    # 0D tensor case
+    yield SampleInput(
+        make_arg(()),
+        0,
+        torch.tensor([0], dtype=torch.int64, device=device))
     yield SampleInput(
         make_arg(()),
         0,
