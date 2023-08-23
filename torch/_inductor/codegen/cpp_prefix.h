@@ -279,6 +279,22 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 # endif
 }
 
+inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vectorized<float> mask) {
+# if defined(CPU_CAPABILITY_AVX512)
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+    auto zero = _mm_set1_epi8(0);
+    auto temp = _mm_mask_loadu_epi8(zero, mmask, src);
+    return _mm512_inserti64x2(_mm512_set1_epi32(0), temp, 0);
+# else // AVX2
+    auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+    auto temp = _mm256_maskload_epi32(reinterpret_cast<const int32_t*>(src), mmask);
+    auto zero = _mm_set1_epi8(0);
+    return _mm256_insert_epi64(_mm256_inserti128_si256(temp, zero, 1), 0, 1);
+# endif
+}
+
 template <typename T>
 inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
