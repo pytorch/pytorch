@@ -85,6 +85,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(                                                       \
       DistNetworkError, THPException_DistNetworkError, retstmnt)              \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
+  _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
@@ -92,25 +93,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     retstmnt;                                                                 \
   }
 
-#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
-#define CATCH_C10D_ERRORS(retstmnt)              \
-  catch (const c10d::TimeoutError& e) {          \
-    auto msg = torch::processErrorMsg(e.what()); \
-    PyErr_SetString(PyExc_TimeoutError, msg);    \
-    retstmnt;                                    \
-  }                                              \
-  catch (const c10::DistError& e) {              \
-    auto msg = torch::processErrorMsg(e.what()); \
-    PyErr_SetString(PyExc_RuntimeError, msg);    \
-    retstmnt;                                    \
-  }
-#else
-#define CATCH_C10D_ERRORS(retstmnt)
-#endif
-
 #define CATCH_TH_ERRORS(retstmnt) \
   CATCH_CORE_ERRORS(retstmnt)     \
-  CATCH_C10D_ERRORS(retstmnt)
 
 #define CATCH_ALL_ERRORS(retstmnt)               \
   CATCH_TH_ERRORS(retstmnt)                      \
@@ -156,8 +140,9 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistBackendError,
-    *THPException_DistNetworkError, *THPException_DistStoreError;
+    *THPException_OutOfMemoryError, *THPException_DistError, 
+    *THPException_DistBackendError,*THPException_DistNetworkError, 
+    *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.

@@ -20,6 +20,7 @@ if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
 # Custom Runtime Errors thrown from the distributed package
+DistError = torch._C._DistError
 DistBackendError = torch._C._DistBackendError
 DistNetworkError = torch._C._DistNetworkError
 DistStoreError = torch._C._DistStoreError
