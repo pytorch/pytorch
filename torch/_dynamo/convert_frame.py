@@ -31,7 +31,7 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
-from .cache_size import compute_cache_size, exceeds_cache_size, is_recompilation
+from .cache_size import compute_cache_size, exceeds_cache_size_limit, is_recompilation
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -240,7 +240,7 @@ def convert_frame_assert(
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
-        if is_recompilation(frame, cache_size) and (
+        if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
@@ -301,7 +301,7 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if exceeds_cache_size(frame, cache_size):
+        if exceeds_cache_size_limit(cache_size):
             # cache_size >= config.cache_size_limit:
 
             def format_func_info(code):

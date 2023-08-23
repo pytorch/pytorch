@@ -1,10 +1,7 @@
 import logging
 import types
 import weakref
-from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import DefaultDict, Set
-from weakref import ReferenceType
+from dataclasses import dataclass
 
 from . import config
 
@@ -69,37 +66,20 @@ mentioned earlier.
 
 @dataclass
 class CacheSize:
-    """
-    Tracks the different cache size limits per code object. See the note at the
-    top of the file.
-    """
+    """ """
 
     # Total number of CacheEntry objects in the Dynamo linked list
-    total: int = 0
+    num_cache_entries: int = 0
 
-    # Number of CacheEntry objects for an object with ID_MATCH guard.
-    per_id_guarded_obj: DefaultDict[ReferenceType, int] = field(
-        default_factory=defaultdict(int)
-    )
+    # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
+    num_cache_entries_with_same_id_matched_objs: int = 0
 
-    # local_names of objects with ID_MATCH guards
-    id_matched_local_names: Set[str] = field(default_factory=set)
-
-
-def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
-    # Walk the linked list to calculate the cache size
-    cache_size_per_id_matched_obj = defaultdict(int)
-    total = 0
-    local_names = set()
-    while cache_entry:
-        total += 1
-        for local_name, weak_id in cache_entry.check_fn.id_matched_objs.items():
-            if weak_id() is not None:
-                cache_size_per_id_matched_obj[weak_id] += 1
-                local_names.add(local_name)
-        cache_entry = cache_entry.next
-
-    return CacheSize(total, cache_size_per_id_matched_obj, local_names)
+    def __ge__(self, other):
+        return (
+            self.num_cache_entries >= other.num_cache_entries
+            or self.num_cache_entries_with_same_id_matched_objs
+            >= other.num_cache_entries_with_same_id_matched_objs
+        )
 
 
 def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
@@ -112,44 +92,61 @@ def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
     return weak_id
 
 
-def is_recompilation(frame: types.FrameType, cache_size: CacheSize) -> bool:
-    local_names = cache_size.id_matched_local_names
+def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
+    """
+    Checks if the ID_MATCH'd objects saved on cache_entry are same as the ones
+    in frame.f_locals.
+    """
+    if not cache_entry:
+        return False
 
-    # If there is no ID_MATCH guard, just check the total cache size
-    if not local_names:
-        return cache_size.total >= 1
+    for (
+        local_name,
+        weakref_from_cache_entry,
+    ) in cache_entry.check_fn.id_matched_objs.items():
+        if weakref_from_cache_entry() is not None:
+            weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
+            if weakref_from_frame != weakref_from_cache_entry:
+                return False
 
-    per_id_guarded_obj = cache_size.per_id_guarded_obj
-    for local_name in local_names:
-        weak_id = _get_weakref_from_f_locals(frame, local_name)
-        if (
-            weak_id
-            and weak_id in per_id_guarded_obj
-            and per_id_guarded_obj[weak_id] >= 1
-        ):
-            return True
-    return False
+    # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
+    return True
 
 
-def exceeds_cache_size(frame: types.FrameType, cache_size: CacheSize) -> bool:
-    local_names = cache_size.id_matched_local_names
-    per_id_guarded_obj = cache_size.per_id_guarded_obj
-    accumulated_limit = config.accumulated_cache_size_limit
-    limit = config.cache_size_limit
+def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
+    # Walk the linked list to calculate the cache size
+    num_cache_entries = 0
+    num_cache_entries_with_same_id_matched_objs = 0
 
-    # If there are no id_guarded_obj, we want to limit the number of
-    # cache_entries.
-    if not local_names:
-        return cache_size.total >= limit
+    while cache_entry:
+        num_cache_entries += 1
+        # Track the number of cache entries having same ID_MATCH'd objects as
+        # that of frame.f_locals. This will be used later to compare against the
+        # cache_size_limit.
+        if _has_same_id_matched_objs(frame, cache_entry):
+            num_cache_entries_with_same_id_matched_objs += 1
+        cache_entry = cache_entry.next
 
-    for local_name in local_names:
-        weak_id = _get_weakref_from_f_locals(frame, local_name)
-        if (
-            weak_id
-            and weak_id in per_id_guarded_obj
-            and per_id_guarded_obj[weak_id] >= limit
-        ):
-            return True
+    return CacheSize(num_cache_entries, num_cache_entries_with_same_id_matched_objs)
 
-    # Ensure that total number of cache entries are bounded.
-    return cache_size.total >= accumulated_limit
+
+def is_recompilation(cache_size: CacheSize) -> bool:
+    """
+    If the frame (earlier parsed by compute_cache_size) has more than 1 cache
+    entry with same ID_MATCH'd objects, then its a recompilation.
+    """
+    # The first limit of config.accumulated_cache_size_limit is for the total
+    # number of cache entries, e.g., you can have 64 nn module instances, each
+    # one having an ID_MATCH guard, and each one having just 1 cache entry in
+    # the cache.  In this case, we can have 64 entries in the cache, but no
+    # recompilation because there is only one entry for each id_matched_obj.
+    return cache_size >= CacheSize(config.accumulated_cache_size_limit, 1)
+
+
+def exceeds_cache_size_limit(cache_size: CacheSize) -> bool:
+    """
+    Checks if we are exceeding the cache size limit.
+    """
+    return cache_size >= CacheSize(
+        config.accumulated_cache_size_limit, config.cache_size_limit
+    )
