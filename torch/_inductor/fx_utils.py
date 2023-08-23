@@ -74,6 +74,8 @@ class FakeTensorUpdater:
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
                 return False
+            if new is None:
+                breakpoint()
             if isinstance(new, (list, tuple)):
                 return all(
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
@@ -98,34 +100,37 @@ class FakeTensorUpdater:
                     return x.meta["val"]
                 return x
 
-            if node.op == "call_function" and isinstance(
-                node.target, torch._ops.OpOverload
-            ):
-                processing = [node]
-                while len(processing) > 0:
-                    updating_node = processing.pop()
-                    if updating_node in processed:
-                        continue
-                    if updating_node.op != "call_function" or not isinstance(
-                        updating_node.target, torch._ops.OpOverload
-                    ):
-                        continue
+            def is_aten_node(node):
+                return node.op == "call_function" and isinstance(
+                    node.target, torch._ops.OpOverload
+                )
 
-                    args, kwargs = tree_map(
-                        get_fake_tensor, (updating_node.args, updating_node.kwargs)
-                    )
-                    with V.fake_mode:
-                        new_fake_tensor = updating_node.target(*args, **kwargs)
-                    if "val" in updating_node.meta and is_fake_tensor_same(
-                        new_fake_tensor, updating_node.meta["val"]
-                    ):
-                        continue
-                    updating_node.meta["val"] = new_fake_tensor
-                    processed.add(updating_node)
-                    for user in updating_node.users:
-                        processing.append(user)
+            if not is_aten_node(node):
+                continue
 
-                self.processed_hashes.add(self.hash_node(updating_node))
+            processing = [node]
+            while len(processing) > 0:
+                updating_node = processing.pop()
+                if updating_node in processed:
+                    continue
+                if is_aten_node(updating_node):
+                    continue
+
+                args, kwargs = tree_map(
+                    get_fake_tensor, (updating_node.args, updating_node.kwargs)
+                )
+                with V.fake_mode:
+                    new_fake_tensor = updating_node.target(*args, **kwargs)
+                if "val" in updating_node.meta and is_fake_tensor_same(
+                    new_fake_tensor, updating_node.meta["val"]
+                ):
+                    continue
+                updating_node.meta["val"] = new_fake_tensor
+                processed.add(updating_node)
+                for user in updating_node.users:
+                    processing.append(user)
+
+            self.processed_hashes.add(self.hash_node(updating_node))
 
 
 def get_storage(t):
