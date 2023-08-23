@@ -41,10 +41,8 @@ Tensor TensorMaker::make_tensor() {
 
    auto keys = c10::DispatchKeySet({opts_.computeDispatchKey()});
    if (is_nested_) {
-    if (!is_fake_) {
       keys = keys.add(c10::DispatchKey::NestedTensor);
-    }
-    keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
+      keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
    }
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), keys, opts_.dtype());
