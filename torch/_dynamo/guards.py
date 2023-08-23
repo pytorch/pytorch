@@ -39,6 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
+from torch.utils._traceback import report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from . import config, convert_frame, mutation_guard
@@ -264,6 +265,11 @@ class GuardBuilder(GuardBuilderBase):
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
+        self._produce_guard_code(guard, [code])
+
+    def DATA_PTR_MATCH(self, guard: Guard):
+        obj = self.get(guard.name)
+        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
@@ -905,10 +911,6 @@ class CheckFunctionManager:
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
-        verbose_code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        )
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -961,11 +963,10 @@ class CheckFunctionManager:
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
-            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_args = ", ".join(
+            tensor_check_args = ", ".join(
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
-            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+            code_parts.append(f"___check_tensors({tensor_check_args})")
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -978,12 +979,10 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
-                verbose_code_parts.append(code_part)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
         closure_vars = collections.OrderedDict(
@@ -1002,7 +1001,7 @@ class CheckFunctionManager:
         guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", guard_body)
+            print("GUARDS\n", guard_body)
 
         if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
@@ -1018,9 +1017,10 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
-        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {"G": global_builder.scope["G"]}
+        guard_fn.global_scope = {
+            "G": global_builder.scope["G"],
+        }
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
@@ -1102,11 +1102,15 @@ def guard_fail_hook(
         return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
+    scope["___check_tensors"] = scope["___check_tensors_verbose"]
     reason = None
-    for part in guard_fn.verbose_code_parts:
-        fail_reason = eval(part, guard_fn.global_scope, scope)
-        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
-        # is updated to return a string explaining the failure.
+    for part in guard_fn.code_parts:
+        global_scope = dict(guard_fn.global_scope)
+        global_scope["__compile_source__"] = part
+        with report_compile_source_on_error():
+            fail_reason = eval(part, global_scope, scope)
+        # Only ___check_tensors knows how to return a fancy fail reason;
+        # for everything else we just report the code that failed
         if isinstance(fail_reason, str):
             reason = fail_reason
             break
