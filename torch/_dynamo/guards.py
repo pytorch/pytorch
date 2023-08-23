@@ -943,6 +943,9 @@ class CheckFunctionManager:
                     ]
                 )
                 for t in tensor_check_examples
+                if self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                    "stride"
+                ] is not None
             ]
 
             tensor_guards = TensorGuards(
@@ -1101,10 +1104,12 @@ def guard_fail_hook(
         if isinstance(fail_reason, str):
             reason = fail_reason
             break
-        elif isinstance(fail_reason, bool) and not fail_reason:
+        elif (isinstance(fail_reason, bool) or isinstance(fail_reason, torch.SymBool)) and not fail_reason:
             reason = part
             break
-
+        else:
+            # Maybe we should error here or something?
+            pass
     if first:
         stashed_first_fail_reason = reason
 

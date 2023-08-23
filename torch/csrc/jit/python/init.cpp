@@ -1242,9 +1242,18 @@ void initJITBindings(PyObject* module) {
       .def(
           "__str__",
           [](c10::SymNode a) { return a->str(); })
-      .def("__repr__", [](c10::SymNode a) {
-        return a->str();
-      });
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "__hash__",
+          [](c10::SymNode node){
+            // TODO: We should do this properly by adding a method to SymNodeImpl
+            auto ms = node->singleton_int();
+            TORCH_CHECK(ms.has_value());
+            return *ms;
+          });
+
   // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)

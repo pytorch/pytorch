@@ -391,7 +391,7 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    if not t.is_nested:
+                    if not t.is_nested and not "NestedTensor" == t.__class__.__name__:
                         sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
 
                     # If we have a subclass that desugars into dense tensors,

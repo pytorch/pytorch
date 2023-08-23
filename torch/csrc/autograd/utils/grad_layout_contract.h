@@ -17,7 +17,8 @@ inline bool obeys_layout_contract(
   TORCH_INTERNAL_ASSERT(!grad.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(!variable.is_sparse_csr());
 
-  if (variable.is_nested()) {
+  if (variable.is_nested() || variable.unsafeGetTensorImpl()->key_set().has(
+                c10::DispatchKey::AutogradNestedTensor)) {
     // TODO: Nested Tensor does not have an implementation of detach. The
     // current implementation of nested tensor likely does obey the gradient
     // contract and should return true, but this would likely change in the

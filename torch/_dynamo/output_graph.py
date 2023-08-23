@@ -514,14 +514,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             bind_symint(
                 s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
             )
-        for i, s in enumerate(arg.fake_tensor.stride()):
+        if "NestedTensor" not in arg.fake_tensor.__class__.__name__:
+            for i, s in enumerate(arg.fake_tensor.stride()):
+                bind_symint(
+                    s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+                )
             bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+                arg.fake_tensor.storage_offset(),
+                lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
             )
-        bind_symint(
-            arg.fake_tensor.storage_offset(),
-            lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-        )
 
     def count_calls(self):
         return count_calls(self.graph)

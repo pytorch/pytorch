@@ -290,6 +290,9 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def __hash__(self) -> int:
+        return hash(self.node)
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -383,7 +386,7 @@ class SymBool:
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.

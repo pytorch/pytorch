@@ -60,20 +60,30 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode eq(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    TORCH_CHECK(
-        c,
-        "SingletonSymNode can only be compared with SingletonSymNode, but got ",
-        other->str());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *c));
+    bool ret = c.has_value() && val_ == *c;
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
   c10::SymNode ne(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    TORCH_CHECK(
-        c,
-        "SingletonSymNode can only be compared with SingletonSymNode, but got ",
-        other->str());
-    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ != *c));
+    bool ret = c.has_value() && val_ != *c;
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
+  }
+
+  // Would be cool to have the ability to arbitrarily constrain the range of the
+  // singleton's values. For now we constrain the range to be [2, int64_t::max()]
+  // (inclusive), as to bypass 0/1 specialization checks.
+  c10::SymNode ge(const c10::SymNode& other) override {
+    if (other->singleton_int().has_value()) {
+        return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    }
+    c10::optional<int64_t> c = other->constant_int();
+    TORCH_CHECK(c.has_value());
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c <= 2));
+  }
+
+  c10::SymNode lt(const c10::SymNode& other) override {
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
   }
 
   c10::optional<int64_t> singleton_int() override {
@@ -93,8 +103,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   DEFINE_BINARY_NOT_SUPPORTED(floordiv)
   DEFINE_BINARY_NOT_SUPPORTED(mod)
   DEFINE_BINARY_NOT_SUPPORTED(gt)
-  DEFINE_BINARY_NOT_SUPPORTED(lt)
-  DEFINE_BINARY_NOT_SUPPORTED(ge)
   DEFINE_BINARY_NOT_SUPPORTED(sym_min)
   DEFINE_BINARY_NOT_SUPPORTED(sym_max)
   DEFINE_BINARY_NOT_SUPPORTED(sym_and)

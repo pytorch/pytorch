@@ -192,12 +192,17 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
-        return val.node.expr.free_symbols
+        if hasattr(val.node, "expr"):
+            return val.node.expr.free_symbols
+        else:
+            return set()
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        if "NestedTensor" in val.__class__.__name__:
+            return free_symbols(val.size())
         return (
             free_symbols(val.size()) |
             free_symbols(val.stride()) |
@@ -1358,12 +1363,20 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        # Decay constant SymBool into plain bools
+        if isinstance(self.node, torch._C._SymNode):
+            if isinstance(self, SymBool):
+                return (method_to_operator(method))(self.node.guard_bool(), other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method_attr)(other_node))
 
     def rbinary_magic_impl(self, other):
+        # Decay constant SymBool into plain bools
+        if isinstance(self.node, torch._C._SymNode):
+            if isinstance(self, SymBool):
+                return (method_to_operator(method))(self.node.guard_bool(), other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
@@ -2296,7 +2309,7 @@ Target Guards:
 
     def create_unspecified_symbol(
         self,
-        val: int,
+        val: Union[int, SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -2322,7 +2335,11 @@ Target Guards:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            return sympy.Integer(val)
+            if isinstance(val, int):
+                return sympy.Integer(val)
+            else:
+                return sympy.Symbol(str(val))
+
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
             # if it was requested
@@ -2342,7 +2359,10 @@ Target Guards:
             self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
             self.counter["create_symbol"] += 1
             # We always associate vars to vals
-            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            if isinstance(val, int):
+                self.var_to_val[sympy_expr] = sympy.Integer(val)
+            else:
+                self.var_to_val[sympy_expr] = sympy.Symbol(str(val))
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
             # Create a Z3 variable for the new symbol.
@@ -2368,8 +2388,9 @@ Target Guards:
                 self.var_to_range[sympy_expr] &= constraint_dim.vr
 
             vr = self.var_to_range[sympy_expr]
-            if val not in vr:
-                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+            if isinstance(val, int):
+                if val not in vr:
+                    raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
@@ -2606,9 +2627,10 @@ Target Guards:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss, constraint[i])
-            for i, ss in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+            if "NestedTensor" not in t.__class__.__name__:
+                for i, ss in enumerate(t.stride()):
+                    track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
+                track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

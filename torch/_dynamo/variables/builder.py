@@ -1474,7 +1474,7 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        if not e.is_nested:
+        if not e.is_nested and not "NestedTensor" in e.__class__.__name__:
             dynamic_dims, constraint_dims = _automatic_dynamic(
                 e, tx, source.name(), static_shapes
             )
@@ -1502,7 +1502,7 @@ def wrap_to_fake_tensor_and_record(
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
-            "stride": fake_e.stride(),
+            "stride": fake_e.stride() if not "NestedTensor" in e.__class__.__name__ else None,
         }
         return fake_e
     else:

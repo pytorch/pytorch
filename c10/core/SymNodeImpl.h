@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 
