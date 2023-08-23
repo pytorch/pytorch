@@ -869,6 +869,18 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
+    def test_constrain_as_size_error(self):
+
+        def f(x):
+            a = x.item()
+            return torch.full((a, 4), 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Tried to use data-dependent value in the subsequent computation"
+        ):
+            _ = export(f, (torch.tensor(6),))
+
 
 if __name__ == '__main__':
     run_tests()
