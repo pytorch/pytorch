@@ -191,10 +191,7 @@ class BaseSchedulerNode:
     def prune_weak_deps(self):
         # Prune weak dependencies on buffers that have been removed
         def should_prune(dep):
-            return (
-                isinstance(dep, WeakDep)
-                and dep.name in V.graph.removed_buffers
-            )
+            return isinstance(dep, WeakDep) and dep.name in V.graph.removed_buffers
 
         to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
@@ -215,17 +212,17 @@ class BaseSchedulerNode:
                 name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
 
         def should_prune(dep):
-            if not isinstance(dep, WeakDep):
+            if isinstance(dep, WeakDep):
+                is_redundant = (
+                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
+                )
+                # These can occur because fused nodes always gather deps from their snodes
+                # If B has a weakdep on A
+                # B gets fused with C, then any time BC is fused, the weakdep will reappear
+                is_self_dep = name_to_fused_node[dep.name] == self
+                return is_redundant or is_self_dep
+            else:
                 return False
-
-            is_redundant = (
-                name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
-            )
-            # These can occur because fused nodes always gather deps from their snodes
-            # If B has a weakdep on A
-            # B gets fused with C, then any time BC is fused, the weakdep will reappear
-            is_self_dep = name_to_fused_node[dep.name] == self
-            return is_redundant or is_self_dep
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
         self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
@@ -1119,7 +1116,9 @@ class Scheduler:
             return reachable_names
 
         def add_user(used_by_name, user_node, can_inplace=False, is_weak=False):
-            name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace, is_weak))
+            name_to_users[rename(used_by_name)].append(
+                NodeUser(user_node, can_inplace, is_weak)
+            )
 
         for node in self.nodes:
             # a node will mutate either 0 or 1 buffers
@@ -1187,19 +1186,16 @@ class Scheduler:
         while again:
             updated_nodes = []
             for node in self.nodes:
-                def can_eliminate_user(user: NodeUser):
-                    return (
-                        user.get_name() in V.graph.removed_buffers
-                        or user.is_weak
-                    )
 
-                can_eliminate = (
-                    not node.has_side_effects()
-                    and all(can_eliminate_user(u) for u in node.users)
+                def can_eliminate_user(user: NodeUser):
+                    return user.is_weak or user.get_name() in V.graph.removed_buffers
+
+                can_eliminate = not node.has_side_effects() and all(
+                    can_eliminate_user(u) for u in node.users
                 )
 
                 if not can_eliminate:
-                     updated_nodes.append(node)
+                    updated_nodes.append(node)
                 else:
                     # dead code
                     log.debug("removed dead node: %s", node.get_name())
