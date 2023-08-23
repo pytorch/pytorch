@@ -494,16 +494,20 @@ def help_message(verbose=False):
     setting_info = "  " + "\n  ".join(lines)
     examples = """
 Examples:
-  TORCH_LOGS="+dynamo,aot" will set the log level of TorchDynamo to logging.DEBUG and AOT to logging.INFO
+  TORCH_LOGS="+dynamo,aot" will set the log level of TorchDynamo to
+  logging.DEBUG and AOT to logging.INFO
 
-  TORCH_LOGS="-dynamo,+inductor" will set the log level of TorchDynamo to logging.ERROR and TorchInductor to logging.DEBUG
+  TORCH_LOGS="-dynamo,+inductor" will set the log level of TorchDynamo to
+  logging.ERROR and TorchInductor to logging.DEBUG
 
   TORCH_LOGS="aot_graphs" will enable the aot_graphs artifact
 
-  TORCH_LOGS="+dynamo,schedule" will enable set the log level of TorchDynamo to logging.DEBUG and enable the schedule artifact
+  TORCH_LOGS="+dynamo,schedule" will enable set the log level of TorchDynamo
+  to logging.DEBUG and enable the schedule artifact
 
-  TORCH_LOGS="+some.random.module,schedule" will set the log level of some.random.module to logging.DEBUG and enable the schedule artifact
-"""
+  TORCH_LOGS="+some.random.module,schedule" will set the log level of
+  some.random.module to logging.DEBUG and enable the schedule artifact
+"""  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
 {examples}
@@ -521,7 +525,8 @@ def _invalid_settings_err_msg(settings, verbose=False):
         + list(log_registry.artifact_names)
     )
     msg = f"""
-Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, registered log names or registered artifact names.
+Invalid log settings: {settings}, must be a comma separated list of fully
+qualified module names, registered log names or registered artifact names.
 For more info on various settings, try TORCH_LOGS="help"
 Valid settings:
 {valid_settings}

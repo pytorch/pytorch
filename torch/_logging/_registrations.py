@@ -1,3 +1,4 @@
+# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 register_log("dynamo", "torch._dynamo")

@@ -9,9 +9,9 @@ from sympy import Expr
 
 import torch
 import torch._inductor as inductor
-from torch.utils._pytree import tree_map
 
 from .. import config, ir, pattern_matcher
+from ..fx_utils import FakeTensorUpdater, get_node_storage
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -46,96 +46,6 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
-
-
-def get_storage(t):
-    return t.untyped_storage()._cdata
-
-
-def get_node_storage(node):
-    if "val" not in node.meta:
-        return None
-    if not isinstance(node.meta["val"], torch.Tensor):
-        return None
-    if not torch._C._has_storage(node.meta["val"]):
-        return None
-    return get_storage(node.meta["val"])
-
-
-class FakeTensorUpdater:
-    def __init__(self, graph):
-        self.processed_hashes = set()
-        self.graph = graph
-
-        for node in self.graph.nodes:
-            self.processed_hashes.add(self.hash_node(node))
-
-    def hash_node(self, node):
-        return (node, node.target, id(node.args), id(node.kwargs))
-
-    def incremental_update(self):
-        """
-        Not fully featured yet. Mainly added to ensure that reinplacing pass is
-        sound.
-
-        Todo things:
-        1. We probably want to persist this across more passes.
-        """
-        processed = set()
-        existing_tensors = defaultdict(int)
-        for node in self.graph.nodes:
-            existing_tensors[get_node_storage(node)] += 1
-
-        def is_fake_tensor_same(new, old):
-            if type(new) != type(old):
-                return False
-            if isinstance(new, (list, tuple)):
-                return all(is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old))
-            if new.shape != old.shape or new.stride() != old.stride():
-                return False
-            if get_storage(new) == get_storage(old):
-                return True
-            if (
-                existing_tensors[get_storage(old)] == 1
-                and get_storage(new) not in existing_tensors
-            ):
-                return True
-            return False
-
-        for node in self.graph.nodes:
-            if self.hash_node(node) in self.processed_hashes:
-                continue
-
-            def get_fake_tensor(x):
-                if isinstance(x, torch.fx.Node):
-                    return x.meta["val"]
-                return x
-
-            if node.op == "call_function" and isinstance(
-                node.target, torch._ops.OpOverload
-            ):
-                processing = [node]
-                while len(processing) > 0:
-                    updating_node = processing.pop()
-                    if updating_node in processed:
-                        continue
-                    if updating_node.op != "call_function" or not isinstance(
-                        updating_node.target, torch._ops.OpOverload
-                    ):
-                        continue
-
-                    args, kwargs = tree_map(
-                        get_fake_tensor, (updating_node.args, updating_node.kwargs)
-                    )
-                    new_fake_tensor = updating_node.target(*args, **kwargs)
-                    if "val" in updating_node.meta and is_fake_tensor_same(new_fake_tensor, updating_node.meta["val"]):
-                        continue
-                    updating_node.meta["val"] = new_fake_tensor
-                    processed.add(updating_node)
-                    for user in updating_node.users:
-                        processing.append(user)
-
-                self.processed_hashes.add(self.hash_node(updating_node))
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -594,23 +504,11 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
 
 
 def remove_noop_ops(graph: torch.fx.Graph):
-    def true(*args, **kwargs):
-        return True
+    """
+    Removes aten.clone and aten.alias ops from the graph when it's safe.
 
-    def slice_scatter_cond(self, src, dim=0, start=None, end=None, step=1):
-        if start is None or end is None:
-            return False
-        if start == 0 and end >= 2**63 - 1 and step == 1:
-            return True
-        return False
-
-    def slice_cond(self, dim=0, start=None, end=None, step=1):
-        if start is None or end is None:
-            return False
-        if start == 0 and end >= 2**63 - 1 and step == 1:
-            return True
-        return False
-
+    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    """
     input_storages = set()
     output_storages = set()
     for node in graph.nodes:
@@ -623,27 +521,22 @@ def remove_noop_ops(graph: torch.fx.Graph):
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
-    noop_conditions = {
-        aten.slice.Tensor: (0, slice_cond),
-        aten.clone.default: (0, true),
-        aten.slice_scatter.default: (1, slice_scatter_cond),
-    }
-
     for node in graph.nodes:
-        if node.target in noop_conditions:
-            cloned_arg_index, cond = noop_conditions[node.target]
-            src = node.args[cloned_arg_index]
+        if node.target in (aten.alias.default, aten.clone.default):
+            src = node.args[0]
             if (
                 get_node_storage(node) in output_storages
                 and get_node_storage(src) in input_storages
             ):
                 continue
-            if same_layout(node, src) and cond(*node.args, **node.kwargs):
+            if same_layout(node, src):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
 
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
+
+
 def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
@@ -653,16 +546,15 @@ def reinplace_scatters(graph):
     Also handles input mutations when there is a corresponding copy node.
     """
 
-    copy_nodes = {}
+    copy_args_to_copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
-            copy_nodes[(node.args[0], node.args[1])] = node
-            assert node.args[0].op == 'placeholder'
+            copy_args_to_copy_nodes[(node.args[0], node.args[1])] = node
+            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
-
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
@@ -674,7 +566,9 @@ def reinplace_scatters(graph):
                 continue
             shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
             if mutated_arg.op == "placeholder":
-                if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
+                if not (
+                    copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
+                ):
                     continue
 
                 if (
