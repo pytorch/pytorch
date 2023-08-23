@@ -2728,6 +2728,12 @@ class ForeachFuncInfo(OpInfo):
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
 
+    def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
+            return []
+        return self.sample_inputs_func.sample_zero_size_tensor_inputs(
+            self, device, dtype, requires_grad, **kwargs)
+
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
