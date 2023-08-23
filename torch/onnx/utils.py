@@ -1524,6 +1524,17 @@ def _export(
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
+    # torch.onnx.export does not support opset versions >=18
+    if opset_version > _constants.ONNX_OLD_EXPORTER_MAX_OPSET:
+        raise ValueError(
+            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"by 'torch.onnx.export()'. "
+            f"The highest opset version supported is {_constants.ONNX_OLD_EXPORTER_MAX_OPSET}."
+            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
+            f"Note that dynamo_export() is in preview. Please report errors with "
+            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues."
+        )
+
     if export_modules_as_functions and opset_version < 15:
         raise ValueError(
             "`export_modules_as_functions` is not supported for `opset_version` < 15."
