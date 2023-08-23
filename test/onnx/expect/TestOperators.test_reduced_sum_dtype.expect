@@ -39,7 +39,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Cast_0"
     type {

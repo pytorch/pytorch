@@ -75,7 +75,7 @@ graph {
     name: "Mul_7"
     op_type: "Mul"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Div_0"
     type {
