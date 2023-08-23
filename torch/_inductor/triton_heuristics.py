@@ -216,11 +216,8 @@ class CachingAutotuner(KernelInterface):
                     grid_0, grid_1, grid_2 = grid(grid_meta)
                 else:
                     grid_0, grid_1, grid_2 = grid
-                # use default value for num_ctas and clusterDims
-                num_ctas = 1
-                clusterDims = [1, 1, 1]
                 bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
-                            num_ctas, *clusterDims, bin.shared,
+                            bin.num_ctas, *bin.clusterDims, bin.shared,
                             stream, bin.cu_function, None, None, None,
                             {', '.join(call_args)})
             """.lstrip(),
