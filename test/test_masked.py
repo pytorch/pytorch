@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride)
+    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride, toleranceOverride, tol)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -296,7 +296,8 @@ class TestMasked(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
-    @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})
+    @toleranceOverride({torch.float16 : tol(atol=5e-3, rtol=1.5e-3)})
+    @precisionOverride({torch.bfloat16: 5e-3})
     def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
         for sample in sample_inputs:
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs

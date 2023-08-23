@@ -378,8 +378,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
+        "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16, torch.float16),
+        reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16, float16")
     ),
     # See https://github.com/pytorch/pytorch/issues/111454
     xfail(
@@ -769,6 +769,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
+        "logit",
     ]
 
     @common_device_type.ops(
