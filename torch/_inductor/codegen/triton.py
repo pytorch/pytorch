@@ -1848,6 +1848,7 @@ class TritonKernel(Kernel):
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
+            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
         }
 
         for tree in self.range_trees:
@@ -2432,6 +2433,11 @@ class TritonScheduling(BaseScheduling):
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
+
+            # DESCRIPTIVE_KRNL_NAME is used for profiling purposes; it shows the full kernel name
+            # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
+            # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
+            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does

@@ -457,12 +457,7 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
-            output = placement._shard_tensor(local_tensor, device_mesh, idx)
-            # scatter call could not return a tensor with correct requires_grad
-            # field, as ProcessGroupNCCL refuse to take a tensor with requires_grad
-            # to do inplace update! So we manually set it here
-            output.requires_grad_(tensor.requires_grad)
-            local_tensor = output
+            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
@@ -475,7 +470,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach(),
+        local_tensor.detach().requires_grad_(tensor.requires_grad),
         device_mesh,
         tuple(placements),
         shape=tensor.size(),
