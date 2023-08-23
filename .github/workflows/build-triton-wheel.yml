@@ -159,7 +159,7 @@ jobs:
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
-    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'upload-stats' || '' }}
+    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'conda-aws-upload' || '' }}
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
