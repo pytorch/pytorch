@@ -1186,6 +1186,7 @@ def split_with_sizes(
             length >= 0,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
+        torch.sym_constrain_range_for_size(length, min=None, max=None)
         # We know this is true thanks to the sum, but this assertion helps
         # out our internal reasoning
         expect_true(start_idx + length <= self.shape[dim])

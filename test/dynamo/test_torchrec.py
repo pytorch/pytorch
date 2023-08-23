@@ -1,5 +1,5 @@
 import unittest
-from typing import Dict
+from typing import Dict, List
 
 import torch
 import torch._dynamo.test_case
@@ -13,6 +13,45 @@ try:
     HAS_TORCHREC = True
 except ImportError:
     HAS_TORCHREC = False
+
+
+class BucketizeMod(torch.nn.Module):
+    def __init__(self, feature_boundaries: Dict[str, List[float]]):
+        super().__init__()
+        self.bucket_w = torch.nn.ParameterDict()
+        self.boundaries_dict = {}
+        for key, boundaries in feature_boundaries.items():
+            self.bucket_w[key] = torch.nn.Parameter(
+                torch.empty([len(boundaries) + 1]).fill_(1.0),
+                requires_grad=True,
+            )
+            buf = torch.tensor(boundaries, requires_grad=False)
+            self.register_buffer(
+                f"{key}_boundaries",
+                buf,
+                persistent=False,
+            )
+            self.boundaries_dict[key] = buf
+
+    def forward(self, features: KeyedJaggedTensor) -> KeyedJaggedTensor:
+        weights_list = []
+        for key, boundaries in self.boundaries_dict.items():
+            jt = features[key]
+            bucketized = torch.bucketize(jt.weights(), boundaries)
+            # doesn't super matter I guess
+            # hashed = torch.ops.fb.index_hash(bucketized, seed=0, modulo=len(boundaries))
+            hashed = bucketized
+            weights = torch.gather(self.bucket_w[key], dim=0, index=hashed)
+            weights_list.append(weights)
+        return KeyedJaggedTensor(
+            keys=features.keys(),
+            values=features.values(),
+            weights=torch.cat(weights_list),
+            lengths=features.lengths(),
+            offsets=features.offsets(),
+            stride=features.stride(),
+            length_per_key=features.length_per_key(),
+        )
 
 
 @unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
@@ -64,10 +103,24 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
         )
         di = iter(dataset)
 
-        # NB: this MUST be sync'ed, it currently doesn't work with unsync
-        d1 = next(di).sparse_features
-        d2 = next(di).sparse_features
-        d3 = next(di).sparse_features
+        # unsync should work
+
+        d1 = next(di).sparse_features.unsync()
+        d2 = next(di).sparse_features.unsync()
+        d3 = next(di).sparse_features.unsync()
+
+        r1 = f(d1)
+        r2 = f(d2)
+        r3 = f(d3)
+
+        self.assertEqual(counter.frame_count, 1)
+        counter.frame_count = 0
+
+        # sync should work too
+
+        d1 = next(di).sparse_features.sync()
+        d2 = next(di).sparse_features.sync()
+        d3 = next(di).sparse_features.sync()
 
         r1 = f(d1)
         r2 = f(d2)
@@ -75,15 +128,31 @@ class TorchRecTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 1)
 
-        """
-        # TODO: this doesn't work, export specializes too much
-        gm = torch._dynamo.export(f)(next(di).sparse_features).graph_module
+        # export only works with unsync
+
+        gm = torch._dynamo.export(f)(next(di).sparse_features.unsync()).graph_module
         gm.print_readable()
 
         self.assertEqual(gm(d1), r1)
-        self.assertEqual(gm(d2), r1)
-        self.assertEqual(gm(d3), r1)
-        """
+        self.assertEqual(gm(d2), r2)
+        self.assertEqual(gm(d3), r3)
+
+    def test_bucketize(self):
+        mod = BucketizeMod({"f1": [0.0, 0.5, 1.0]})
+        features = KeyedJaggedTensor.from_lengths_sync(
+            keys=["f1"],
+            values=torch.tensor([0, 1, 2, 3, 4, 5, 6, 7]),
+            lengths=torch.tensor([2, 0, 1, 1, 1, 3]),
+            weights=torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]),
+        ).unsync()
+
+        def f(x):
+            # This is a trick to populate the computed cache and instruct
+            # ShapeEnv that they're all sizey
+            x.to_dict()
+            return mod(x)
+
+        torch._dynamo.export(f, aten_graph=True)(features).graph_module.print_readable()
 
     @unittest.expectedFailure
     def test_simple(self):
