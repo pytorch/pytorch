@@ -1450,9 +1450,7 @@ class TorchPatcher:
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
-            # through the optimizer init without failing. Otherwise we get an irrecoverable graphbreak
-            # saying "torch.* op returned non-Tensor RemovableHandle call_function <class
-            # 'torch.utils.hooks.RemovableHandle'>"
+            # through the optimizer init without failing. See #107789
             opt.register_load_state_dict_pre_hook = disable(
                 opt.register_load_state_dict_pre_hook
             )

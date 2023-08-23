@@ -2064,14 +2064,11 @@ class TestOptim(TestCase):
         self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
         self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_get_load_state_dict_cast_hook_handle(self):
-        if not torch.cuda.is_available():
-            self.skipTest("Requires CUDA devices")
         param = torch.rand(2, 3, requires_grad=True, device="cpu")
         param.grad = torch.rand_like(param)
         opt = optim.Adadelta([param], lr=0.001)
-        handle = opt.get_load_state_dict_cast_hook_handle()
-        handle.remove()
 
         # Simulate saving and loading state_dict after init'ing state with step()
         opt.step()
@@ -2079,11 +2076,15 @@ class TestOptim(TestCase):
 
         param_cuda = torch.rand(2, 3, requires_grad=True, device="cuda")
         param_cuda.grad = torch.rand_like(param_cuda)
-        opt.load_state_dict(cpu_state_dict)
+        opt_cuda = optim.Adadelta([param_cuda], lr=0.001)
+        handle = opt_cuda.get_load_state_dict_cast_hook_handle()
+        handle.remove()
+
+        opt_cuda.load_state_dict(cpu_state_dict)
 
         # Assert that casting to CUDA did not happen for the param state
         # since the cast hook has been removed
-        self.assertEqual(opt.state[param]["square_avg"].device, torch.device("cpu"))
+        self.assertEqual(opt_cuda.state[param_cuda]["square_avg"].device, torch.device("cpu"))
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
