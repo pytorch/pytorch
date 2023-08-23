@@ -1525,7 +1525,7 @@ def _export(
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
     # torch.onnx.export does not support opset versions >=18
-    if opset_version > _constants.ONNX_OLD_EXPORTER_MAX_OPSET:
+    if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
         raise ValueError(
             f"Exporting to ONNX opset version {opset_version} is not supported. "
             f"by 'torch.onnx.export()'. "
