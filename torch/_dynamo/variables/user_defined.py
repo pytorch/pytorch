@@ -581,4 +581,9 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+    def var_getattr(self, tx, name):
+        source = AttrSource(self.source, name) if self.source else None
+        if source is not None and name in ("_length_per_key", "_offset_per_key"):
+            with torch._dynamo.config.patch(force_unspec_int_unbacked_size_like=True):
+                return super().var_getattr(tx, name)
+        return super().var_getattr(tx, name)

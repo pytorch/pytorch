@@ -40,6 +40,13 @@ cache_size_limit = 64
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
+# this is an internal setting that shouldn't be directly used.  When it is
+# True, whenever we encounter an int in Dynamo tracing, we will (1) force
+# unspec it and (2) force it as a size-like unbacked integer.  This is
+# currently used when processing certain lists of ints that are known
+# to be size-like and may have 0/1 entries that we must not specialize on.
+force_unspec_int_unbacked_size_like = False
+
 # Assume these functions return constants
 constant_functions = {
     torch.jit.is_scripting: False,
