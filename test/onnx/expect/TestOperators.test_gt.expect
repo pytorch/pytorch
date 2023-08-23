@@ -9,7 +9,7 @@ graph {
     name: "Greater_0"
     op_type: "Greater"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Greater_0"
     type {

@@ -25,7 +25,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 5
     dims: 4
