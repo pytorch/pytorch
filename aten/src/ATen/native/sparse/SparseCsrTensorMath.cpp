@@ -394,15 +394,14 @@ Tensor sparse_mask_sparse_compressed(
     Tensor compressed_indices, plain_indices;
     std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
     auto mask_values = mask.values();
-    auto mask_options = mask_values.options();
     auto dense_mask = at::native::_sparse_compressed_tensor_unsafe(
-                                                                   compressed_indices,
-                                                                   plain_indices,
-                                                                   at::ones({1}, self.options().dtype(kBool)).expand_as(mask_values),
-                                                                   self.sizes(),
-                                                                   kBool,
-                                                                   mask.layout(),
-                                                                   self.device()).to_dense();
+        compressed_indices,
+        plain_indices,
+        at::ones({1}, self.options().dtype(kBool)).expand_as(mask_values),
+        self.sizes(),
+        kBool,
+        mask.layout(),
+        self.device()).to_dense();
     return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         mask.layout(), "sparse_mask_sparse_compressed",
         [&] {
