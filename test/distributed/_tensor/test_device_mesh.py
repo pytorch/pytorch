@@ -9,7 +9,11 @@ from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
 )
-from torch.distributed._tensor.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed._tensor.device_mesh import (
+    DeviceMesh,
+    init_device_mesh,
+    mesh_resources,
+)
 from torch.distributed._tensor.placement_types import Shard
 
 from torch.distributed.distributed_c10d import (
@@ -233,6 +237,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(
             two_d_mesh["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx]
         )
+
+    @with_comms
+    def test_get_parent_mesh(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("DP", "TP")
+        two_d_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["DP"]), two_d_mesh)
+        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["TP"]), two_d_mesh)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

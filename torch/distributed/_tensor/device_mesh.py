@@ -34,11 +34,37 @@ if TYPE_CHECKING:
 class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
+        self.child_to_parent_mapping = {}
 
     def get_current_mesh(self) -> "DeviceMesh":
         if len(self.mesh_stack) == 0:
             raise RuntimeError("No device mesh is currently active!")
         return self.mesh_stack[-1]
+
+    def create_child_mesh(
+        self, device_mesh: "DeviceMesh", mesh_dim: int
+    ) -> "DeviceMesh":
+        # swap the current dim to the last dim then reshape to flatten out other
+        # dims, so we can just extract the list of ranks which contains cur_rank.
+        cur_rank = device_mesh.get_rank()
+        pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+            -1, device_mesh.mesh.size(mesh_dim)
+        )
+
+        for mesh_1d in pg_ranks_by_dim:
+            sub_mesh = DeviceMesh(
+                device_mesh.device_type, mesh_1d, _init_process_groups=False
+            )
+            if cur_rank in mesh_1d:
+                res_sub_mesh = sub_mesh
+
+        res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+        self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+        return res_sub_mesh
+
+    def get_parent_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+        return self.child_to_parent_mapping.get(device_mesh, None)
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
@@ -98,7 +124,6 @@ class DeviceMesh:
     device_type: str
     mesh: torch.Tensor
     mesh_dim_names: Optional[Tuple[str, ...]]
-    _parent_device_mesh: Any
 
     def __init__(
         self,
@@ -116,7 +141,6 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self.mesh_dim_names = mesh_dim_names
-        self._parent_device_mesh = None
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -244,24 +268,6 @@ class DeviceMesh:
             return True
         return self.mesh.equal(other.mesh)
 
-    def _create_child_mesh(self, mesh_dim: int) -> "DeviceMesh":
-        # swap the current dim to the last dim then reshape to flatten out other
-        # dims, so we can just extract the list of ranks which contains cur_rank.
-        cur_rank = self.get_rank()
-        pg_ranks_by_dim = self.mesh.swapdims(-1, mesh_dim).reshape(
-            -1, self.mesh.size(mesh_dim)
-        )
-
-        for mesh_1d in pg_ranks_by_dim:
-            sub_mesh = DeviceMesh(self.device_type, mesh_1d, _init_process_groups=False)
-            if cur_rank in mesh_1d:
-                res_sub_mesh = sub_mesh
-
-        res_sub_mesh._dim_group_infos = [self._dim_group_infos[mesh_dim]]
-        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
-        res_sub_mesh._parent_device_mesh = self
-        return res_sub_mesh
-
     def __getitem__(self, mesh_dim_name):
         """
         Slice the current DeviceMesh based on the mesh_dim_name given to create a child
@@ -306,7 +312,7 @@ class DeviceMesh:
                 f"Available mesh dimensions are: {self.mesh_dim_names}",
             )
         mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
-        submesh = self._create_child_mesh(mesh_dim)
+        submesh = mesh_resources.create_child_mesh(self, mesh_dim)
 
         return submesh
 
