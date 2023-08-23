@@ -328,7 +328,7 @@ class GraphState:
     tensor_values: Dict[str, TensorValue] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
-    _is_single_tensor_return: bool = False
+    is_single_tensor_return: bool = False
 
 
 class GraphModuleSerializer:
@@ -366,7 +366,7 @@ class GraphModuleSerializer:
         node_args = node.args[0]
         if isinstance(node_args, torch.fx.Node):
             # For singleton tensor returns
-            self.graph_state._is_single_tensor_return = True
+            self.graph_state.is_single_tensor_return = True
             self.graph_state.outputs = [self.serialize_input(node_args)]
         else:
             assert isinstance(node_args, (tuple, list))
@@ -719,7 +719,7 @@ class GraphModuleSerializer:
             sym_int_values=self.graph_state.sym_int_values,
             sym_bool_values=self.graph_state.sym_bool_values,
             outputs=self.graph_state.outputs,
-            _is_single_tensor_return=self.graph_state._is_single_tensor_return,
+            is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
@@ -898,7 +898,7 @@ class GraphModuleDeserializer:
         for output in serialized_graph.outputs:
             outputs.append(self.deserialize_graph_output(output))
 
-        if serialized_graph._is_single_tensor_return:
+        if serialized_graph.is_single_tensor_return:
             assert len(outputs) == 1
             outputs = outputs[0]  # type: ignore[assignment]
         else:
@@ -906,7 +906,7 @@ class GraphModuleDeserializer:
 
         output_node = self.graph.output(outputs)
 
-        if serialized_graph._is_single_tensor_return:
+        if serialized_graph.is_single_tensor_return:
             output_node.meta["val"] = output_node.args[0].meta["val"]
         else:
             output_node.meta["val"] = tuple(
