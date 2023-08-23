@@ -9,7 +9,7 @@ graph {
     name: "PRelu_0"
     op_type: "PRelu"
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 2
     dims: 1

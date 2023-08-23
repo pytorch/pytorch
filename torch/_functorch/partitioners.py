@@ -307,6 +307,8 @@ def _tensor_nbytes(numel, dtype):
     sizes = {
         torch.complex64: 8,
         torch.complex128: 16,
+        torch.float8_e4m3fn: 1,
+        torch.float8_e5m2: 1,
         torch.float16: 2,
         torch.bfloat16: 2,
         torch.float32: 4,

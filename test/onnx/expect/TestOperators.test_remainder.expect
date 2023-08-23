@@ -29,7 +29,7 @@ graph {
     name: "Sub_3"
     op_type: "Sub"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Div_0"
     type {

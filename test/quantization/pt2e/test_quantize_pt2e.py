@@ -333,14 +333,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.manual_seed(MANUAL_SEED)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
 
-        # FX
-        # Note: In order to match the PT2E numerics exactly, we need to feed the
-        # example inputs to the model once before calling prepare, since this is
-        # what torchdynamo.export does. Otherwise, the BN running mean and variance
-        # would diverge in the two flows and this test would fail. For more detail,
-        # see https://github.com/pytorch/pytorch/issues/95900.
         model_fx = copy.deepcopy(model)
-        model_fx(*example_inputs)
         if is_per_channel:
             default_qconfig = default_per_channel_symmetric_qnnpack_qat_qconfig
         else:
