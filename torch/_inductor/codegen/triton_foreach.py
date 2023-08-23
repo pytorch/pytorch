@@ -1,4 +1,5 @@
 import itertools
+from dataclasses import dataclass
 
 from .. import metrics
 from ..utils import ceildiv, sympy_product
@@ -8,8 +9,29 @@ from .triton import TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
 
+@dataclass
+class PartitionState:
+    partitions: list[tuple]
+    cur_partition: list[tuple]
+    cur_count: int
+
+    def finalize(self):
+        if self.cur_partition:
+            self.partitions.append(self.cur_partition)
+
+
 class ForeachKernel(Kernel):
     MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
+
+    @staticmethod
+    def _update_partition(partition_state, node_rw_count, node_info):
+        if partition_state.cur_count + node_rw_count > ForeachKernel.MAX_NUM_ARGS:
+            partition_state.partitions.append(partition_state.cur_partition)
+            partition_state.cur_partition = [node_info]
+            partition_state.cur_count = node_rw_count
+        else:
+            partition_state.cur_count += node_rw_count
+            partition_state.cur_partition.append(node_info)
 
     @staticmethod
     def horizontal_partition(subkernel_nodes, triton_scheduling):
@@ -18,9 +40,9 @@ class ForeachKernel(Kernel):
         or 1D blocking strategy."""
         assert len(subkernel_nodes) >= 1
 
-        cur_count = 0
-        partitions = []
-        cur_partition = []
+        partition_state_1d = PartitionState([], [], 0)
+        partition_state_2d = PartitionState([], [], 0)
+
         for node in subkernel_nodes:
             fused_nodes = node.get_nodes()
             _, (numel, rnumel) = max(
@@ -31,18 +53,20 @@ class ForeachKernel(Kernel):
 
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
-            if cur_count + read_write_count > ForeachKernel.MAX_NUM_ARGS:
-                partitions.append(cur_partition)
-                cur_partition = [node_info]
-                cur_count = read_write_count
+
+            if tiled_groups[1] == 1:
+                ForeachKernel._update_partition(
+                    partition_state_1d, read_write_count, node_info
+                )
             else:
-                cur_count += read_write_count
-                cur_partition.append(node_info)
+                ForeachKernel._update_partition(
+                    partition_state_2d, read_write_count, node_info
+                )
 
-        if cur_partition:
-            partitions.append(cur_partition)
+        partition_state_1d.finalize()
+        partition_state_2d.finalize()
 
-        return partitions
+        return partition_state_1d.partitions + partition_state_2d.partitions
 
     def __init__(self):
         super().__init__()
