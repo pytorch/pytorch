@@ -74,8 +74,6 @@ class FakeTensorUpdater:
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
                 return False
-            if new is None:
-                breakpoint()
             if isinstance(new, (list, tuple)):
                 return all(
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
