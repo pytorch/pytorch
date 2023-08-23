@@ -88,7 +88,8 @@ def _reference_quantized_conv2d(
     bias_scale = x_scale * weight_scale
     bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale)
     # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
-    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32 + bias_i32, x_scale * weight_scale / out_scale) + out_zero_point
+    acc_i32 = out_dtype(
+        torch.ops.aten.mul.Tensor, torch.int32, acc_i32 + bias_i32, x_scale * weight_scale / out_scale) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
@@ -253,9 +254,9 @@ def _reference_quantized_adaptive_avg_pool2d(
     x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
     x_i32 = x_i8.to(torch.int32)
     out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
-    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
-    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
-    out_i8 = out_fp32.to(torch.int8)
+    out_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, out_i32, (x_scale / out_scale)) + out_zero_point
+    out_i32 = torch.clamp(out_i32, out_quant_min, out_quant_max)
+    out_i8 = out_i32.to(torch.int8)
     return out_i8
 
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
@@ -382,8 +383,10 @@ _REWRITE_INFO_LIST = [
         _QUANTIZED_CONV2d_EXAMPLE_INPUTS,
         _qdq_quantized_conv2d,
         _reference_quantized_conv2d,
-        _replace_ph_qconv,
-        _replace_ph_qconv
+        _replace_literals_with_new_placeholders,
+        _replace_literals_with_new_placeholders,
+        # _replace_ph_qconv,
+        # _replace_ph_qconv
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
@@ -452,6 +455,5 @@ def reference_representation_rewrite(model: GraphModule) -> GraphModule:
             replacement = replacement_post_trans(replacement)
         pattern.recompile()  # type: ignore[attr-defined]
         replacement.recompile()  # type: ignore[attr-defined]
-        print("pattern:", pattern, " replacement:", replacement)
         matches = replace_pattern(model, pattern, replacement)
     return model
