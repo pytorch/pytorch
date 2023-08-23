@@ -59,6 +59,11 @@ needs_realized_inputs = set()
 foreach_ops = set()
 
 
+def assert_nyi(cond, msg):
+    if not cond:
+        raise NotImplementedError(f"inductor does not support {msg}")
+
+
 def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, tuple, set)):
         return [add_needs_realized_inputs(x) for x in fn]
@@ -190,9 +195,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
-                if arg.get_dtype() != dtype:
-                    return to_dtype(arg, dtype)
-                return arg
+                return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
@@ -491,10 +494,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
-        return clone(x)
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -502,10 +504,14 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
+def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    return to_dtype(x, dtype, copy=True)
+
+
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
@@ -526,12 +532,21 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
-@register_lowering(prims.device_put, type_promotion_kind=None)
-def to_device(x: TensorBox, device: torch.device):
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    return to_dtype_bitcast(x, dtype, copy=True)
+
+
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
-        return clone(x)
+        return clone(x) if copy else x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(prims.device_put, type_promotion_kind=None)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -1874,7 +1889,7 @@ def copy(self, src, non_blocking=False):
 
 
 @register_lowering(aten.clone)
-def clone(x, *, memory_format=0):
+def clone(x, *, memory_format=None):
     # TODO(jansel): memory format
     return Pointwise.create(
         device=x.get_device(),
@@ -2021,8 +2036,8 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
-    assert layout in (None, torch.strided)
-    assert pin_memory is False
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -2143,10 +2158,9 @@ def tensor_constructor(fill_value):
         pin_memory=False,
         memory_format=None,
     ):
-        assert names is None
-        assert not pin_memory
-        assert layout in (None, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+        assert_nyi(names is None, "named tensors")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+        assert_nyi(not pin_memory, "pin_memory")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -2167,8 +2181,7 @@ def empty(
     pin_memory=None,
     memory_format=None,
 ):
-    assert names is None
-    assert memory_format in (None, torch.contiguous_format)
+    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -2185,8 +2198,8 @@ def create_tensor_like(creation_fn):
     def _constant_like(
         x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -2214,8 +2227,8 @@ def new_constant(fill_value):
         x, size, *, dtype=None, layout=None, device=None, pin_memory=None
     ):
         assert isinstance(size, (list, tuple))
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -2241,8 +2254,8 @@ def empty_strided(
 ):
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
-    assert not pin_memory
-    assert layout in (None, torch.strided)
+    assert_nyi(not pin_memory, "pin_memory")
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)

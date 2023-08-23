@@ -27,23 +27,32 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch._logging
 import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
+from torch._logging import LazyString
 from . import config
 
 
 # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+if np:
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-NP_TO_TNP_MODULE = {
-    np: tnp,
-    np.fft: tnp.fft,
-    np.linalg: tnp.linalg,
-    np.random: tnp.random,
-}
+    NP_TO_TNP_MODULE = {
+        np: tnp,
+        np.fft: tnp.fft,
+        np.linalg: tnp.linalg,
+        np.random: tnp.random,
+    }
+else:
+    NP_SUPPORTED_MODULES = {}
+
+    NP_TO_TNP_MODULE = {}
 
 import importlib
 
@@ -405,6 +414,9 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -421,6 +433,9 @@ def is_numpy_int_type(value):
 
 
 def is_numpy_float_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -432,6 +447,9 @@ def is_numpy_float_type(value):
 
 
 def is_numpy_ndarray(value):
+    if not np:
+        return False
+
     return istype(value, np.ndarray)
 
 
@@ -1529,16 +1547,6 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
-
-
 def lazy_format_graph_code(name, gm, maybe_id=None):
     def format_name():
         if maybe_id is not None:
@@ -1709,6 +1717,26 @@ class numpy_method_wrapper:
             obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+class numpy_operator_wrapper:
+    """Implements dunder methods for tnp.ndarray via functions from the operator library"""
+
+    def __init__(self, op: str):
+        self.op = op
+        self.__name__ = f"wrapped_{op.__name__}"
+
+    def __repr__(self):
+        return f"<Wrapped operator <original {self.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        assert not kwargs
+
+        args = (
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        out = self.op(*args)
         return numpy_to_tensor(out)
 
 

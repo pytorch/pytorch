@@ -1686,15 +1686,16 @@ def forward(self, x_1):
         self.assertEqual(gx, x.cos())
 
 
+def op_with_incorrect_schema(testcase, name):
+    lib = testcase.lib()
+    lib.define(f"{name}(Tensor x) -> Tensor")
+    qualname = f"{testcase.test_ns}::{name}"
+    lib.impl(name, lambda x: x[:], "CompositeExplicitAutograd")
+    return testcase.get_op(qualname)
+
+
 class MiniOpTest(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
-
-    def _op_with_incorrect_schema(self, name):
-        lib = self.lib()
-        lib.define(f"{name}(Tensor x) -> Tensor")
-        qualname = f"{self.test_ns}::{name}"
-        lib.impl(name, lambda x: x[:], "CompositeExplicitAutograd")
-        return self.get_op(qualname)
 
     def _op_delayed_backward_error(self, name):
         lib = self.lib()
@@ -1750,7 +1751,7 @@ class MiniOpTest(CustomOpTestCaseBase):
         self.assertEqual(x, x_clone.sin())
 
     def test_incorrect_schema(self):
-        op = self._op_with_incorrect_schema("incorrect_schema")
+        op = op_with_incorrect_schema(self, "incorrect_schema")
         x = torch.randn(3)
         op(x)
 
@@ -1804,12 +1805,13 @@ optests.generate_opcheck_tests(
     MiniOpTest,
     ["aten", "MiniOpTest"],
     mini_op_test_failures_dict,
+    "test/test_custom_ops.py",
     [],
     mini_op_test_checks,
 )
 
 
-class TestGenerateOpcheckTests(TestCase):
+class TestGenerateOpcheckTests(CustomOpTestCaseBase):
     def test_MiniOpTest(self):
         for orig_test in ["test_mm", "test_nonzero"]:
             for test in mini_op_test_checks:
@@ -1860,6 +1862,67 @@ class TestGenerateOpcheckTests(TestCase):
         }
         with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
             validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+
+    def test_opcheck(self):
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "OpOverload"):
+            optests.opcheck(torch.sin, (x,))
+        with self.assertRaisesRegex(ValueError, "test_utils to be subset of"):
+            optests.opcheck(torch.ops.aten.sin.default, (x,), test_utils="blah")
+        result = optests.opcheck(torch.ops.aten.sin.default, (x,))
+
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+                "test_autograd_registration": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+                "test_aot_dispatch_static": "SUCCESS",
+                "test_aot_dispatch_dynamic": "SUCCESS",
+            },
+        )
+
+        result = optests.opcheck(
+            torch.ops.aten.sin.default, (x,), test_utils="test_schema"
+        )
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+            },
+        )
+
+        result = optests.opcheck(
+            torch.ops.aten.sin.default,
+            (x,),
+            test_utils=["test_schema", "test_faketensor"],
+        )
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+            },
+        )
+
+    def test_opcheck_bad_op(self):
+        op = op_with_incorrect_schema(self, "foo")
+        x = torch.randn(3)
+        with self.assertRaisesRegex(Exception, "is not defined to alias output"):
+            optests.opcheck(op, (x,))
+
+        result = optests.opcheck(op, (x,), raise_exception=False)
+        self.assertTrue(isinstance(result["test_schema"], RuntimeError))
+        del result["test_schema"]
+        self.assertEqual(
+            result,
+            {
+                "test_autograd_registration": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+                "test_aot_dispatch_static": "SUCCESS",
+                "test_aot_dispatch_dynamic": "SUCCESS",
+            },
+        )
 
 
 only_for = ("cpu", "cuda")
