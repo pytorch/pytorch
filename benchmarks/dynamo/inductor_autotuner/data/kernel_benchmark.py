@@ -1,7 +1,9 @@
 import argparse
-import subprocess, os, signal
+import os
+import signal
+import subprocess
 from os import listdir
-from os.path import join, isdir
+from os.path import isdir, join
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--kernel_dir", type=str, default="./data_hf")
@@ -48,7 +50,7 @@ def main(args):
             # remove best config file
             for py in listdir(kernel_path):
                 py_path = join(kernel_path, py)
-                if py.endswith((".best_config")):
+                if py.endswith(".best_config"):
                     cmd = "rm -rf " + py_path
                     print(cmd)
                     os.system(cmd)
@@ -61,7 +63,7 @@ def main(args):
                 kernel_name = py[:-3]
 
                 # skip graph python file
-                with open(py_path, "r") as file:
+                with open(py_path) as file:
                     content = file.read()
                     if "AsyncCompile()" in content:
                         print("Skip " + py_path + " GRAPH")

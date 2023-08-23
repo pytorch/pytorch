@@ -1,8 +1,8 @@
 import argparse
-import subprocess
 import os
+import subprocess
 from os import listdir
-from os.path import join, isdir
+from os.path import isdir, join
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--log_dir", type=str, default="./data_logs")
@@ -43,7 +43,7 @@ def main(args):
         for MODE in MODE_LIST:
             model_list_path = MODEL_LIST_PATH
             model_names = []
-            with open(model_list_path, "r") as f:
+            with open(model_list_path) as f:
                 for line in f.readlines()[1:]:
                     line = line.split(",")[0]
                     model_names.append(line)
