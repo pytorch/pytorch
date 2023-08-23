@@ -514,7 +514,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             bind_symint(
                 s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
             )
-        if "NestedTensor" not in arg.fake_tensor.__class__.__name__:
+        if not arg.fake_tensor.is_nested:
             for i, s in enumerate(arg.fake_tensor.stride()):
                 bind_symint(
                     s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)

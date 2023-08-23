@@ -201,7 +201,7 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
-        if "NestedTensor" in val.__class__.__name__:
+        if val.is_nested:
             return free_symbols(val.size())
         return (
             free_symbols(val.size()) |
@@ -2627,7 +2627,7 @@ Target Guards:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss, constraint[i])
-            if "NestedTensor" not in t.__class__.__name__:
+            if not t.is_nested:
                 for i, ss in enumerate(t.stride()):
                     track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
                 track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())

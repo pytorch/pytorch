@@ -64,7 +64,7 @@ class TensorCheck {
         }
       }
     }
-    if (!v.unsafeGetTensorImpl()->key_set().has(at::DispatchKey::AutogradNestedTensor)) {
+    if (!v.is_nested()) {
       const auto& strides = v.sym_strides();
       for (auto i : c10::irange(ndim)) {
         auto known_stride = strides_[i];
@@ -132,7 +132,7 @@ class TensorCheck {
         return fail_reason.str();
       }
     }
-    if (!v.unsafeGetTensorImpl()->key_set().has(at::DispatchKey::AutogradNestedTensor)) {
+    if (!v.is_nested()) {
       const auto& strides = v.sym_strides();
       for (auto i : c10::irange(ndim)) {
         auto known_stride = strides_[i];
@@ -281,7 +281,7 @@ static int TensorGuards_init(
         ? wrapIntegersInOptional(tensor.sym_sizes())
         : per_tensor_dynamic_dims_sizes[i];
     std::vector<std::optional<c10::SymInt>> tensor_dims_stride = {};
-    if (!tensor.unsafeGetTensorImpl()->key_set().has(at::DispatchKey::AutogradNestedTensor)) {
+    if (!tensor.is_nested()) {
       tensor_dims_stride =
         per_tensor_dynamic_dims_strides.size() == 0
         ? wrapIntegersInOptional(tensor.sym_strides())
