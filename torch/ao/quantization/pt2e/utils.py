@@ -11,11 +11,82 @@ import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
+from torch.ao.quantization.quantizer import QuantizationAnnotation
+from torch.ao.quantization.quantizer.utils import _is_sym_size_node
+
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
+    "_filter_sym_size_users",
+    "_find_q_dq_node_for_user",
+    "_is_valid_annotation",
 ]
+
+_QUANTIZE_OPS = [
+    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.quantize_per_channel.default,
+]
+
+
+_DEQUANTIZE_OPS = [
+    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+]
+
+
+def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
+    if target.op == "output":
+        return False
+    if next_node == target:
+        return True
+    for n in next_node.users.keys():
+        if _is_connected(n, target):
+            return True
+    return False
+
+
+def _find_q_dq_node_for_user(
+    produer: torch.fx.Node, user: torch.fx.Node
+) -> Tuple[torch.fx.Node]:
+    dq_node = None
+    for n in user.args:
+        if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
+            if _is_connected(produer, n):
+                dq_node = n
+                break
+    if dq_node is None:
+        for n in user.kwargs:
+            if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
+                if _is_connected(produer, n):
+                    dq_node = n
+                    break
+    if dq_node is None:
+        return (None, None)
+
+    q_node = None
+    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:
+        q_node = dq_node.args[0]
+    return (q_node, dq_node)
+
+
+
+def _filter_sym_size_users(node: torch.fx.Node) -> List[torch.fx.Node]:
+    node_users = list(filter((lambda x: (_is_sym_size_node(x) is False)), node.users))
+    return node_users
+
+
+def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
+    if annotation is None:
+        return False
+    input_qspec_map = annotation.input_qspec_map
+    output_qspec = annotation.output_qspec
+    if len(input_qspec_map) == 0 and output_qspec is None:
+        return False
+    return True
+
 
 def _get_tensor_constant_from_node(node, m):
     if node is None:
