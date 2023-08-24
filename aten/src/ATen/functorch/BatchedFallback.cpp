@@ -73,15 +73,16 @@ static bool areAnyArgumentsTensorList(const at::FunctionSchema& schema) {
       });
 }
 
-static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace, bool is_nested=false) {
   TORCH_CHECK(isVmapFallbackEnabled(),
       schema.operator_name(), " hit the vmap fallback which is currently disabled");
   if (!isVmapFallbackWarningEnabled()) {
     return;
   }
   TORCH_WARN("There is a performance drop because we have not yet implemented ",
-             "the batching rule for ", schema.operator_name(), ". Please file ",
-             "us an issue on GitHub so that we can prioritize its implementation.");
+             "the ", (is_nested ? "nested " : "") , "batching rule for ",
+             schema.operator_name(), ". Please file us an issue on GitHub so that ",
+             "we can prioritize its implementation.");
 }
 
 // The general flow of the algorithm is as follows.
@@ -397,14 +398,13 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 }
 
 void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  // batchedTensorForLoopFallback(op, stack);
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
   const auto arguments = torch::jit::last(stack, num_arguments);
 
   TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
-              "Batching rule not implemented for ", schema.operator_name(), ". ",
+              "Nested batching rule not implemented for ", schema.operator_name(), ". ",
               "We could not generate a fallback.");
 
   if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
@@ -415,16 +415,16 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   }
 
   if (isInplaceOp(schema)) {
-    TORCH_INTERNAL_ASSERT(false, "Fallbacks not supported for in-place ops on nested tensors");
+    TORCH_INTERNAL_ASSERT(false, "vmap fallback not supported for in-place ops on nested tensors");
     return;
   }
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
-              "Batching rule not implemented for ", schema.operator_name(), "; ",
+              "Nested batching rule not implemented for ", schema.operator_name(), "; ",
               "the fallback path doesn't work on out= or view ops.");
   TORCH_CHECK(num_returns >= 1,
-              "Batching rule not implemented for ", schema.operator_name(), ". ",
+              "Nested batching rule not implemented for ", schema.operator_name(), ". ",
               "The fallback path does not support operations with no returns.");
-  warnFallback(schema, /*in_place*/false);
+  warnFallback(schema, /*in_place*/false, /*is_nested*/true);
 
   const auto arguments_begin = stack->size() - num_arguments;
 
