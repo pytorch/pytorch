@@ -753,6 +753,8 @@ inline static PyObject* eval_custom_code(
   // Most of these don't exist in 3.12 anymore.
   // _PyFunction_CopyWithNewCode and _PyFrame_InitializeSpecials in particular
   PyFunctionObject* func;
+  PyErr_SetString(PyExc_RuntimeError, "Dynamo is not supported in Python 3.12 yet");
+  return NULL;
   #else
   PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
   if (func == NULL) {
