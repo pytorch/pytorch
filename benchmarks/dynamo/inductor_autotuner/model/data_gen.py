@@ -10,11 +10,29 @@ from torch._inductor.autotuner.model import AutotunerModel, ModelType
 from triton import Config
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--data_dir", type=str, required=True)
-parser.add_argument("--model_type", type=int, required=True)
-parser.add_argument("--output_dir", type=str, required=True)
-parser.add_argument("--train", type=float, default=0.8)
-parser.add_argument("--pairwise-threshold", type=float, default=10)
+parser.add_argument(
+    "--data_dir",
+    type=str,
+    required=True,
+    help="Path to data dir, containing kernel meta data and configs",
+)
+parser.add_argument(
+    "--model_type",
+    type=int,
+    required=True,
+    help="Model type, which is consistent with ModelType in pytorch/torch/_inductor/autotuner/model.py",
+)
+parser.add_argument(
+    "--output_dir", type=str, required=True, help="Path to output directory for data"
+)
+parser.add_argument("--train", type=float, default=0.8, help="Train/test split")
+parser.add_argument(
+    "--pairwise-threshold",
+    type=float,
+    default=10,
+    help="""When generating data for pairwise loss models, we need to sample pairs. """
+    """This threshold controls how many pairs we sample for each config at most.""",
+)
 parser.add_argument("--seed", type=int, default=0)
 
 
