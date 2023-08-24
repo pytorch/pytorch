@@ -8,7 +8,7 @@ graph {
     name: "Acos_0"
     op_type: "Acos"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Acos_0"
     type {

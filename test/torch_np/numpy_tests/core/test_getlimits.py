@@ -112,8 +112,7 @@ class TestIinfo:
     def test_unsigned_max(self):
         types = np.sctypes["uint"]
         for T in types:
-            with np.errstate(over="ignore"):
-                max_calculated = T(0) - T(1)
+            max_calculated = T(0) - T(1)
             assert_equal(iinfo(T).max, max_calculated)
 
 
@@ -154,8 +153,7 @@ def test_known_types():
     ):
         assert_ma_equal(_discovered_machar(ftype), ma_like)
     # Suppress warning for broken discovery of double double on PPC
-    with np.errstate(all="ignore"):
-        ld_ma = _discovered_machar(np.longdouble)
+    ld_ma = _discovered_machar(np.longdouble)
     bytes = np.dtype(np.longdouble).itemsize
     if (ld_ma.it, ld_ma.maxexp) == (63, 16384) and bytes in (12, 16):
         # 80-bit extended precision
@@ -168,8 +166,7 @@ def test_known_types():
 @pytest.mark.skip(reason="MachAr no implemented (does it need to be)?")
 def test_subnormal_warning():
     """Test that the subnormal is zero warning is not being raised."""
-    with np.errstate(all="ignore"):
-        ld_ma = _discovered_machar(np.longdouble)
+    ld_ma = _discovered_machar(np.longdouble)
     bytes = np.dtype(np.longdouble).itemsize
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

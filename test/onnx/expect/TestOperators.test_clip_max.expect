@@ -23,7 +23,7 @@ graph {
     name: "Clip_1"
     op_type: "Clip"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Clip_0"
     type {

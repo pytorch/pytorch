@@ -328,6 +328,7 @@ class GraphState:
     tensor_values: Dict[str, TensorValue] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
+    is_single_tensor_return: bool = False
 
 
 class GraphModuleSerializer:
@@ -364,9 +365,12 @@ class GraphModuleSerializer:
         assert len(node.args) == 1, "FX.Node's args should have one arg"
         node_args = node.args[0]
         if isinstance(node_args, torch.fx.Node):
-            node_args = (node_args,)
-        assert isinstance(node_args, (tuple, list))
-        self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
+            # For singleton tensor returns
+            self.graph_state.is_single_tensor_return = True
+            self.graph_state.outputs = [self.serialize_input(node_args)]
+        else:
+            assert isinstance(node_args, (tuple, list))
+            self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
 
     def serialize_operator(self, target) -> str:
         if isinstance(target, str):
@@ -715,6 +719,7 @@ class GraphModuleSerializer:
             sym_int_values=self.graph_state.sym_int_values,
             sym_bool_values=self.graph_state.sym_bool_values,
             outputs=self.graph_state.outputs,
+            is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
@@ -854,6 +859,14 @@ class GraphModuleDeserializer:
                 ),
             )
 
+    def deserialize_graph_output(self, output) -> torch.fx.Node:
+        if isinstance(output.value, TensorArgument):
+            return self.serialized_name_to_node[output.value.name]
+        elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
+            return self.serialized_name_to_node[output.value.as_name]
+        else:
+            raise SerializeError(f"Unable to deserialize output node {output}")
+
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
@@ -883,19 +896,24 @@ class GraphModuleDeserializer:
         # Outputs: convert to a single `output` node.
         outputs = []
         for output in serialized_graph.outputs:
-            if isinstance(output.value, TensorArgument):
-                outputs.append(self.serialized_name_to_node[output.value.name])
-            elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
-                outputs.append(self.serialized_name_to_node[output.value.as_name])
-            else:
-                raise SerializeError(f"Unable to deserialize output node {output}")
+            outputs.append(self.deserialize_graph_output(output))
 
+        if serialized_graph.is_single_tensor_return:
+            assert len(outputs) == 1
+            outputs = outputs[0]  # type: ignore[assignment]
+        else:
+            outputs = tuple(outputs)  # type: ignore[assignment]
 
-        output_node = self.graph.output(tuple(outputs))
-        output_node.meta["val"] = tuple(
-            arg.meta["val"] for arg in output_node.args[0]
-        )
-        return output_node
+        output_node = self.graph.output(outputs)
+
+        if serialized_graph.is_single_tensor_return:
+            output_node.meta["val"] = output_node.args[0].meta["val"]
+        else:
+            output_node.meta["val"] = tuple(
+                arg.meta["val"] for arg in output_node.args[0]
+            )
+
+        return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
         if target.__module__ == "_operator":  # TODO(zhxchen17) Follow up on this.
