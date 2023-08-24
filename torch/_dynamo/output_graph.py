@@ -1069,9 +1069,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
-            if self.frame_state["capture_dynamic_output_shape_ops"]:
+            if (
+                e.args[0] == "Cannot convert symbols to int"
+                and self.frame_state["capture_dynamic_output_shape_ops"]
+            ):
                 self.frame_state["capture_dynamic_output_shape_ops"] = False
-                raise RestartAnalysis() from e
+                raise RestartAnalysis() from None
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
             ) from None
