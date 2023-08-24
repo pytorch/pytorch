@@ -359,6 +359,47 @@ class TestFSDPHybridShard(FSDPTest):
                 optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    def test_fsdp_hybrid_shard_accumulation(
+        self,
+    ):
+        fsdp_model = self._init_fsdp_model(use_orig_params=True)
+        global_pg = dist.distributed_c10d._get_default_group()
+        hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
+        hsdp_model = self._init_hsdp_model(
+            ShardingStrategy.HYBRID_SHARD,
+            ShardingStrategyMode.ALL_HYBRID_SHARD,
+            use_orig_params=True,
+            hsdp_process_groups=hsdp_pgs,
+        )
+        assert (
+            hsdp_model._inter_node_pg.size() > 1
+        ), "HSDP model initialized without replication"
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+        hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
+        torch.manual_seed(global_pg.rank() + 1)
+
+        inp = fsdp_model.module.get_input(torch.device("cuda"))
+
+        with fsdp_model.no_sync():
+            for _ in range(3):
+                loss = fsdp_model(*inp).sum()
+                loss.backward()
+        loss = fsdp_model(*inp).sum()
+        loss.backward()
+        fsdp_optim.step()
+        fsdp_loss = fsdp_model(*inp).sum()
+
+        with hsdp_model.no_sync(disable_all_reduce_only=True):
+            for _ in range(3):
+                loss = hsdp_model(*inp).sum()
+                loss.backward()
+        loss = hsdp_model(*inp).sum()
+        loss.backward()
+        hsdp_optim.step()
+        hsdp_loss = hsdp_model(*inp).sum()
+
+        self.assertEqual(fsdp_loss, hsdp_loss)
+
     def _init_fsdp_model(self, use_orig_params: bool) -> nn.Module:
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer},

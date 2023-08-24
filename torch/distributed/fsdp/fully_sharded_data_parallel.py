@@ -1013,7 +1013,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise ValueError(msg)
 
     @contextmanager
-    def no_sync(self) -> Generator:
+    def no_sync(self, disable_all_reduce_only: bool = False) -> Generator:
         """
         A context manager to disable gradient synchronizations across FSDP
         instances. Within this context, gradients will be accumulated in module
@@ -1039,17 +1039,25 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         old_flags = []
         for m in self.modules():
             if isinstance(m, FullyShardedDataParallel):
-                old_flags.append((m, m._sync_gradients))
+                old_flags.append((m, m._sync_gradients, m._disable_all_reduce_only))
                 m._sync_gradients = False
+                # HACK: This is just to unblock. We enable overall gradient
+                # sync to go into the post-backward reduction logic; however,
+                # we disable the all-reduce for HSDP. Variable naming is not
+                # good and needs to be fixed.
+                if disable_all_reduce_only:
+                    m._sync_gradients = True
+                m._disable_all_reduce_only = disable_all_reduce_only
         try:
             yield
         finally:
-            for m, old_flag in old_flags:
-                assert not m._sync_gradients, (
+            for m, old_sync_gradients, old_disable_all_reduce_only in old_flags:
+                assert not m._sync_gradients or m._disable_all_reduce_only, (
                     "`_sync_gradients` was incorrectly set to "
                     "`True` while in the `no_sync()` context manager"
                 )
-                m._sync_gradients = old_flag
+                m._sync_gradients = old_sync_gradients
+                m._disable_all_reduce_only = old_disable_all_reduce_only
 
     @torch.no_grad()
     def clip_grad_norm_(

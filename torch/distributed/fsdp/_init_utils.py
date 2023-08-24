@@ -446,6 +446,7 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
+    state._disable_all_reduce_only = False
     state._comm_hook = None
     state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times

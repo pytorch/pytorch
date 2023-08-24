@@ -870,7 +870,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             padded_unsharded_grad,
             group=state.process_group,
         )
-        if uses_hybrid_sharded_strategy:
+        if uses_hybrid_sharded_strategy and not state._disable_all_reduce_only:
             state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
                 # Since the new sharded gradient is produced in the post-
