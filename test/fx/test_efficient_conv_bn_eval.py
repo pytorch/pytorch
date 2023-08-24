@@ -1,4 +1,3 @@
-import unittest
 from unittest import TestCase
 
 import torch
@@ -8,7 +7,6 @@ from torch.fx.experimental.efficient_conv_bn_eval import turn_on_efficient_conv_
 
 
 class BackboneModel(nn.Module):
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.conv1 = nn.Conv2d(6, 6, 6)
@@ -47,6 +45,6 @@ class TestEfficientConvBNEval(TestCase):
         grads2 = [x.grad.clone() for x in model.parameters() if x.grad is not None]
         assert torch.allclose(output, output2, atol=1e-6)
         assert len(grads) == len(grads2)
-        for (a, b) in zip(grads, grads2):
+        for a, b in zip(grads, grads2):
             print((a - b).abs().max().item())
             assert torch.allclose(a, b, atol=1e-3)
