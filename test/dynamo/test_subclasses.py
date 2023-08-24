@@ -225,6 +225,7 @@ class GraphModule(torch.nn.Module):
             torch.randn([3, 4]),
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
+            # Expect to compile twice once for true and once for false branch
             [1, 1, 2, 2],
         )
 

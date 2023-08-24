@@ -3056,9 +3056,9 @@ class GraphModule(torch.nn.Module):
         false_guard_code = ["L['pred'] == 0"]
         test_symbool_guards(
             f,
-            [3, 4, 5],
-            [true_graph, false_graph, false_graph],
-            [true_guard_code, false_guard_code, false_guard_code],
+            [3, 3, 4, 5],
+            [true_graph, true_graph, false_graph, false_graph],
+            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
         )
 
     def test_invalid_input_global(self) -> None:
