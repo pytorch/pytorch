@@ -336,12 +336,18 @@ def _multi_tensor_asgd(
             # decay term
             decay = torch._foreach_add(torch._foreach_mul(etas, -lambd), 1)
             # update parameter
-            torch._foreach_mul_(grouped_params, torch._foreach_add(torch._foreach_div(torch._foreach_mul(grouped_grads, torch._foreach_mul(etas, -1)), torch._foreach_mul(grouped_params, decay)), 1.0))
+            torch._foreach_mul_(grouped_params,
+                                torch._foreach_add(torch._foreach_div(torch._foreach_mul(grouped_grads,
+                                                                                         torch._foreach_mul(etas, -1)),
+                                                                      torch._foreach_mul(grouped_params, decay)),
+                                                   1.0))
 
             torch._foreach_add_(grouped_axs, torch._foreach_mul(torch._foreach_sub(grouped_params, grouped_axs), grouped_mus))
             # until we have foreach_copy, zero out grouped mus and add
             # these memory bound ops will be fused by the compiler so it doesn't matter
-            torch._foreach_add_(grouped_mus, torch._foreach_sub(torch._foreach_reciprocal(torch._foreach_maximum(torch._foreach_sub(grouped_state_steps, t0), 1.0)), grouped_mus))
+            torch._foreach_copy_(grouped_mus,
+                                 torch._foreach_reciprocal(torch._foreach_maximum(torch._foreach_sub(grouped_state_steps, t0),
+                                                                                  1.0)))
         else:
             # decay term
             eta = _get_value(grouped_etas[0])
