@@ -484,8 +484,6 @@ class ForeachTests(TestCase):
     @requires_cuda()
     @bin_ops
     def test_2d_blocking(self, op):
-        torch._logging.set_logs(output_code=True)
-
         def fn(a0, a1, b0, b1):
             a0_c = torch.cat((a0, a0), 0)
             b0_c = torch.cat((b0, b0), 0)
