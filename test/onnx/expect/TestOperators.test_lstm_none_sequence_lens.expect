@@ -18,7 +18,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   output {
     name: "7"
     type {

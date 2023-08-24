@@ -100,7 +100,8 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
+                or self.device.type
+                in ["lazy", "xla", "mtia", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
@@ -248,7 +249,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT Tensors.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, ORT Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -258,7 +259,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort"] or (
+        if self.device.type in ["xla", "mtia", "ort"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):

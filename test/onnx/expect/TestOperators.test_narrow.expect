@@ -53,7 +53,7 @@ graph {
     name: "Slice_3"
     op_type: "Slice"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Slice_0"
     type {
