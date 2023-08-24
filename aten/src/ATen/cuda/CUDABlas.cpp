@@ -1023,7 +1023,7 @@ void int8_gemm(
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
 
   // cublas team: alpha and beta need to be the same dtype as of scaleType
-  at::opmath_type<int32_t> alpha_val = 1.0;
+  at::opmath_type<int32_t> alpha_val = 1;
   int32_t beta_val = 0;
 
   cublasStatus_t cublasStatus = cublasLtMatmul(
