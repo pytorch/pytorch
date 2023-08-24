@@ -22,7 +22,9 @@ from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
+
 from torch.fx.experimental.symbolic_shapes import (
+    _disable_specialize_zero_one,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -135,8 +137,6 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
-
-from torch.fx.experimental.symbolic_shapes import _disable_specialize_zero_one
 
 log = logging.getLogger(__name__)
 
@@ -683,11 +683,18 @@ class VariableBuilder:
 
             # Create a new SymInt in dynamo shape_env
             with _disable_specialize_zero_one(self.tx.output.shape_env):
-                new_sym = self.tx.output.shape_env.create_symbol(val, source=self.source, dynamic_dim=DimDynamic.DYNAMIC, constraint_dim=None)
+                new_sym = self.tx.output.shape_env.create_symbol(
+                    val,
+                    source=self.source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    constraint_dim=None,
+                )
 
             # dynamo's shape_env cannot use outter_sym_int.node.expr to create new symint
             # since the expr constains symbols in outter shape_env.
-            new_symint = self.tx.output.shape_env.create_symintnode(new_sym, hint=val, source=self.source)
+            new_symint = self.tx.output.shape_env.create_symintnode(
+                new_sym, hint=val, source=self.source
+            )
 
             # Fakified the SymInt with a SymBool to recover the original behavior
             new_symbool = new_symint == 1
@@ -704,7 +711,9 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symbool,
             )
-            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, self.source, None))
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, self.source, None)
+            )
             return SymNodeVariable(
                 sym_node_proxy,
                 new_symbool,

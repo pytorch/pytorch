@@ -8,12 +8,10 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils.checkpoint
 
+from torch._dynamo.testing import normalize_gm
+
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
-from torch._dynamo.testing import normalize_gm
-from torch._functorch.aot_autograd import to_fun
-from torch._higher_order_ops.wrap import wrap
-from functorch.experimental.control_flow import cond
 
 class MockSubclass(torch.Tensor):
     @classmethod
@@ -180,7 +178,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
 
     def test_recompile_with_symbool_inputs(self):
-
         def f(pred: bool):
             if pred:
                 return torch.ones([3, 4])
@@ -203,23 +200,33 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
                     f_cond(pred)
-                    actual = normalize_gm(backend.graphs[exp_frame_count[i]-1].print_readable(print_output=False))
+                    actual = normalize_gm(
+                        backend.graphs[exp_frame_count[i] - 1].print_readable(
+                            print_output=False
+                        )
+                    )
                     self.assertExpectedInline(actual, exp_graphs[i])
                     self.assertEqual(cnt.frame_count, exp_frame_count[i])
 
-        true_graph ="""\
+        true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
         ones = torch.ones([3, 4])
         return (ones,)
 """
-        false_graph ="""\
+        false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
         ones = torch.ones([4, 3])
         return (ones,)
 """
-        test_recompilation(f_cond, torch.randn([3, 4]), [3, 4, 5], [true_graph, false_graph, false_graph], [1, 2, 2])
+        test_recompilation(
+            f_cond,
+            torch.randn([3, 4]),
+            [3, 4, 5],
+            [true_graph, false_graph, false_graph],
+            [1, 2, 2],
+        )
 
 
 if __name__ == "__main__":

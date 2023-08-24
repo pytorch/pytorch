@@ -360,7 +360,7 @@ class SymBool:
         # an if clause, then we have a default guard for SymInt which is >= 0.
         # This always evaluates to True for SymBool though, so it's safe to return True.
         # without creating any guard in shape_env.
-        if isinstance(other, py_int) and other == 0:
+        if isinstance(other, py_int) and other == 0:  # type: ignore[arg-type]
             return True
         else:
             raise RuntimeError(f"Cannot compare SymBool with {other}")

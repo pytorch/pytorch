@@ -2480,7 +2480,7 @@ class ShapeEnv:
             symexpr_true = self.create_symbol(1, torch._dynamo.source.DummyGlobalSource(), DimDynamic.DYNAMIC)
             symexpr_false = self.create_symbol(0, torch._dynamo.source.DummyGlobalSource(), DimDynamic.DYNAMIC)
         # ITE will force simplification while we want to keep the symbolic expr around
-        symint_expr = sympy.Piecewise((symexpr_true, sym_bool.node.expr), (symexpr_false ,True))
+        symint_expr = sympy.Piecewise((symexpr_true, sym_bool.node.expr), (symexpr_false, True))
         return self.create_symintnode(symint_expr, hint=None, source=None)
 
     def create_symbol(
