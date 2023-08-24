@@ -136,6 +136,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
 )
 
+from torch.fx.experimental.symbolic_shapes import _disable_specialize_zero_one
 
 log = logging.getLogger(__name__)
 
@@ -672,6 +673,42 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.SymBool):
+            # Create a SymInt in outside shape_env
+            outter_sym_int = value.node.shape_env.create_symint_from_symbool(value)
+
+            val = outter_sym_int.node.require_hint()
+            assert isinstance(val, int) and (val == 0 or val == 1)
+
+            # Create a new SymInt in dynamo shape_env
+            with _disable_specialize_zero_one(self.tx.output.shape_env):
+                new_sym = self.tx.output.shape_env.create_symbol(val, source=self.source, dynamic_dim=DimDynamic.DYNAMIC, constraint_dim=None)
+
+            # dynamo's shape_env cannot use outter_sym_int.node.expr to create new symint
+            # since the expr constains symbols in outter shape_env.
+            new_symint = self.tx.output.shape_env.create_symintnode(new_sym, hint=val, source=self.source)
+
+            # Fakified the SymInt with a SymBool to recover the original behavior
+            new_symbool = new_symint == 1
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symbool),
+                source=self.source,
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                self.source,
+                new_symbool,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symbool,
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, self.source, None))
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symbool,
+                source=self.source,
             )
         else:
             result = UserDefinedObjectVariable(

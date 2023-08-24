@@ -10,6 +10,10 @@ import torch.utils.checkpoint
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
+from torch._dynamo.testing import normalize_gm
+from torch._functorch.aot_autograd import to_fun
+from torch._higher_order_ops.wrap import wrap
+from functorch.experimental.control_flow import cond
 
 class MockSubclass(torch.Tensor):
     @classmethod
@@ -174,6 +178,48 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             test_automatic_dynamic(f, [x, a, z], dim_dynamic, 3, 3)
             # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
             test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
+
+    def test_recompile_with_symbool_inputs(self):
+
+        def f(pred: bool):
+            if pred:
+                return torch.ones([3, 4])
+            else:
+                return torch.ones([4, 3])
+
+        dim_dynamic = DimDynamic.DYNAMIC
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        f_cond = torch.compile(f, backend=cnt, fullgraph=True)
+
+        def test_recompilation(f, x, sizes, exp_graphs, exp_frame_count):
+            shape_env = ShapeEnv()
+            with torch._subclasses.fake_tensor.FakeTensorMode(
+                shape_env=shape_env
+            ) as fake_mode:
+                fake_inp = fake_mode.from_tensor(
+                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                )
+                for i, size in enumerate(sizes):
+                    pred = fake_inp.size(0) == size
+                    f_cond(pred)
+                    actual = normalize_gm(backend.graphs[exp_frame_count[i]-1].print_readable(print_output=False))
+                    self.assertExpectedInline(actual, exp_graphs[i])
+                    self.assertEqual(cnt.frame_count, exp_frame_count[i])
+
+        true_graph ="""\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        ones = torch.ones([3, 4])
+        return (ones,)
+"""
+        false_graph ="""\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        ones = torch.ones([4, 3])
+        return (ones,)
+"""
+        test_recompilation(f_cond, torch.randn([3, 4]), [3, 4, 5], [true_graph, false_graph, false_graph], [1, 2, 2])
 
 
 if __name__ == "__main__":

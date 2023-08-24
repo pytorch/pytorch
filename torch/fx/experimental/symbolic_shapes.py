@@ -1981,6 +1981,14 @@ class DimConstraints:
 
 TLS = threading.local()
 
+@contextmanager
+def _disable_specialize_zero_one(shape_env):
+    prev = shape_env.specialize_zero_one
+    try:
+        shape_env.specialize_zero_one = False
+        yield
+    finally:
+        shape_env.specialize_zero_one = prev
 
 class ShapeEnv:
     def __init__(
@@ -2466,6 +2474,14 @@ class ShapeEnv:
         # 'positive' is None for unspecified symbols, since we can't
         # assume that it will be neither positive nor negative.
         return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
+
+    def create_symint_from_symbool(self, sym_bool: torch.SymBool):
+        with _disable_specialize_zero_one(self):
+            symexpr_true = self.create_symbol(1, torch._dynamo.source.DummyGlobalSource(), DimDynamic.DYNAMIC)
+            symexpr_false = self.create_symbol(0, torch._dynamo.source.DummyGlobalSource(), DimDynamic.DYNAMIC)
+        # ITE will force simplification while we want to keep the symbolic expr around
+        symint_expr = sympy.Piecewise((symexpr_true, sym_bool.node.expr), (symexpr_false ,True))
+        return self.create_symintnode(symint_expr, hint=None, source=None)
 
     def create_symbol(
         self,

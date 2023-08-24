@@ -354,6 +354,17 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
+    def __ge__(self, other):
+        # This can happen in dynamo, where we convert SymBool to a
+        # SymInt and if no restrictions are put on the SymInt e.g. used in
+        # an if clause, then we have a default guard for SymInt which is >= 0.
+        # This always evaluates to True for SymBool though, so it's safe to return True.
+        # without creating any guard in shape_env.
+        if isinstance(other, py_int) and other == 0:
+            return True
+        else:
+            raise RuntimeError(f"Cannot compare SymBool with {other}")
+
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
