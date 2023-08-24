@@ -7,7 +7,12 @@ from torch._export.pass_base import _ExportPassBase
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation, QuantizationSpecBase
 
-from torch.ao.quantization.quantizer.utils import _is_sym_size_node
+from torch.ao.quantization.pt2e.utils import (
+    _filter_sym_size_users,
+    _find_q_dq_node_for_user,
+    _is_valid_annotation,
+)
+
 from torch.fx.passes.infra.pass_base import PassResult
 
 
@@ -44,47 +49,6 @@ def _add_metadata(to_node: torch.fx.Node, from_node: torch.fx.Node) -> None:
 
 def _has_quant_annotation(node: torch.fx.Node) -> bool:
     return "quantization_annotation" in node.meta
-
-
-def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
-    if target.op == "output":
-        return False
-    if next_node == target:
-        return True
-    for n in next_node.users.keys():
-        if _is_connected(n, target):
-            return True
-    return False
-
-
-def _filter_sym_size_users(node: torch.fx.Node) -> List[torch.fx.Node]:
-    node_users = list(filter((lambda x: (_is_sym_size_node(x) is False)), node.users))
-    return node_users
-
-
-def _find_q_dq_node_for_user(
-    produer: torch.fx.Node, user: torch.fx.Node
-) -> Optional[torch.fx.Node]:
-    q_node = None
-    for n in produer.users.keys():
-        if n.op == "call_function" and n.target in _QUANTIZE_OPS:
-            if _is_connected(n, user):
-                q_node = n
-                break
-    if q_node is None:
-        return (None, None)
-
-    q_node_users = _filter_sym_size_users(q_node)
-    if len(q_node_users) > 1:
-        raise InternalError(f"Expecting single user for {q_node}")
-    dq_node = q_node_users.pop()
-    if dq_node.op == "call_function" and dq_node.target not in _DEQUANTIZE_OPS:
-        raise InternalError(f"Expecting {dq_node} to be a dequantize op")
-    dq_node_users = _filter_sym_size_users(dq_node)
-    if len(dq_node_users) > 1:
-        raise InternalError(f"Expecting single user for {dq_node}")
-
-    return (q_node, dq_node)
 
 
 def _find_choose_qparams_node(node: torch.fx.Node) -> Optional[torch.fx.Node]:
@@ -155,16 +119,6 @@ def _port_metadata_for_output_quant_nodes(
         return
 
     _add_metadata(q_node, node)
-
-
-def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
-    if annotation is None:
-        return False
-    input_qspec_map = annotation.input_qspec_map
-    output_qspec = annotation.output_qspec
-    if len(input_qspec_map) == 0 and output_qspec is None:
-        return False
-    return True
 
 
 class PortNodeMetaForQDQ(_ExportPassBase):

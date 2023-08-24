@@ -29,6 +29,7 @@ from torch.ao.quantization.backend_config import BackendConfig
 from typing import Any, Tuple
 
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
 from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
 
 __all__ = [
@@ -98,7 +99,9 @@ def convert_pt2e(
     _replace_dropout_for_eval(model)
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
-    print(model)
+    pm = PassManager([DuplicateDQPass()])
+    model = pm(model).graph_module
+
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
     if use_reference_representation:

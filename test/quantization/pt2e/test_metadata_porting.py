@@ -5,7 +5,7 @@ from typing import List
 import torch
 import torch._export as export
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer import OperatorConfig, Quantizer
+from torch.ao.quantization.quantizer import Quantizer
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
@@ -127,10 +127,6 @@ class TestMetaDataPorting(QuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
-                pass
-
         example_inputs = (torch.randn(1, 3, 5, 5),)
         quantize_per_tensor_tags = {
             "BackendA_conv2d_0",
@@ -179,10 +175,6 @@ class TestMetaDataPorting(QuantizationTestCase):
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -238,10 +230,6 @@ class TestMetaDataPorting(QuantizationTestCase):
                 _tag_partitions(backend_string, "linear_dynamic", annotated_partitions)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -303,10 +291,6 @@ class TestMetaDataPorting(QuantizationTestCase):
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
-                pass
-
         example_inputs = (torch.randn(1, 3, 5, 5),)
         choose_qparams_tensor_tags = {
             "BackendA_conv2d_dynamic_0",
@@ -359,10 +343,6 @@ class TestMetaDataPorting(QuantizationTestCase):
                 _tag_partitions(backend_string, "linear_dynamic", annotated_partitions)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-            @classmethod
-            def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
