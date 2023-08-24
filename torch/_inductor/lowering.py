@@ -59,6 +59,11 @@ needs_realized_inputs = set()
 foreach_ops = set()
 
 
+def assert_nyi(cond, msg):
+    if not cond:
+        raise NotImplementedError(f"inductor does not support {msg}")
+
+
 def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, tuple, set)):
         return [add_needs_realized_inputs(x) for x in fn]
@@ -190,9 +195,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
-                if arg.get_dtype() != dtype:
-                    return to_dtype(arg, dtype)
-                return arg
+                return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
@@ -491,10 +494,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
-        return clone(x)
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -502,10 +504,14 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
+def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    return to_dtype(x, dtype, copy=True)
+
+
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
@@ -526,12 +532,21 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
-@register_lowering(prims.device_put, type_promotion_kind=None)
-def to_device(x: TensorBox, device: torch.device):
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    return to_dtype_bitcast(x, dtype, copy=True)
+
+
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
-        return clone(x)
+        return clone(x) if copy else x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(prims.device_put, type_promotion_kind=None)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -1462,7 +1477,6 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
     if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
@@ -1871,7 +1885,7 @@ def copy(self, src, non_blocking=False):
 
 
 @register_lowering(aten.clone)
-def clone(x, *, memory_format=0):
+def clone(x, *, memory_format=None):
     # TODO(jansel): memory format
     return Pointwise.create(
         device=x.get_device(),
@@ -2018,8 +2032,8 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
-    assert layout in (None, torch.strided)
-    assert pin_memory is False
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -2140,10 +2154,9 @@ def tensor_constructor(fill_value):
         pin_memory=False,
         memory_format=None,
     ):
-        assert names is None
-        assert not pin_memory
-        assert layout in (None, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+        assert_nyi(names is None, "named tensors")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+        assert_nyi(not pin_memory, "pin_memory")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -2164,8 +2177,7 @@ def empty(
     pin_memory=None,
     memory_format=None,
 ):
-    assert names is None
-    assert memory_format in (None, torch.contiguous_format)
+    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -2182,8 +2194,8 @@ def create_tensor_like(creation_fn):
     def _constant_like(
         x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -2211,8 +2223,8 @@ def new_constant(fill_value):
         x, size, *, dtype=None, layout=None, device=None, pin_memory=None
     ):
         assert isinstance(size, (list, tuple))
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -2238,8 +2250,8 @@ def empty_strided(
 ):
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
-    assert not pin_memory
-    assert layout in (None, torch.strided)
+    assert_nyi(not pin_memory, "pin_memory")
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
@@ -3724,7 +3736,7 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    assert not divisor_override
+    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
     if not stride:
         stride = kernel_size
     if not padding:
@@ -3831,7 +3843,9 @@ def avg_pool2d_backward(
                 ph = ops.add(phstart, ops.constant(ph_, torch.int32))
                 pw = ops.add(pwstart, ops.constant(pw_, torch.int32))
 
-                if count_include_pad or not had_padding:
+                if divisor_override is not None:
+                    scale = divisor_override
+                elif count_include_pad or not had_padding:
                     scale = kernel_size[0] * kernel_size[1]
                 else:
                     scale = compute_pool_size_without_padding(ph, pw)
@@ -4025,35 +4039,41 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim):
-    # triton-rocm currently doesn't support tl.reduce
-    device = x.get_device()
-    if device.type == "cuda" and torch.version.hip is not None:
-        return True
-
-    # Single pass variance cannot be split, so use sum based var-mean if it
-    # would be split
+    # Instead of unrolling welford, just unroll the simpler two-step var
+    axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
-        x,
-        axis=axis,
-        keepdims=keepdim,
-        dtype=x.get_dtype(),
-        override_return_dtype=None,
+        x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
     )
-    _, split = ir.Reduction.num_splits(
-        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
-        reduction_type="sum",
-        **kwargs,
+
+    ranges = kwargs["ranges"]
+    reduction_numel = sympy_product(kwargs["reduction_ranges"])
+    return (
+        isinstance(reduction_numel, sympy.Integer)
+        and int(reduction_numel) < config.unroll_reductions_threshold
+        and sympy_product(ranges) != 1
     )
-    return split > 1
 
 
-def var_welford_(x, axis, *, correction, keepdim):
+def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if correction is None:
         correction = 1
 
-    sum_dx2 = make_reduction("var_unnormalized")(x, axis=axis, keepdims=keepdim)
+    kwargs = _make_reduction_inner(
+        x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
+    )
+    loader = kwargs.pop("inner_fn")
+    kwargs.pop("dst_dtype")
+    kwargs.pop("src_dtype")
 
-    dtype = sum_dx2.get_dtype()
+    mean, m2, _ = ir.WelfordReduction.create(
+        inner_fns=(loader,),
+        reduction_type="welford_reduce",
+        dtype=x.get_dtype(),
+        **kwargs,
+    )
+    m2.realize()
+
+    dtype = x.get_dtype()
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     rnumel = sympy_product(size[i] for i in axis)
@@ -4068,7 +4088,12 @@ def var_welford_(x, axis, *, correction, keepdim):
         N = get_constant_or_index_expr(rnumel, dtype)
         return data / (N - c)
 
-    return make_pointwise(scale_fn)(sum_dx2)
+    var = make_pointwise(scale_fn)(m2)
+
+    if return_mean:
+        mean.realize()
+        return var, mean
+    return var
 
 
 @register_lowering([aten.var, prims.var])
@@ -4078,7 +4103,9 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
             x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
         )
 
-    return var_welford_(x, axis=axis, correction=correction, keepdim=keepdim)
+    return var_mean_welford_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+    )
 
 
 @register_lowering(aten.var_mean)
@@ -4088,9 +4115,8 @@ def var_mean(x, axis=None, *, correction=None, keepdim=False):
             x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
         )
 
-    return (
-        var_welford_(x, axis=axis, correction=correction, keepdim=keepdim),
-        mean(x, axis=axis, keepdim=keepdim),
+    return var_mean_welford_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
 
@@ -4506,6 +4532,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
+register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 def register_inplace(aten_op, outplace_op):

@@ -5,9 +5,15 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     BarrierOptions,
-    ReduceScatterOptions
+    ReduceScatterOptions,
+    BroadcastOptions,
+    ScatterOptions,
+    AllToAllOptions
 )
 from torch.futures import Future
+
+from typing import List
+from torch import Tensor
 
 
 def ret_work(ret):
@@ -69,6 +75,35 @@ class FakeProcessGroup(dist.ProcessGroup):
     def barrier(self, opts=BarrierOptions()):
         # it should be no-op for fake pg
         pass
+
+    def broadcast(self, tensors: List[Tensor], opts=BroadcastOptions()):
+        return ret_work(tensors)
+
+    def scatter(
+        self,
+        output_tensors: List[Tensor],
+        input_tensors: List[List[Tensor]],
+        opts=ScatterOptions(),
+    ):
+        return ret_work(output_tensors)
+
+    def alltoall(
+        self,
+        output_tensors: List[Tensor],
+        input_tensors: List[Tensor],
+        opts=AllToAllOptions(),
+    ):
+        return ret_work(output_tensors)
+
+    def alltoall_base(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: List[int],
+        input_split_sizes: List[int],
+        opts=AllToAllOptions(),
+    ):
+        return ret_work(output_tensor)
 
     def getBackendName(self):
         return "fake"

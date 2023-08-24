@@ -20,17 +20,16 @@ from torch.ao.quantization.observer import (
 
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
-from torch.fx import Node
+from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
-from .quantizer import (
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
     QuantizationConfig,
-    QuantizationSpec,
-    Quantizer,
 )
 
-from .xnnpack_quantizer_utils import OP_TO_ANNOTATOR
+from torch.fx import Node
 
 
 __all__ = [
