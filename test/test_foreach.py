@@ -163,9 +163,12 @@ class TestForeach(TestCase):
             try:
                 with ctxmgr:
                     actual = func([sample.input, *sample.args], self.is_cuda, expect_fastpath, **kwargs)
-            # TODO(crcrpar): Check the pattern as well by using `assertRaisesRegex`
             except Exception as e:
-                with self.assertRaises(type(e)):
+                with (
+                    self.assertRaisesRegex(type(e), re.escape(str(e)))
+                    if not (op.has_no_in_place or op.has_no_out_of_place)
+                    else self.assertRaises(type(e))
+                ):
                     ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
             else:
                 expected = ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
