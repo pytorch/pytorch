@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import get_handle_fqns_from_root
+from torch.distributed.fsdp._common_utils import _get_handle_fqns_from_root
 from torch.distributed.fsdp._runtime_utils import (
     _get_handle_to_prefetch,
     _get_training_state,
@@ -122,7 +122,7 @@ class TestBackwardPrefetch(FSDPTest):
                 nonlocal all_handle_fqns
                 # FQNs prefixed from the root module
                 # state._exec_order_data.param_to_fqn
-                fqns = get_handle_fqns_from_root(state, handle)
+                fqns = _get_handle_fqns_from_root(state, handle)
                 all_handle_fqns.append(fqns)
             return handle
 
@@ -149,7 +149,7 @@ class TestBackwardPrefetch(FSDPTest):
                     # prefetch order
                     #     decoder 5...0 -> encoder 5...0 -> None
                     # None: when current_handle=encoder 0,
-                    #       handles_post_forward_order returns None
+                    #       _get_handle_to_prefetch returns None
                     # +1 is for the above None
                     encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_PRE
                     self.assertEqual(
@@ -157,16 +157,17 @@ class TestBackwardPrefetch(FSDPTest):
                     )
                 elif backward_prefetch == BackwardPrefetch.BACKWARD_POST:
                     # state._exec_order_data.handles_post_forward_order
-                    # equals forward order
+                    # equals forward order (same as BACKWARD_PRE)
                     #     encoder 0...5 -> decoder 0...5 -> root
                     # post-backward hook (AccumulateGrad) order
                     #     decoder 5, 4...0 -> encoder 5...0 -> root
                     # prefetch order
                     #     decoder 4...0 -> encoder 5...0 -> None -> None
                     # 1st None: when current_handle=encoder 0,
-                    #           handles_post_forward_order returns None
+                    #           _get_handle_to_prefetch returns None
                     # 2nd None: when current_handle=root,
-                    #           handles_post_forward_order returns decoder 5 but not needed
+                    #           get decoder 5 inside _get_handle_to_prefetch
+                    #           but not needed since decoder 5 is computed already
                     # +2 is for the above Nones
                     encoder_begin_index = ENCODER_BEGIN_INDEX_FOR_POST
                     self.assertEqual(

@@ -360,12 +360,12 @@ def _log_post_backward_hook(
     # Below logging of module names this post-bwd hook fires for can help debug certain
     # cases where hooks don't fire, such as under certain activation checkpoint configs.
     if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
-        param_fqns = get_handle_fqns_from_root(state, handle)
+        param_fqns = _get_handle_fqns_from_root(state, handle)
         log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
 @no_type_check
-def get_handle_fqns_from_root(
+def _get_handle_fqns_from_root(
     state: _FSDPState, handle: "FlatParamHandle"
 ) -> Optional[List[str]]:
     if handle is None:
