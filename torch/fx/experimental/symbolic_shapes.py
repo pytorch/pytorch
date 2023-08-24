@@ -1810,7 +1810,7 @@ class DimConstraints:
             if s not in self._substitutions
         }
 
-    def solve(self, disable_congruences=True):
+    def solve(self, disable_congruences=True, disable_equivalences=True):
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
@@ -1869,11 +1869,17 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
+            if disable_equivalences and not isinstance(expr, sympy.Symbol):
+                for s in expr.free_symbols:
+                    self._force_specialization(s)
+                    sexpr = self._dcp._print_Symbol(s)
+                    self._dynamic_results = {r for r in self._dynamic_results if sexpr not in r}
             self.add_equality(source, expr.subs(self._substitutions))
 
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
+
 
     def forced_specializations(self):
         return "\n".join([
@@ -2542,6 +2548,24 @@ class ShapeEnv:
 
         return r
 
+    def render_range_for_constraint_violation(self, source, c):
+        if isinstance(c, StrictMinMaxConstraint):
+            lower, upper = c.vr.lower, c.vr.upper
+            default = self._default_value_range()
+            if lower <= default.lower:
+                lower = None
+            if upper >= default.upper:
+                upper = None
+            c_render = f"{source.name()} in the specified range"
+            if lower is not None and upper is not None:
+                c_render += f" {lower} <= {source.name()} <= {upper}"
+            elif lower is None and upper is not None:
+                c_render += f" {source.name()} <= {upper}"
+            elif lower is not None and upper is None:
+                c_render += f" {lower} <= {source.name()}"
+            return c_render
+        return c.render(source)
+
     # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
@@ -2665,7 +2689,7 @@ class ShapeEnv:
 
         def record_constraint_violation(warn_only, msg, hint=None):
             constraint_violations.append(
-                (warn_only, lambda: f"{msg} {hint()}" if hint else msg)
+                (warn_only, lambda: f"{msg}{hint()}" if hint else msg)
             )
 
         def is_dim(src):
@@ -2711,21 +2735,16 @@ class ShapeEnv:
                                 constraint_violated = True
                     if constraint_violated:
                         def hint(s):
-                            if s.free_symbols:
-                                return (
-                                    f"Perhaps you meant to specify a constraint on {s.free_symbols}?" +
-                                    "; ".join(
-                                        f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
-                                        for s0 in s.free_symbols
-                                    )
-                                )
-                            else:
-                                return "Did you really mean to mark this dimension as dynamic?"
+                            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
+                            return (
+                                f"{sexpr}. For more information about this inference, "
+                                "run with TORCH_LOGS=dynamic."
+                            )
 
+                        var_with_range = self.render_range_for_constraint_violation(source, constraint)
                         msg = (
-                            f"Could not validate constraint {constraint.render(source)} as "
-                            f"{source.name()} is actually a non-atomic symbolic expression "
-                            f"{s}."
+                            f"Not all values of {var_with_range} are valid because "
+                            f"{source.name()} was inferred to be equal to "
                         )
                         record_constraint_violation(
                             constraint.warn_only,
@@ -2746,10 +2765,12 @@ class ShapeEnv:
                     if val not in (0, 1):
                         constraint_violated = True
                 if constraint_violated:
+                    var_with_range = self.render_range_for_constraint_violation(source, constraint)
                     msg = (
-                        f"Could not validate constraint {constraint.render(source)} as "
-                        f"{source.name()} was inferred to be constant ({val}).  For more information "
-                        "about why it is constant, run with TORCH_LOGS=dynamic"
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{source.name()} was inferred to be a constant ({val}). "
+                        "For more information about why it is constant, "
+                        "run with TORCH_LOGS=dynamic."
                     )
                     record_constraint_violation(constraint.warn_only, msg)
 
@@ -2858,9 +2879,12 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
+                            var_with_range = self.render_range_for_constraint_violation(source, c)
                             msg = (
-                                f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}."
+                                f"Not all values of {var_with_range} "
+                                f"satisfy the generated guard {guard_expr}. "
+                                "For more information about why this guard was generated, "
+                                "run with TORCH_LOGS=dynamic."
                             )
                             record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
@@ -2902,24 +2926,6 @@ class ShapeEnv:
                 r = self.runtime_var_to_range.get(symbol)
                 if r is None:
                     r = self.var_to_range[symbol]
-
-                for c in symbol_to_constraints[symbol]:
-                    if isinstance(c, StrictMinMaxConstraint):
-                        # Refine the user VR based on default value range, as
-                        # no matter what the user specifies, we will have
-                        # narrowed it according to the default range
-                        c_vr = c.vr & self._default_value_range()
-                        # NB: exact match is OK here, because we already
-                        # applied the constraint when we allocated the symbol
-                        # originally.  Otherwise, should only assert that
-                        # vr is superset of c_vr
-                        if not (c_vr.lower <= r.lower and c_vr.upper >= r.upper):
-                            msg = (
-                                f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
-                            )
-                            record_constraint_violation(c.warn_only, msg)
-
                 assert sources
                 assert symbol.is_integer
                 g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
