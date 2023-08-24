@@ -9,7 +9,11 @@ from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
 )
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import (
+    DeviceMesh,
+    init_device_mesh,
+    mesh_resources,
+)
 from torch.distributed._tensor.placement_types import Shard
 
 from torch.distributed.distributed_c10d import (
@@ -155,6 +159,95 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
+
+
+class InitDeviceMeshTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_init_device_mesh(self):
+        mesh_shape = (2, 4)
+        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
+
+        # test init_device_mesh with mesh_dim_names
+        mesh_dim_names = ("DP", "TP")
+        two_d_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        self.assertEqual(two_d_mesh, ref_mesh)
+        self.assertEqual(two_d_mesh.mesh_dim_names, mesh_dim_names)
+
+        # test init_device_mesh without mesh_dim_names
+        two_d_mesh = init_device_mesh(self.device_type, mesh_shape)
+        self.assertEqual(two_d_mesh, ref_mesh)
+
+
+class TestDeviceMeshGetItem(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_raises_mesh_dim_less_than_2(self):
+        with self.assertRaisesRegex(RuntimeError, "Cannot slice a DeviceMesh"):
+            mesh = init_device_mesh(self.device_type, (8,))
+            child_mesh = mesh["DP"]
+
+    @with_comms
+    def test_raises_no_mesh_dim_found(self):
+        with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
+            mesh = init_device_mesh(self.device_type, (2, 4))
+            child_mesh = mesh["DP"]
+
+    @with_comms
+    def test_raises_invalid_mesh_dim_name(self):
+        child_mesh_dim_name = "PP"
+        with self.assertRaisesRegex(
+            KeyError, f"Mesh dimension '{child_mesh_dim_name}' does not exist."
+        ):
+            mesh_dim_names = ("DP", "TP")
+            mesh = init_device_mesh(
+                self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
+            )
+            child_mesh = mesh[child_mesh_dim_name]
+
+    @with_comms
+    def test_get_item(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("DP", "TP")
+        two_d_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        pg_ranks_by_dim_name = {}
+        for mesh_dim_name in mesh_dim_names:
+            mesh_dim = mesh_dim_names.index(mesh_dim_name)
+            pg_ranks_by_dim_name[mesh_dim_name] = two_d_mesh.mesh.swapdims(
+                -1, mesh_dim
+            ).reshape(-1, two_d_mesh.mesh.size(mesh_dim))
+
+        tp_mesh = two_d_mesh["TP"]
+        tp_group_idx = self.rank // 4
+        self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
+
+        dp_mesh = two_d_mesh["DP"]
+        dp_group_idx = self.rank % 4
+        self.assertEqual(
+            two_d_mesh["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx]
+        )
+
+    @with_comms
+    def test_get_parent_mesh(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("DP", "TP")
+        two_d_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["DP"]), two_d_mesh)
+        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["TP"]), two_d_mesh)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

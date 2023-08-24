@@ -27,7 +27,7 @@ import sympy
 
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 
 
 @dataclass
@@ -199,7 +199,13 @@ class IndexPropagation:
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
-        if new_expr is NotImplemented:
+        is_valid_expr = new_expr is not NotImplemented and (
+            # Inductor doesn't expect floating point in sympy expressions, but
+            # allow floating point constants to be propagated
+            isinstance(new_expr.expr, sympy.Number)
+            or new_expr.expr.is_integer
+        )
+        if not is_valid_expr:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
@@ -223,7 +229,12 @@ class IndexPropagation:
     def indirect_indexing(
         self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
+        # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
+        #     for SymPy expressions, so we don't want to repeat idx too much
+
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
-            return index.value.expr
+            # If we are turning a indirect indexing into direct, we need to wrap it.
+            index = index.value.expr
+            return index + Where(index >= 0, 0, size)
         return self.fallback("indirect_indexing", (index, size, check), {}).value
