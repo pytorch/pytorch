@@ -259,6 +259,17 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("aot_eager")(model)
         opt_model()
 
+    def test_issue90375(self):
+        class Model(nn.Module):
+            def forward(self):
+                return torch.randn(3) * torch.randn(3)
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model()
+
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
@@ -277,7 +288,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertFalse(config.optimize_ddp)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
-            m = torch._dynamo.optimize("aot_eager")(m)
+            m = torch.compile(m, fullgraph=True, backend="aot_eager")
             outputs = m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
