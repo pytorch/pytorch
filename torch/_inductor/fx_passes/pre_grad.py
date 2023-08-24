@@ -1,14 +1,17 @@
 import copy
 import logging
+import operator
 from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import counters, detect_fake_mode
+from torch._subclasses import FakeTensor
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -17,6 +20,7 @@ from .. import config
 
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
+    CallFunctionVarArgs,
     init_once_fakemode,
     PatternMatcherPass,
     stable_topological_sort,
@@ -65,6 +69,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        boolean_mask_rewritten(gm.graph)
         group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
@@ -461,3 +466,58 @@ def transpose_matmul(
     if Btrans:
         B = B.transpose(-1, -2)
     return torch.matmul(A, B)
+
+
+_pointwise_ops = [
+    operator.add,
+    operator.sub,
+    operator.mul,
+    operator.iadd,
+    operator.isub,
+    operator.imul,
+    operator.itruediv,
+    operator.ifloordiv,
+]
+
+
+def boolean_mask_rewritten(graph: torch.fx.Graph) -> torch.fx.Graph:
+    for node in graph.nodes:
+        if CallFunctionVarArgs(operator.setitem).match(node):
+            # value = pointwise_op(tensor[index])
+            # tensor[index] = value
+            tensor, index, value = node.args
+            if (
+                "example_value" in index.meta
+                and isinstance(index.meta["example_value"], FakeTensor)
+                and index.meta["example_value"].dtype == torch.bool
+            ):
+                if CallFunctionVarArgs(_pointwise_ops).match(value):
+                    pointwise_op = value.target
+                    arg1, arg2 = value.args
+                    if CallFunctionVarArgs(operator.getitem).match(arg1):
+                        _tensor, _index = arg1.args
+                        if _tensor is tensor and _index is index:
+                            # Matched!
+                            # replace `tensor[index] = pointwise_op(tensor[index])`
+                            # with `tensor = torch.where(index, pointwise_op(tensor), tensor)`
+
+                            with graph.inserting_before(node):
+                                transformed_value_node = graph.call_function(
+                                    pointwise_op,
+                                    args=(tensor, arg2),
+                                )
+                                where_node = graph.call_function(
+                                    torch.where,
+                                    args=(index, transformed_value_node, tensor),
+                                    kwargs={"out": tensor},
+                                )
+                            node.replace_all_uses_with(where_node)
+                            where_node.meta.update(node.meta)
+                            graph.erase_node(node)
+                            graph.erase_node(value)
+                            graph.erase_node(arg1)
+
+                            counters["inductor"]["boolean_mask_rewritten"] += 1
+                            log.info(
+                                "Replaced tensor[index] = pointwise_op(tensor[index]) with where op."
+                            )

@@ -11,6 +11,7 @@ import torch
 import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -389,6 +390,41 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    def test_boolean_mask_rewritten(self, device):
+        counters.clear()
+
+        def fn(x, y):
+            x[y] *= 0.2
+            return x
+
+        x = torch.rand(1, 2, 3, device=device)
+        x1 = x.clone()
+        y = torch.rand(1, 2, 3, device=device).to(torch.bool)
+        cfn = self.compile_fn(fn)
+
+        expect = fn(x, y)
+        actual = cfn(x1, y)
+        self.assertEqual(expect, actual)
+        self.assertEqual(counters["inductor"]["boolean_mask_rewritten"], 1)
+        self.assertFalse("graph_break" in counters.keys())
+
+    def test_boolean_mask_rewritten_restart_analysis(self, device):
+        counters.clear()
+
+        def fn(x, y):
+            return x[y] + 1
+
+        x = torch.rand(1, 2, 3, device=device)
+        x1 = x.clone()
+        y = torch.rand(1, 2, 3, device=device).to(torch.bool)
+        cfn = self.compile_fn(fn)
+
+        expect = fn(x, y)
+        actual = cfn(x1, y)
+        self.assertEqual(expect, actual)
+        self.assertEqual(counters["inductor"]["boolean_mask_rewritten"], 0)
+        self.assertTrue("graph_break" in counters.keys())
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
