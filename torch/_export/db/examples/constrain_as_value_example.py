@@ -11,7 +11,7 @@ from torch._export.constraints import constrain_as_value
         "torch.escape-hatch",
     },
 )
-def constrain_as_value(x, y):
+def constrain_as_value_example(x, y):
     """
     If the value is not known at tracing time, you can provide hint so that we
     can trace further. Please look at constrain_as_value and constrain_as_size APIs.

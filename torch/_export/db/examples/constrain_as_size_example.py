@@ -5,13 +5,13 @@ from torch._export.constraints import constrain_as_size
 
 
 @export_case(
-    example_inputs=(torch.tensor(4), torch.randn(5, 5)),
+    example_inputs=(torch.tensor(4),),
     tags={
         "torch.dynamic-value",
         "torch.escape-hatch",
     },
 )
-def constrain_as_size(x):
+def constrain_as_size_example(x):
     """
     If the value is not known at tracing time, you can provide hint so that we
     can trace further. Please look at constrain_as_value and constrain_as_size APIs

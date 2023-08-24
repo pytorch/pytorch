@@ -1369,7 +1369,7 @@ def get_fake_value(node, tx):
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
                 "You will need to explicitly give hint to the compiler. Please take a look at "
                 "constrain_as_value OR constrain_as_size APIs",
-                case_name="constrain_as_size",
+                case_name="constrain_as_size_example",
             )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
