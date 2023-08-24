@@ -235,8 +235,8 @@ class SendBuffer {
  public:
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
-    const uint8_t* tmp_ptr = (const uint8_t*)&queryMagicNumber;
-    buffer.reserve(36); // enough for most commands
+    auto *tmp_ptr = static_cast<const uint8_t>(queryMagicNumber);
+    buffer.reserve(32 + sizeof(queryMagicNumber)); // enough for most commands
     for (int i = 0; i < 4; i++) {
       buffer.push_back(tmp_ptr[i]);
     }
