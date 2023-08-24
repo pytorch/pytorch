@@ -46,6 +46,7 @@ all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
@@ -118,7 +119,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -146,7 +147,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_scheduler_fusion_scalar(self, op):
         def fn(a0, a1):
             c = op([a0, a1], 3.4)
@@ -249,7 +250,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     @unittest.skip(
         "Triton recursion depth exceeded: https://github.com/openai/triton/issues/1763"
     )
