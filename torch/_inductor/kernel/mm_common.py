@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import List, Tuple, cast
+from typing import cast, List, Tuple
 
 import sympy
 

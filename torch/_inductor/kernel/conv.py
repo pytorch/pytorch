@@ -5,7 +5,6 @@ import logging
 from typing import cast, List, Tuple, TypedDict
 
 import torch
-import torch._inductor.config as inductor_config
 from .. import config, ir
 from ..ir import TensorBox
 
