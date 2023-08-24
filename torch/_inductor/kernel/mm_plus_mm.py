@@ -103,83 +103,89 @@ mm_plus_mm_template = TritonTemplate(
 def mm_configs():
     import triton
 
-    # these have been tweaked to workaround register issues
-    if torch.version.hip is None:
-        return [
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
-                num_stages=4,
-                num_warps=16,
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
-                num_stages=1,
-                num_warps=8,
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128},
-                num_stages=1,
-                num_warps=8,
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
-            ),
-            triton.Config(
-                {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-            ),
+    # List of dictionaries to store the kernel configs. Configs that evaluate to true
+    # will be utilised on the target platform
+    mm_triton_configs = [
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 2,
+            "num_warps": 4,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 3,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 16,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": torch.version.hip is None,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16},
+            "num_stages": 2,
+            "num_warps": 4,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16},
+            "num_stages": 1,
+            "num_warps": 2,
+            "cond": True,
+        },
+    ]
+
+    # Filter out configs in which cond evaluates to true
+    # On ROCm convert num_stages to 1 as pipelining provides no benefit
+    if torch.version.hip:
+        filtered_configs = [
+            triton.Config(c["config"], num_stages=1, num_warps=c["num_warps"])
+            for c in mm_triton_configs
+            if c["cond"]
         ]
     else:
-        # Separate ROCm configs as pipelining currently gives no benefit
-        # so we need to set "num_stages" to 1 and carefully pick the block configs
-        # to avoid running out of shared memory
-        return [
+        filtered_configs = [
             triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=1, num_warps=4
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=1, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
-                num_stages=1,
-                num_warps=16,
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=1, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=1, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
-                num_stages=1,
-                num_warps=8,
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
-            ),
-            triton.Config(
-                {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=1, num_warps=4
-            ),
-            triton.Config(
-                {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-            ),
+                c["config"], num_stages=c["num_stages"], num_warps=c["num_warps"]
+            )
+            for c in mm_triton_configs
+            if c["cond"]
         ]
+
+    return filtered_configs
 
 
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
