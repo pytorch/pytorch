@@ -67,16 +67,6 @@ CUDAGraph::CUDAGraph()
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-#ifdef USE_C10D_NCCL
-  // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
-  // the graph capture.
-  while (!c10d::ProcessGroupNCCL::watchDogsDone()) {
-    TORCH_WARN("Attempting to start graph capture but NCCL ProcessGroup(s) have remaining enqueued work. Waiting for enqueued work to finish...");
-    // Yield
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(_busy_wait_millis));
-  }
-#endif
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -126,6 +116,17 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
+
+#ifdef USE_C10D_NCCL
+  // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
+  // the graph capture.
+  while (!c10d::ProcessGroupNCCL::watchDogsDone()) {
+    TORCH_WARN("Attempting to start graph capture but NCCL ProcessGroup(s) have remaining enqueued work. Waiting for enqueued work to finish...");
+    // Yield
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(_busy_wait_millis));
+  }
+#endif
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
