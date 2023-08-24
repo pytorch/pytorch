@@ -11,5 +11,5 @@ def DistributedDataParallelCPU(*args, **kwargs):
     import warnings
     warnings.warn("torch.nn.parallel.DistributedDataParallelCPU is deprecated, "
                   "please use torch.nn.parallel.DistributedDataParallel instead.",
-                  DeprecationWarning, stacklevel=2)
+                  stacklevel=2)
     return DistributedDataParallel(*args, **kwargs)

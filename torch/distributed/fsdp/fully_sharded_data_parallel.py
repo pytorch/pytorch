@@ -1184,7 +1184,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if optim_input is not None:
             warnings.warn(
                 "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
-                "from your code without changing its functionality.", DeprecationWarning, stacklevel=2,
+                "from your code without changing its functionality.",
+                stacklevel=2,
             )
 
     @staticmethod
@@ -1204,7 +1205,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
             f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
-            DeprecationWarning, stacklevel=2,
+            stacklevel=2,
         )
 
     @staticmethod

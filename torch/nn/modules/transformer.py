@@ -279,8 +279,7 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn.num_heads is odd"
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
-            warnings.warn("enable_nested_tensor is True, but self.use_nested_tensor is False "
-                          f"because {why_not_sparsity_fast_path}",
+            warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}",
                           stacklevel=2)
             self.use_nested_tensor = False
 

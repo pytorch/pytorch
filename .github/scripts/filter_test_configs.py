@@ -435,9 +435,7 @@ def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> An
         except Exception as e:
             warnings.warn(f"Could not download {url}: {e}", stacklevel=1)
 
-    warnings.warn(
-        f"All {num_retries} retries exhausted, downloading {url} failed", stacklevel=1
-    )
+    warnings.warn(f"All {num_retries} retries exhausted, downloading {url} failed", stacklevel=1)
     return {}
 
 
@@ -519,9 +517,7 @@ def main() -> None:
     test_matrix = yaml.safe_load(args.test_matrix)
 
     if test_matrix is None:
-        warnings.warn(
-            f"Invalid test matrix input '{args.test_matrix}', exiting", stacklevel=1
-        )
+        warnings.warn(f"Invalid test matrix input '{args.test_matrix}', exiting", stacklevel=1)
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)

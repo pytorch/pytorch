@@ -889,7 +889,8 @@ class Caffe2Backend(Backend):
             pred_model = cls.optimize_onnx(onnx_model, predict=True)
         except ModuleNotFoundError:
             warnings.warn("OptimizerWarning: onnxoptimizer module not installed. "
-                          "init_model and pred_model models will not be splitted, which can cause a runtime error", stacklevel=1)
+                          "init_model and pred_model models will not be splitted, which can cause a runtime error",
+                          stacklevel=1)
             init_model = onnx_model
             pred_model = onnx_model
 

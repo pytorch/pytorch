@@ -1069,7 +1069,8 @@ class Graph:
                           "no underlying reference in the owning "
                           "GraphModule! Call "
                           "GraphModule.add_submodule to add the "
-                          "necessary submodule", stacklevel=2)
+                          "necessary submodule",
+                          stacklevel=2)
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
@@ -1376,7 +1377,8 @@ class Graph:
                               and atom not in m_itr._buffers):
                             warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
                                           'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target', stacklevel=2)
+                                          'what \'get_attr\' Nodes typically target',
+                                          stacklevel=2)
                         else:
                             m_itr = new_m_itr
 

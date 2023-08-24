@@ -27,9 +27,8 @@ class WeightNorm:
 
     @staticmethod
     def apply(module, name: str, dim: int) -> 'WeightNorm':
-        warnings.warn("torch.nn.utils.weight_norm is deprecated in favor of "
-                      "torch.nn.utils.parametrizations.weight_norm.",
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn("torch.nn.utils.weight_norm is deprecated in favor of torch.nn.utils.parametrizations.weight_norm.", 
+                      stacklevel=2)
 
         for hook in module._forward_pre_hooks.values():
             if isinstance(hook, WeightNorm) and hook.name == name:

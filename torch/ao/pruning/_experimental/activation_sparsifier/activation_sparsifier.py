@@ -176,8 +176,7 @@ class ActivationSparsifier:
         assert name is not None, "layer not found in the model"  # satisfy mypy
 
         if name in self.data_groups:  # unregister layer if already present
-            warnings.warn("layer already attached to the sparsifier, "
-                          "deregistering the layer and registering with new config",
+            warnings.warn("layer already attached to the sparsifier, deregistering the layer and registering with new config",
                           stacklevel=2)
             self.unregister_layer(name=name)
 

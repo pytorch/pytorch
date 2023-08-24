@@ -919,14 +919,14 @@ def convert(
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
             "in a future version. Please pass in a ConvertCustomConfig instead.",
-            DeprecationWarning, stacklevel=2)
+            stacklevel=2)
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
             "in a future version. Please pass in a QConfigMapping instead.",
-            DeprecationWarning, stacklevel=2)
+            stacklevel=2)
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
@@ -935,7 +935,7 @@ def convert(
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
             "in a future version. Please pass in a BackendConfig instead.",
-            DeprecationWarning, stacklevel=2)
+            stacklevel=2)
         backend_config = BackendConfig.from_dict(backend_config)
 
     if backend_config is None:

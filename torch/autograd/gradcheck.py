@@ -327,7 +327,7 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
         "in a future version of PyTorch. If you have a specific use for "
         "this or feature request for this to be a stable API, please file "
         "us an issue at https://github.com/pytorch/pytorch/issues/new",
-        DeprecationWarning, stacklevel=2,
+        stacklevel=2,
     )
     if (
         grad_out != 1.0
@@ -823,7 +823,7 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
         "in a future version of PyTorch. If you have a specific use for "
         "this or feature request for this to be a stable API, please file "
         "us an issue at https://github.com/pytorch/pytorch/issues/new",
-        DeprecationWarning, stacklevel=2,
+        stacklevel=2,
     )
     if (
         grad_out != 1.0
@@ -1294,7 +1294,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             "Backwards compatibility: New undefined gradient support checking "
             "feature is enabled by default, but it may break existing callers "
             "of this function. If this is true for you, you can call this "
-            "function with \"check_undefined_grad=False\" to disable the feature",
+            'function with "check_undefined_grad=False" to disable the feature',
             stacklevel=2,
         )
 
@@ -2027,7 +2027,7 @@ def gradcheck(
         warnings.warn(
             "Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch."
             f" Use masked={check_sparse_nnz} instead.",
-            DeprecationWarning, stacklevel=2,
+            stacklevel=2,
         )
         if masked is None:
             masked = check_sparse_nnz

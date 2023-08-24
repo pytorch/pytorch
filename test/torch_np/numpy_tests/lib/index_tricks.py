@@ -704,7 +704,7 @@ class ndindex:
         warnings.warn(
             "`ndindex.ndincr()` is deprecated, use `next(ndindex)` instead",
             DeprecationWarning,
-            stacklevel=1,
+            stacklevel=2,
         )
         next(self)
 

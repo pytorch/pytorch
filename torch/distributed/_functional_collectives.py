@@ -20,7 +20,8 @@ else:
         from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
-            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly", stacklevel=2
+            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly",
+            stacklevel=2,
         )
 
         def is_torchdynamo_compiling():

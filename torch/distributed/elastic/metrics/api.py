@@ -192,7 +192,7 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
 def publish_metric(metric_group: str, metric_name: str, metric_value: int):
     warnings.warn(
         "Deprecated, use put_metric(metric_group)(metric_name, metric_value) instead",
-        DeprecationWarning, stacklevel=2
+        stacklevel=2,
     )
     metric_stream = getStream(metric_group)
     metric_stream.add_value(metric_name, metric_value)

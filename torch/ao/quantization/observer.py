@@ -212,9 +212,9 @@ class UniformQuantizationObserverBase(ObserverBase):
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
-                "Please use quant_min and quant_max to specify the range for observers. "
-                "reduce_range will be deprecated in a future release of PyTorch.",
-                DeprecationWarning, stacklevel=2
+                "Please use quant_min and quant_max to specify the range for observers. \
+                    reduce_range will be deprecated in a future release of PyTorch.",
+                stacklevel=2,
             )
         self.reduce_range = reduce_range
         self.register_buffer(
@@ -1206,8 +1206,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
         )
         if is_uninitialized:
             warnings.warn(
-                "must run observer before calling calculate_qparams. "
-                "Returning default scale and zero point ", stacklevel=2
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point ",
+                stacklevel=2,
             )
             return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor([0], device=self.min_val.device.type)
         assert self.bins == len(self.histogram), (
@@ -1353,9 +1354,10 @@ class PlaceholderObserver(ObserverBase):
         if compute_dtype:
             is_dynamic = True
             warnings.warn(
-                "Please use `is_dynamic` instead of `compute_dtype`. "
-                "`compute_dtype` will be deprecated in a future release "
-                "of PyTorch.", DeprecationWarning, stacklevel=2
+                "Please use `is_dynamic` instead of `compute_dtype`. \
+                    `compute_dtype` will be deprecated in a future release \
+                    of PyTorch.",
+                stacklevel=2,
             )
         self.is_dynamic = is_dynamic
 

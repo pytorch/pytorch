@@ -596,9 +596,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
     """
-    warnings.warn("nn.quantized.functional.upsample is deprecated. "
-                  "Use nn.quantized.functional.interpolate instead.",
-                  DeprecationWarning, stacklevel=2)
+    warnings.warn("nn.quantized.functional.upsample is deprecated. Use nn.quantized.functional.interpolate instead.",
+                  stacklevel=2)
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 def upsample_bilinear(input, size=None, scale_factor=None):
@@ -620,9 +619,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.quantized.functional.upsample is deprecated. "
-                  "Use nn.quantized.functional.interpolate instead.",
-                  DeprecationWarning, stacklevel=2)
+    warnings.warn("nn.quantized.functional.upsample_bilinear is deprecated. Use nn.quantized.functional.interpolate instead.",
+                  stacklevel=2)
     return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 def upsample_nearest(input, size=None, scale_factor=None):
@@ -644,7 +642,6 @@ def upsample_nearest(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.quantized.functional.upsample_nearest is deprecated. "
-                  "Use nn.quantized.functional.interpolate instead.",
-                  DeprecationWarning, stacklevel=2)
+    warnings.warn("nn.quantized.functional.upsample_nearest is deprecated. Use nn.quantized.functional.interpolate instead.",
+                  stacklevel=2)
     return interpolate(input, size, scale_factor, mode='nearest')

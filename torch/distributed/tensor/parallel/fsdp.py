@@ -70,6 +70,7 @@ def enable_2d_with_fsdp() -> bool:
         warnings.warn(
             "PyTorch doesn't have TensorFlattener extension point available"
             "2D parallelism won't work with FSDP"
-            f"exception: {e}", stacklevel=2
+            f"exception: {e}",
+            stacklevel=2,
         )
         return False

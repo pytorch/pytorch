@@ -550,14 +550,16 @@ class DataLoader(Generic[T_co]):
             warnings.warn(_create_warning_msg(
                 max_num_worker_suggest,
                 self.num_workers,
-                cpuset_checked), stacklevel=2)
+                cpuset_checked),
+                stacklevel=2)
             return
 
         if self.num_workers > max_num_worker_suggest:
             warnings.warn(_create_warning_msg(
                 max_num_worker_suggest,
                 self.num_workers,
-                cpuset_checked), stacklevel=2)
+                cpuset_checked),
+                stacklevel=2)
 
 
 class _BaseDataLoaderIter:

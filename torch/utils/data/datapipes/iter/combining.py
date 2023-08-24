@@ -154,7 +154,8 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             warnings.warn(
                 "Unlimited buffer size is set for `fork`, "
                 "please be aware of OOM at random places",
-                UserWarning, stacklevel=2
+                UserWarning,
+                stacklevel=2,
             )
         if copy is None:
             self.copy_fn = _no_op
@@ -412,7 +413,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
             warnings.warn(
                 "Unlimited buffer size is set for `demux`, "
                 "please be aware of OOM at random places",
-                UserWarning, stacklevel=2
+                UserWarning,
+                stacklevel=2,
             )
         self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]

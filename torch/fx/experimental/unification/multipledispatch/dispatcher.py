@@ -32,7 +32,8 @@ def halt_ordering():
     """
     warn(
         'halt_ordering is deprecated, you can safely remove this call.',
-        DeprecationWarning, stacklevel=2
+        DeprecationWarning,
+        stacklevel=2,
     )
 
 
@@ -43,7 +44,8 @@ def restart_ordering(on_ambiguity=ambiguity_warn):
         'restart_ordering is deprecated, if you would like to eagerly order'
         'the dispatchers, you should call the ``reorder()`` method on each'
         ' dispatcher.',
-        DeprecationWarning, stacklevel=2
+        DeprecationWarning,
+        stacklevel=2,
     )
 
 
@@ -322,7 +324,8 @@ class Dispatcher:
             Use ``dispatch(*types)`` instead
         """
         warn("resolve() is deprecated, use dispatch(*types)",
-             DeprecationWarning, stacklevel=2)
+             DeprecationWarning,
+             stacklevel=2)
 
         return self.dispatch(*types)
 

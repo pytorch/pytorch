@@ -108,7 +108,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                 "no need to use model averaging because the communication cost "
                 "of all-reducing parameters will be no less than the cost of all-reducing gradients "
                 "by DistributedDataParallel in the backward pass. Therefore, only "
-                "DistributedDataParallel should be used for this case.", stacklevel=2
+                "DistributedDataParallel should be used for this case.",
+                stacklevel=2,
             )
         overall_group_size = dist.get_world_size(group=self.process_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:

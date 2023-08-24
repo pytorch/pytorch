@@ -607,9 +607,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(
-            f"ONNX export failed on {op} because {msg} not supported", stacklevel=2
-        )
+        warnings.warn(f"ONNX export failed on {op} because {msg} not supported", stacklevel=2)
     elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 

@@ -336,8 +336,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.uint8:
-                warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. "
-                              "Use bool tensor instead.", DeprecationWarning, stacklevel=2)
+                warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.",
+                              stacklevel=2)
                 attn_mask = attn_mask.to(torch.bool)
             assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
                 f'Only float and bool types are supported for attn_mask, not {attn_mask.dtype}'
@@ -355,8 +355,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # convert ByteTensor key_padding_mask to bool
         if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. "
-                          "Use bool tensor instead.", DeprecationWarning, stacklevel=2)
+            warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.",
+                          stacklevel=2)
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:

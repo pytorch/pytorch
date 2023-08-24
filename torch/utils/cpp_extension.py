@@ -362,7 +362,8 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
         warnings.warn(WRONG_COMPILER_WARNING.format(
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
-            platform=sys.platform), stacklevel=2)
+            platform=sys.platform),
+            stacklevel=2)
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:

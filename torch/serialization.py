@@ -651,7 +651,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
-                              "for correctness upon loading.", stacklevel=2)
+                              "for correctness upon loading.",
+                              stacklevel=2)
             return ('module', obj, source_file, source)
 
         if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
@@ -1066,7 +1067,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
                           "type " + container_type.__name__ + ". It won't be checked "
-                          "for correctness upon loading.", stacklevel=2)
+                          "for correctness upon loading.",
+                          stacklevel=2)
             return
         if original_source != current_source:
             if container_type.dump_patches:
@@ -1346,7 +1348,8 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
                       "in a future release, to avoid this behavior please use "
                       "torch.serialization.set_default_load_endianness to set "
                       "the desired default load endianness",
-                      DeprecationWarning, stacklevel=2)
+                      DeprecationWarning,
+                      stacklevel=2)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

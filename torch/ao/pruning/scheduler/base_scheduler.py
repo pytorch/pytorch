@@ -88,7 +88,8 @@ class BaseScheduler:
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`.", stacklevel=2)
+                "please use `get_last_sl()`.",
+                stacklevel=2)
         raise NotImplementedError
 
     def print_sl(self, is_verbose, group, sl, epoch=None):

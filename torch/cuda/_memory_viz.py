@@ -378,8 +378,7 @@ add_local_files(local_files, $VIZ_KIND)
 
 def _format_viz(data, viz_kind, device):
     if device is not None:
-        warnings.warn('device argument is deprecated, plots now contain all device',
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn('device argument is deprecated, plots now contain all device', stacklevel=2)
     buffer = pickle.dumps(data)
     buffer += b'\x00' * (3 - len(buffer) % 3)
     # Encode the buffer with base64

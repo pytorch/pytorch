@@ -18,7 +18,7 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead",
-                  DeprecationWarning, stacklevel=2)
+                  stacklevel=2)
     return _apply_permutation(tensor, permutation, dim)
 
 
@@ -95,7 +95,8 @@ class RNNBase(torch.nn.Module):
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
                           f"num_layers greater than 1, but got dropout={dropout} and "
-                          f"num_layers={num_layers}", stacklevel=2)
+                          f"num_layers={num_layers}",
+                          stacklevel=2)
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size

@@ -165,9 +165,7 @@ class ProcessContext:
 
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
-        warnings.warn(
-            "SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=2
-        )
+        warnings.warn("SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=2)
         super().__init__(processes, error_queues)
 
 

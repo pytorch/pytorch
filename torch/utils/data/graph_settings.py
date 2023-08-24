@@ -102,7 +102,8 @@ def apply_shuffle_settings(datapipe: DataPipe, shuffle: Optional[bool] = None) -
     if not shufflers and shuffle:
         warnings.warn(
             "`shuffle=True` was set, but the datapipe does not contain a `Shuffler`. Adding one at the end. "
-            "Be aware that the default buffer size might not be sufficient for your task.", stacklevel=2
+            "Be aware that the default buffer size might not be sufficient for your task.",
+            stacklevel=2,
         )
         datapipe = datapipe.shuffle()
         shufflers = [datapipe, ]  # type: ignore[list-item]
@@ -116,7 +117,8 @@ def apply_shuffle_settings(datapipe: DataPipe, shuffle: Optional[bool] = None) -
 def apply_shuffle_seed(datapipe: DataPipe, rng: Any) -> DataPipe:
     warnings.warn(
         "`apply_shuffle_seed` is deprecated since 1.12 and will be removed in the future releases."
-        "\nPlease use `apply_random_seed` instead.", DeprecationWarning, stacklevel=2
+        "\nPlease use `apply_random_seed` instead.",
+        stacklevel=2,
     )
     return apply_random_seed(datapipe, rng)
 

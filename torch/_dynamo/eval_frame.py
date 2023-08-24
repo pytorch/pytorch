@@ -693,7 +693,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f).", DeprecationWarning, stacklevel=2,
+            "conflict with future kwargs added to explain(f).",
+            stacklevel=2,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -1229,9 +1230,10 @@ def export(
 
     if extra_args or extra_kwargs:
         warnings.warn(
-            "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead. "
+            "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f).", DeprecationWarning, stacklevel=2,
+            "conflict with future kwargs added to export(f).",
+            stacklevel=2,
         )
         return inner(*extra_args, **extra_kwargs)
     else:

@@ -91,7 +91,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         else:
             warnings.warn(
                 "Loaded state dict does not contain a step counter for an averager. "
-                "Setting step counter to 0.", stacklevel=2
+                "Setting step counter to 0.",
+                stacklevel=2,
             )
             self.averager.step = 0
 

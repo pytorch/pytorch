@@ -1568,7 +1568,8 @@ def handle_torch_function(
                 torch_func_method is not torch._C._disabled_torch_function_impl:
             warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
                           "will be an error in future, please define it as a classmethod.",
-                          DeprecationWarning, stacklevel=2)
+                          DeprecationWarning,
+                          stacklevel=2)
 
         # Use `public_api` instead of `implementation` so __torch_function__
         # implementations can do equality/identity comparisons.
@@ -1855,8 +1856,7 @@ class TorchFunctionMode:
 
     @classmethod
     def push(cls, *args, **kwargs):
-        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`", stacklevel=2)
         instance = cls(*args, **kwargs)
         return instance
 
