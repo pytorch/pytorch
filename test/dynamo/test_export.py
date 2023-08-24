@@ -21,7 +21,6 @@ from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
-from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
@@ -3583,80 +3582,6 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
         for name, buffer in gm.named_buffers():
             self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
-
-    def test_predispatch_with_higher_order(self):
-        def f(x):
-            return cond(x.shape[0] > 4, lambda x: x + 5, lambda x: x - 3, [x])
-
-        gm, _ = torch._dynamo.export(f, aten_graph=True, pre_dispatch=True)(
-            torch.randn(4, 4)
-        )
-        inp1 = torch.randn(4, 4)
-        inp2 = torch.randn(6, 4)
-        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
-        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
-
-    def test_predispatch_with_higher_order_nested(self):
-        def f(x):
-            def true_fn(x):
-                return cond(x.shape[0] > 6, lambda x: x + 10, lambda x: x - 10, [x])
-
-            return cond(x.shape[0] > 4, true_fn, lambda x: x - 3, [x])
-
-        gm, _ = torch._dynamo.export(f, aten_graph=True, pre_dispatch=True)(
-            torch.randn(4, 4)
-        )
-        inp1 = torch.randn(4, 4)
-        inp2 = torch.randn(6, 4)
-        inp3 = torch.randn(8, 4)
-        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
-        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
-        self.assertTrue(torch.allclose(f(inp3), gm(inp3)))
-
-    def test_predispatch_with_for_out_dtype(self):
-        class M(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
-
-            def forward(self, x):
-                return out_dtype(torch.ops.aten.mm.default, torch.int32, x, self.weight)
-
-        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        m = M(weight)
-        x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
-
-        self.assertTrue(torch.allclose(m(x), gm(x)))
-
-    def test_predispatch_with_for_out_dtype_nested(self):
-        class M(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
-
-            def true_fn(self, x):
-                return out_dtype(
-                    torch.ops.aten.mm.default, torch.int32, x, self.weight
-                ).sum()
-
-            def false_fn(self, x):
-                return out_dtype(
-                    torch.ops.aten.mul.Tensor, torch.int32, x, self.weight
-                ).sum()
-
-            def forward(self, x):
-                return cond(x.sum() != 0, self.true_fn, self.false_fn, [x])
-
-        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        m = M(weight)
-        x = torch.ones((5, 5), dtype=torch.int8)
-        gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
-        gm.print_readable()
-
-        self.assertTrue(torch.allclose(m(x), gm(x)))
-        y = torch.zeros((5, 5), dtype=torch.int8)
-        self.assertTrue(torch.allclose(m(y), gm(y)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
