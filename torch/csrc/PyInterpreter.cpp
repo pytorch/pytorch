@@ -592,7 +592,7 @@ static void set_tensor_attr_with_capsule(
     py::capsule& capsule,
     const char* attr_name) {
   c10::optional<PyObject*> mb_obj =
-    tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   py::handle(mb_obj.value()).attr(attr_name) = capsule;
@@ -624,18 +624,17 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
       "sizes must be a list or a tuple");
   int64_t len = py::len(out);
   int64_t* ptr = new int64_t[len];
-  auto capsule = py::capsule(ptr, [](void* p) {
-    delete[] reinterpret_cast<int64_t*>(p);
-  });
+  auto capsule =
+      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
   int64_t idx = 0;
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<int64_t>(*it);
+  }
   set_tensor_attr_with_capsule(
       const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
   return c10::IntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
-
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
     const c10::TensorImpl* self) const {
@@ -661,12 +660,12 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
       "sym_size must be a list or a tuple");
   int64_t len = py::len(out);
   c10::SymInt* ptr = new c10::SymInt[len];
-  auto capsule = py::capsule(ptr, [](void* p) {
-    delete[] reinterpret_cast<c10::SymInt*>(p);
-  });
+  auto capsule = py::capsule(
+      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
   int64_t idx = 0;
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<c10::SymInt>(*it);
+  }
   set_tensor_attr_with_capsule(
       const_cast<c10::TensorImpl*>(self), capsule, "_sym_sizes_capsule");
   return c10::SymIntArrayRef(ptr, len);
@@ -770,12 +769,12 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
       "sym_strides must be a list or a tuple");
   int64_t len = py::len(out);
   c10::SymInt* ptr = new c10::SymInt[len];
-  auto capsule = py::capsule(ptr, [](void* p) {
-    delete[] reinterpret_cast<c10::SymInt*>(p);
-  });
+  auto capsule = py::capsule(
+      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
   int64_t idx = 0;
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<c10::SymInt>(*it);
+  }
   set_tensor_attr_with_capsule(
       const_cast<c10::TensorImpl*>(self), capsule, "_sym_strides_capsule");
   return c10::SymIntArrayRef(ptr, len);
