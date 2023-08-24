@@ -343,8 +343,6 @@ def _multi_tensor_asgd(
                                                    1.0))
 
             torch._foreach_add_(grouped_axs, torch._foreach_mul(torch._foreach_sub(grouped_params, grouped_axs), grouped_mus))
-            # until we have foreach_copy, zero out grouped mus and add
-            # these memory bound ops will be fused by the compiler so it doesn't matter
             torch._foreach_copy_(grouped_mus,
                                  torch._foreach_reciprocal(torch._foreach_maximum(torch._foreach_sub(grouped_state_steps, t0),
                                                                                   1.0)))
