@@ -12,7 +12,7 @@ import os
 import warnings
 from hashlib import sha256
 from typing import Any, cast, Dict, List, Optional
-from unittest import main, mock, TestCase
+from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -295,17 +295,6 @@ class TestTryMerge(TestCase):
         author = pr.get_author()
         self.assertTrue(author is not None)
 
-    def test_last_pushed_at(self, *args: Any) -> None:
-        """Tests that last_pushed_at will return None on merge commits."""
-        pr = GitHubPR("pytorch", "pytorch", 71759)
-        self.assertIsNotNone(pr.last_pushed_at())
-
-        # 307120d6d3f7fcc3f92cfd26be891d360ad6a92a is merge commit
-        # and as such does not have a pushedDate
-        # See https://github.com/pytorch/pytorch/pull/94146#issuecomment-1421647117
-        pr = GitHubPR("pytorch", "pytorch", 94146)
-        self.assertIsNone(pr.last_pushed_at())
-
     def test_large_diff(self, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73099)
@@ -393,6 +382,13 @@ class TestTryMerge(TestCase):
         self.assertTrue(
             all(conclusions[name].status == "SUCCESS" for name in lint_checks)
         )
+
+    def test_get_review_comment_by_id(self, *args: Any) -> None:
+        """Tests that even if the comment requested was actually a review instead of a simple comment, we can still find it"""
+        pr = GitHubPR("pytorch", "pytorch", 107070)
+        review_comment_id = 1582767635
+        comment = pr.get_comment_by_id(review_comment_id)
+        self.assertIsNotNone(comment)
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(True, False))
@@ -731,17 +727,29 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "mock_merge_base": "436d035dc74db9c703297a62163b0cad0c546665",
+                "unrelated_failure_count": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "mock_merge_base": "194fe1d12f9860734cc28ed21bdabda2fbb06336",
+                "unrelated_failure_count": 1,
+            },
+            {
+                # The failure on the merge base was retried successfully and
+                # its conclusion changed from failure to success. We want to
+                # keep the failure record from the merge base so that it can
+                # be used to detect broken trunk
+                "pr_num": 107160,
+                "mock_merge_base": "a5d841ef01e615e2a654fb12cf0cd08697d12ccf",
+                "unrelated_failure_count": 4,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             mock_merge_base = case["mock_merge_base"]
+            unrelated_failure_count = case["unrelated_failure_count"]
 
             pr = GitHubPR("pytorch", "pytorch", cast(int, pr_num))
             with mock.patch(
@@ -762,13 +770,13 @@ class TestBypassFailures(TestCase):
                     checks, list(checks.keys()), ok_failed_checks_threshold=0
                 )
                 self.assertTrue(len(pending) == 0)
-                self.assertTrue(len(failed) == 1)
+                self.assertTrue(len(failed) == unrelated_failure_count)
 
     def test_ignore_current(self, *args: Any) -> None:
-        # Test various interactions of the failure classifier, mostly that
-        # ignore current checks takes precedence over classifications for flaky
-        # or broken trunk
-
+        # Test various interactions of the failure classifier to ensure that ignore
+        # current checks takes place after other classifications: flaky, unstable,
+        # or broken trunk. Only actual new failures should be kept in the list of
+        # ignore current checks to use to record force merge with actual failures
         flaky_rules = [
             FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
@@ -782,43 +790,57 @@ class TestBypassFailures(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
 
-        # No broken trunk or flaky rules
-        checks = get_classifications(checks, pr.last_commit()["oid"], None, [], [flaky])
-        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification is None)
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=0
-        )
-        self.assertTrue(len(failed) == 1)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
-
-        # No flaky rules
+        # No broken trunk or flaky rules, then all failures are ignored when ic is used
         checks = get_classifications(
-            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
+            checks, pr.last_commit()["oid"], None, [], [broken_trunk, flaky]
         )
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
+        self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
         _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
         )
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 2)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
-        # No broken_trunk
+        # Known flaky failure takes precedence over ignore current (need to set the
+        # merge base here to get the results from Rockset, and that categorize the
+        # broken trunk failure too
         checks = get_classifications(
             checks,
             pr.last_commit()["oid"],
             pr.get_merge_base(),
             flaky_rules,
-            [broken_trunk],
+            [broken_trunk, flaky],
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
-        self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
+        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
         _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
+        )
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+        # Broken trunk takes precedence over ignore current (no flaky rule is set here)
+        checks = get_classifications(
+            checks,
+            pr.last_commit()["oid"],
+            pr.get_merge_base(),
+            [],
+            [broken_trunk, flaky],
+        )
+        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
+        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
+        _, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
         )
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
@@ -863,6 +885,9 @@ class TestGitHubPRGhstackDependencies2(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
+    @skip(
+        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+    )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")

@@ -39,6 +39,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     RangeConstraint,
     ScalarType,
+    SCHEMA_VERSION,
     SymBool,
     SymBoolArgument,
     SymExpr,
@@ -464,9 +465,10 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs
+        self, target: torch._ops.OpOverload, args, kwargs=None
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
+        kwargs = kwargs or {}
         serialized_args = []
         for i, schema_arg in enumerate(target._schema.arguments):
             if schema_arg.name in kwargs:
@@ -534,6 +536,8 @@ class GraphModuleSerializer:
                 return Argument.create(as_ints=list(arg))
             elif all(isinstance(a, float) for a in arg):
                 return Argument.create(as_floats=list(arg))
+            elif all(isinstance(a, str) for a in arg):
+                return Argument.create(as_strings=list(arg))
             elif all(self.is_sym_int_arg(a) for a in arg):
                 # list of sym_ints
                 values = []
@@ -651,9 +655,9 @@ class GraphModuleSerializer:
             return []
         if _is_single_tensor_return(node.target):
             return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(returns[0].real_type, torch.SymIntType):  # type: ignore[attr-defined]
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymInt):
             return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(node.meta["val"], torch.SymBool):
+        elif len(returns) == 1 and isinstance(meta_val, torch.SymBool):
             return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
 
         # There are a two possibilities at this point:
@@ -749,6 +753,7 @@ class ExportedProgramSerializer:
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
+                schema_version=SCHEMA_VERSION,
             ),
             serialize_state_dict(exported_program.state_dict),
         )
@@ -803,7 +808,12 @@ class GraphModuleDeserializer:
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
                         symbolic_shapes._constrain_symbol_range(
-                            self.shape_env, sym, vr.lower, vr.upper  # type: ignore[arg-type]
+                            self.shape_env,
+                            sym,
+                            compiler_min=vr.lower,  # type: ignore[arg-type]
+                            compiler_max=vr.upper,  # type: ignore[arg-type]
+                            runtime_min=vr.lower,  # type: ignore[arg-type]
+                            runtime_max=vr.upper  # type: ignore[arg-type]
                         )
 
             return self.shape_env.create_symintnode(sym, hint=val.hint)
@@ -844,6 +854,14 @@ class GraphModuleDeserializer:
                 ),
             )
 
+    def deserialize_graph_output(self, output) -> torch.fx.Node:
+        if isinstance(output.value, TensorArgument):
+            return self.serialized_name_to_node[output.value.name]
+        elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
+            return self.serialized_name_to_node[output.value.as_name]
+        else:
+            raise SerializeError(f"Unable to deserialize output node {output}")
+
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
@@ -873,13 +891,7 @@ class GraphModuleDeserializer:
         # Outputs: convert to a single `output` node.
         outputs = []
         for output in serialized_graph.outputs:
-            if isinstance(output.value, TensorArgument):
-                outputs.append(self.serialized_name_to_node[output.value.name])
-            elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
-                outputs.append(self.serialized_name_to_node[output.value.as_name])
-            else:
-                raise SerializeError(f"Unable to deserialize output node {output}")
-
+            outputs.append(self.deserialize_graph_output(output))
 
         output_node = self.graph.output(tuple(outputs))
         output_node.meta["val"] = tuple(
@@ -1190,6 +1202,12 @@ class ExportedProgramDeserializer:
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
+        if serialized_exported_program.schema_version != SCHEMA_VERSION:
+            raise SerializeError(
+                f"Serialized schema version {serialized_exported_program.schema_version} "
+                f"does not match our current schema version {SCHEMA_VERSION}."
+            )
+
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in serialized_exported_program.range_constraints.items()

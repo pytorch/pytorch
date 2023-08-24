@@ -181,6 +181,13 @@ struct CheckpointDelta {
   std::vector<at::DataPtr> dataptrs_allocd;
 };
 
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
@@ -237,7 +244,7 @@ class CUDAAllocator : public Allocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) = 0;
+      RecordContext when) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
@@ -362,12 +369,9 @@ inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    bool alloc_trace_record_context) {
+    RecordContext when) {
   return get()->recordHistory(
-      enabled,
-      context_recorder,
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
+      enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
 inline bool isHistoryEnabled() {

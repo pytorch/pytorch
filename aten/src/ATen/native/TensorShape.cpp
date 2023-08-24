@@ -549,6 +549,21 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
+static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  auto outBytes = out.nbytes();
+  char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
+  size_t totalBytes = 0;
+  for (const Tensor& input : inputs) {
+    TORCH_CHECK(outBytes >= totalBytes);
+    if (input.nbytes() > 0) {
+      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    }
+    totalBytes += input.nbytes();
+  }
+  TORCH_CHECK(outBytes == totalBytes);
+}
+
+
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -564,10 +579,20 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   auto materialized = tensors.materialize();
 
-  // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = at::isFloatingType(dtype);
+  // fast path for single thread when both inputs and result are contiguous and
+  // not empty, and concat dim is 0
+  if (use_serial_kernel && all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format)) {
+    if (dim == 0) {
+      fastCatOutDim0(result, materialized);
+      return;
+    }
+    // TODO: Add fast cat for higher dimensions and support multi-threaded fast cat
+  }
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
@@ -1283,9 +1308,12 @@ Tensor& narrow_copy_dense_cpu_out(
 
   // wrap start and do bound check
   const auto cur_size = self_sizes[dim];
-  if (start != cur_size && start < 0) { // start being the end is valid, but
-                                        // not a valid dim specification.
-    start = at::maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(
       length >= 0 && start <= cur_size - length,
@@ -1349,8 +1377,12 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
@@ -1359,12 +1391,16 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
+  TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
-  TORCH_CHECK(start <= cur_size - length,
+  TORCH_SYM_CHECK(start.sym_le(cur_size - length),
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice_symint(self, dim, start, start + length, 1);
 }

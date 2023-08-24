@@ -29,6 +29,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import Self
+
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
@@ -75,6 +77,11 @@ _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 
 _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
 """The default path to write the SARIF log to if the export fails."""
+
+log = logging.getLogger(__name__)
+
+
+DiagnosticOptions = infra.DiagnosticOptions
 
 
 @dataclasses.dataclass
@@ -277,10 +284,8 @@ class ExportOptions:
     """Whether to export the model with op-level debug information by evaluating
     ops through ONNX Runtime."""
 
-    logger: Optional[logging.Logger] = None
-    """The logger for the ONNX exporter to use. Defaults to creating a child
-    logger named "torch.onnx" under the current logger (as returned by
-    :py:meth:`logging.getLogger`)."""
+    diagnostic_options: DiagnosticOptions
+    """The diagnostic options for the exporter."""
 
     fake_context: Optional[ONNXFakeContext] = None
     """The fake context used for symbolic tracing."""
@@ -295,15 +300,15 @@ class ExportOptions:
         *,
         dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
-        logger: Optional[logging.Logger] = None,
         fake_context: Optional[ONNXFakeContext] = None,
         onnx_registry: Optional[OnnxRegistry] = None,
+        diagnostic_options: Optional[DiagnosticOptions] = None,
     ):
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
-        self.logger = logger
         self.fake_context = fake_context
         self.onnx_registry = onnx_registry
+        self.diagnostic_options = diagnostic_options or DiagnosticOptions()
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -315,7 +320,7 @@ class ResolvedExportOptions(ExportOptions):
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
     dynamic_shapes: bool
     op_level_debug: bool
-    logger: logging.Logger
+    diagnostic_options: DiagnosticOptions
     fake_context: ONNXFakeContext
     onnx_registry: OnnxRegistry
 
@@ -342,13 +347,14 @@ class ResolvedExportOptions(ExportOptions):
         if isinstance(options, ResolvedExportOptions):
             self.dynamic_shapes = options.dynamic_shapes
             self.op_level_debug = options.op_level_debug
-            self.logger = options.logger
+            self.diagnostic_options = options.diagnostic_options
+            self.fake_context = options.fake_context
+            # private
             self.fx_tracer = options.fx_tracer
             self.onnx_registry = options.onnx_registry
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
-            self.fake_context = options.fake_context
         else:
             T = TypeVar("T")
 
@@ -366,20 +372,17 @@ class ResolvedExportOptions(ExportOptions):
                 dynamo_graph_extractor,
             )
 
+            self.diagnostic_options = resolve(
+                options.diagnostic_options, DiagnosticOptions()
+            )
+
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
-            self.logger = resolve(
-                options.logger, lambda: logging.getLogger().getChild("torch.onnx")
-            )
             self.fake_context = resolve(options.fake_context, None)
-            # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
-            # Options:
-            #   - Add a shim and make it noop if onnxscript is not available.
-            #   - Try local import and raise.
-            # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
             self.diagnostic_context = diagnostics.DiagnosticContext(
                 "torch.onnx.dynamo_export",
                 torch.__version__,
+                self.diagnostic_options,
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
@@ -549,6 +552,7 @@ class ExportOutput:
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
+    _export_exception: Final[Optional[Exception]]
 
     @_beartype.beartype
     def __init__(
@@ -557,18 +561,23 @@ class ExportOutput:
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: diagnostics.DiagnosticContext,
+        *,
         fake_context: Optional[ONNXFakeContext] = None,
+        export_exception: Optional[Exception] = None,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
+        self._export_exception = export_exception
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
+        if self._export_exception is not None:
+            raise self._export_exception
         return self._model_proto
 
     @property
@@ -772,6 +781,56 @@ class ExportOutput:
             else:
                 serializer.serialize(self, destination)
 
+    @_beartype.beartype
+    def save_diagnostics(self, destination: str) -> None:
+        """Saves the export diagnostics as a SARIF log to the specified destination path.
+
+        Args:
+            destination: The destination to save the diagnostics SARIF log.
+                It must have a `.sarif` extension.
+
+        Raises:
+            ValueError: If the destination path does not end with `.sarif` extension.
+        """
+        if not destination.endswith(".sarif"):
+            message = f"'destination' must have a .sarif extension, got {destination}"
+            log.fatal(message)
+            raise ValueError(message)
+
+        self.diagnostic_context.dump(destination)
+
+    @classmethod
+    def _from_failure(
+        cls,
+        export_exception: Exception,
+        diagnostic_context: diagnostics.DiagnosticContext,
+    ) -> Self:
+        """
+        Creates an instance of ``ExportOutput`` when the export process encounters a failure.
+
+        In case of a failed export, this method is used to encapsulate the exception
+        and associated diagnostic context within an ``ExportOutput`` instance for
+        easier handling and debugging.
+
+        Args:
+            export_exception: The exception raised during the export process.
+            diagnostic_context: The context associated with diagnostics during export.
+
+        Returns:
+            An instance of ``ExportOutput`` representing the failed export output.
+        """
+        # Defer `import onnx` out of `import torch` path
+        # https://github.com/pytorch/pytorch/issues/103764
+        import onnx
+
+        return ExportOutput(
+            onnx.ModelProto(),  # type: ignore[attr-defined]
+            io_adapter.InputAdapter(),
+            io_adapter.OutputAdapter(),
+            diagnostic_context,
+            export_exception=export_exception,
+        )
+
 
 class FXGraphExtractor(abc.ABC):
     """Abstract interface for FX graph extractor engines.
@@ -819,7 +878,14 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        self._assert_fake_tensor_mode()
+        # TODO:Retire FXSymbolicTracer
+        # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
+        from torch.onnx._internal.fx import fx_symbolic_graph_extractor
+
+        if not isinstance(
+            self.options.fx_tracer, fx_symbolic_graph_extractor.FXSymbolicTracer
+        ):
+            self._assert_fake_tensor_mode()
 
     def export(self) -> ExportOutput:
         with self.options.diagnostic_context:
@@ -860,7 +926,7 @@ class Exporter:
                 self.options.fx_tracer.input_adapter,
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
-                self.options.fake_context,
+                fake_context=self.options.fake_context,
             )
 
     def _assert_fake_tensor_mode(self):
@@ -879,8 +945,7 @@ class Exporter:
         if (
             has_any_fake_tensor or has_any_fake_param_or_buffer
         ) and not self.options.fake_context:
-            return OnnxExporterError(
-                self.options.diagnostic_context,
+            raise RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         has_any_non_fake_tensors = pytree.tree_any(
@@ -898,16 +963,9 @@ class Exporter:
         if (
             has_any_non_fake_tensors or has_any_non_fake_param_or_buffer
         ) and self.options.fake_context:
-            raise OnnxExporterError(
-                self.options.diagnostic_context,
+            raise RuntimeError(
                 "Cannot export a model with non fake inputs/weights and enabled fake mode.",
             )
-
-    @property
-    def logger(self) -> logging.Logger:
-        # options.logger will always be resolved to an instance when constructing
-        assert isinstance(self.options.logger, logging.Logger)
-        return self.options.logger
 
 
 class UnsatisfiedDependencyError(RuntimeError):
@@ -919,18 +977,29 @@ class UnsatisfiedDependencyError(RuntimeError):
 
 
 class OnnxExporterError(RuntimeError):
-    """Raised when an ONNX exporter error occurs. Diagnostic context is enclosed."""
+    """Raised when an ONNX exporter error occurs.
 
-    diagnostic_context: Final[diagnostics.DiagnosticContext]
+    This exception is thrown when there's an error during the ONNX export process.
+    It encapsulates the `ExportOutput` object generated until the failure, allowing
+    access to the partial export results and associated metadata.
+    """
 
-    def __init__(self, diagnostic_context: diagnostics.DiagnosticContext, message: str):
+    export_output: Final[ExportOutput]
+
+    def __init__(self, export_output: ExportOutput, message: str):
+        """
+        Initializes the OnnxExporterError with the given export output and message.
+
+        Args:
+            export_output (ExportOutput): The partial results of the ONNX export.
+            message (str): The error message to be displayed.
+        """
         super().__init__(message)
-        self.diagnostic_context = diagnostic_context
+        self.export_output = export_output
 
 
 @_beartype.beartype
 def _assert_dependencies(export_options: ResolvedExportOptions):
-    logger = export_options.logger
     opset_version = export_options.onnx_registry.opset_version
 
     def missing_package(package_name: str, exc_info: logging._ExcInfoType):
@@ -938,7 +1007,7 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
             f"Please install the `{package_name}` package "
             f"(e.g. `python -m pip install {package_name}`)."
         )
-        logger.fatal(message, exc_info=exc_info)
+        log.fatal(message, exc_info=exc_info)
         return UnsatisfiedDependencyError(package_name, message)
 
     def missing_opset(package_name: str):
@@ -947,7 +1016,7 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
             f"version {opset_version}. Install a newer `{package_name}` package or "
             f"specify an older opset version."
         )
-        logger.fatal(message)
+        log.fatal(message)
         return UnsatisfiedDependencyError(package_name, message)
 
     try:
@@ -1023,14 +1092,16 @@ def dynamo_export(
     except Exception as e:
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
         resolved_export_options.diagnostic_context.dump(sarif_report_path)
-        # TODO(bowbao): A summary as well as suggestion for posting the .sarif log in
-        # the issue to be added.
         message = (
-            f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
+            "Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
+            "SARIF is a standard format for the output of static analysis tools. "
+            "SARIF log can be loaded in VS Code SARIF viewer extension, "
+            "or SARIF web viewer(https://microsoft.github.io/sarif-web-component/)."
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
         raise OnnxExporterError(
-            resolved_export_options.diagnostic_context, message
+            ExportOutput._from_failure(e, resolved_export_options.diagnostic_context),
+            message,
         ) from e
 
 
@@ -1121,4 +1192,5 @@ __all__ = [
     "OnnxExporterError",
     "enable_fake_mode",
     "OnnxRegistry",
+    "DiagnosticOptions",
 ]
