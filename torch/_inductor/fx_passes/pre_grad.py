@@ -487,7 +487,8 @@ def boolean_mask_rewritten(graph: torch.fx.Graph) -> torch.fx.Graph:
             # tensor[index] = value
             tensor, index, value = node.args
             if (
-                "example_value" in index.meta
+                isinstance(index, torch.fx.node.Node)
+                and "example_value" in index.meta
                 and isinstance(index.meta["example_value"], FakeTensor)
                 and index.meta["example_value"].dtype == torch.bool
             ):

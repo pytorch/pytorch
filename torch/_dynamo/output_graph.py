@@ -39,7 +39,11 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    GuardOnDataDependentSymNode,
+    ShapeEnv,
+)
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1069,10 +1073,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
+            breakpoint()
             if (
                 e.args[0] == "Cannot convert symbols to int"
-                and self.frame_state["capture_dynamic_output_shape_ops"]
-            ):
+                or isinstance(e, GuardOnDataDependentSymNode)
+            ) and self.frame_state["capture_dynamic_output_shape_ops"]:
                 self.frame_state["capture_dynamic_output_shape_ops"] = False
                 raise RestartAnalysis() from None
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
