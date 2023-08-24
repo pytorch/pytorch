@@ -9,6 +9,7 @@ from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+from torch._decomp import register_decomposition
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_node_storage
@@ -502,6 +503,43 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val1.stride() == val2.stride()
     )
 
+count = defaultdict(int)
+noop_registry = {}
+def register_noop_decomp(targets, arg_num=0):
+    def register_fun(cond):
+        register_decomposition(targets, registry=noop_registry, unsafe=True)((cond, arg_num))
+    return register_fun
+
+@register_noop_decomp(aten.slice)
+def slice_noop(self, dim=0, start=None, end=None, step=1):
+    if start is None or end is None:
+        return False
+    if start == 0 and end >= 2**63 - 1 and step == 1:
+        return True
+    return False
+
+@register_noop_decomp(aten.slice_scatter, 1)
+def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
+    if start is None:
+        start = 0
+    if end is None:
+        end = 2**63 - 1
+    if start == 0 and end >= 2**63 - 1 and step == 1:
+        return True
+    return False
+
+@register_noop_decomp(aten.constant_pad_nd)
+def constant_pad_nd(x, padding, fill_value=0):
+    if all(p == 0 for p in padding):
+        return True
+
+
+
+
+@register_noop_decomp([aten.clone, aten.alias])
+def true_noop(*args, **kwargs):
+    return True
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes aten.clone and aten.alias ops from the graph when it's safe.
@@ -510,6 +548,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     input_storages = set()
     output_storages = set()
+
     for node in graph.nodes:
         if node.op == "placeholder":
             input_storages.add(get_node_storage(node))
@@ -521,8 +560,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
             output_storages.add(get_node_storage(out))
 
     for node in graph.nodes:
-        if node.target in (aten.alias.default, aten.clone.default):
-            src = node.args[0]
+        if node.target in noop_registry:
+            cond, src_index = noop_registry[node.target]
+            src = node.args[src_index]
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
             if (
@@ -530,7 +570,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 and get_node_storage(src) in input_storages
             ):
                 continue
-            if same_layout(node, src):
+            if same_layout(node, src) and cond(*node.args, **node.kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
