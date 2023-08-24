@@ -2,6 +2,8 @@
 
 from unittest import TestCase
 
+import copy
+import itertools
 import torch
 from torch import nn
 
@@ -34,19 +36,30 @@ class TestEfficientConvBNEval(TestCase):
     """Test the turn_on_efficient_conv_bn_eval function."""
 
     def test_efficient_conv_bn_eval(self):
-        model = BackboneModel()
-        model.eval()
+        model1 = BackboneModel()
+        model1.eval()
+        model2 = copy.deepcopy(model1)
+        turn_on_efficient_conv_bn_eval(model2)
+        model3 = copy.deepcopy(model1)
+        model3 = torch.compile(model3)
+
+        models = [model1, model2, model3]
+
         input = torch.randn(64, 6, 32, 32)
-        output = model(input)
-        output.sum().backward()
-        grads = [x.grad.clone() for x in model.parameters() if x.grad is not None]
-        model.zero_grad()
-        turn_on_efficient_conv_bn_eval(model)
-        output2 = model(input)
-        output2.sum().backward()
-        grads2 = [x.grad.clone() for x in model.parameters() if x.grad is not None]
-        assert torch.allclose(output, output2, atol=1e-6)
-        assert len(grads) == len(grads2)
-        for a, b in zip(grads, grads2):
-            print((a - b).abs().max().item())
-            assert torch.allclose(a, b, atol=1e-3)
+
+        outputs = []
+        grads = []
+        for model in models:
+            output = model(input)
+            outputs.append(output.clone())
+            output.sum().backward()
+            grads.append([x.grad.clone() for x in model.parameters() if x.grad is not None])
+            model.zero_grad()
+
+        for output_a, output_b in itertools.product(outputs, outputs):
+            assert torch.allclose(output_a, output_b, atol=1e-6)
+
+        for grad_a, grad_b in itertools.product(grads, grads):
+            assert len(grad_a) == len(grad_b)
+            for a, b in zip(grad_a, grad_b):
+                assert torch.allclose(a, b, atol=1e-3)
