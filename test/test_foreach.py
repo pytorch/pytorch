@@ -96,17 +96,6 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
     return transform
 
 
-
-
-def clone(arg):
-    if isinstance(arg, (list, tuple)):
-        return [clone(a) for a in arg]
-    if torch.is_tensor(arg):
-        return arg.clone().detach().requires_grad_()
-    else:
-        return arg
-
-
 # note(crcrpar): `zero_size` is `False` unless (dtype, device) == (torch.float32, "cuda")
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 class TestForeach(TestCase):
