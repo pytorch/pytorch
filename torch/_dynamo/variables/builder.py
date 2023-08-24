@@ -676,7 +676,9 @@ class VariableBuilder:
         elif isinstance(value, torch.SymBool):
             val = value.node.require_hint()
 
-            # Create a new SymInt symbol in dynamo's shape_env
+            # Create a SymInt in dynamo's shape_env.
+            # The idea is to track the SymBool as if it was a SymInt in dymao
+            # so we could re-use the infra we have for SymInt.
             new_sym = self.tx.output.shape_env.create_symbol(
                 val,
                 source=self.source,
@@ -685,7 +687,7 @@ class VariableBuilder:
                 new_sym, hint=val, source=self.source
             )
 
-            # Convert the fake SymInt to the original SymBool
+            # Convert the fake SymInt back to SymBool
             new_symbool = new_symint == 1
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
