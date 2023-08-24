@@ -56,6 +56,9 @@ inductor_decompositions = get_decompositions(
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
+# Remove unwanted decompositions included via the core ATen decompositions from
+# the Inductor decomp table.
+decompositions.pop(aten._unsafe_index.Tensor, None)
 
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
