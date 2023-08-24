@@ -3,13 +3,14 @@ import itertools
 import logging
 
 import weakref
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Dict, Counter, Optional, Tuple, Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
 
+from torch.fx import Node
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 
@@ -87,8 +88,8 @@ class ConstantFolder(torch.fx.Interpreter):
         insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
     ):
         super().__init__(gm)
-        self.node_replacements = {}
-        self.replaced_uses = collections.Counter()
+        self.node_replacements: Dict[Node, Any] = {}
+        self.replaced_uses: Counter[Node] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
         self.insertable_tensor_check = (
