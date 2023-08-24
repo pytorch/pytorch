@@ -305,5 +305,21 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   return self;
 }
 
+Tensor ge_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "ge", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.ge(b2);
+      });
+}
+
+Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
 } // namespace native
 } // namespace at
