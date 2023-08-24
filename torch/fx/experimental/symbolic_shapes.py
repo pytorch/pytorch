@@ -1981,6 +1981,7 @@ class DimConstraints:
 
 TLS = threading.local()
 
+
 class ShapeEnv:
     def __init__(
         self, *,
