@@ -46,6 +46,79 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
+def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> None:
+    """
+    Returns benchmark results by examining torch profiler events.
+    This could be more accurate as it doesn't count CPU side overhead.
+    However, this also requires manually excluding irrelevant event, e.g.
+    vectorized_elementwise_kernel which is used to fill L2 cache,
+    various CUDA events, etc, so could also be fragile.
+    """
+
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+
+    # Estimate the runtime of the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+    ) as p:
+        # Benchmark
+        for i in range(n_repeat):
+            # we clear the L2 cache before each run
+            cache.zero_()
+            # record time of `fn`
+            fn()
+        # Record clocks
+        torch.cuda.synchronize()
+
+    log.debug("profiling time breakdown")
+    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+    def _should_keep(key: str) -> bool:
+        if key.startswith("cuda"):
+            return False
+        if key in {
+            "Context Sync",
+            "cuLaunchKernel",
+            "Event Sync",
+            "Stream Wait Event",
+            "Stream Sync",
+            "Unknown Sync",
+        }:
+            return False
+        if key.startswith("void at::native::vectorized_elementwise_kernel"):
+            return False
+        return True
+
+    filtered_events = [event for event in p.key_averages() if _should_keep(event.key)]
+    log.debug("filtered events")
+    log.debug(filtered_events)
+    res = sum(event.cuda_time for event in filtered_events) / 1000.0
+    log.debug(f"profiling results: {res}")
+    return res
+
+
 def do_bench(*args, **kwargs):
     @functools.lru_cache(None)
     def load_triton():
@@ -140,7 +213,7 @@ def ceildiv(numer: int, denom: int) -> int:
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2**32, "32-bit only"
+    assert n <= 2 ** 32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
