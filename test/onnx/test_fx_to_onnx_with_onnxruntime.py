@@ -437,6 +437,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
+    )
     def test_expand_as_fill_zero(self):
         class Model(torch.nn.Module):
             def forward(self, x):
