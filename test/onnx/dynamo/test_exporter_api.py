@@ -121,9 +121,16 @@ class TestDynamoExportAPI(common_utils.TestCase):
             with open(path) as fp:
                 self.assertEqual(fp.read(), expected_buffer)
 
-    def test_save_succeeds_when_model_greater_than_2gb(self):
+    def test_save_succeeds_when_model_greater_than_2gb_and_destination_is_str(self):
         with common_utils.TemporaryFileName() as path:
             dynamo_export(_LargeModel(), torch.randn(1)).save(path)
+
+    def test_save_raises_when_model_greater_than_2gb_and_destination_is_not_str(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "'destination' must be a string when saving model larger than 2GB.",
+        ):
+            dynamo_export(_LargeModel(), torch.randn(1)).save(io.BytesIO())
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName(suffix=".sarif") as path:
