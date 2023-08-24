@@ -19,8 +19,7 @@ from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
     foreach_reduce_op_db, foreach_lerp_op_db)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, integral_types,
-    floating_types_and, floating_types, integral_types_and,
+    all_types_and_complex_and, floating_types_and, floating_types, integral_types_and,
 )
 
 
@@ -730,7 +729,7 @@ class TestForeach(TestCase):
                 if key in sample.kwargs:
                     del sample.kwargs[key]
             # note: `_foreach_pow.Scalar` and `_foreach_pow.ScalarList` don't depend on `result`
-            # see: https://github.com/pytorch/pytorch/blob/5403c7770cd9cdc05f6c216d593ea8e8ae328ff3/tools/autograd/derivatives.yaml#L3048-L3049  # noqa: B950
+            # see: https://github.com/pytorch/pytorch/blob/5403c777/tools/autograd/derivatives.yaml#L3048-L3049
             if op.name == "_foreach_pow":
                 if (
                     (isinstance(sample.args[0], list) and isinstance(sample.args[0][0], Number))
