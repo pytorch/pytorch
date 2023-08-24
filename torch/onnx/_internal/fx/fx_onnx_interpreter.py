@@ -810,10 +810,14 @@ class FxOnnxInterpreter:
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
+        # NOTE: We only save real tensors to initializer default data
+        not_fake_tensor = not isinstance(attr_tensor, torch._subclasses.FakeTensor)
         # Parameter/buffer name cannot contain "."
         # Revert from "/" to restore namespace formatting.
         input_ = onnxscript_graph.add_initializer(
-            node.target.replace("/", "."), attr_tensor
+            name=node.target.replace("/", "."),
+            value=attr_tensor,
+            save_value_to_default=not_fake_tensor,
         )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)

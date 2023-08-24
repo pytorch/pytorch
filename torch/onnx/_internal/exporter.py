@@ -915,14 +915,6 @@ class Exporter:
                 op_level_debug=self.options.op_level_debug,
             )
 
-            # NOTE: Filter out the initializers with fake tensors, otherwise,
-            # the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null not valid
-            initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
-            for initializer_name, initializer in onnxscript_graph.initializers.items():
-                if not isinstance(initializer, torch._subclasses.FakeTensor):
-                    initializers_with_real_tensors[initializer_name] = initializer
-            onnxscript_graph.initializers = initializers_with_real_tensors
-
             # Export TorchScript graph to ONNX ModelProto.
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
