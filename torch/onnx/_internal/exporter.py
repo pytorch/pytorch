@@ -544,6 +544,36 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
+class LargeProtobufExportOutputSerializer:
+    """Serializes ONNX graph as Protobuf.
+
+    Fallback to serializing as Protobuf with external data for models larger than 2GB.
+    """
+
+    _destination_path: Final[str]
+
+    def __init__(self, destination_path: str):
+        self._destination_path = destination_path
+
+    @_beartype.beartype
+    def serialize(
+        self, export_output: ExportOutput, destination: io.BufferedIOBase
+    ) -> None:
+        """`destination` is ignored. The model is saved to `self._destination_path` instead."""
+        import onnx
+
+        try:
+            onnx.save(export_output.model_proto, self._destination_path)
+        except ValueError:
+            # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
+            # Fallback to serializing the model with external data.
+            onnx.save(
+                export_output.model_proto,
+                self._destination_path,
+                save_as_external_data=True,
+            )
+
+
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
@@ -724,7 +754,10 @@ class ExportOutput:
         """
 
         if serializer is None:
-            serializer = ProtobufExportOutputSerializer()
+            if isinstance(destination, str):
+                serializer = LargeProtobufExportOutputSerializer(destination)
+            else:
+                serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
         _model_state_dict_files: List[Union[str, io.BytesIO]] = []
@@ -779,7 +812,12 @@ class ExportOutput:
                 with open(destination, "wb") as f:
                     serializer.serialize(self, f)
             else:
-                serializer.serialize(self, destination)
+                try:
+                    serializer.serialize(self, destination)
+                except ValueError:
+                    raise ValueError(
+                        "'destination' must be a string when saving model larger than 2GB."
+                    )
 
     @_beartype.beartype
     def save_diagnostics(self, destination: str) -> None:
