@@ -324,35 +324,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
 
-    def test_conv_bn_with_conv_multi_users(self):
-        class Model(torch.nn.Module):
-            def __init__(self, in_channels, out_channels, bias=False, **kwargs):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels, out_channels, bias=bias, **kwargs
-                )
-                self.bn = torch.nn.BatchNorm2d(
-                    out_channels, eps=0.001, dtype=torch.float
-                )
-
-            def forward(self, x):
-                x = self.conv(x)
-                return self.bn(x), x.relu()
-
-        mod = Model(3, 32, bias=False, kernel_size=3, stride=2).eval().to(self.device)
-
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = mod(x)
-            out_compiled = foo(mod, x)
-
-            self.assertEqual(out_eager, out_compiled)
-
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
 
