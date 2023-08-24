@@ -1123,9 +1123,9 @@ def init_process_group(
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
-                "For MPI backend, world_size ({}) and rank ({}) "
+                f"For MPI backend, world_size ({world_size}) and rank ({rank}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank)
+                "MPI runtime."
             )
 
         default_pg, _ = _new_process_group_helper(
@@ -2603,8 +2603,13 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     broadcast(object_sizes_tensor, src=src, group=group)
 
     # Concatenate and broadcast serialized object tensors
+    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # has only one element, we can skip the copy.
     if my_rank == src:
-        object_tensor = torch.cat(tensor_list)
+        if len(tensor_list) == 1:
+            object_tensor = tensor_list[0]
+        else:
+            object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(  # type: ignore[call-overload]
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
@@ -4265,6 +4270,8 @@ def _get_group_tag(pg: ProcessGroup) -> str:
         tag = tag[5:]
     return tag
 
+def _get_process_group_name(pg: ProcessGroup) -> str:
+    return _world.pg_names[pg]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.

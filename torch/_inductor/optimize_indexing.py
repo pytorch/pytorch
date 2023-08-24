@@ -9,7 +9,7 @@ from .utils import dominated_nodes
 
 
 def val_expressable_in_32_bits(val):
-    if hasattr(val, "is_Boolean") and val.is_Boolean:
+    if getattr(val, "is_Boolean", False):
         return True
 
     if isinstance(val, sympy.Expr):
