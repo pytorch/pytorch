@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DeviceMesh, DTensor, Shard
+from torch.distributed._tensor import DTensor, Shard
+from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -44,6 +45,7 @@ class TestDummyModel(torch.nn.Module):
     def get_input(self):
         return torch.rand(8, 8, device="cuda")
 
+
 class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def _create_model(self, device_mesh=None):
         model = FSDP(TestDummyModel().cuda(), device_mesh=device_mesh)
@@ -56,8 +58,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp_init_with_device_mesh(self):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(
@@ -87,8 +88,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(
@@ -149,8 +149,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(
@@ -200,8 +199,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(

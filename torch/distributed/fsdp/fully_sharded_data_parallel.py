@@ -408,7 +408,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         self,
         module: nn.Module,
         process_group: ProcessGroupType = None,
-        device_mesh: DeviceMesh = None,
+        device_mesh: Optional[DeviceMesh] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,

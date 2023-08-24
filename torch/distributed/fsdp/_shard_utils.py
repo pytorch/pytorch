@@ -53,6 +53,8 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
+# TODO: Make this API work for both FSDP, and 2D. Move it outside of FSDP.
+# External users are interesting in using this API.
 def _gather_state_dict(
     state_dict: Dict[str, Any],
     pg: Optional[dist.ProcessGroup] = None,

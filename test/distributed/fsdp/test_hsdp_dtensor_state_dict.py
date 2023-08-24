@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -46,10 +47,14 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(4, 8, device="cuda")
 
 
+# TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
     def _create_model(self, use_device_mesh=True):
-        mesh_tensor = torch.arange(self.world_size).view(2, -1)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
 
         if use_device_mesh:
             model = FSDP(
@@ -73,7 +78,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         return model, optim
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_hsdp_init_with_device_mesh(self):
         mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -102,7 +107,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 self.assertEqual(v.device_mesh, device_mesh)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
         model, optim = self._create_model(use_device_mesh=True)
@@ -162,7 +167,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
         model, optim = self._create_model(use_device_mesh=True)
@@ -211,7 +216,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 self.assertEqual(v1, v2)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
         model, optim = self._create_model(use_device_mesh=True)

@@ -252,6 +252,8 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+        # TODO: remove this if check after we integrate device_mesh in Composable APIs.
+        # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
         if hasattr(root_state, "_device_mesh"):
             fsdp_state._device_mesh = root_state._device_mesh
     for attr_name, attr_values in attr_name_to_values.items():
