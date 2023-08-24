@@ -14,10 +14,7 @@ diag_configs_short = op_bench.config_list(
         [2, 128, 128, -10, False],
         [1, 256, 256, 20, True],
     ],
-    cross_product_configs={
-        "device": ["cpu", "cuda"],
-        "dtype": [torch.float32]
-    },
+    cross_product_configs={"device": ["cpu", "cuda"], "dtype": [torch.float32]},
     tags=["short"],
 )
 

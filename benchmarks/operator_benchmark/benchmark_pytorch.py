@@ -94,11 +94,13 @@ class TorchBenchmarkBase(torch.nn.Module):
         for key in kargs:
             value = kargs[key]
             try:
-                appended_str = ("" if key in skip_key_list else key) + \
-                               str(value if type(value) != bool else int(value)).removeprefix("torch.")
+                appended_str = ("" if key in skip_key_list else key) + str(
+                    value if type(value) != bool else int(value)
+                ).removeprefix("torch.")
             except AttributeError:
-                appended_str = ("" if key in skip_key_list else key) + \
-                               str(value if type(value) != bool else int(value))
+                appended_str = ("" if key in skip_key_list else key) + str(
+                    value if type(value) != bool else int(value)
+                )
             test_name_str.append(appended_str)
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name

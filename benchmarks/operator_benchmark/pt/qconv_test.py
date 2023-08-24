@@ -31,6 +31,7 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+
 class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, L, G, kernel, stride, pad):
     def init(self, IC, OC, kernel, stride, N, L, device, **kwargs):
@@ -95,6 +96,7 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     device=["cpu"],
     tags=["long"],
 )
+
 
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, H, W, G, kernel, stride, pad):

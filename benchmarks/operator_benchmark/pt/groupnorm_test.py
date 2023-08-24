@@ -13,7 +13,7 @@ groupnorm_configs_short = op_bench.cross_product_configs(
     ),
     num_groups=(2, 4),
     tags=["short"],
-    dtype=[torch.float32, torch.bfloat16]
+    dtype=[torch.float32, torch.bfloat16],
 )
 
 

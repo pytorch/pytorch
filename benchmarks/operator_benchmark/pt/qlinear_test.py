@@ -2,8 +2,6 @@ import torch
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 
-from pt import configs
-
 import operator_benchmark as op_bench
 
 """
@@ -27,6 +25,7 @@ linear_configs_short = op_bench.config_list(
 linear_configs_long = op_bench.cross_product_configs(
     N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu"], tags=["long"]
 )
+
 
 class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, linear_under_test):

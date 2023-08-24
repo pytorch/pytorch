@@ -83,6 +83,7 @@ binary_long_configs = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+
 class BinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype_one, dtype_two, op_func):
         self.inputs = {
@@ -120,10 +121,22 @@ other_binary_ops_list = op_bench.op_list(
         ["hermite_polynomial_he", torch.special.hermite_polynomial_he],
         ["laguerre_polynomial_l", torch.special.laguerre_polynomial_l],
         ["laguerre_polynomial_p", torch.special.legendre_polynomial_p],
-        ["shifted_chebyshev_polynomial_t", torch.special.shifted_chebyshev_polynomial_t],
-        ["shifted_chebyshev_polynomial_u", torch.special.shifted_chebyshev_polynomial_u],
-        ["shifted_chebyshev_polynomial_v", torch.special.shifted_chebyshev_polynomial_v],
-        ["shifted_chebyshev_polynomial_w", torch.special.shifted_chebyshev_polynomial_w],
+        [
+            "shifted_chebyshev_polynomial_t",
+            torch.special.shifted_chebyshev_polynomial_t,
+        ],
+        [
+            "shifted_chebyshev_polynomial_u",
+            torch.special.shifted_chebyshev_polynomial_u,
+        ],
+        [
+            "shifted_chebyshev_polynomial_v",
+            torch.special.shifted_chebyshev_polynomial_v,
+        ],
+        [
+            "shifted_chebyshev_polynomial_w",
+            torch.special.shifted_chebyshev_polynomial_w,
+        ],
     ],
 )
 
@@ -150,6 +163,7 @@ other_binary_ops_short_configs = op_bench.config_list(
     tags=["short"],
 )
 
+
 class SpecialBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype, op_func):
         self.inputs = {
@@ -161,8 +175,11 @@ class SpecialBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input_one, input_two):
         return self.op_func(input_one, input_two)
 
+
 op_bench.generate_pt_tests_from_op_list(
-    other_binary_ops_list, other_binary_ops_long_configs + other_binary_ops_short_configs, SpecialBinaryOpBenchmark
+    other_binary_ops_list,
+    other_binary_ops_long_configs + other_binary_ops_short_configs,
+    SpecialBinaryOpBenchmark,
 )
 
 if __name__ == "__main__":

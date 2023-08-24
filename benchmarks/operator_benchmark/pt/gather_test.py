@@ -15,14 +15,19 @@ gather_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
 
 
 gather_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024], N=[128, 1024], dim=[0, 1], device=["cpu", "cuda"], dtype=[torch.float32, torch.bfloat16], tags=["long"]
+    M=[128, 1024],
+    N=[128, 1024],
+    dim=[0, 1],
+    device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
+    tags=["long"],
 )
 
 
@@ -34,7 +39,9 @@ class GatherBenchmark(op_bench.TorchBenchmarkBase):
             "input_one": torch.rand(M, N, device=device, dtype=dtype),
             "dim": dim,
             "index": torch.tensor(
-                numpy.random.randint(0, min_val, (M, N)), device=device, dtype=torch.long
+                numpy.random.randint(0, min_val, (M, N)),
+                device=device,
+                dtype=torch.long,
             ),
         }
         self.set_module_name("gather")

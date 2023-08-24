@@ -367,17 +367,30 @@ class BenchmarkRunner:
 
         if "bfloat16" in op_test_config.test_name:
             import platform
+
             if "linux" not in platform.system().lower():
                 # Only Linux based benchmarks are currently supported for BF16
                 return False
-            not_implemented_ops = ["FractionalMax", "MaxPool3d", "AvgPool3d", "erfcx", "bessel_",
-                "special.i1", "log_ndtr", "special.ndtri"]
+            not_implemented_ops = [
+                "FractionalMax",
+                "MaxPool3d",
+                "AvgPool3d",
+                "erfcx",
+                "bessel_",
+                "special.i1",
+                "log_ndtr",
+                "special.ndtri",
+            ]
             for op in not_implemented_ops:
                 if op in op_test_config.test_name:
-                # BF16 dtype not supported for FractionalMaxPool, MaxPool3D & AvgPool3D with indices
+                    # BF16 dtype not supported for FractionalMaxPool, MaxPool3D & AvgPool3D with indices
                     return False
             import subprocess
-            if "avx512_bf16" not in (subprocess.check_output("lscpu", shell=True).strip()).decode():
+
+            if (
+                "avx512_bf16"
+                not in (subprocess.check_output("lscpu", shell=True).strip()).decode()
+            ):
                 return False
 
         # Filter framework, operator, test_name, tag, forward_only

@@ -1,8 +1,7 @@
+import numpy as np
+import torch
 
 import operator_benchmark as op_bench
-import torch
-import torch.nn as nn
-import numpy as np
 
 """
 Microbenchmarks for the polar operator.
@@ -10,25 +9,20 @@ Microbenchmarks for the polar operator.
 
 # Config for polar op
 polar_config = op_bench.config_list(
-    attr_names=[
-        'L', 'M', 'N'
-    ],
+    attr_names=["L", "M", "N"],
     attrs=[
         [3, 256, 256],
         [3, 64, 64],
     ],
-    cross_product_configs={
-        'device': ['cpu'],
-        'dtype': [torch.float32, torch.float64]
-    },
-    tags=['short']
+    cross_product_configs={"device": ["cpu"], "dtype": [torch.float32, torch.float64]},
+    tags=["short"],
 )
 
 
 polar_op_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
+    attr_names=["op_name", "op_func"],
     attrs=[
-        ['polar', torch.polar],
+        ["polar", torch.polar],
     ],
 )
 
@@ -37,7 +31,9 @@ class PolarBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, L, M, N, device, dtype, op_func):
         self.inputs = {
             "input_one": torch.rand(L, M, N, device=device, dtype=dtype),
-            "input_two": torch.tensor([5 * np.pi / 4], device=device, dtype=dtype).expand(L, M, N)
+            "input_two": torch.tensor(
+                [5 * np.pi / 4], device=device, dtype=dtype
+            ).expand(L, M, N),
         }
         self.op_func = op_func
 
@@ -45,9 +41,7 @@ class PolarBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(input_one, input_two)
 
 
-op_bench.generate_pt_tests_from_op_list(polar_op_list,
-                                        polar_config,
-                                        PolarBenchmark)
+op_bench.generate_pt_tests_from_op_list(polar_op_list, polar_config, PolarBenchmark)
 
 
 if __name__ == "__main__":

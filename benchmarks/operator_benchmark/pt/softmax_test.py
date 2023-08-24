@@ -18,7 +18,7 @@ softmax_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -31,7 +31,7 @@ softmax_configs_long = op_bench.cross_product_configs(
     W=[256, 512],
     device=["cpu", "cuda"],
     dtype=[torch.float32, torch.bfloat16],
-    tags=["long"]
+    tags=["long"],
 )
 
 
@@ -57,7 +57,7 @@ softmax_two_dims_configs = op_bench.config_list(
     attrs=[[700, 23258, 0], [700, 23258, 1], [1024, 23258, 1]],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["long"],
 )

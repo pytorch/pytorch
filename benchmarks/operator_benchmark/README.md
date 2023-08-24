@@ -23,6 +23,16 @@ $ cd pt_extension
 $ python setup.py install
 ```
 
+## How to measure ATen CPU kernel performance with difference vectorization ISAs?
+By default, for CPU, PyTorch would use an AVX512 version of a kernel, if it's supported for that kernel.
+Otherwise, it would use its AVX2 counterpart.
+
+While adding a new kernel, performance of AVX512 & AVX2 variants of an op's kernels can be compared after setting the
+value of the following environment variable to "avx512" and "avx2", respectively.
+```
+ATEN_CPU_CAPABILITY
+```
+
 ## How to run the benchmarks:
 
 Run `torch.add` benchmark:

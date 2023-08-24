@@ -1,5 +1,6 @@
-import operator_benchmark as op_bench
 import torch
+
+import operator_benchmark as op_bench
 
 """
 Configs shared by multiple benchmarks
@@ -140,14 +141,19 @@ linear_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
 
 
 linear_configs_long = op_bench.cross_product_configs(
-    N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu", "cuda"], dtype=[torch.float32, torch.bfloat16], tags=["long"]
+    N=[32, 64],
+    IN=[128, 512],
+    OUT=[64, 128],
+    device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
+    tags=["long"],
 )
 
 embeddingbag_short_configs = op_bench.cross_product_configs(

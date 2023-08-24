@@ -12,7 +12,7 @@ instancenorm_configs_short = op_bench.cross_product_configs(
         (32, 8, 56, 56),
     ),
     tags=["short"],
-    dtype=[torch.float32, torch.bfloat16]
+    dtype=[torch.float32, torch.bfloat16],
 )
 
 

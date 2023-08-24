@@ -10,7 +10,7 @@ import operator_benchmark as op_bench
 
 cross_product_configs = {
     "device": ["cpu", "cuda"],
-    "dtype": [torch.float32, torch.bfloat16]
+    "dtype": [torch.float32, torch.bfloat16],
 }
 
 # Configs for PT Cat operator

@@ -6,7 +6,12 @@ import operator_benchmark as op_bench
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
-    M=[8, 128], N=[32, 64], K=[256, 512], device=["cpu", "cuda"], tags=["long"], dtype=[torch.float32, torch.bfloat16]
+    M=[8, 128],
+    N=[32, 64],
+    K=[256, 512],
+    device=["cpu", "cuda"],
+    tags=["long"],
+    dtype=[torch.float32, torch.bfloat16],
 )
 
 
@@ -19,7 +24,7 @@ add_short_configs = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype" : [torch.float32, torch.bfloat16],
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -59,9 +64,15 @@ op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenc
 class AddmmBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype):
         self.inputs = {
-            "input_one": torch.rand(M, K, device=device, dtype=dtype, requires_grad=self.auto_set()),
-            "mat1": torch.rand(M, N, device=device, dtype=dtype, requires_grad=self.auto_set()),
-            "mat2": torch.rand(N, K, device=device, dtype=dtype, requires_grad=self.auto_set()),
+            "input_one": torch.rand(
+                M, K, device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "mat1": torch.rand(
+                M, N, device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "mat2": torch.rand(
+                N, K, device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
         }
         self.set_module_name("addmm")
 

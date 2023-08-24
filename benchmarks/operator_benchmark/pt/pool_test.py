@@ -15,7 +15,7 @@ pool_1d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -67,7 +67,7 @@ pool_2d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -138,7 +138,7 @@ pool_3d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype": [torch.float32, torch.bfloat16]
+        "dtype": [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
