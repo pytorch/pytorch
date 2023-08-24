@@ -587,28 +587,27 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
   return c10::IntArrayRef(start, len);
 }
 
-static std::vector<int64_t> values_from_buffer(
-    const c10::TensorImpl* self,
-    py::handle values) {
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+template <typename T>
+static void attach_array_lifetime_to_tensor(
+    const c10::TensorImpl* tensor,
+    T* array_data,
+    const char* attr_name) {
+  c10::TensorImpl* t_ptr = const_cast<c10::TensorImpl*>(tensor);
   c10::optional<PyObject*> mb_obj =
-      ptr->pyobj_slot()->check_pyobj(getPyInterpreter());
+    t_ptr->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  return result;
+  auto capsule = py::capsule(array_data, [](void* p) {
+      delete[] reinterpret_cast<T*>(p);
+  });
+  py::handle(mb_obj.value()).attr(attr_name) = capsule;
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
+  HANDLE_TH_ERRORS
   auto out = torchDispatchFromTensorImpl(
       self,
       "size",
@@ -619,21 +618,28 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .attr("default")
           .ptr(),
       "torch.ops.aten");
-
   if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-  auto result = values_from_buffer(self, values);
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "sizes must be a list or a tuple");
+  int64_t len = py::len(out);
+  // Cleanup happens in the callback of a py::capsule attached to tensor
+  // See attach_array_lifetime_to_tensor.
+  int64_t* ptr = new int64_t[len];
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<int64_t>(*it);
+  }
+  attach_array_lifetime_to_tensor<int64_t>(self, ptr, "_sizes_capsule");
+  return c10::IntArrayRef(ptr, len);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
+
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
     const c10::TensorImpl* self) const {
@@ -654,24 +660,19 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   if (out.is_none()) {
     return self->sym_sizes_default();
   }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_sizes()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
+      "sym_size must be a list or a tuple");
+  int64_t len = py::len(out);
+  // Cleanup happens in the callback of a py::capsule attached to tensor
+  // See attach_array_lifetime_to_tensor.
+  c10::SymInt* ptr = new c10::SymInt[len];
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  attach_array_lifetime_to_tensor<c10::SymInt>(self, ptr, "_sym_sizes_capsule");
+  return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -769,20 +770,17 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   // since it's a format `sym_strides()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
-                                    : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.as_int_unchecked());
+      "sym_strides must be a list or a tuple");
+  int64_t len = py::len(out);
+  // Cleanup happens in the callback of a py::capsule attached to tensor
+  // See attach_array_lifetime_to_tensor.
+  c10::SymInt* ptr = new c10::SymInt[len];
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  attach_array_lifetime_to_tensor<c10::SymInt>(self, ptr, "_sym_strides_capsule");
+  return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
