@@ -145,6 +145,23 @@ Tensor NestedTensor_elementwise_Tensor(
       }
       return result;
     }
+
+    // check for the [B, C, *, *], [C, 1, 1] case
+    bool is_broadcastable_4d_3d = (
+        self_ptr->dim() == 4 &&
+        other.dim() == 3 &&
+        self_ptr->opt_size(1).has_value() &&
+        self_ptr->size(1) == other.size(0) &&
+        other.size(1) == 1 &&
+        other.size(2) == 1);
+    if (is_broadcastable_4d_3d) {
+      std::vector<Tensor> results;
+      for (auto t : self.unbind()) {
+        results.push_back(f(t, other));
+      }
+      return at::_nested_tensor_from_tensor_list(results);
+    }
+
     TORCH_CHECK(
         false,
         "Expected both self and other to be nested, but got a nested self and non-nested other for op: ",
