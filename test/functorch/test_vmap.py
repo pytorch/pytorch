@@ -5232,6 +5232,14 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = torch.randn(5, 3, 4, device=device)
         self._vmap_test(f, (x, y))
 
+    def test_nt_acts_as_dense_in_vmap(self, device):
+        def f(x):
+            assert not x.is_nested
+            return x
+
+        x = self._create_nt([5, None, 3], device=device)
+        self._vmap_test(f, (x,))
+
     def test_cat_batching_rule(self, device):
         def f(x, y, dim):
             return torch.cat([x, y], dim=dim)
@@ -5265,7 +5273,7 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         x = self._create_nt([3, None, 2])
         self._vmap_test(f, (x,))
 
-    def test_nt_with_nonzero_bdim_raises(self, device):
+    def test_nt_with_nonzero_in_dim_raises(self, device):
         def f(x):
             return x
 
@@ -5273,6 +5281,15 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         with self.assertRaisesRegex(
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, in_dims=2)(x)
+
+    def test_nt_with_nonzero_out_dim_raises(self, device):
+        def f(x):
+            return x
+
+        x = self._create_nt([3, None, 2], device=device)
+        with self.assertRaisesRegex(
+                RuntimeError, "Nested tensors can only be vmapped over dim=0"):
+            vmap(f, out_dims=2)(x)
 
     @allowVmapFallbackUsage
     def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_raises(self, device):
