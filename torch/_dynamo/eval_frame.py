@@ -1135,6 +1135,7 @@ def export(
             and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
         ):
             dim_constraints.solve()
+            dim_constraints.remove_redundant_dynamic_results()
             msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
             if forced_specializations:
