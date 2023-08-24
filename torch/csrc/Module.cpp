@@ -28,7 +28,6 @@
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
-#include <iostream>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
