@@ -23,7 +23,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::ArgMax_0"
     type {

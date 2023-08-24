@@ -20,7 +20,7 @@ graph {
     }
     domain: "org.pytorch.aten"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "x.1"
     type {

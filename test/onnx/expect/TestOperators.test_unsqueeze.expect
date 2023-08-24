@@ -23,7 +23,7 @@ graph {
     name: "Unsqueeze_1"
     op_type: "Unsqueeze"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Unsqueeze_0"
     type {
