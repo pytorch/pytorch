@@ -9,8 +9,8 @@ from torch._export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
+    DeserializeFn,
     FlattenFunc,
-    MaybeDeserializeFn,
     SerializeFn,
     UnflattenFunc,
 )
@@ -20,8 +20,9 @@ def register_dataclass_as_pytree_node(
     typ: Any,
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
+    serialized_type_name: Optional[str] = None,
     serialize_fn: Optional[SerializeFn] = None,
-    maybe_deserialize_fn: Optional[MaybeDeserializeFn] = None,
+    deserialize_fn: Optional[DeserializeFn] = None,
     *,
     return_none_fields: bool = False,
 ) -> None:
@@ -53,8 +54,9 @@ def register_dataclass_as_pytree_node(
         typ,
         flatten_fn,
         unflatten_fn,
+        serialized_type_name,
         serialize_fn,
-        maybe_deserialize_fn,
+        deserialize_fn,
     )
 
 

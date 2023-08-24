@@ -320,8 +320,20 @@ TreeSpec(TupleVariable, None, [*,
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
     def test_pytree_custom_type_serialize(self):
-        _register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
-        spec = TreeSpec(torch.Size, "size1", [LeafSpec(), LeafSpec()])
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        _register_pytree_node(
+            DummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: Dummy(*xs),
+            "DummyType",
+            lambda spec: (None, "1"),
+            lambda context, version: None,
+        )
+        spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
         roundtrip_spec = str_to_pytree(pytree_to_str(spec))
         self.assertEqual(roundtrip_spec, spec)
 
