@@ -52,6 +52,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
+        higher_order_op.out_dtype,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}

@@ -252,7 +252,9 @@ class HigherOrderOperator(OperatorBase):
                 type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            # This is the longer term change
+            #return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            return curr_mode.__torch_dispatch__(self, *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 

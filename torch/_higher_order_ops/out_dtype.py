@@ -86,6 +86,21 @@ out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
 out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
+# out_dtype(torch.mm, args, kwargs)
+# ~>
+# _int_mm(args, kwargs)
+#
+# Richard:
+# 1. can we make it work for all higher order ops?
+# 2. there is a way to register decomps for regular ops, the higher order op
+#    should work the same way
+
+
+def out_dtype_decomp(op: torch._ops.OpOverload, output_dtype, *args) -> Tensor:
+    return out_dtype_dense(op, output_dtype, *args)
+
+
+
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
@@ -100,12 +115,16 @@ def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
+# This should be registered as a decomposition somehow
 @out_dtype.py_impl(DispatchKey.CompositeExplicitAutograd)
 def out_dtype_dense(
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
+    if ... is an int8 thing ..:
+        return torch.ops.aten.int_mm(*args)
+
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
@@ -128,6 +147,15 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args
 ):
+    # Inlined logic
+    if out_dtype is in DECOMP_TABLE:
+        return DECOMP_TABLE[out_dtype](op, output_dtype, *args)
+
+    # This is a good unblock
+    r := maybe_handle_decomp(op, output_dtype, *args)
+    if r is not NotImplemented:
+        return r
+
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:

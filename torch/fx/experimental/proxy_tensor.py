@@ -43,7 +43,7 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+CURRENT_DECOMPOSITION_TABLE: Dict[Union[torch._ops.OpOverload, HigherOrderOp], Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
