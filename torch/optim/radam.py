@@ -147,13 +147,13 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
             &\rule{110mm}{0.4pt}  \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
-            &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
-            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
-            &\hspace{10mm}\textbf{else}                                                          \\
-            &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
-            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1}                 \\
+            &\hspace{6mm} g_t \leftarrow \nabla_{\theta} f_t (\theta_{t-1})                      \\
+            &\hspace{6mm} \theta_t \leftarrow \theta_{t-1}                                       \\
+            &\hspace{6mm} \textbf{if} \: \lambda \neq 0                                          \\
+            &\hspace{12mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
+            &\hspace{18mm} \theta_t \leftarrow \theta_{t} - \gamma \lambda \theta_{t}            \\
+            &\hspace{12mm}\textbf{else}                                                          \\
+            &\hspace{18mm} g_t \leftarrow g_t + \lambda \theta_{t}                               \\
             &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{6mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
             &\hspace{6mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
