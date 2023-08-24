@@ -3197,9 +3197,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
+    for (auto& allocator : device_allocator) {
+      allocator->attachOutOfMemoryObserver(std::move(observer));
+    }
   }
 
   void emptyCache() override {

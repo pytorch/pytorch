@@ -1659,16 +1659,7 @@ def get_classifications(
     for name, check in checks.items():
         if check.status == "SUCCESS":
             continue
-        if ignore_current_checks is not None and name in ignore_current_checks:
-            checks_with_classifications[name] = JobCheckState(
-                check.name,
-                check.url,
-                check.status,
-                "IGNORE_CURRENT_CHECK",
-                check.job_id,
-                check.title,
-            )
-            continue
+
         if "unstable" in name:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -1692,10 +1683,24 @@ def get_classifications(
                 check.job_id,
                 check.title,
             )
+            continue
+
         elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
+            continue
+
+        if ignore_current_checks is not None and name in ignore_current_checks:
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "IGNORE_CURRENT_CHECK",
+                check.job_id,
+                check.title,
+            )
+
     return checks_with_classifications
 
 
