@@ -2677,6 +2677,7 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         supports_autograd=True,
+        supports_inplace_autograd=True,
         supports_scalar_self_arg=False,
         supports_forward_ad=True,
         backward_requires_result=False,
@@ -2717,6 +2718,7 @@ class ForeachFuncInfo(OpInfo):
         self.backward_requires_result = backward_requires_result
         self.has_no_out_of_place = has_no_out_of_place
         self.has_no_in_place = self.inplace_variant is None
+        self.supports_inplace_autograd = supports_inplace_autograd
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm

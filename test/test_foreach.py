@@ -96,8 +96,6 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
     return transform
 
 
-def assert_multiple_grad_fns(tensors, test_case):
-    test_case.assertEqual(len({t.grad_fn for t in tensors}), len(tensors), msg=f"{[t.grad_fn for t in tensors]}")
 
 
 def clone(arg):
@@ -872,8 +870,50 @@ class TestForeach(TestCase):
                     continue
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
                     call_gradcheck()
-            else:
-                call_gradcheck()
+                continue
+            call_gradcheck()
+
+            # Test per-tensor `grad_fn` behavior.
+            if inplace and op.supports_inplace_autograd:
+                # per-tensor `grad_fn` check.
+                hook_buffer = []
+
+                def get_grad_fn_hook(i):
+
+                    def hook(grad_inputs, grad_outputs) -> None:
+                        hook_buffer.append(i)
+
+                    return hook
+
+                _inputs = [t.clone().detach().requires_grad_() for t in sample.input]
+                inputs = [t.clone() for t in _inputs]
+                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
+                op.inplace_variant(inputs, *sample.args, **kwargs)
+
+                self.assertEqual(len({t.grad_fn for t in inputs}), len(inputs))
+
+                for i, t in enumerate(inputs):
+                    t.grad_fn.register_hook(get_grad_fn_hook(i))
+
+                torch.autograd.grad(
+                    inputs[0],
+                    inputs=(_inputs[0],),
+                    grad_outputs=(torch.rand_like(inputs[0]),),
+                    retain_graph=True,
+                )
+                self.assertEqual(hook_buffer, [0])
+                hook_buffer.clear()
+
+                # tensors have different shapes.
+                sum_of_cloned_tensors = torch.cat([t.view(-1) for t in inputs]).sum()
+                grad_output = torch.rand_like(sum_of_cloned_tensors)
+                torch.autograd.grad(
+                    sum_of_cloned_tensors,
+                    inputs=tuple(_inputs),
+                    grad_outputs=(grad_output,),
+                    retain_graph=False,
+                )
+                self.assertEqual(hook_buffer, list(reversed(range(len(inputs)))))
 
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.

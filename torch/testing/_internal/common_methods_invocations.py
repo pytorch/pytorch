@@ -8899,6 +8899,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
+        supports_inplace_autograd=False,
     ),
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
@@ -8907,6 +8908,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
+        supports_inplace_autograd=False,
     ),
     ForeachFuncInfo(
         "pow",
