@@ -805,7 +805,7 @@ class Optimizer:
             for group in self.param_groups:
                 for p in group['params']:
                     if p.grad is not None:
-                        if set_to_none and get_static_address_type(p.grad) is not None:
+                        if set_to_none and get_static_address_type(p.grad) is None:
                             p.grad = None
                         else:
                             if p.grad.grad_fn is not None:
