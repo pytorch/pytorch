@@ -111,6 +111,12 @@ class TestForeach(TestCase):
             RegularFuncWrapper(op.ref_inplace),
         )
 
+    # note(crcrpar): Make sure 0-size tensors are appropriately ignored by `multi_tensor_apply`
+    # which is originally reported in https://github.com/pytorch/pytorch/issues/94865.
+    # rel:
+    #   - https://github.com/pytorch/pytorch/pull/94655
+    #   - https://github.com/pytorch/pytorch/issues/100701
+    #   - https://github.com/pytorch/pytorch/pull/100811
     @onlyCUDA
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
