@@ -683,7 +683,7 @@ class TestForeach(TestCase):
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
         self.assertTrue(all(t.requires_grad for t in sample.input))
         sample.kwargs.pop("disable_fastpath")
-        if func.func in (torch._foreach_addcmul, torch._foreach_addcdiv):
+        if func.func in foreach_pointwise_op_db:
             sample.kwargs.pop("values", None)
         (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
