@@ -713,7 +713,7 @@ class DistributedTest:
                 self.assertEqual(dist.get_backend(group_id), backend_str)
             else:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Invalid process group specified"
+                    ValueError, "Invalid process group specified"
                 ):
                     dist.get_backend(group_id)
 
