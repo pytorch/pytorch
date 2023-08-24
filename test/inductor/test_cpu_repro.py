@@ -254,6 +254,64 @@ class CPUReproTests(TestCase):
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
+    @config.patch(implicit_fallbacks=True)
+    def test_multihead_attention_cpu(self):
+        def fn(
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ):
+            return torch._native_multi_head_attention(
+                q,
+                k,
+                v,
+                embed_dim,
+                num_heads,
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                mask,
+                need_weights,
+            )
+
+        B = 1
+        T = 3
+        embed_dim = 6
+        num_heads = 2
+        q = torch.randn([B, T, embed_dim])
+        k = torch.randn([B, T, embed_dim])
+        v = torch.randn([B, T, embed_dim])
+        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
+        qkv_bias = torch.randn([3 * embed_dim])
+        proj_weight = torch.randn([3 * embed_dim, embed_dim])
+        proj_bias = torch.randn([3 * embed_dim])
+        mask = None
+        need_weights = False
+
+        inps = [
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ]
+        self.common(fn, inps)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
@@ -2327,6 +2385,17 @@ class CPUReproTests(TestCase):
             return x
 
         self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":
