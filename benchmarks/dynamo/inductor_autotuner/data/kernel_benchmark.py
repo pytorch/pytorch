@@ -5,6 +5,8 @@ import subprocess
 from os import listdir
 from os.path import isdir, join
 
+from inductor_autotuner.util import kernel_iter
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--kernel_dir", type=str, default="./data_hf", help="path to all the kernels"
