@@ -88,7 +88,7 @@ class ForeachKernel(Kernel):
 
     def codegen_pid_range(self, code, num_elems):
         if self.blocking_2d:
-            x_elems, y_elems, _ = num_elems
+            y_elems, x_elems, _ = num_elems
             num_x_blocks = ceildiv(x_elems, self.block_size_2d)
             num_y_blocks = ceildiv(y_elems, self.block_size_2d)
             upper_bound_y_pid = self.y_block_count + num_y_blocks
@@ -203,9 +203,12 @@ class ForeachKernel(Kernel):
                 # TODO mlazos: support dynamic shapes
                 self.codegen_pid_range(code, tuple(int(x) for x in sub_kernel.numels))
                 with code.indent():
-                    code.splice(f"xnumel = {sub_kernel.numels[0]}")
                     if self.blocking_2d:
-                        code.splice(f"ynumel = {sub_kernel.numels[1]}")
+                        code.splice(f"ynumel = {sub_kernel.numels[0]}")
+                        code.splice(f"xnumel = {sub_kernel.numels[1]}")
+                    else:
+                        code.splice(f"xnumel = {sub_kernel.numels[0]}")
+
                     sub_kernel.codegen_body()
                     code.splice(sub_kernel.body)
 
@@ -213,7 +216,6 @@ class ForeachKernel(Kernel):
             with code.indent():
                 code.splice("pass")
 
-        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):

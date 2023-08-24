@@ -2874,8 +2874,6 @@ class ConcatKernel(NopKernel):
                 )
             )
             input_names.append(inputs[i].get_name())
-        if inputs[0].get_device().type == "cuda":
-            V.graph.register_list(input_names)
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
