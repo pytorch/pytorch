@@ -125,7 +125,7 @@ class CachingAutotuner(KernelInterface):
         mutated_arg_names,
         heuristic_type,
         size_hints=None,
-        save_whole_cache_hook=None
+        save_whole_cache_hook=None,
     ):
         super().__init__()
         self.fn = fn
