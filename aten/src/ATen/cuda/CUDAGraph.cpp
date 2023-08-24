@@ -243,7 +243,7 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::enable_debug_mode() {
-#if (!defined(USE_ROCM) || ROCM_VERSION >= 50300)
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   _cuda_graphs_debug = true;
 #else
   TORCH_CHECK(false, "CUDA graphs is not yet supported on ROCM");
