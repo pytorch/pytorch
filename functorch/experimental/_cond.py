@@ -51,7 +51,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
     with disable_proxy_modes_tracing():
         true_graph = make_fx(true_fn, pre_dispatch=pre_dispatch)(*operands)
+        print("done make_fx(true_fn)")
         false_graph = make_fx(false_fn, pre_dispatch=pre_dispatch)(*operands)
+        print("done make_fx(false_fn)")
 
     true_outs = []
     false_outs = []
@@ -116,6 +118,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
     # a FakeTensorMode error :
     # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
+    breakpoint()
     out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)

@@ -1201,6 +1201,7 @@ def export(
                         graph, fake_params_buffers, fake_graph_inputs
                     )
 
+                print("done getting fake result")
                 return graph_captured_result
 
             return result_capturing_wrapper

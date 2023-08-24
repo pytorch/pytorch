@@ -233,6 +233,7 @@ class HigherOrderOperator(OperatorBase):
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
+        print(self, dispatch_key)
 
         if dispatch_key in self._dispatch_cache:
             kernel = self._dispatch_cache[dispatch_key]
@@ -265,7 +266,9 @@ class HigherOrderOperator(OperatorBase):
                 DispatchKey.Python
             ):
                 curr_mode = curr_stack[-1]
+                print(f"picked {type(curr_mode)}")
                 return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            print("continue")
 
         final_key = resolve_key(self, dispatch_key)
 
