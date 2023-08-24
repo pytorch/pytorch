@@ -164,7 +164,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_broadcasting(self, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
@@ -405,7 +405,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_consumer_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.add(a0, b0)
