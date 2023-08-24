@@ -360,8 +360,7 @@ class SymBool:
         # check equality.
         if isinstance(other, py_int):  # type: ignore[arg-type]
             return self.__int__() == other
-        else:
-            raise AssertionError(f"comparing a SymBool with {other} is not supported.")
+        return NotImplemented
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
