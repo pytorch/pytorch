@@ -5,6 +5,8 @@ import subprocess
 from os import listdir
 from os.path import isdir, join
 
+from torch._inductor.config import triton
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--log_dir", type=str, default="./data_logs")
 parser.add_argument("--data_dir", type=str, default="./data")
@@ -71,6 +73,8 @@ def main(args):
                                 subprocess.call(cmd, shell=True)
 
                 # run benchmark
+                # Turn off indirect indexing, the effect is that no device_assert will be generated
+                triton.assert_indirect_indexing = False
                 my_env = os.environ.copy()
                 my_env["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
                 my_env["TORCHINDUCTOR_DUMP_AUTOTUNER_DATA"] = "1"
