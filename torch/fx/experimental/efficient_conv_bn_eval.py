@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 
 
-def efficient_conv_bn_eval_forward(bn: nn.modules.batchnorm._BatchNorm,
-                                   conv: nn.modules.conv._ConvNd,
-                                   x: torch.Tensor):
+def efficient_conv_bn_eval_forward(
+    bn: nn.modules.batchnorm._BatchNorm, conv: nn.modules.conv._ConvNd, x: torch.Tensor
+):
     """
     Args:
         bn (nn.modules.batchnorm._BatchNorm): a BatchNorm module.
@@ -36,24 +36,25 @@ def efficient_conv_bn_eval_forward(bn: nn.modules.batchnorm._BatchNorm,
         bn_bias = torch.zeros_like(bn.running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
-    weight_coeff = torch.rsqrt(bn.running_var +
-                               bn.eps).reshape([-1] + [1] *
-                                               (conv.weight.ndim - 1))
+    weight_coeff = torch.rsqrt(bn.running_var + bn.eps).reshape(
+        [-1] + [1] * (conv.weight.ndim - 1)
+    )
     # shape of [C_out, 1, 1, 1] in Conv2d
     coefff_on_the_fly = bn_weight.view_as(weight_coeff) * weight_coeff
 
     # shape of [C_out, C_in, k, k] in Conv2d
     weight_on_the_fly = weight_on_the_fly * coefff_on_the_fly
     # shape of [C_out] in Conv2d
-    bias_on_the_fly = bn_bias + coefff_on_the_fly.flatten() *\
-        (bias_on_the_fly - bn.running_mean)
+    bias_on_the_fly = bn_bias + coefff_on_the_fly.flatten() * (
+        bias_on_the_fly - bn.running_mean
+    )
 
     return conv._conv_forward(x, weight_on_the_fly, bias_on_the_fly)
 
 
-def efficient_conv_bn_eval_control(bn: nn.modules.batchnorm._BatchNorm,
-                                   conv: nn.modules.conv._ConvNd,
-                                   x: torch.Tensor):
+def efficient_conv_bn_eval_control(
+    bn: nn.modules.batchnorm._BatchNorm, conv: nn.modules.conv._ConvNd, x: torch.Tensor
+):
     """This function controls whether to use `efficient_conv_bn_eval_forward`.
 
     If the following `bn` is in `eval` mode, then we turn on the special
@@ -73,14 +74,13 @@ def efficient_conv_bn_eval_graph_transform(fx_model):
     with the fused operation."""
     modules = dict(fx_model.named_modules())
 
-    patterns = [(torch.nn.modules.conv._ConvNd,
-                 torch.nn.modules.batchnorm._BatchNorm)]
+    patterns = [(torch.nn.modules.conv._ConvNd, torch.nn.modules.batchnorm._BatchNorm)]
 
     pairs = []
     # Iterate through nodes in the graph to find ConvBN blocks
     for node in fx_model.graph.nodes:
         # If our current node isn't calling a Module then we can ignore it.
-        if node.op != 'call_module':
+        if node.op != "call_module":
             continue
         target_module = modules[node.target]
         found_pair = False
@@ -108,17 +108,20 @@ def efficient_conv_bn_eval_graph_transform(fx_model):
         # argument. `fx_model.graph.get_attr` and
         # `fx_model.graph.call_function` does not allow the `name` argument.
         conv_get_node = fx_model.graph.create_node(
-            op='get_attr', target=conv_node.target, name='get_conv')
+            op="get_attr", target=conv_node.target, name="get_conv"
+        )
         bn_get_node = fx_model.graph.create_node(
-            op='get_attr', target=bn_node.target, name='get_bn')
+            op="get_attr", target=bn_node.target, name="get_bn"
+        )
         # prepare args for the fused function
         args = (bn_get_node, conv_get_node, conv_node.args[0])
         # create a new node
         new_node = fx_model.graph.create_node(
-            op='call_function',
+            op="call_function",
             target=efficient_conv_bn_eval_control,
             args=args,
-            name='efficient_conv_bn_eval')
+            name="efficient_conv_bn_eval",
+        )
         # this node replaces the original conv + bn, and therefore
         # should replace the uses of bn_node
         bn_node.replace_all_uses_with(new_node)
