@@ -1,26 +1,30 @@
-from collections import defaultdict
 import copy
 import dataclasses
-import sympy
+from collections import defaultdict
+from enum import auto, Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
-from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
+import warnings
+
+import sympy
 
 import torch
-from torch.fx.passes.infra.pass_manager import PassManager
+import torch.fx
 import torch.fx._pytree as fx_pytree
+
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import SymInt
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx._compatibility import compatibility
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.passes.infra.pass_manager import PassManager
+
 from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForConstraintsPass,
     InputDim,
     RangeConstraint,
-)
-from .passes.functionalize_side_effectful_ops_pass import (
-    _FunctionalizeSideEffectfulOpsPass,
-    _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS,
 )
 
 
@@ -45,8 +49,8 @@ LeafValue = Union[
 # Information to maintain user calling/returning specs
 @dataclasses.dataclass
 class CallSpec:
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
+    in_spec: Optional[pytree.TreeSpec]
+    out_spec: Optional[pytree.TreeSpec]
 
 
 # Extra information for joint graphs
@@ -86,6 +90,232 @@ class ExportGraphSignature:
             == assertion_dep_token_index
         )
 
+class ArgumentKind(Enum):
+    Tensor = auto()
+    SymInt = auto()
+    Constant = auto()
+
+
+@dataclasses.dataclass
+class ArgumentSpec:
+    kind: ArgumentKind
+    value: Any
+
+    def __post_init__(self):
+        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
+            assert isinstance(self.value, str)
+
+
+@dataclasses.dataclass
+class ModuleCallSignature:
+    inputs: List[ArgumentSpec]
+    outputs: List[ArgumentSpec]
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+
+@dataclasses.dataclass
+class ModuleCallEntry:
+    fqn: str
+    signature: Optional[ModuleCallSignature] = None
+
+
+def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
+    count = 0
+    buffer_name_to_node = {}
+    # Step 1: make lifted params as get_attr
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if count in inp_pos_to_param_buffer_name:
+                with gm.graph.inserting_after(node):
+                    getattr_node = gm.graph.get_attr(
+                        inp_pos_to_param_buffer_name[count]
+                    )
+                    node.replace_all_uses_with(getattr_node)
+                    metadata = node.meta
+                    gm.graph.erase_node(node)
+                    getattr_node.meta = metadata
+                    buffer_name_to_node[inp_pos_to_param_buffer_name[count]] = getattr_node
+
+            count += 1
+        # Step 2: Find the all the buffers that were mutated and update them
+        if node.op == "output":
+            user_output_nodes = []
+            for return_node in node.all_input_nodes:
+                return_node_name = return_node.name
+                # we found a param/buffer mutation
+                if return_node_name in buffers_to_mutate:
+                    buffer_node_name = buffers_to_mutate[return_node_name]
+                    assert buffer_node_name in buffer_name_to_node
+                    buffer_node = buffer_name_to_node[buffer_node_name]
+                    with gm.graph.inserting_before(node):
+                        buffer_update_node = gm.graph.call_function(
+                            torch.ops.aten.copy_.default, (buffer_node, return_node)
+                        )
+                else:
+                    user_output_nodes.append(return_node)
+            with gm.graph.inserting_before(node):
+                # Only return user outputs
+                new_output = gm.graph.output(tuple(user_output_nodes))
+                node.replace_all_uses_with(new_output)
+                gm.graph.erase_node(node)
+
+    # Step 3: Fix the input/output of the graph now that we deleted
+    # some args.
+    gm.graph.lint()
+    names = [f"arg_{i}" for i in range(len(in_spec.children_specs))]
+    gm.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            names,
+            in_spec,
+            out_spec,
+        )
+    )
+    gm.recompile()
+
+    # Step 4: Find state references in HigherOrderOps and recursively
+    # fix them.
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and node.target == torch.ops.cond:
+            pred, true_graph, false_graph, operands = node.args
+            true_gm = getattr(gm, true_graph.name)
+            false_gm = getattr(gm, false_graph.name)
+            inp_pos_to_param_buffer_name_for_submod = {}
+            real_operands = []
+            for ix, operand in enumerate(operands):
+                if operand.target in inp_pos_to_param_buffer_name.values():
+                    inp_pos_to_param_buffer_name_for_submod[ix] = operand.target
+                    true_gm.register_buffer(operand.target, state_dict[operand.target])
+                    false_gm.register_buffer(operand.target, state_dict[operand.target])
+                else:
+                    real_operands.append(operand)
+            node.args = (pred, true_graph, false_graph, real_operands)
+
+            _, in_spec = pytree.tree_flatten(real_operands)
+
+            _unlift(
+                true_gm,
+                inp_pos_to_param_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
+            )
+            _unlift(
+                false_gm,
+                inp_pos_to_param_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
+            )
+        if node.op == "call_function" and node.target.__name__ == "map_impl":
+            body_graph, num_mapped, *operands = node.args
+            body_gm = getattr(gm, body_graph.name)
+            inp_pos_to_buffer_name_for_submod = {}
+            real_operands = []
+            for ix, operand in enumerate(operands):
+                if operand.target in inp_pos_to_param_buffer_name.values():
+                    inp_pos_to_buffer_name_for_submod[ix] = operand.target
+                    body_gm.register_buffer(operand.target, state_dict[operand.target])
+                else:
+                    real_operands.append(operand)
+            node.args = (body_graph, num_mapped, *real_operands)
+
+            _, in_spec = pytree.tree_flatten(real_operands)
+
+            _unlift(
+                body_gm,
+                inp_pos_to_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
+            )
+    gm.graph.lint()
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
+
+
+def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Module:
+    new_gm = copy.deepcopy(ep.graph_module)
+
+    # TODO Fix the period in params/buffers names later
+    # maybe a pass to replace graph signature with fixed names
+    param_buffer_name_to_corrected_name = {}
+
+    for name, value in ep.state_dict.items():
+        if name in ep.graph_signature.buffers:
+            if "." in name:
+                new_gm.register_buffer(name.replace(".", "_"), value)
+                param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
+            else:
+                new_gm.register_buffer(name, value)
+        if name in ep.graph_signature.parameters:
+            if "." in name:
+                new_gm.register_parameter(name.replace(".", "_"), value)
+                param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
+            else:
+                new_gm.register_parameter(name, value)
+
+    count = 0
+    inp_pos_to_param_buffer_name = {}
+    for node in new_gm.graph.nodes:
+        if node.op == "placeholder":
+            if node.name in ep.graph_signature.inputs_to_buffers:
+                buffer_name = ep.graph_signature.inputs_to_buffers[node.name]
+                if buffer_name in param_buffer_name_to_corrected_name:
+                    inp_pos_to_param_buffer_name[
+                        count
+                    ] = param_buffer_name_to_corrected_name[buffer_name]
+                else:
+                    inp_pos_to_param_buffer_name[count] = buffer_name
+            if node.name in ep.graph_signature.inputs_to_parameters:
+                param_name = ep.graph_signature.inputs_to_parameters[node.name]
+                if param_name in param_buffer_name_to_corrected_name:
+                    inp_pos_to_param_buffer_name[
+                        count
+                    ] = param_buffer_name_to_corrected_name[param_name]
+                else:
+                    inp_pos_to_param_buffer_name[count] = param_name
+            count += 1
+    new_gm = _unlift(
+        new_gm,
+        inp_pos_to_param_buffer_name,
+        ep.call_spec.in_spec,
+        ep.call_spec.out_spec,
+        ep.state_dict,
+        ep.graph_signature.buffers_to_mutate,
+        ep.graph_signature.user_outputs,
+    )
+    new_gm.meta.update(ep.graph_module.meta)
+    return new_gm
+
+
+def _create_graph_module_for_export(root, graph):
+    try:
+        gm = torch.fx.GraphModule(root, graph)
+    except SyntaxError:
+        # If custom objects stored in memory are being used in the graph,
+        # the generated python code will result in a syntax error on the custom
+        # object, since it is unable to parse the in-memory object. However
+        # we can still run the graph eagerly through torch.fx.Interpreter,
+        # so we will bypass this error.
+        warnings.warn(
+            "Unable to execute the generated python source code from "
+            "the graph. The graph module will no longer be directly callable, "
+            "but you can still run the ExportedProgram, and if needed, you can "
+            "run the graph module eagerly using torch.fx.Interpreter."
+        )
+        gm = torch.fx.GraphModule(root, torch.fx.Graph())
+        gm._graph = graph
+
+    return gm
+
 
 class ExportedProgram:
     def __init__(
@@ -97,23 +327,68 @@ class ExportedProgram:
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
         equality_constraints: List[Tuple[InputDim, InputDim]],
+        module_call_graph: List[ModuleCallEntry],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
-        self.graph_module = torch.fx.GraphModule(root, graph)
+        self._graph_module = _create_graph_module_for_export(root, graph)
+        if isinstance(root, torch.fx.GraphModule):
+            self._graph_module.meta.update(root.meta)
 
-        self.graph_signature: ExportGraphSignature = graph_signature
-        self.call_spec: CallSpec = call_spec
-        self.state_dict: Dict[str, Any] = state_dict
-        self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self._graph_signature: ExportGraphSignature = graph_signature
+        self._call_spec: CallSpec = call_spec
+        self._state_dict: Dict[str, Any] = state_dict
+        self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self._equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
 
-    def __call__(self, *args: Any) -> Any:
+    @property
+    @compatibility(is_backward_compatible=True)
+    def graph_module(self):
+        return self._graph_module
+
+    @property
+    @compatibility(is_backward_compatible=True)
+    def graph(self):
+        return self.graph_module.graph
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def graph_signature(self):
+        return self._graph_signature
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def state_dict(self):
+        return self._state_dict
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self):
+        return self._call_spec
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def range_constraints(self):
+        return self._range_constraints
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def equality_constraints(self):
+        return self._equality_constraints
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def module_call_graph(self):
+        return self._module_call_graph
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
             try:
-                args = fx_pytree.tree_flatten_spec(args, self.call_spec.in_spec)  # type: ignore[assignment]
+                user_args = combine_args_kwargs(args, kwargs)
+                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(args)
+                _, received_spec = pytree.tree_flatten(user_args)
                 raise error.InternalError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -121,11 +396,16 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = (value for _, value in self.state_dict.items())
+        ordered_params = tuple(self.state_dict[name] for name in self.graph_signature.parameters)
+        ordered_buffers = tuple(self.state_dict[name] for name in self.graph_signature.buffers)
+        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
         with torch.no_grad():
+            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+            # See: torch/_functorch/aot_autograd.py#L1034
             res = torch.fx.Interpreter(self.graph_module).run(
-                *param_buffer_values,
+                *ordered_params,
+                *ordered_buffers,
                 *args,
                 enable_io_processing=False
             )
@@ -169,127 +449,166 @@ class ExportedProgram:
         )
         return string
 
-    @property
-    def graph(self):
-        return self.graph_module.graph
+    def module(self) -> torch.nn.Module:
+        """
+        Returns a self contained GraphModule with all the states
+        flattened.
+        """
+        return unlift_exported_program_lifted_states(self)
+
 
     def transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
+
+        def _get_updated_range_constraints(
+            gm: torch.fx.GraphModule,
+        ) -> Dict[sympy.Symbol, RangeConstraint]:
+            def get_shape_env(gm):
+                vals = [
+                    node.meta["val"]
+                    for node in gm.graph.nodes
+                    if node.meta.get("val", None) is not None
+                ]
+                from torch._guards import detect_fake_mode
+                fake_mode = detect_fake_mode(vals)
+                if fake_mode is not None:
+                    return fake_mode.shape_env
+                for v in vals:
+                    if isinstance(v, torch.SymInt):
+                        return v.node.shape_env
+
+            shape_env = get_shape_env(gm)
+            if shape_env is None:
+                return {}
+            range_constraints = {
+                k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
+            }
+            return range_constraints
+
+        def get_output_node_names(gm):
+            output_node = list(gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+
+            return [str(arg) for arg in output_node.args[0]]
+
+        def get_input_node_names(gm):
+            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+
+        def _generate_new_graph_signature(old_ep, new_gm):
+            """
+            Update graph_signature according to graph after transformation.
+            Transformations can lead to node name changes, which are used in
+            graph_signature to identify inputs and outputs. Therefore, after each
+            transformation, we need to update the graph_signature according to
+            new node names.
+
+            WARNING: This implementation makes a few assumptions
+                - The transformation doesn't change number of inputs/outputs
+                - Each input/output still has the same meaning.
+                    - For inputs, that means that the inputs in transformed
+                        graph map to the same lifted parameter/buffer or user
+                        input as the input of the same position in the graph
+                        before transformation.
+                    - Similarly for outputs, each output should correspond to the
+                        same mutated buffer or user output as the output value of
+                        the same position  in the graph before transformation.
+
+            It is difficult to programatically validate these assumptions, but they
+            should hold true most of the time as inputs/outputs of the graph rarely
+            need to be changed.
+            """
+            old_signature = old_ep.graph_signature
+            old_gm = old_ep.graph_module
+
+            old_graph_input_node_names = get_input_node_names(old_gm)
+            new_graph_input_node_names = get_input_node_names(new_gm)
+            assert len(old_graph_input_node_names) == len(new_graph_input_node_names), f"""
+                Number of input nodes changed from {len(old_graph_input_node_names)}
+                to {len(new_graph_input_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            old_graph_output_node_names = get_output_node_names(old_gm)
+            new_graph_output_node_names = get_output_node_names(new_gm)
+            assert len(old_graph_output_node_names) == len(new_graph_output_node_names), f"""
+                Number of output values changed from {len(old_graph_output_node_names)}
+                to {len(new_graph_output_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            node_names_mapping = dict(zip(
+                old_graph_input_node_names + old_graph_output_node_names,
+                new_graph_input_node_names + new_graph_output_node_names
+            ))
+
+            new_signature = copy.deepcopy(old_signature)
+            new_signature.user_inputs = [
+                node_names_mapping[old_user_input]
+                for old_user_input in old_signature.user_inputs
+            ]
+            new_signature.user_outputs = [
+                node_names_mapping[old_user_output]
+                for old_user_output in old_signature.user_outputs
+            ]
+            new_signature.inputs_to_parameters = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[old_input_name]
+                for old_input_name in old_signature.inputs_to_parameters.keys()
+            }
+            new_signature.inputs_to_buffers = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[old_input_name]
+                for old_input_name in old_signature.inputs_to_buffers.keys()
+            }
+            new_signature.buffers_to_mutate = {
+                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[old_output_name]
+                for old_output_name in old_signature.buffers_to_mutate.keys()
+            }
+            return new_signature
+
+        new_graph_signature = _generate_new_graph_signature(self, transformed_gm)
+
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            copy.deepcopy(self.graph_signature),
+            new_graph_signature,
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            copy.deepcopy(self.range_constraints),
+            _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
+            copy.deepcopy(self._module_call_graph),
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
-    def _add_runtime_assertions(
-        self,
-        functionalize: bool,
-    ) -> "ExportedProgram":
-        ep = self.transform(
-            _AddRuntimeAssertionsForConstraintsPass(
-                self.range_constraints,
-                self.equality_constraints,
-            )
-        )
-        # Graph signature update should be part of pass run instead of a
-        # separate step. However this requires augmenting pass infra at fx level
-        # to operate on `ExportedProgram` instead of `fx.GraphModule`.
-        # TODO: Integrate graph signature update into pass run.
-        ep = _fixup_graph_signature(old_ep=self, new_ep=ep)
-        if functionalize:
-            ep = ep.transform(_FunctionalizeSideEffectfulOpsPass())
-            ep = _update_graph_signature_after_assertions_functionalization(ep)
+    def _check_input_constraints(self, *args):
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
+        for p in self.graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            self.range_constraints,
+            self.equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
 
-        return ep
-
-
-def _update_graph_signature_after_assertions_functionalization(
-    ep: ExportedProgram,
-) -> ExportedProgram:
-    output_node = next(
-        n for n in ep.graph_module.graph.nodes if n.op == "output"
-    )
-    dep_token = next(
-        (
-            {idx: str(n)}
-            for idx, n in enumerate(output_node.args[0])
-            if n.target
-            in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS.values()
-        ),
-        None,
-    )
-
-    return (
-        _update_graph_signature(
-            ep=ep,
-            gs=dataclasses.replace(
-                copy.deepcopy(ep.graph_signature), assertion_dep_token=dep_token
-            ),
-        )
-        if dep_token is not None
-        else ep
-    )
-
-def _fixup_graph_signature(
-    old_ep: ExportedProgram, new_ep: ExportedProgram,
-) -> ExportedProgram:
-    def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
-        output_node = next(n for n in gm.graph.nodes if n.op == "output")
-        return [str(arg) for arg in output_node.args[0]]  # type: ignore[misc]
-
-    # Update output names since after adding run time assertions, the names of
-    # outputs could change.
-    # The assumption here is that the pass:
-    # - Won't change graph outputs order semantically so it's possible to create
-    #   map from old to new output names based on position.
-    # - Will keep input names unchanged so no need to update inputs related
-    #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
-    # If any pass logic breaks the above assumption, it needs to update the
-    # signature accordingly to maintain the assumption.
-    outputs = _get_output_node_names(old_ep.graph_module)
-    new_outputs = _get_output_node_names(new_ep.graph_module)
-    assert len(outputs) == len(new_outputs)
-    outputs_map = dict(zip(outputs, new_outputs))
-    gs = old_ep.graph_signature
-    # Need to update graph signature fields related to output since after adding
-    # runtime assertions, the output names could change.
-    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]  # type: ignore[index]
-    new_buffers_to_mutate = {
-        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()  # type: ignore[index]
-    }
-
-    return _update_graph_signature(
-        ep=new_ep,
-        gs=dataclasses.replace(
-            copy.deepcopy(new_ep.graph_signature),
-            user_outputs=new_user_outputs,
-            buffers_to_mutate=new_buffers_to_mutate,
-        ),
-    )
-
-def _update_graph_signature(
-    ep: ExportedProgram, gs: ExportGraphSignature,
-) -> ExportedProgram:
-    gm = copy.deepcopy(ep.graph_module)
-    return ExportedProgram(
-        root=gm,
-        graph=gm.graph,
-        graph_signature=gs,
-        call_spec=copy.deepcopy(ep.call_spec),
-        state_dict=ep.state_dict,
-        range_constraints=copy.deepcopy(ep.range_constraints),
-        equality_constraints=copy.deepcopy(ep.equality_constraints),
-    )
+    def validate(self):
+        # TODO(zhxchen17) check for get_attr
+        # TODO(zhxchen17) check for funcitonal ops
+        for gm in self.graph_module.modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    assert node.target != torch.ops.higher_order._export_tracepoint
 
 
 def _process_constraints(
@@ -380,3 +699,6 @@ def _process_constraints(
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
     return range_constraints, equality_constraints
+
+def combine_args_kwargs(args, kwargs):
+    return (args, kwargs) if kwargs else args

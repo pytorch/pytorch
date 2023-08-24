@@ -12,8 +12,8 @@ class Partition:
     def __init__(self, partition_id: int) -> None:
         self.nodes: Set[Node] = set()
         self.partition_id = partition_id
-        self.parents: Set["Partition"] = set()
-        self.children: Set["Partition"] = set()
+        self.parents: Set[Partition] = set()
+        self.children: Set[Partition] = set()
         self.bfs_level: int = -1
         self.used_mem_bytes: int = 0
         self.logical_device_ids: List[int] = []

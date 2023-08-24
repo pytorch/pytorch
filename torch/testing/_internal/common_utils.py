@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
@@ -203,7 +203,7 @@ slow_tests_dict = {}
 
 def maybe_load_json(filename):
     if os.path.isfile(filename):
-        with open(filename, 'r') as fp:
+        with open(filename) as fp:
             return json.load(fp)
     log.warning("Attempted to load json file '%s' but it does not exist.", filename)
     return {}
@@ -214,7 +214,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta', torch._C._get_privateuse1_backend_name())
 
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
@@ -355,12 +355,12 @@ def instantiate_parametrized_tests(generic_cls):
             def instantiated_test(self, param_kwargs=param_kwargs):
                 test(self, **param_kwargs)
 
-            assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
+            assert not hasattr(generic_cls, name), f"Redefinition of test {name}"
             setattr(generic_cls, name, instantiated_test)
 
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
-            full_name = '{}_{}'.format(test.__name__, test_suffix)
+            full_name = f'{test.__name__}_{test_suffix}'
 
             # Apply decorators based on full param kwargs.
             for decorator in decorator_fn(param_kwargs):
@@ -462,7 +462,7 @@ class parametrize(_TestParametrizer):
             return value.formatted_name
         else:
             # Include name and value separated by underscore.
-            return '{}_{}'.format(name, str(value).replace('.', '_'))
+            return f"{name}_{str(value).replace('.', '_')}"
 
     def _default_subtest_name(self, values):
         return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
@@ -506,9 +506,8 @@ class parametrize(_TestParametrizer):
 
                 values = list(values) if len(self.arg_names) > 1 else [values]
                 if len(values) != len(self.arg_names):
-                    raise RuntimeError('Expected # values == # arg names, but got: {} '
-                                       'values and {} names for test "{}"'.format(
-                                           len(values), len(self.arg_names), test.__name__))
+                    raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
+                                       f'values and {len(self.arg_names)} names for test "{test.__name__}"')
 
                 param_kwargs = dict(zip(self.arg_names, values))
 
@@ -686,12 +685,18 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = p.wait(timeout=5)
+        exit_status = None
+        try:
+            exit_status = p.wait(timeout=5)
+        # try to handle the case where p.wait(timeout=5) times out as well as
+        # otherwise the wait() call in the finally block can potentially hang
+        except subprocess.TimeoutExpired:
+            pass
         if exit_status is not None:
             return exit_status
         else:
             p.kill()
-            raise
+        raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -830,7 +835,7 @@ def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
-            with open(SLOW_TESTS_FILE, 'r') as fp:
+            with open(SLOW_TESTS_FILE) as fp:
                 global slow_tests_dict
                 slow_tests_dict = json.load(fp)
                 # use env vars so pytest-xdist subprocesses can still access them
@@ -839,7 +844,7 @@ def run_tests(argv=UNITTEST_ARGS):
             warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
-            with open(DISABLED_TESTS_FILE, 'r') as fp:
+            with open(DISABLED_TESTS_FILE) as fp:
                 global disabled_tests_dict
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
@@ -905,7 +910,7 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -1055,6 +1060,8 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
+custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
+TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
 TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
@@ -1062,6 +1069,8 @@ TEST_DILL = _check_module_exists('dill')
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
+
+TEST_Z3 = _check_module_exists('z3')
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
@@ -1257,14 +1266,20 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
-def skipIfRocm(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_WITH_ROCM:
-            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
+def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def runOnRocm(fn):
     @wraps(fn)
@@ -1294,7 +1309,7 @@ def skipIfRocmVersionLessThan(version=None):
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    reason = f"ROCm {rocm_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
@@ -1315,10 +1330,11 @@ def skipIfNotMiopenSuggestNHWC(fn):
 def setLinalgBackendsToDefaultFinally(fn):
     @wraps(fn)
     def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_linalg_library()
         try:
             fn(*args, **kwargs)
         finally:
-            torch.backends.cuda.preferred_linalg_library('default')
+            torch.backends.cuda.preferred_linalg_library(_preferred_backend)
     return _fn
 
 
@@ -1536,9 +1552,8 @@ def slowTest(fn):
     return wrapper
 
 
-def slowAwareTest(fn):
-    fn.__dict__['slow_test'] = True
-    return fn
+def slowTestIf(condition):
+    return slowTest if condition else lambda fn: fn
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
@@ -1672,7 +1687,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
     return True
 
 
-class CudaNonDefaultStream():
+class CudaNonDefaultStream:
     def __enter__(self):
         # Before starting CUDA test save currently active streams on all
         # CUDA devices and set new non default streams to all CUDA devices
@@ -1698,7 +1713,7 @@ class CudaNonDefaultStream():
                                      device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-class CudaMemoryLeakCheck():
+class CudaMemoryLeakCheck:
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
@@ -1848,7 +1863,7 @@ def print_repro_on_failure(repro_str):
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+            e.args = (f"{e.args[0]}\n{repro_str}", *e.args[1:])
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
@@ -1910,59 +1925,65 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 
 def check_if_enable(test: unittest.TestCase):
-    test_suite = str(test.__class__).split('\'')[1]
-    raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if raw_test_name in slow_tests_dict:
+    classname = str(test.__class__).split("'")[1].split(".")[-1]
+    sanitized_testname = remove_device_and_dtype_suffixes(test._testMethodName)
+
+    def matches_test(target: str):
+        target_test_parts = target.split()
+        if len(target_test_parts) < 2:
+            # poorly formed target test name
+            return False
+        target_testname = target_test_parts[0]
+        target_classname = target_test_parts[1][1:-1].split(".")[-1]
+        # if test method name or its sanitized version exactly matches the disabled
+        # test method name AND allow non-parametrized suite names to disable
+        # parametrized ones (TestSuite disables TestSuiteCPU)
+        return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
+
+    if any(matches_test(x) for x in slow_tests_dict.keys()):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
+
     if not IS_SANDCASTLE:
         should_skip = False
         skip_msg = ""
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
-            disable_test_parts = disabled_test.split()
-            if len(disable_test_parts) > 1:
-                disabled_test_name = disable_test_parts[0]
-                disabled_test_suite = disable_test_parts[1][1:-1]
-                # if test method name or its sanitized version exactly matches the disabled test method name
-                # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU)
-                if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
-                   and disabled_test_suite in test_suite:
-                    platform_to_conditional: Dict = {
-                        "mac": IS_MACOS,
-                        "macos": IS_MACOS,
-                        "win": IS_WINDOWS,
-                        "windows": IS_WINDOWS,
-                        "linux": IS_LINUX,
-                        "rocm": TEST_WITH_ROCM,
-                        "asan": TEST_WITH_ASAN,
-                        "dynamo": TEST_WITH_TORCHDYNAMO,
-                        "inductor": TEST_WITH_TORCHINDUCTOR,
-                        "slow": TEST_WITH_SLOW,
-                    }
+            if matches_test(disabled_test):
+                platform_to_conditional: Dict = {
+                    "mac": IS_MACOS,
+                    "macos": IS_MACOS,
+                    "win": IS_WINDOWS,
+                    "windows": IS_WINDOWS,
+                    "linux": IS_LINUX,
+                    "rocm": TEST_WITH_ROCM,
+                    "asan": TEST_WITH_ASAN,
+                    "dynamo": TEST_WITH_TORCHDYNAMO,
+                    "inductor": TEST_WITH_TORCHINDUCTOR,
+                    "slow": TEST_WITH_SLOW,
+                }
 
-                    invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
-                    if len(invalid_platforms) > 0:
-                        invalid_plats_str = ", ".join(invalid_platforms)
-                        valid_plats = ", ".join(platform_to_conditional.keys())
+                invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
+                if len(invalid_platforms) > 0:
+                    invalid_plats_str = ", ".join(invalid_platforms)
+                    valid_plats = ", ".join(platform_to_conditional.keys())
 
-                        print(f"Test {disabled_test} is disabled for some unrecognized ",
-                              f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                              "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
-                              f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
+                    print(f"Test {disabled_test} is disabled for some unrecognized ",
+                          f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
+                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
-                        # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
-                        platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
+                    # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
+                    platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
-                        should_skip = True
-                        skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
-                            f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
-                            "If you're seeing this on your local machine and would like to enable this test, " \
-                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
-                        break
+                if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
+                    should_skip = True
+                    skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                        f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                        "If you're seeing this on your local machine and would like to enable this test, " \
+                        "please make sure CI is not set and you are not using the flag --import-disabled-tests."
+                    break
 
         if should_skip and not RERUN_DISABLED_TESTS:
             # Skip the disabled test when not running under --rerun-disabled-tests verification mode
@@ -2104,7 +2125,7 @@ class TensorOrArrayPair(TensorLikePair):
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
-        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        actual, expected = (self._to_tensor(input) for input in (actual, expected))
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
@@ -2201,7 +2222,7 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 
-class NoTest():
+class NoTest:
     # causes pytest to not recognize this class as a test
     __test__ = False
 
@@ -2311,6 +2332,19 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
     def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
+
+    # Munges exceptions that internally contain stack traces, using munge_exc
+    def assertExpectedInlineMunged(
+        self, exc_type, callable, expect, *, suppress_suffix=True
+    ):
+        try:
+            callable()
+        except exc_type as e:
+            self.assertExpectedInline(
+                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+            )
+            return
+        self.fail(msg="Did not raise when expected to")
 
     def assertLogs(self, logger=None, level=None):
         if logger is None:
@@ -3245,8 +3279,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         )
 
         if error_metas:
+            # See [ErrorMeta Cycles]
+            error_metas = [error_metas]
             # TODO: compose all metas into one AssertionError
-            raise error_metas[0].to_error(
+            raise error_metas.pop()[0].to_error(
                 # This emulates unittest.TestCase's behavior if a custom message passed and
                 # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
                 # is True (default)
@@ -3408,12 +3444,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         subname_output = ""
         if subname:
             expected_file += "-" + subname
-            subname_output = " ({})".format(subname)
+            subname_output = f" ({subname})"
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
+            print(f"Accepting {update_type} for {munged_id}{subname_output}:\n\n{s}")
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
@@ -3423,16 +3459,16 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         try:
             with open(expected_file) as f:
                 expected = f.read()
-        except IOError as e:
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
             elif expecttest.ACCEPT:
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}{}:\n\n{}\n\n"
-                     "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
+                      f"I got this output for {munged_id}{subname_output}:\n\n{s}\n\n"
+                      "No expect file exists; to accept the current output, run:\n"
+                      f"python {__main__.__file__} {munged_id} --accept") from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -3442,7 +3478,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Adjust for producer_version
         expected = expected.replace(
             'producer_version: "CURRENT_VERSION"',
-            'producer_version: "{}"'.format(torch.onnx.producer_version)
+            f'producer_version: "{torch.onnx.producer_version}"'
         )
         if expecttest.ACCEPT:
             if expected != s:
@@ -3600,7 +3636,7 @@ def download_file(url, binary=True):
             f.write(data)
         return path
     except error.URLError as e:
-        msg = "could not download test file '{}'".format(url)
+        msg = f"could not download test file '{url}'"
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
@@ -4035,10 +4071,9 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
-        "is not defined in the running script \"{}\", but in \"{}\". Did you " \
-        "accidentally import a unittest.TestCase from another file?".format(
-            test_case.id(), running_script_path, test_case_class_file)
+    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
+        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+        "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
     set_running_script_path()
@@ -4359,7 +4394,7 @@ def set_single_threaded_if_parallel_tbb(fn):
     return wrap_fn
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def get_cycles_per_ms() -> float:
     """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
     """
@@ -4614,3 +4649,34 @@ def make_lazy_class(cls):
 @make_lazy_class
 class LazyVal:
     pass
+
+
+def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    if file is None:
+        file = inspect.stack()[1 + skip].filename  # skip one frame
+
+    s = str(e)
+
+    # Remove everything that looks like stack frames in NOT this file
+    def repl_frame(m):
+        if m.group(1) != file:
+            return ""
+        # Don't accept top-level, even for this script, these will wobble
+        # depending on how the testing script was invoked
+        if m.group(2) == "<module>":
+            return ""
+
+        return m.group(0)
+
+    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(file, os.path.basename(file), s)
+    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
+    s = re.sub(r"\\", "/", s)  # for Windows
+    if suppress_suffix:
+        s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+    if suppress_prefix:
+        s = re.sub(r"Cannot export model.+\n\n", "", s)
+    s = re.sub(r" +$", "", s, flags=re.M)
+    return s

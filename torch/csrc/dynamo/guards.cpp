@@ -54,8 +54,8 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -76,7 +76,7 @@ class TensorCheck {
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
-      std::string tensor_name) {
+      const std::string& tensor_name) {
     std::stringstream fail_reason;
     fail_reason << "tensor '" << tensor_name << "' ";
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
@@ -113,8 +113,8 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -280,13 +280,18 @@ static int TensorGuards_init(
   return 0;
 }
 
-PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
+PyObject* TensorGuards_check(
+    TensorGuards* self,
+    PyObject* args,
+    PyObject* kwargs) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
     return NULL;
   }
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
+
+  // kwargs is just ignored here
 
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
@@ -403,7 +408,10 @@ PyObject* TensorGuards_check_verbose(
 }
 
 static PyMethodDef TensorGuards_methods[] = {
-    {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
+    {"check",
+     (PyCFunction)(void*)TensorGuards_check,
+     METH_VARARGS | METH_KEYWORDS,
+     ""},
     {"check_verbose",
      (PyCFunction)(void*)TensorGuards_check_verbose,
      METH_VARARGS | METH_KEYWORDS,

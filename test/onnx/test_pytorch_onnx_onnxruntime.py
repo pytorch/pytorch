@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import io
 import itertools
 import os
@@ -38,16 +40,9 @@ from pytorch_test_common import (
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, errors, verification
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
-
-# The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
-# The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = (
-    _constants.ONNX_MAX_OPSET - 1
-)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -163,7 +158,7 @@ def _parametrize_rnn_args(arg_name):
 
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(
-        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+        onnx_test_common.MIN_ONNX_OPSET_VERSION, onnx_test_common.MAX_ONNX_OPSET_VERSION
     ),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
@@ -749,7 +744,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_logit(self):
         class Logit(torch.nn.Module):
             def __init__(self, eps):
-                super(Logit, self).__init__()
+                super().__init__()
                 self.eps = eps
 
             def forward(self, x):
@@ -1459,6 +1454,69 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    def test_maxpool_1d_ceil_corner(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=False
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_2d_ceil_corner(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_3d_ceil_corner(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_1d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=True
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_2d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_3d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
@@ -1490,29 +1548,31 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
     @common_utils.parametrize(
         "padding",
         (0, 1),
     )
     @common_utils.parametrize(
-        "ceil_mode",
-        (True, False),
-    )
-    @common_utils.parametrize(
         "count_include_pad",
         (True, False),
     )
-    def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
+    def test_avgpool_2d(self, padding, count_include_pad):
         model = torch.nn.AvgPool2d(
             3,
             3,
             padding=padding,
-            ceil_mode=ceil_mode,
             count_include_pad=count_include_pad,
         )
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
+    @skipIfUnsupportedMinOpsetVersion(19)
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -1523,6 +1583,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
             additional_test_inputs=[y],
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_avgpool_dynamic(self):
+        class test(torch.nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                norm_layer = functools.partial(torch.nn.BatchNorm2d, eps=0.0009)
+                self.avgpool = torch.nn.AvgPool2d(
+                    (2, 2), stride=2, ceil_mode=True, count_include_pad=False
+                )
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                )
+                self.norm = norm_layer(out_channels)
+
+            def forward(self, x):
+                return self.norm(self.conv(self.avgpool(x)))
+
+        model = test(8, 16)
+        inputs = torch.randn(2, 8, 64, 64)
+        self.run_test(
+            model,
+            inputs,
+            input_names=["input_0"],
+            dynamic_axes={"input_0": {3: "x", 2: "y"}, "output_0": {3: "x", 2: "y"}},
+            output_names=["output_0"],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -4126,7 +4213,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
@@ -4148,7 +4235,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce_self_rank_zero(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
@@ -13028,6 +13115,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # Scale and Zero-point must be a scalar in ORT:optimization
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
             torch.ao.quantization.QuantStub(),

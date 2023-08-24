@@ -69,8 +69,8 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& is_nested(bool value) noexcept {
-    is_nested_ = value;
+  TensorMaker& allocator(c10::Allocator* allocator) noexcept {
+    allocator_ = allocator;
 
     return *this;
   }
@@ -97,8 +97,8 @@ class TORCH_API TensorMaker {
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
   c10::optional<Device> device_{};
   TensorOptions opts_{};
-  bool resizeable_{}; // Allows the storage of this tensor to be resized
-  bool is_nested_{};
+  bool resizeable_{};
+  c10::Allocator* allocator_{};
 };
 
 inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {

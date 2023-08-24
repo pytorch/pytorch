@@ -27,12 +27,10 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymInt>::cast(
-    c10::SymInt si,
+    const c10::SymInt& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (auto m = si.maybe_as_int()) {
-    return py::cast(*m).release();
-  } else {
+  if (si.is_symbolic()) {
     auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
         si.toSymNodeImplUnowned());
     if (py_node) {
@@ -46,6 +44,9 @@ py::handle type_caster<c10::SymInt>::cast(
       }
       return torch::get_symint_class()(inner).release();
     }
+  } else {
+    auto m = si.maybe_as_int();
+    return py::cast(*m).release();
   }
 }
 
@@ -65,7 +66,7 @@ bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymFloat>::cast(
-    c10::SymFloat si,
+    const c10::SymFloat& si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
@@ -95,7 +96,7 @@ bool type_caster<c10::SymBool>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymBool>::cast(
-    c10::SymBool si,
+    const c10::SymBool& si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (auto m = si.maybe_as_bool()) {

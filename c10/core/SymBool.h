@@ -53,6 +53,7 @@ class C10_API SymBool {
   // that value.  Note that C++ comparison operations default to returning
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
+  bool expect_true(const char* file, int64_t line) const;
 
   bool has_hint() const;
 
@@ -78,4 +79,10 @@ class C10_API SymBool {
 };
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
+
+#define TORCH_SYM_CHECK(cond, ...) \
+  TORCH_CHECK((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
+#define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
+  TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
+
 } // namespace c10

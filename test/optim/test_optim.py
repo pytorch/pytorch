@@ -238,8 +238,6 @@ class TestOptim(TestCase):
             optimizer_c.step(fn_c)
             self.assertEqual(weight, weight_c)
             self.assertEqual(bias, bias_c)
-        # Make sure state dict wasn't modified
-        self.assertEqual(state_dict, state_dict_c)
         # Make sure state dict is deterministic with equal but not identical parameters
         self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
         # Make sure repeated parameters have identical representation in state dict
@@ -301,7 +299,7 @@ class TestOptim(TestCase):
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_cuda.load_state_dict(state_dict_c)
 
-        # Make sure state dict wasn't modified
+        # Make sure state_dict_c isn't modified by merely calling load_state_dict
         self.assertEqual(state_dict, state_dict_c)
 
         # Make sure that device of state['step'] is still CPU
@@ -312,7 +310,7 @@ class TestOptim(TestCase):
             for state in new_state_dict["state"].values():
                 self.assertEqual(state["step"].device.type, "cpu")
 
-        for _i in range(20):
+        for _ in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
@@ -691,7 +689,13 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p)
+                # Increasing the tolerance as we are collating lots of ops together for optimizers and
+                # the designated tolerances are for single op only.
+                single_rtol, single_atol = torch.testing._comparison.get_tolerances(mt_p.dtype, rtol=None, atol=None)
+                rtol = 5 * single_rtol
+                atol = 5 * single_atol
+
+                self.assertEqual(st_p, mt_p, rtol=rtol, atol=atol)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
@@ -699,15 +703,7 @@ class TestOptim(TestCase):
 
                 for k in st_p_state:
                     actual = mt_p_state[k]
-                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
-                    # `step` Tensor is 1D while usually it's 0D.
-                    if (
-                        k == "step"
-                        and isinstance(actual, torch.Tensor)
-                        and actual.ndim == 1
-                    ):
-                        actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual)
+                    self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
@@ -815,6 +811,10 @@ class TestOptim(TestCase):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
+                if optimizer_constructor.__name__ == "NAdam":
+                    # with capturable in NAdam, we have 3 extra intermediates for the
+                    # bias_correction, mus, and mu_nexts
+                    nintermediates = 5
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
@@ -832,16 +832,38 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
+            (
+                optim.Adam,
+                dict(lr=torch.tensor(.001), weight_decay=1.0, amsgrad=True,
+                     capturable=True, maximize=True)
+            ),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
+            (
+                optim.AdamW,
+                dict(lr=torch.tensor(.001), weight_decay=0.0, amsgrad=False,
+                     capturable=True, maximize=True)
+            ),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3, capturable=True)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3, capturable=True)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
+            ),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3,
+                     decoupled_weight_decay=True, capturable=True),
+            ),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
@@ -849,6 +871,14 @@ class TestOptim(TestCase):
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True, maximize=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False, maximize=True),
             ),
             (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
@@ -859,6 +889,7 @@ class TestOptim(TestCase):
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
             (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), maximize=True)),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
             (optim.ASGD, dict(weight_decay=0, maximize=True)),
@@ -900,7 +931,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop"
+                "RAdam", "RMSprop", "RProp", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -910,6 +941,7 @@ class TestOptim(TestCase):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
+                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
@@ -1076,9 +1108,25 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=torch.tensor(1e-3),
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1087,6 +1135,11 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -1129,10 +1182,33 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.AdamW(
+                [weight, bias],
+                lr=torch.tensor(1e-3),
+                weight_decay=1,
+                amsgrad=True,
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.AdamW)
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -1239,6 +1315,30 @@ class TestOptim(TestCase):
                 lr=1e-3,
                 weight_decay=0.1,
                 momentum_decay=6e-3,
+                foreach=foreach,
+            ),
+            [lambda opt: ExponentialLR(opt, gamma=0.9)],
+            constructor_accepts_foreach=True,
+        )
+        # NAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
+                foreach=foreach,
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
                 foreach=foreach,
             ),
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
@@ -1701,8 +1801,8 @@ class TestOptim(TestCase):
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            params, grads, exp_avgs, exp_avg_sqs = (
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4))
             prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
@@ -1870,6 +1970,121 @@ class TestOptim(TestCase):
                 optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
             with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
+
+    @staticmethod
+    def _state_dict_pre_hook(optimizer: Optimizer) -> None:
+        optimizer.state["test"] = 1
+
+    @staticmethod
+    def _state_dict_post_hook(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        if "test" in state_dict["state"]:
+            state_dict["state"].pop("test")
+            state_dict["ran_state_dict_pre_hook"] = True
+        else:
+            state_dict["ran_state_dict_pre_hook"] = False
+        return state_dict
+
+    @staticmethod
+    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
+        state_dict["param_groups"][0]["lr"] = 0.002
+
+    @staticmethod
+    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        # The typical use case for returning a state dict is to drastically modify the state dict.
+        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
+        my_state_dict = deepcopy(state_dict)
+        my_state_dict["param_groups"][0]["lr"] = 0.003
+        return my_state_dict
+
+    @staticmethod
+    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
+        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
+        optimizer.state["ran_load_state_dict_post_hook"] = True
+
+    def test_state_dict_pre_hook(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
+        state_dict = opt.state_dict()
+        self.assertEqual(state_dict["state"]["test"], 1)
+
+    def test_state_dict_post_hook(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+        opt.register_state_dict_post_hook(self._state_dict_post_hook)
+        state_dict = opt.state_dict()
+        self.assertEqual(state_dict["ran_state_dict_pre_hook"], False)
+
+    def test_state_dict_pre_post_hook(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
+        opt.register_state_dict_post_hook(self._state_dict_post_hook)
+        state_dict = opt.state_dict()
+        self.assertFalse("test" in state_dict["state"])
+        self.assertEqual(state_dict["ran_state_dict_pre_hook"], True)
+
+    def test_load_state_dict_pre_hook_and_prepend(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+        state_dict = opt.state_dict()
+
+        # usually one would have a new opt instance here, but it's all the same here
+        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook1)
+        opt.load_state_dict(state_dict)
+        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
+
+        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2, prepend=True)
+        opt.load_state_dict(state_dict)
+        # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
+        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
+
+    def test_load_state_dict_post_hook(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+
+        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
+        opt.load_state_dict(opt.state_dict())
+        self.assertFalse(opt.state["ran_load_state_dict_pre_hook2"])
+        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
+
+    def test_load_state_dict_pre_post_hook(self):
+        param = torch.rand(2, 3, requires_grad=True)
+        param.grad = torch.rand(2, 3, requires_grad=True)
+        opt = SGD([param], lr=0.001)
+
+        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2)
+        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
+        opt.load_state_dict(opt.state_dict())
+        self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
+        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_get_load_state_dict_cast_hook_handle(self):
+        param = torch.rand(2, 3, requires_grad=True, device="cpu")
+        param.grad = torch.rand_like(param)
+        opt = optim.Adadelta([param], lr=0.001)
+
+        # Simulate saving and loading state_dict after init'ing state with step()
+        opt.step()
+        cpu_state_dict = opt.state_dict()
+
+        param_cuda = torch.rand(2, 3, requires_grad=True, device="cuda")
+        param_cuda.grad = torch.rand_like(param_cuda)
+        opt_cuda = optim.Adadelta([param_cuda], lr=0.001)
+        handle = opt_cuda.get_load_state_dict_cast_hook_handle()
+        handle.remove()
+
+        opt_cuda.load_state_dict(cpu_state_dict)
+
+        # Assert that casting to CUDA did not happen for the param state
+        # since the cast hook has been removed
+        self.assertEqual(opt_cuda.state[param_cuda]["square_avg"].device, torch.device("cpu"))
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
@@ -2129,6 +2344,18 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.NAdam,
                 {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.NAdam,
+                {"lr": 0.9, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )

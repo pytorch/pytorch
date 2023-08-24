@@ -340,12 +340,12 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  if (!tensor.defined() || tensor.use_count() <= 1) {
+    return false;
+  }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
-    return false;
-  }
-  if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
   return true;
@@ -427,6 +427,7 @@ static int THPVariable_clear(THPVariable* self) {
     return 0;
   }
   Py_CLEAR(self->backward_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
     // Two situations to consider:
@@ -629,15 +630,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "bool is_nested=False)",
-      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides=None, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "bool is_nested=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
-  ParsedArgs<15> parsed_args{};
+  ParsedArgs<13> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -685,8 +684,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
                      options.device()) // TODO: this shouldn't be necessary if
                                        // it came from options
                  .options(options)
+                 .allocator(c10::GetAllocator(c10::kMeta))
                  .resizeable_storage()
-                 .is_nested(r.toBool(13))
                  .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
@@ -698,45 +697,26 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-    // We use storages **only** to track aliasing of subclasses during tracing.
-    // The actual data pointers are not valid.
-    Storage storage{
-        Storage::use_byte_size_t{},
-        0,
-        at::DataPtr{},
-        /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizeable=*/true};
+    // We shouldn't need storage
+    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
 
-    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
-    if (r.toBool(13)) {
-      keys = keys.add(c10::DispatchKey::NestedTensor);
-      keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
-    }
     tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), keys, options.dtype());
+        std::move(storage), options.computeDispatchKey(), options.dtype());
 
     auto sym_sizes = r.symintlist(1);
-    auto sym_strides = r.symintlistOptional(2);
+    auto sym_strides = r.symintlist(2);
     auto sym_storage_offset = r.toSymIntOptional(3);
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    if (sym_strides.list.has_value()) {
-      tensor_impl->set_sizes_and_strides(
-          sym_sizes, sym_strides.list.value(), sym_storage_offset.value_or(0));
-    } else {
-      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
-      if (sym_storage_offset.has_value()) {
-        // Replicating what TensorImpl does with storage_offset:
-        // https://github.com/pytorch/pytorch/blob/main/c10/core/TensorImpl.cpp#L1144
-        tensor_impl->set_storage_offset(sym_storage_offset->as_int_unchecked());
-      }
-    }
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
-          parseSizesStridesPolicyArgument(*sizes_strides_policy));
+      TORCH_CHECK(
+          false,
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
@@ -1185,6 +1165,47 @@ int THPVariable_set_backwards_hooks(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject* THPVariable_get_post_accumulate_grad_hooks(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
+  }
+  if (self->post_accumulate_grad_hooks) {
+    Py_INCREF(self->post_accumulate_grad_hooks);
+    return self->post_accumulate_grad_hooks;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set_post_accumulate_grad_hooks(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(
+        self, "_post_accumulate_grad_hooks", obj);
+  }
+  THPUtils_assertRet(
+      -1, obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  if (obj == Py_None) {
+    obj = nullptr;
+  }
+  Py_XINCREF(obj);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
+  self->post_accumulate_grad_hooks = obj;
+  const auto& tensor = THPVariable_Unpack(self);
+  if (obj) {
+    torch::autograd::impl::set_post_acc_grad_hooks(
+        tensor, std::make_unique<PyFunctionTensorPostAccGradHooks>(obj));
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1497,6 +1518,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"_backward_hooks",
      (getter)THPVariable_get_backwards_hooks,
      (setter)THPVariable_set_backwards_hooks,
+     nullptr,
+     nullptr},
+    {"_post_accumulate_grad_hooks",
+     (getter)THPVariable_get_post_accumulate_grad_hooks,
+     (setter)THPVariable_set_post_accumulate_grad_hooks,
      nullptr,
      nullptr},
     {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
@@ -2056,6 +2082,7 @@ static int THPVariable_subclass_traverse(
 
   // Finally traverse THPVariable special stuff
   Py_VISIT(var->backward_hooks);
+  Py_VISIT(var->post_accumulate_grad_hooks);
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(var);
     if (tensor.defined()) {
