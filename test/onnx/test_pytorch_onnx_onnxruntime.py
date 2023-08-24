@@ -40,7 +40,7 @@ from pytorch_test_common import (
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, errors, verification
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
