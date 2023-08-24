@@ -1,6 +1,5 @@
 import torch.fx as fx
 from torch.fx.node import Argument, Target
-from torch.nn.utils.fusion import fuse_conv_bn_eval
 from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast
 import torch
 import torch.nn as nn
@@ -53,14 +52,14 @@ def fuse(model: torch.nn.Module, inplace=True) -> torch.nn.Module:
     Implementation based on https://arxiv.org/abs/2305.11624
     "Tune-Mode ConvBN Blocks For Efficient Transfer Learning"
     It leverages the associative law between convolution and affine transform:
-    normalize (weight * feature) = (normalize weight) * feature, where * is 
-    the convolution operator. During inference, the weight and normalization 
-    can be constant-folded, which is the same as the normally used conv-bn 
-    fusion. A unique feature of this implementation is that it also works for 
-    training when BN is trained in `eval` mode, where keeping BN layers help 
+    normalize (weight * feature) = (normalize weight) * feature, where * is
+    the convolution operator. During inference, the weight and normalization
+    can be constant-folded, which is the same as the normally used conv-bn
+    fusion. A unique feature of this implementation is that it also works for
+    training when BN is trained in `eval` mode, where keeping BN layers help
     stablize training.
     This function only modifies the `forward` of `model`, without touching the
-     state dict of `model`. It is safe to inplace modify the `model` by 
+     state dict of `model`. It is safe to inplace modify the `model` by
     default. It also supports copying the model with `inplace=False`.
     """
     if not inplace:
