@@ -223,9 +223,9 @@ class GraphModule(torch.nn.Module):
         test_recompilation(
             f_cond,
             torch.randn([3, 4]),
-            [3, 4, 5],
-            [true_graph, false_graph, false_graph],
-            [1, 2, 2],
+            [3, 3, 4, 5],
+            [true_graph, true_graph, false_graph, false_graph],
+            [1, 1, 2, 2],
         )
 
 

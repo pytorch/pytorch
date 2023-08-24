@@ -354,14 +354,13 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
-    def __ge__(self, other):
+    def __eq__(self, other):
         # This can happen in dynamo, where we convert SymBool to a
-        # SymInt and if no restrictions are put on the SymInt e.g. used in
-        # an if clause, then we have a default guard for SymInt which is >= 0.
-        # This always evaluates to True for SymBool though, so it's safe to return True.
-        # without creating any guard in shape_env.
-        if isinstance(other, py_int) and other == 0:  # type: ignore[arg-type]
-            return True
+        # SymInt and if they're used in an if clause, they will become
+        # check equality.
+        if isinstance(other, py_int):  # type: ignore[arg-type]
+            assert other in (0, 1), f"Unexpcted comparison with an interger other than 0/1. got {other}"
+            return self.__int__() == other
         else:
             raise RuntimeError(f"Cannot compare SymBool with {other}")
 

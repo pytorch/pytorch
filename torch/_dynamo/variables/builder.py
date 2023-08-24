@@ -24,7 +24,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 
 from torch.fx.experimental.symbolic_shapes import (
-    _disable_specialize_zero_one,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -675,28 +674,18 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.SymBool):
-            # Create a SymInt in outside shape_env
-            outter_sym_int = value.node.shape_env.create_symint_from_symbool(value)
+            val = value.node.require_hint()
 
-            val = outter_sym_int.node.require_hint()
-            assert isinstance(val, int) and (val == 0 or val == 1)
-
-            # Create a new SymInt in dynamo shape_env
-            with _disable_specialize_zero_one(self.tx.output.shape_env):
-                new_sym = self.tx.output.shape_env.create_symbol(
-                    val,
-                    source=self.source,
-                    dynamic_dim=DimDynamic.DYNAMIC,
-                    constraint_dim=None,
-                )
-
-            # dynamo's shape_env cannot use outter_sym_int.node.expr to create new symint
-            # since the expr constains symbols in outter shape_env.
+            # Create a new SymInt symbol in dynamo's shape_env
+            new_sym = self.tx.output.shape_env.create_symbol(
+                val,
+                source=self.source,
+            )
             new_symint = self.tx.output.shape_env.create_symintnode(
                 new_sym, hint=val, source=self.source
             )
 
-            # Fakified the SymInt with a SymBool to recover the original behavior
+            # Convert the fake SymInt to the original SymBool
             new_symbool = new_symint == 1
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -712,7 +701,7 @@ class VariableBuilder:
                 example_strong_ref=new_symbool,
             )
             self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, self.source, None)
+                TrackedFake(new_symbool, self.source, None)
             )
             return SymNodeVariable(
                 sym_node_proxy,
