@@ -78,7 +78,7 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
@@ -103,7 +103,7 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,))
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
@@ -146,7 +146,7 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
@@ -170,7 +170,7 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,))
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
@@ -190,8 +190,8 @@ class TestDeserialize(TestCase):
         ep = export(fn, inputs, {}, constraints)
         ep.graph.eliminate_dead_code()
 
-        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
-        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        serialized_struct, state_dict, orig_args = serialize(ep, opset_version={"aten": 0})
+        deserialized_ep = deserialize(serialized_struct, state_dict, orig_args, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
@@ -433,10 +433,14 @@ class TestSchemaVersioning(TestCase):
 
         ep = export(f, (torch.randn(1, 3),))
 
-        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
+        serialized_ep, serialized_state_dict, serialized_orig_args = ExportedProgramSerializer().serialize(ep)
         serialized_ep.schema_version = -1
         with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
-            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
+            ExportedProgramDeserializer().deserialize(
+                serialized_ep,
+                serialized_state_dict,
+                serialized_orig_args,
+            )
 
 
 class TestOpVersioning(TestCase):

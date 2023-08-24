@@ -408,6 +408,7 @@ def export(
         range_constraints,
         equality_constraints,
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        args,
     )
 
     exported_program = exported_program.transform(
@@ -477,7 +478,7 @@ def save(
     """
     from .serde.serialize import serialize
     from .serde.schema import SCHEMA_VERSION
-    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+    serialized_program, serialized_state_dict, serialized_orig_args = serialize(ep, opset_version)
 
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
@@ -485,7 +486,8 @@ def save(
     with zipfile.ZipFile(f, 'w') as zipf:
         # Save serialized_ep and serialized_state_dict to the zip file
         zipf.writestr('serialized_exported_program.json', serialized_program)
-        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        zipf.writestr('serialized_state_dict.pt', serialized_state_dict)
+        zipf.writestr('serialized_orig_args.pt', serialized_orig_args)
         zipf.writestr('version', str(SCHEMA_VERSION))
 
         # Add extra files if provided
@@ -559,11 +561,12 @@ def load(
 
         # Load serialized_ep and serialized_state_dict from the zip file
         serialized_ep = zipf.read('serialized_exported_program.json')
-        serialized_state_dict = zipf.read('serialized_state_dict.json')
+        serialized_state_dict = zipf.read('serialized_state_dict.pt')
+        serialized_orig_args = zipf.read('serialized_orig_args.pt')
 
         # Deserialize ExportedProgram
         from .serde.serialize import deserialize
-        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+        ep = deserialize(serialized_ep, serialized_state_dict, serialized_orig_args, expected_opset_version)
 
         # Populate extra_files map
         if extra_files is not None:

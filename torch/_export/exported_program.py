@@ -328,6 +328,7 @@ class ExportedProgram:
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
         equality_constraints: List[Tuple[InputDim, InputDim]],
         module_call_graph: List[ModuleCallEntry],
+        original_traced_arguments: Tuple[Any, ...],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -341,6 +342,7 @@ class ExportedProgram:
         self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self._equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._original_traced_arguments = original_traced_arguments
 
     @property
     @compatibility(is_backward_compatible=True)
@@ -381,6 +383,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
+
+    @property
+    @compatibility(is_backward_compatible=True)
+    def original_traced_arguments(self):
+        return self._original_traced_arguments
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
@@ -578,6 +585,7 @@ class ExportedProgram:
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
+            copy.deepcopy(self.original_traced_arguments),
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
