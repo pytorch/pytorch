@@ -199,7 +199,6 @@ def _create_obs_or_fq_from_qspec(
             "quant_min": quantization_spec.quant_min,
             "quant_max": quantization_spec.quant_max,
             "qscheme": quantization_spec.qscheme,
-            "ch_axis": quantization_spec.ch_axis,
         }
         edge_or_nodes = quantization_spec.derived_from
         obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]

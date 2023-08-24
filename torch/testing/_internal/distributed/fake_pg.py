@@ -7,8 +7,7 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     ReduceScatterOptions,
     BroadcastOptions,
-    ScatterOptions,
-    AllToAllOptions
+    ScatterOptions
 )
 from torch.futures import Future
 
@@ -86,24 +85,6 @@ class FakeProcessGroup(dist.ProcessGroup):
         opts=ScatterOptions(),
     ):
         return ret_work(output_tensors)
-
-    def alltoall(
-        self,
-        output_tensors: List[Tensor],
-        input_tensors: List[Tensor],
-        opts=AllToAllOptions(),
-    ):
-        return ret_work(output_tensors)
-
-    def alltoall_base(
-        self,
-        output_tensor: Tensor,
-        input_tensor: Tensor,
-        output_split_sizes: List[int],
-        input_split_sizes: List[int],
-        opts=AllToAllOptions(),
-    ):
-        return ret_work(output_tensor)
 
     def getBackendName(self):
         return "fake"
