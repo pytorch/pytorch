@@ -59,8 +59,7 @@ def build_triton(
     commit_hash: str,
     build_conda: bool = False,
     build_rocm: bool = False,
-    py_version: Optional[str] = None,
-    rocm_version: Optional[str] = None,
+    py_version: Optional[str] = None
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
@@ -138,7 +137,6 @@ def build_triton(
         )
 
         if build_rocm:
-            print(f"rocm_version:\t{rocm_version}")
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
             print("ROCm libraries setup for triton installation...")
 
@@ -161,7 +159,6 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
-    parser.add_argument("--rocm_version", type=str)
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
@@ -174,7 +171,6 @@ def main() -> None:
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
-        rocm_version=args.rocm_version,
     )
 
 

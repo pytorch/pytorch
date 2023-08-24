@@ -41,7 +41,6 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
-      ROCM_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -96,7 +95,7 @@ jobs:
 
           BUILD_ROCM=""
           if [[ "$BUILD_DEVICE" == "rocm" ]]; then
-            BUILD_ROCM="--build-rocm --rocm_version ${ROCM_VERSION}"
+            BUILD_ROCM="--build-rocm"
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
