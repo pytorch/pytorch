@@ -1,5 +1,6 @@
 import itertools
 from dataclasses import dataclass
+from typing import List, Tuple
 
 from .. import metrics
 from ..utils import ceildiv
@@ -11,8 +12,8 @@ from .triton_utils import config_of, signature_to_meta
 
 @dataclass
 class PartitionState:
-    partitions: list[tuple]
-    cur_partition: list[tuple]
+    partitions: List[Tuple]
+    cur_partition: List[Tuple]
     cur_count: int
 
     def finalize(self):
