@@ -20,7 +20,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.eval_frame import Constraint
+from torch.export import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -216,11 +216,26 @@ def export(
         raise UserError(UserErrorType.INVALID_INPUT,
                         f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}")
 
+    # We convert to nn.Module because __call__ of ExportedProgram
+    # is untracable right now.
+    if isinstance(f, ExportedProgram):
+        if len(constraints) > 0:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "Cannot provide constraints for already exported program."
+            )
+        f = f.module()
+
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                if len(constraints) > 0:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        "Cannot provide constraints for already exported program."
+                    )
                 gm_torch_level = f
             else:
                 with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
@@ -349,8 +364,7 @@ def export(
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
-    for key, val in gm_torch_level.meta.items():
-        gm.meta[key] = val
+    gm.meta.update(gm_torch_level.meta)
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo

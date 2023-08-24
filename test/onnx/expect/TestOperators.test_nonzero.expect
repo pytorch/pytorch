@@ -20,7 +20,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::NonZero_0"
     type {
