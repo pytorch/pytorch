@@ -878,7 +878,7 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # TODO:Retire FXSymbolicTracer
+        # TODO: Retire FXSymbolicTracer
         # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
         from torch.onnx._internal.fx import fx_symbolic_graph_extractor
 
@@ -915,10 +915,17 @@ class Exporter:
                 op_level_debug=self.options.op_level_debug,
             )
 
+            # NOTE: Filter out the initializers with fake tensors, otherwise,
+            # the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null not valid
+            initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
+            for initializer_name, initializer in onnxscript_graph.initializers.items():
+                if not isinstance(initializer, torch._subclasses.FakeTensor):
+                    initializers_with_real_tensors[initializer_name] = initializer
+            onnxscript_graph.initializers = initializers_with_real_tensors
+
             # Export TorchScript graph to ONNX ModelProto.
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
-                include_initializers=self.options.fake_context is None,
             )
 
             return torch.onnx.ExportOutput(
@@ -942,12 +949,6 @@ class Exporter:
                 lambda x: isinstance(x, torch._subclasses.FakeTensor),
                 (self.model.parameters(), self.model.buffers()),
             )
-        if (
-            has_any_fake_tensor or has_any_fake_param_or_buffer
-        ) and not self.options.fake_context:
-            raise RuntimeError(
-                "Cannot export a model with fake inputs/weights without enabling fake mode.",
-            )
         has_any_non_fake_tensors = pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor)
             and not isinstance(x, torch._subclasses.FakeTensor),
@@ -959,6 +960,12 @@ class Exporter:
                 lambda x: isinstance(x, torch.Tensor)
                 and not isinstance(x, torch._subclasses.FakeTensor),
                 (self.model.parameters(), self.model.buffers()),
+            )
+        if (
+            has_any_fake_tensor or has_any_fake_param_or_buffer
+        ) and not self.options.fake_context:
+            raise RuntimeError(
+                "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         if (
             has_any_non_fake_tensors or has_any_non_fake_param_or_buffer
