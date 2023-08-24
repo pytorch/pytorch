@@ -65,10 +65,10 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
   using ElementOutput = ElementInputA;
 
   using SmArch = cutlass::arch::Sm80;
-  using ThreadBlockShape = cutlass::gemm::GemmShape<32, 128, 64>;
+  using ThreadblockShape = cutlass::gemm::GemmShape<32, 128, 64>;
   using WarpShape = cutlass::gemm::GemmShape<32, 32, 64>;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
-  using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
+  using ThreadblockSwizzle = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
   using Operator = cutlass::arch::OpMultiplyAddDequantizeInterleavedBToA;
 
   constexpr auto ThreadblockK = 64;
@@ -83,7 +83,10 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
   constexpr auto ElementsPerAccessB = 128 / cutlass::sizeof_bits<ElementInputB>::value;
   constexpr auto ElementsPerAccessC = ElementsPerAccessA;
   constexpr auto Stages = 4;
-  constexpr auto split_k_factor = 1; // FIXME: wrong results if >1
+  constexpr auto split_k_factor = 1; // FIXME: wrong results if !=1,
+                                     // even if GemmFpAIntB
+                                     // instantiated with SplitKSerial
+                                     // set to false.
 
   using ElementAccumulator = float;
 
@@ -106,11 +109,11 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
       ElementAccumulator,
       cutlass::arch::OpClassTensorOp,
       SmArch,
-      ThreadBlockShape,
+      ThreadblockShape,
       WarpShape,
       InstructionShape,
       EpilogueOp,
-      SwizzleThreadBlock,
+      ThreadblockSwizzle,
       Stages,
       true,
       Operator>::GemmKernel;
