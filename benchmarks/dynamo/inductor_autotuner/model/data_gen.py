@@ -6,6 +6,8 @@ from os.path import isdir, isfile, join
 
 import numpy as np
 import tqdm
+
+from inductor_autotuner.util import kernel_iter
 from torch._inductor.autotuner.model import AutotunerModel, ModelType
 from triton import Config
 
@@ -70,104 +72,90 @@ def main(args):
         if not isdir(model_path):
             continue
 
-        for kernel in sorted(listdir(model_path)):
-            kernel_path = join(model_path, kernel)
-            if not isdir(kernel_path):
+        for kernel, py, kernel_path, py_path in kernel_iter(model_path, verbose=False):
+            kernel_name = py[:-3]
+            if kernel_name in seen_kernels:
                 continue
 
-            for py in listdir(kernel_path):
-                py_path = join(kernel_path, py)
-                if not py.endswith(".py"):
-                    continue
+            with open(py_path) as file:
+                src = file.read()
 
-                # skip graph python file
-                with open(py_path) as file:
-                    src = file.read()
-                    if "AsyncCompile()" in src:
-                        continue
+            seen_kernels.add(kernel_name)
+            log_path = join(kernel_path, kernel_name + ".log")
+            pkl_path = join(kernel_path, py + ".pkl")
+            all_config_path = join(kernel_path, kernel_name + ".all_config")
 
-                kernel_name = py[:-3]
-                if kernel_name in seen_kernels:
-                    continue
+            # Sanith check, make sure log, pkl, and all_config exist
+            # assert isfile(log_path), log_path
+            # assert isfile(pkl_path), pkl_path
+            # assert isfile(all_config_path), all_config_path
+            if not isfile(log_path):
+                print("Missing log file: " + log_path)
+                continue
+            if not isfile(pkl_path):
+                print("Missing pkl file: " + pkl_path)
+                continue
+            if not isfile(all_config_path):
+                print("Missing all_config file: " + all_config_path)
+                continue
 
-                seen_kernels.add(kernel_name)
-                log_path = join(kernel_path, kernel_name + ".log")
-                pkl_path = join(kernel_path, py + ".pkl")
-                all_config_path = join(kernel_path, kernel_name + ".all_config")
+            # Read the raw data
+            autotuner_raw_data = pickle.load(open(pkl_path, "rb"))
+            src_code = autotuner_raw_data.src_code
 
-                # Sanith check, make sure log, pkl, and all_config exist
-                # assert isfile(log_path), log_path
-                # assert isfile(pkl_path), pkl_path
-                # assert isfile(all_config_path), all_config_path
-                if not isfile(log_path):
-                    print("Missing log file: " + log_path)
-                    continue
-                if not isfile(pkl_path):
-                    print("Missing pkl file: " + pkl_path)
-                    continue
-                if not isfile(all_config_path):
-                    print("Missing all_config file: " + all_config_path)
-                    continue
+            # Sanity check, making sure the metadata is correct
+            src_code = src_code.replace("KERNEL_NAME", "triton_")
+            assert src_code == src
 
-                # Read the raw data
-                autotuner_raw_data = pickle.load(open(pkl_path, "rb"))
-                src_code = autotuner_raw_data.src_code
+            # Get the baseline timing (best max autotune) from log
+            baseline_config_num = get_baseline_config_num(log_path)
+            baseline_timing = 1e6
+            with open(all_config_path) as file:
+                all_configs = json.load(file)
+                for config in all_configs[:baseline_config_num]:
+                    baseline_timing = min(baseline_timing, config["timing"])
 
-                # Sanity check, making sure the metadata is correct
-                src_code = src_code.replace("KERNEL_NAME", "triton_")
-                assert src_code == src
-
-                # Get the baseline timing (best max autotune) from log
-                baseline_config_num = get_baseline_config_num(log_path)
-                baseline_timing = 1e6
-                with open(all_config_path) as file:
-                    all_configs = json.load(file)
-                    for config in all_configs[:baseline_config_num]:
-                        baseline_timing = min(baseline_timing, config["timing"])
-
-                # Read all the configs
-                config_list = list()
-                y_list = list()
-                with open(all_config_path) as file:
-                    all_config = json.load(file)
-                    # use only max autotune configs for NN_PAIRWISE_SMALL
-                    for config in (
-                        all_config[:baseline_config_num]
-                        if model_type == ModelType.NN_PAIRWISE_SMALL
-                        else all_config
-                    ):
-                        num_warps = config.pop("num_warps")
-                        num_stages = config.pop("num_stages")
-                        timing = config.pop("timing")
-                        # n_regs, shared, n_spills are only available after compilation
-                        # while we want to predict before compilation
-                        config.pop("n_regs")
-                        config.pop("shared")
-                        config.pop("n_spills")
-                        config_list.append(
-                            Config(
-                                kwargs=config,
-                                num_warps=num_warps,
-                                num_stages=num_stages,
-                            )
+            # Read all the configs
+            config_list = list()
+            y_list = list()
+            with open(all_config_path) as file:
+                all_config = json.load(file)
+                # use only max autotune configs for NN_PAIRWISE_SMALL
+                for config in (
+                    all_config[:baseline_config_num]
+                    if model_type == ModelType.NN_PAIRWISE_SMALL
+                    else all_config
+                ):
+                    num_warps = config.pop("num_warps")
+                    num_stages = config.pop("num_stages")
+                    timing = config.pop("timing")
+                    # n_regs, shared, n_spills are only available after compilation
+                    # while we want to predict before compilation
+                    config.pop("n_regs")
+                    config.pop("shared")
+                    config.pop("n_spills")
+                    config_list.append(
+                        Config(
+                            kwargs=config,
+                            num_warps=num_warps,
+                            num_stages=num_stages,
                         )
-                        y_list.append(timing)
+                    )
+                    y_list.append(timing)
 
-                # normalize y to (0, 1]
-                y_best = min(y_list)
-                y_normalized_list = [y_best / y_ for y_ in y_list]
+            # normalize y to (0, 1]
+            y_best = min(y_list)
+            y_normalized_list = [y_best / y_ for y_ in y_list]
 
-                # Get feature vector
-                x_list = autotuner_model.get_feature_vec(
-                    config_list, autotuner_raw_data
-                )
+            # Get feature vector
+            x_list = autotuner_model.get_feature_vec(config_list, autotuner_raw_data)
 
-                x_all.extend(x_list)
-                y_all.extend(y_list)
-                y_normalized_all.extend(y_normalized_list)
-                y_baseline_all.extend([baseline_timing] * len(y_list))
-                qid_all.extend([kernel_counter] * len(y_list))
-                kernel_counter += 1
+            x_all.extend(x_list)
+            y_all.extend(y_list)
+            y_normalized_all.extend(y_normalized_list)
+            y_baseline_all.extend([baseline_timing] * len(y_list))
+            qid_all.extend([kernel_counter] * len(y_list))
+            kernel_counter += 1
 
     # Split the data by qid
     # Note that X might not be np.array, so using array as indices might not work
