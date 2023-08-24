@@ -9,7 +9,7 @@ graph {
     name: "Pow_0"
     op_type: "Pow"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Pow_0"
     type {
