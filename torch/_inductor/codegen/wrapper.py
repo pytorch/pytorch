@@ -914,6 +914,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
+        self.resized_outputs = {}
 
         from .cpp import cexpr
 
@@ -1094,14 +1095,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if (
-                    hasattr(output, "get_name")
-                    and output.get_name() in self.outputs_need_copy
-                ):
-                    output_as_strided = output.codegen_reference()
-                    self.wrapper_call.writeline(
-                        f"outputs[{idx}].copy_({output_as_strided});"
-                    )
+                if hasattr(output, "get_name"):
+                    name = output.get_name()
+                    if name in self.outputs_need_copy:
+                        output_as_strided = output.codegen_reference()
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].copy_({output_as_strided});"
+                        )
+                    resize_to = self.resized_outputs.get(name, None)
+                    if resize_to is not None:
+                        resize_to_args = ", ".join(pexpr(d) for d in resize_to)
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].resize_({{{resize_to_args}}});"
+                        )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1256,7 +1262,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.sizevars.statically_known_leq(
                 buffer.get_numel(), output_buffer.get_numel()
             ):
-                return f"auto {name} = outputs[{output_idx}];"
+                buf_str = f"auto {name} = outputs[{output_idx}];"
+                # avoid resize_output warning:
+                # "An output with one or more elements was resized since it had..."
+                if buffer.get_size() != output_buffer.get_size():
+                    buf_str += f" {name}.resize_(0);"
+                    assert name not in self.resized_outputs
+                    self.resized_outputs[name] = list(output_buffer.get_size())
+                return buf_str
             else:
                 self.outputs_need_copy.add(name)
 
@@ -1362,12 +1375,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int gridX,
                     int gridY,
                     int gridZ,
-                    int numWraps,
+                    int numWarps,
                     int sharedMemBytes,
                     void* args[],
                     cudaStream_t stream) {
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
