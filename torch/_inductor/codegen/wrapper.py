@@ -1051,6 +1051,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
                 self.prefix.writeline(f"""inputs_info_[{idx}].name = "{name}";""")
+                self.prefix.writeline(
+                    f"""inputs_info_[{idx}].dtype = "{V.graph.graph_inputs[name].get_dtype()}";"""
+                )
                 sizes = V.graph.graph_inputs[name].get_size()
                 self.prefix.writeline(
                     f"inputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1066,6 +1069,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
                 self.prefix.writeline(f"""outputs_info_[{idx}].name = "output{idx}";""")
+                self.prefix.writeline(
+                    f"""outputs_info_[{idx}].dtype = "{output.get_dtype()}";"""
+                )
                 sizes = output.get_size()
                 self.prefix.writeline(
                     f"outputs_info_[{idx}].shape.reserve({len(sizes)});"
