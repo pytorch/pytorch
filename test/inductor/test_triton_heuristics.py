@@ -4,15 +4,16 @@ import sys
 import unittest
 
 try:
-    import triton
+    import triton  # noqa: F401
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires triton")
 
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor import config
 from torch._inductor.triton_heuristics import triton_config
-from  torch._inductor import config
+
 
 class TestTritonHeuristics(TestCase):
     def test_triton_config(self):
@@ -25,6 +26,7 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= config.triton.max_block[label])
+
 
 if __name__ == "__main__":
     run_tests()
