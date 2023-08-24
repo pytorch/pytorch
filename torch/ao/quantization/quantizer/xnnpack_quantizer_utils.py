@@ -230,7 +230,7 @@ def _annotate_conv2d(
         conv_node = conv_partition.output_nodes[0]
         if (
             conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
+            or conv_node.target != torch.ops.aten.conv2d.default
         ):
             raise ValueError(f"{conv_node} is not an aten conv2d operator")
         # skip annotation if it is already annotated
@@ -278,7 +278,7 @@ def _annotate_conv2d_relu(
             raise ValueError(f"{conv_node} is not a Node")
         if (
             conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
+            or conv_node.target != torch.ops.aten.conv2d.default
         ):
             raise ValueError(f"{conv_node} is not an aten conv2d operator")
         if relu_node.op != "call_function" or relu_node.target not in [
@@ -350,7 +350,7 @@ def _annotate_conv2d_bn(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -487,8 +487,12 @@ def _annotate_max_pool2d(
         output_node = maxpool_partition.output_nodes[0]
         maxpool_node = None
         for n in maxpool_partition.nodes:
-            if n.target == torch.ops.aten.max_pool2d_with_indices.default:
+            if n.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = n
+        assert (
+            maxpool_node is not None
+        ), "XNNPACKQuantizer only works with torch.ops.aten.max_pool2d.default, "
+        "please make sure you are exporting the model correctly"
         if _is_annotated([output_node, maxpool_node]):  # type: ignore[list-item]
             continue
 
