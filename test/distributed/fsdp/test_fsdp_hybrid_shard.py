@@ -359,6 +359,7 @@ class TestFSDPHybridShard(FSDPTest):
                 optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(4)
     def test_fsdp_hybrid_shard_accumulation(
         self,
     ):
