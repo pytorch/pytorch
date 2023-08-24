@@ -200,23 +200,29 @@ def normalizer(_func=None, *, promote_scalar_result=False):
             sig = inspect.signature(func)
             params = sig.parameters
             first_param = next(iter(params.values()))
-            # NumPy's API does not have positional args before variadic positional args
-            if first_param.kind == inspect.Parameter.VAR_POSITIONAL:
-                args = [maybe_normalize(arg, first_param) for arg in args]
-            else:
-                # NB: extra unknown arguments: pass through, will raise in func(*args) below
-                args = (
-                    tuple(
-                        maybe_normalize(arg, parm)
-                        for arg, parm in zip(args, params.values())
-                    )
-                    + args[len(params.values()) :]
-                )
 
-            kwds = {
-                name: maybe_normalize(arg, params[name]) if name in params else arg
-                for name, arg in kwds.items()
-            }
+            try:
+                # NumPy's API does not have positional args before variadic positional args
+                if first_param.kind == inspect.Parameter.VAR_POSITIONAL:
+                    args = [maybe_normalize(arg, first_param) for arg in args]
+                else:
+                    # NB: extra unknown arguments: pass through, will raise in func(*args) below
+                    args = (
+                        tuple(
+                            maybe_normalize(arg, parm)
+                            for arg, parm in zip(args, params.values())
+                        )
+                        + args[len(params.values()) :]
+                    )
+
+                kwds = {
+                    name: maybe_normalize(arg, params[name]) if name in params else arg
+                    for name, arg in kwds.items()
+                }
+            except NotImplementedError:
+                # help torch.dynamo fall back to eagery
+                return NotImplemented
+
             result = func(*args, **kwds)
 
             # keepdims
