@@ -3,6 +3,8 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
 
@@ -139,6 +141,152 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
         counts_data[i] = counts_map[output_data[i]];
       }
     }
+  }
+  return std::make_tuple(output, inverse_indices, counts);
+}
+
+// NB: Unique implementation using sort
+//
+// The whole algo is taken from NumPy at numpy/lib/arraysetops.py
+// which firstly do sort on the input sequence and then convert
+// it to consecutive unique.
+//
+// Also improvement has been made upon the NumPy version: parallel
+// `inverse_indices` and `counts` computation in a fused loop,
+// which made this part almost a free launch.
+//
+// This kernel also implements a `equal_nan` flag which has same
+// function as NumPy's unique. Currently this is always disabled.
+//
+template <typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
+    const Tensor& self,
+    const bool return_inverse,
+    const bool return_counts,
+    const bool equal_nan = false) {
+  const Tensor& input = self.contiguous();
+
+  int64_t numel = input.numel();
+  Tensor output = at::empty({0}, self.options());
+  Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+  if (numel == 0) {
+    if (return_inverse) {
+      inverse_indices.resize_(input.sizes());
+    }
+    return std::make_tuple(output, inverse_indices, counts);
+  }
+
+  // index of first unique in each consecutive section
+  // this is used to compute counts for parallelization purpose
+  Tensor unique_index = at::empty({0}, self.options().dtype(kLong));
+
+  // original behavior with unique on scalar tensor
+  // is to return a output size of ([1]), `flatten` here will do the job
+  auto input_flattened = input.flatten();
+
+  Tensor input_sorted, indices;
+  std::tie(input_sorted, indices) = input_flattened.sort();
+
+  scalar_t* input_sorted_data = input_sorted.data_ptr<scalar_t>();
+  int64_t* indices_data = indices.data_ptr<int64_t>();
+
+  // `mask` keeps track of whether it is the first unique
+  // in the sorted input sequence
+  Tensor mask = at::empty({numel}, self.options().dtype(kBool));
+  auto mask_acc = mask.accessor<bool, 1>();
+
+  int num_threads = at::get_num_threads();
+  std::vector<int64_t> unique_count_thread(num_threads, 0);
+  std::vector<int64_t> offset_thread(num_threads, 0);
+
+  // the first element is always true
+  mask_acc[0] = true;
+
+  // we can parallel on [1, numel) but we need to make sure it has
+  // the same parallel scope with the next loop
+  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+    if (begin == 0) { begin += 1; }
+    for (const auto i : c10::irange(begin, end)) {
+      mask_acc[i] = input_sorted_data[i] != input_sorted_data[i - 1];
+    }
+  });
+
+  bool last_element_isnan = _isnan<scalar_t>(input_sorted_data[numel - 1]);
+  if (input.is_floating_point() && equal_nan && last_element_isnan) {
+    int64_t firstnan_index = numel;
+    while (_isnan<scalar_t>(input_sorted_data[firstnan_index - 1])) {
+      firstnan_index--;
+    }
+    mask_acc[firstnan_index] = true;
+    if (firstnan_index + 1 < numel) {
+      for (const auto i : c10::irange(firstnan_index + 1, numel)) {
+        mask_acc[i] = false;
+      }
+    }
+  }
+
+  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    for (const auto i : c10::irange(begin, end)) {
+      if (mask_acc[i]) {
+        unique_count_thread[tid]++;
+      }
+    }
+  });
+
+  int64_t unique_count = std::accumulate(unique_count_thread.begin(), unique_count_thread.end(), 0);
+  std::exclusive_scan(unique_count_thread.begin(), unique_count_thread.end(), offset_thread.begin(), 0);
+
+  output.resize_({unique_count});
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+
+  int64_t* inverse_indices_data = nullptr;
+  if (return_inverse) {
+    inverse_indices.resize_(input.sizes());
+    inverse_indices_data = inverse_indices.data_ptr<int64_t>();
+  }
+
+  int64_t* counts_data = nullptr;
+  int64_t* unique_index_data = nullptr;
+  if (return_counts) {
+    counts.resize_({unique_count});
+    counts_data = counts.data_ptr<int64_t>();
+
+    unique_index.resize_({unique_count + 1});
+    unique_index_data = unique_index.data_ptr<int64_t>();
+    unique_index_data[unique_count] = numel;
+  }
+
+  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    int64_t offset = offset_thread[tid];
+
+    for (const auto i : c10::irange(begin, end)) {
+      if (mask_acc[i]) {
+        output_data[offset] = input_sorted_data[i];
+        if (return_counts) {
+          unique_index_data[offset] = i;
+        }
+        offset++;
+      }
+
+      if (return_inverse) {
+        int64_t inverse_index = offset - 1;
+        int64_t perm = indices_data[i];
+        inverse_indices_data[perm] = inverse_index;
+      }
+    }
+  });
+
+  if (return_counts) {
+    // do diff to get count
+    at::parallel_for(0, unique_count, 0, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        counts_data[i] = unique_index_data[i + 1] - unique_index_data[i];
+      }
+    });
   }
   return std::make_tuple(output, inverse_indices, counts);
 }
@@ -318,12 +466,15 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
 } // namespace
 
-
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
     Tensor output, inverse;
-    std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(self, sorted, return_inverse, false);
+    if (sorted && self.scalar_type() != kBool) {
+      std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(self, return_inverse, false);
+    } else {
+      std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(self, sorted, return_inverse, false);
+    }
     return std::make_tuple(output, inverse);
   });
 }
@@ -331,7 +482,11 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
-    return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
+    if (sorted && self.scalar_type() != kBool) {
+      return unique_cpu_sorted_template<scalar_t>(self, return_inverse, return_counts);
+    } else {
+      return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
+    }
   });
 }
 
