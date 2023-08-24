@@ -38,7 +38,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::AveragePool_0"
     type {

@@ -8,7 +8,7 @@ graph {
     name: "Sqrt_0"
     op_type: "Sqrt"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Sqrt_0"
     type {

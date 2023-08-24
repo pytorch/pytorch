@@ -79,7 +79,7 @@ graph {
     name: "Pow_6"
     op_type: "Pow"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "x"
     type {
