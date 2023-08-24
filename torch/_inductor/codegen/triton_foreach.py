@@ -35,9 +35,9 @@ class ForeachKernel(Kernel):
 
     @staticmethod
     def horizontal_partition(subkernel_nodes, triton_scheduling):
-        """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel) for each subkernel node
-        where each sublist is guaranteed to not exceed CUDA limits for number of args (read/writes) and to have the same 2D
-        or 1D blocking strategy."""
+        """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
+        for each subkernel node where each sublist is guaranteed to not exceed CUDA limits for number of args
+        (read/writes) and to have the same 2D or 1D blocking strategy."""
         assert len(subkernel_nodes) >= 1
 
         partition_state_1d = PartitionState([], [], 0)
