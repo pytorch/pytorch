@@ -640,12 +640,7 @@ class TestModule(TestCase):
                 if ((mem_format == torch.channels_last and d != 4)
                    or (mem_format == torch.channels_last_3d and d != 5)):
                     return obj.clone().detach().requires_grad_(obj.requires_grad)
-                return (
-                    obj.clone()
-                    .to(memory_format=mem_format)
-                    .detach()
-                    .requires_grad_(obj.requires_grad)
-                )
+                return obj.clone().to(memory_format=mem_format).detach().requires_grad_(obj.requires_grad)
 
             return self._traverse_obj(obj, inner_to_mem_format)
 
@@ -705,10 +700,24 @@ class TestModule(TestCase):
 
                 for input_mem_format in input_mem_formats:
                     # === Change memformat of input. ===
-                    module_input.forward_input.args = _to_mem_format(input_mem_format,
-                                                                     module_input.forward_input.args)
-                    module_input.forward_input.kwargs = _to_mem_format(input_mem_format,
-                                                                       module_input.forward_input.kwargs)
+                    d_args = _to_mem_format(input_mem_format, module_input.forward_input.args)
+                    d_kwargs = _to_mem_format(input_mem_format, module_input.forward_input.kwargs)
+
+                    # See https://github.com/pytorch/pytorch/issues/107861
+                    # When inductor tests are turned on, the setting of requires_grad will be lost
+                    for t1, t2 in zip(
+                        torch.utils._pytree.tree_flatten(d_args)[0],
+                        torch.utils._pytree.tree_flatten(module_input.forward_input.args)[0],
+                    ):
+                        t1.requires_grad_(t2.requires_grad)
+                    for t1, t2 in zip(
+                        torch.utils._pytree.tree_flatten(d_kwargs)[0],
+                        torch.utils._pytree.tree_flatten(module_input.forward_input.kwargs)[0],
+                    ):
+                        t1.requires_grad_(t2.requires_grad)
+
+                    module_input.forward_input.args = d_args
+                    module_input.forward_input.kwargs = d_kwargs
 
                     for module_mem_format in module_mem_formats:
                         # === Change memformat of module ===
