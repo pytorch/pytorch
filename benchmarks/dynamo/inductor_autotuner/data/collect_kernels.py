@@ -1,6 +1,6 @@
 import argparse
-import os
 import csv
+import os
 import subprocess
 from os import listdir
 from os.path import isdir, join
