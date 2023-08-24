@@ -73,6 +73,8 @@ from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
 
+from torch.testing._internal.common_utils import set_default_dtype
+
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
@@ -315,12 +317,12 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = fuse_conv_bn_jit(m)
         FileCheck().check_count("prim::CallMethod", 2, exactly=True).run(m.graph)
 
+    @set_default_dtype(torch.double)
     def test_foldbn_complex_cases(self):
         # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
         # this only works when default dtype is double
-        torch.set_default_dtype(torch.double)
         bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
         conv_module = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 
@@ -373,8 +375,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             ).run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
 
             self.assertEqual(eager(x), scripted_or_traced(x))
-
-        torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):

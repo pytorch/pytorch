@@ -6,7 +6,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     onlyCPU,
 )
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_default_dtype
 from torch.testing._internal.common_dtype import complex_types
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
@@ -21,10 +21,8 @@ class TestComplexTensor(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_dtype_inference(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/36834
-        default_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(dtype)
-        x = torch.tensor([3., 3. + 5.j], device=device)
-        torch.set_default_dtype(default_dtype)
+        with set_default_dtype(dtype):
+            x = torch.tensor([3., 3. + 5.j], device=device)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
 
     @onlyCPU
@@ -168,4 +166,5 @@ class TestComplexTensor(TestCase):
 instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
