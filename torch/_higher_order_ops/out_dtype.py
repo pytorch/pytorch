@@ -128,16 +128,6 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args
 ):
-    # TODO Move this to proper utility function
-    from torch._ops import mode_stack_per_key, temporarily_pop_mode
-    pre_dispatch_modes = mode_stack_per_key().get(DispatchKey.PreDispatch, [])  # type: ignore[attr-defined]
-    if len(pre_dispatch_modes) > 0:
-        with temporarily_pop_mode(pre_dispatch_modes) as mode:
-            if mode.enable_tracing:
-                return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-            else:
-                return out_dtype(op, output_dtype, *args)
-
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
