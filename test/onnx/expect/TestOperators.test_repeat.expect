@@ -59,7 +59,7 @@ graph {
     name: "Tile_4"
     op_type: "Tile"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Expand_0"
     type {
