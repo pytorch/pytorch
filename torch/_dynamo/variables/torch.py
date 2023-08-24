@@ -6,6 +6,11 @@ import re
 import types
 from typing import Dict, List
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch._C
 import torch.fx
 import torch.nn
@@ -19,9 +24,7 @@ from ..source import GeneratorStateSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
-    HAS_NUMPY,
     istype,
-    np,
     product,
     proxy_args_kwargs,
     specialize_args_kwargs,
@@ -33,6 +36,7 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
+from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
@@ -222,7 +226,12 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value in config.constant_functions:
+        if self.value is torch._functorch.vmap.vmap_impl:
+            return TorchHigherOrderOperatorVariable.make(
+                self.value,
+                source=self.source,
+            ).call_function(tx, args, kwargs)
+        elif self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
@@ -347,11 +356,10 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif self.value is torch.from_numpy:
-            if not config.numpy_ndarray_as_tensor:
-                unimplemented(
-                    "torch.from_numpy(). Turn on config.numpy_ndarray_as_tensor to support "
-                    "torch.from_numpy()."
-                )
+            if not config.trace_numpy:
+                unimplemented("torch.from_numpy. config.trace_numpy is False")
+            if not np:
+                unimplemented("torch.from_numpy. NumPy is not available")
             assert len(args) == 1, f"Got arguments {args}"
             assert not kwargs
             t = args[0]
@@ -597,7 +605,41 @@ class TorchVariable(VariableTracker):
             if len(args) != 2:
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
-            return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+            unflattened = torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+
+            def _wrap_in_dynamo_variables(container):
+                if isinstance(container, VariableTracker):
+                    return container
+
+                if isinstance(container, list):
+                    return ListVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, tuple):
+                    return TupleVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, dict):
+                    return ConstDictVariable(
+                        {k: _wrap_in_dynamo_variables(v) for k, v in container.items()},
+                        type(container),
+                        **options,
+                    )
+
+            return _wrap_in_dynamo_variables(unflattened)
+
+        elif self.value == torch.fx._pytree.tree_flatten_spec:
+            if len(args) != 2:
+                unimplemented("Unsupported flatten_spec with len(args) != 2")
+
+            flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
         elif self.value == torch.utils._pytree.tree_map_only:
             if len(args) != 3:
                 unimplemented("Unsupported tree_map_only with len(args) != 3")
@@ -613,6 +655,8 @@ class TorchVariable(VariableTracker):
                     return v
 
             return torch.utils._pytree.tree_map(map_fn, tree)
+        elif isinstance(self.value, types.ModuleType):
+            unimplemented("TypeError(\"'module' object is not callable\")")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -636,7 +680,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
-                HAS_NUMPY
+                np
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)

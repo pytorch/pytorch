@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_map_only, TreeSpec
 
 
 # Common type aliases
@@ -179,7 +179,13 @@ class OpSchema:
     def __hash__(self) -> int:
         # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
         frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
-        return hash((self.func_schema, self.args_spec, frozen_set_kwargs_schema))
+        return hash(
+            (
+                self.func_schema,
+                tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
+                frozen_set_kwargs_schema,
+            )
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, OpSchema):
@@ -239,3 +245,23 @@ class OutputSharding:
     output_spec: OutputSpecType
     schema_suggestions: Optional[List[OpSchema]] = None
     failed_reason: Optional[str] = None
+    needs_redistribute: bool = False
+
+
+@dataclass
+class OpInfo:
+    """
+    All Runtime Op execution info are packed here
+    """
+
+    op_call: torch._ops.OpOverload
+    schema: OpSchema
+    flat_args_schema: List[object]
+    flat_kwargs_schema: List[object]
+    flat_local_args: List[object]
+    flat_local_kwargs: List[object]
+    args_tree_spec: TreeSpec
+    kwargs_tree_spec: TreeSpec
+
+    # the output sharding info
+    output_sharding: Optional[OutputSharding] = None

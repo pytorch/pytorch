@@ -46,6 +46,8 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # calling div on only symint args
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -57,9 +59,6 @@ if TEST_WITH_ROCM:
         ("cuda"), is_skip=True
     )
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
 

@@ -26,13 +26,13 @@ tools and their typical usage. For additional help see
      - Find smallest subgraph which reproduces errors for any backend
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
    * - Minifier for ``TorchInductor``
-     - If the error is known to occur after `AOTAutograd`` find
-       smallest subgraph which reproduces errors during TorchInductor lowering
+     - If the error is known to occur after ``AOTAutograd`` find
+       smallest subgraph which reproduces errors during ``TorchInductor`` lowering
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
    * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
        between an eager mode model and optimized model, when you
-       suspect the problem is in AOTAutograd
+       suspect the problem is in ``AOTAutograd``
      - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
    * - Inductor accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
@@ -76,7 +76,7 @@ the stack and will provide full stack traces.
 To determine in which component an error occurred,
 you may use info-level logging
 ``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
-and look for``Step #: ...`` outputs. Logs are made at the beginning and end of
+and look for ``Step #: ...`` outputs. Logs are made at the beginning and end of
 each step, so the step that an error should correspond to is the most recently
 logged step whose end has not yet been logged. The steps correspond to the
 following parts of the stack:
@@ -201,9 +201,8 @@ Diagnosing TorchInductor Errors
 If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
 error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
-There are `different
-choices <https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backends>`__
-for backend compilers for TorchDynamo, with TorchInductor or nvfuser
+There are `different choices <./torch.compiler.rst>`__
+for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other
 backend compilers.
@@ -587,13 +586,13 @@ TorchDynamo will attempt to compile all of the torch/tensor operations
 within some_fun into a single FX graph, but it may fail to capture
 everything into one graph.
 
-Some graph break reasons are insurmountable to TorchDynamo, and can’t be
+Some graph break reasons are insurmountable to TorchDynamo, and can't be
 easily fixed. - calling into a C extension other than torch is invisible
 to torchdynamo, and could do arbitrary things without TorchDynamo being
-able to introduce necessary `guards <./GuardsOverviewPt1.md>`__ to
+able to introduce necessary `guards <./torch.compiler_guards_overview.rst>`__ to
 ensure that the compiled program would be safe to reuse. Graph breaks
 can hinder performance if the resulting fragments are small. To maximize
-performance, it’s important to have as few graph breaks as possible.
+performance, it's important to have as few graph breaks as possible.
 
 Identifying the Cause of a Graph Break
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

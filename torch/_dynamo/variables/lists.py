@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
 from .. import variables
@@ -30,6 +31,7 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            collections.deque: DequeVariable,
         }[obj]
 
     def __init__(
@@ -435,6 +437,16 @@ class DequeVariable(CommonListMethodsVariable):
                 DequeVariable(list(items), regen_guards=False, **options),
             )
             return result
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -714,6 +726,11 @@ def _register_dynamo_list_to_tree_spec():
         pytree._maybe_str_to_list,
     )
 
+    fx_pytree.register_pytree_flatten_spec(
+        ListVariable,
+        _listvariable_flatten,
+    )
+
 
 def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
     return d.items, None
@@ -737,6 +754,11 @@ def _register_dynamo_tuple_to_tree_spec():
         pytree._maybe_str_to_tuple,
     )
 
+    fx_pytree.register_pytree_flatten_spec(
+        TupleVariable,
+        _tuplevariable_flatten,
+    )
+
 
 class SetVariable(VariableTracker):
     @dataclasses.dataclass
@@ -747,7 +769,7 @@ class SetVariable(VariableTracker):
         def __hash__(self) -> int:
             return hash(self.underlying_value)
 
-        def __eq__(self, other: Any) -> bool:
+        def __eq__(self, other: object) -> bool:
             if not isinstance(other, SetVariable.SetElement):
                 return False
             if isinstance(self.vt, variables.TensorVariable):
@@ -883,3 +905,9 @@ class SetVariable(VariableTracker):
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]

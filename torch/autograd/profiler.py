@@ -1,12 +1,12 @@
-from typing import Any, Dict, List, Optional
 from collections import defaultdict
+from typing import Any, Dict, List, Optional
 from warnings import warn
 
 import torch
 
 import torch.cuda
-from torch._C._profiler import _ExperimentalConfig
 from torch._C import _get_privateuse1_backend_name
+from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
     _disable_profiler,
@@ -33,8 +33,19 @@ from torch.autograd.profiler_util import (
 )
 from torch.futures import Future
 
-__all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
-           "parse_nvprof_trace", "KinetoStepTracker", "EventList", "FunctionEvent", "MemRecordsAcc"]
+__all__ = [
+    "profile",
+    "record_function",
+    "emit_itt",
+    "emit_nvtx",
+    "load_nvprof",
+    "EnforceUnique",
+    "parse_nvprof_trace",
+    "KinetoStepTracker",
+    "EventList",
+    "FunctionEvent",
+    "MemRecordsAcc",
+]
 
 try:
     # Available in Python >= 3.2
@@ -43,7 +54,6 @@ except ImportError:
     import functools
 
     class _ContextDecorator:  # type: ignore[no-redef]
-
         def __enter__(self):
             raise NotImplementedError
 
@@ -58,11 +68,23 @@ except ImportError:
 
             return wrapped
 
+
+# global python state - whether profiler is currently enabled
+# useful for fast python checks to reduce latency
+_is_profiler_enabled: bool = False
+
+
+def _set_is_profiler_enabled(enable: bool):
+    global _is_profiler_enabled
+    _is_profiler_enabled = enable
+
+
 def _enable_dynamo_cache_lookup_profiler(enable: bool):
     from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
         clear_profiler_hooks,
         set_profiler_hooks,
     )
+
     """
     Registers a hook within dynamo eval_frame.c called before and after
     the lookup process, which runs guards associated with each cached frame.
@@ -77,6 +99,7 @@ def _enable_dynamo_cache_lookup_profiler(enable: bool):
 
         def _profiler_end(record):
             torch.ops.profiler._record_function_exit._RecordFunction(record)
+
         set_profiler_hooks(_profiler_start, _profiler_end)
     else:
         clear_profiler_hooks()
@@ -166,26 +189,30 @@ class profile:
         -----------------------------------  ---------------  ---------------  ---------------
 
     """
+
     def __init__(
-            self,
-            enabled=True,
-            *,
-            use_cuda=False,
-            use_device=None,
-            record_shapes=False,
-            with_flops=False,
-            profile_memory=False,
-            with_stack=False,
-            with_modules=False,
-            use_kineto=False,
-            use_cpu=True,
-            use_mtia=False,
-            experimental_config=None):
+        self,
+        enabled=True,
+        *,
+        use_cuda=False,
+        use_device=None,
+        record_shapes=False,
+        with_flops=False,
+        profile_memory=False,
+        with_stack=False,
+        with_modules=False,
+        use_kineto=False,
+        use_cpu=True,
+        use_mtia=False,
+        experimental_config=None,
+    ):
         self.enabled: bool = enabled
         if not self.enabled:
             return
         self.use_cuda = use_cuda
-        self.use_device = use_device
+        self.use_device: Optional[str] = (
+            use_device if use_device != "privateuseone" else None
+        )
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -202,8 +229,17 @@ class profile:
         self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
-            assert use_kineto, \
-                "Device-only events supported only with Kineto (use_kineto=True)"
+            assert (
+                use_kineto
+            ), "Device-only events supported only with Kineto (use_kineto=True)"
+
+        if self.use_device == "cuda":
+            self.use_device = None
+            self.use_cuda = True
+
+        if self.use_device and self.use_device != _get_privateuse1_backend_name():
+            warn(f"{self.use_device} doesn't support profile.")
+            self.use_device = None
 
         if self.use_cuda and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
@@ -217,32 +253,28 @@ class profile:
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_cuda:
-            if (not use_kineto or ProfilerActivity.CUDA not in
-                    _supported_activities()):
+            if not use_kineto or ProfilerActivity.CUDA not in _supported_activities():
                 assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
 
         if self.use_device:
-            if self.use_device == 'cuda':
-                # TODO:using 'use_device' instead of 'use_cuda' facilitates access by other devices
-                # and integrate it in subsequent pr.
-                pass
-            elif self.use_device == _get_privateuse1_backend_name():
-                if not use_kineto:
-                    assert self.use_cpu, "Legacy custombackend profiling requires use_cpu=True"
-                    self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
-                else:
-                    raise AssertionError(
-                        "Now, custombackend events does not support Kineto (use_kineto=False)"
-                    )
+            if (
+                not use_kineto
+                or ProfilerActivity.PrivateUse1 not in _supported_activities()
+            ):
+                assert (
+                    self.use_cpu
+                ), "Legacy custombackend profiling requires use_cpu=True"
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
-                raise AssertionError(f"{self.use_device} doesn't support profile.")
+                self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
-        assert len(self.kineto_activities) > 0, \
-            "No activities specified for the profiler"
-
+        assert (
+            len(self.kineto_activities) > 0
+        ), "No activities specified for the profiler"
 
     def config(self):
         return ProfilerConfig(
@@ -252,7 +284,8 @@ class profile:
             self.with_stack,
             self.with_flops,
             self.with_modules,
-            self.experimental_config)
+            self.experimental_config,
+        )
 
     def __enter__(self):
         if not self.enabled:
@@ -270,6 +303,7 @@ class profile:
 
     def _start_trace(self):
         self.entered = True
+        _set_is_profiler_enabled(True)
         _enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -279,23 +313,26 @@ class profile:
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()
+        _set_is_profiler_enabled(False)
         parsed_results = self._parse_kineto_results(self.kineto_results)
         self.function_events = EventList(
             parsed_results,
             use_cuda=self.use_cuda,
+            use_device=self.use_device,
             profile_memory=self.profile_memory,
-            with_flops=self.with_flops)
+            with_flops=self.with_flops,
+        )
         self.function_events._build_tree()
         return False
 
     def __repr__(self):
         if self.function_events is None:
-            return '<unfinished torch.autograd.profile>'
+            return "<unfinished torch.autograd.profile>"
         return repr(self.function_events)
 
     def __str__(self):
         if self.function_events is None:
-            return '<unfinished torch.autograd.profile>'
+            return "<unfinished torch.autograd.profile>"
         return str(self.function_events)
 
     def _check_finish(self):
@@ -303,14 +340,14 @@ class profile:
             raise RuntimeError("Profiler didn't finish running")
 
     def table(
-            self,
-            sort_by=None,
-            row_limit=100,
-            max_src_column_width=75,
-            max_name_column_width=55,
-            max_shapes_column_width=80,
-            header=None,
-            top_level_events_only=False
+        self,
+        sort_by=None,
+        row_limit=100,
+        max_src_column_width=75,
+        max_name_column_width=55,
+        max_shapes_column_width=80,
+        header=None,
+        top_level_events_only=False,
     ):
         self._check_finish()
         assert self.function_events is not None
@@ -321,8 +358,9 @@ class profile:
             max_name_column_width=max_name_column_width,
             max_shapes_column_width=max_shapes_column_width,
             header=header,
-            top_level_events_only=top_level_events_only
+            top_level_events_only=top_level_events_only,
         )
+
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -331,6 +369,7 @@ class profile:
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
             return self.function_events.export_chrome_trace(path)  # type: ignore[union-attr]
+
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
@@ -343,17 +382,19 @@ class profile:
         self._check_finish()
         assert self.function_events is not None, "Expected profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
+
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
         assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
+
     total_average.__doc__ = EventList.total_average.__doc__
 
     @property
     def self_cpu_time_total(self):
-        """ Returns total time spent on CPU obtained as a sum of
+        """Returns total time spent on CPU obtained as a sum of
         all self times across all the events.
         """
         self._check_finish()
@@ -364,23 +405,39 @@ class profile:
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
-        mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
-        oom_records = [evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME]
+        mem_records = [
+            [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
+        ]
+        oom_records = [
+            evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME
+        ]
         mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
-            return mem_record.nbytes() if \
-                mem_record.device_type() in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP] \
+            return (
+                mem_record.nbytes()
+                if mem_record.device_type()
+                in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP]
                 else 0
+            )
 
         def _cuda_memory_usage(mem_record):
-            return mem_record.nbytes() if \
-                mem_record.device_type() in [DeviceType.CUDA, DeviceType.HIP] \
+            return (
+                mem_record.nbytes()
+                if mem_record.device_type() in [DeviceType.CUDA, DeviceType.HIP]
                 else 0
+            )
+
+        def _privateuse1_memory_usage(mem_record):
+            return (
+                mem_record.nbytes()
+                if mem_record.device_type() in [DeviceType.PrivateUse1]
+                else 0
+            )
 
         # Create and return FunctionEvent list
         function_events = []
-        cuda_corr_map: Dict[int, List[FunctionEvent]] = {}
+        device_corr_map: Dict[int, List[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
@@ -391,11 +448,15 @@ class profile:
 
             cpu_memory_usage = 0
             cuda_memory_usage = 0
+            privateuse1_memory_usage = 0
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
-                for mem_record in mem_records_acc.in_interval(kineto_event.start_us(), abs_end_us):
+                for mem_record in mem_records_acc.in_interval(
+                    kineto_event.start_us(), abs_end_us
+                ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
+                    privateuse1_memory_usage += _privateuse1_memory_usage(mem_record[0])
                     mem_record[1] = True
 
             is_async = kineto_event.is_async() or (
@@ -412,10 +473,16 @@ class profile:
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
-                stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
+                stack=[
+                    entry
+                    for entry in kineto_event.stack()
+                    if _filter_stack_entry(entry)
+                ],
                 scope=kineto_event.scope(),
+                use_device=self.use_device,
                 cpu_memory_usage=cpu_memory_usage,
                 cuda_memory_usage=cuda_memory_usage,
+                privateuse1_memory_usage=privateuse1_memory_usage,
                 is_async=is_async,
                 sequence_nr=kineto_event.sequence_nr(),
                 device_type=kineto_event.device_type(),
@@ -424,37 +491,43 @@ class profile:
             )
             max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
             if fe.device_type == DeviceType.CPU and not fe.is_async:
-                # Check if we have CUDA time as a fallback
-                cuda_time = kineto_event.cuda_elapsed_us()
-                if cuda_time > 0:
-                    fe.append_kernel(
-                        fe.name,
-                        fe.device_index,
-                        cuda_time)
-                    fe.is_legacy = True
+                if self.use_device:
+                    privateuse1_time = kineto_event.privateuse1_elapsed_us()
+                    if privateuse1_time > 0:
+                        fe.append_kernel(fe.name, fe.device_index, privateuse1_time)
+                        fe.is_legacy = True
+                else:
+                    # Check if we have CUDA time as a fallback
+                    cuda_time = kineto_event.cuda_elapsed_us()
+                    if cuda_time > 0:
+                        fe.append_kernel(fe.name, fe.device_index, cuda_time)
+                        fe.is_legacy = True
             function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:
-                if corr_id not in cuda_corr_map:
-                    cuda_corr_map[corr_id] = []
-                cuda_corr_map[corr_id].append(fe)
+                if corr_id not in device_corr_map:
+                    device_corr_map[corr_id] = []
+                device_corr_map[corr_id].append(fe)
 
         # associate CUDA kernels and CUDA runtime (CPU) with CPU events
         for fe in function_events:
-            if (fe.device_type == DeviceType.CPU and not fe.is_async and
-                    fe.id in cuda_corr_map):
-                for f_evt in cuda_corr_map[fe.id]:
+            if (
+                fe.device_type == DeviceType.CPU
+                and not fe.is_async
+                and fe.id in device_corr_map
+            ):
+                for f_evt in device_corr_map[fe.id]:
                     if f_evt.device_type == DeviceType.CUDA:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
-                            f_evt.time_range.end - f_evt.time_range.start)
+                            f_evt.time_range.end - f_evt.time_range.start,
+                        )
                     elif f_evt.device_type == DeviceType.CPU:
                         # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
                         # with the 'thread' of the corresponding linked PyTorch event to properly track
                         # parents and children
                         f_evt.thread = fe.thread
-
 
         def createFunctionEventForMemoryEvents(evt):
             rel_start_us = evt.start_us() - trace_start_us
@@ -469,8 +542,10 @@ class profile:
                 input_shapes=[],
                 stack=[],
                 scope=0,  # RecordScope::FUNCTION
+                use_device=self.use_device,
                 cpu_memory_usage=_cpu_memory_usage(evt),
                 cuda_memory_usage=_cuda_memory_usage(evt),
+                privateuse1_memory_usage=_privateuse1_memory_usage(evt),
                 is_async=False,
                 sequence_nr=-1,
                 device_type=DeviceType.CPU,
@@ -490,7 +565,9 @@ class profile:
             fe = createFunctionEventForMemoryEvents(oom_record)
             function_events.append(fe)
 
-        function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
+        function_events.sort(
+            key=lambda evt: [evt.time_range.start, -evt.time_range.end]
+        )
         return function_events
 
 
@@ -530,6 +607,7 @@ class record_function(_ContextDecorator):
         CUDA time total: 0.000us
 
     """
+
     def __init__(self, name: str, args: Optional[str] = None):
         self.name: str = name
         self.args: Optional[str] = args
@@ -537,10 +615,14 @@ class record_function(_ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
-        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
+        self.record = torch.jit.annotate(
+            Optional["torch.classes.profiler._RecordFunction"], None
+        )
 
     def __enter__(self):
-        self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
+        self.record = torch.ops.profiler._record_function_enter_new(
+            self.name, self.args
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
@@ -593,10 +675,15 @@ class record_function(_ContextDecorator):
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
             with torch._C.DisableTorchFunctionSubclass():
-                profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
-                    record, fut)
+                profiled_future = (
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
+                        record, fut
+                    )
+                )
         else:
-            profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+            profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(
+                record, fut
+            )
         return profiled_future
 
 
@@ -636,6 +723,7 @@ class emit_itt:
         ...     model(x)
 
     """
+
     def __init__(self, enabled=True, record_shapes=False):
         self.enabled = enabled
         self.entered = False
@@ -647,6 +735,7 @@ class emit_itt:
         if self.entered:
             raise RuntimeError("ITT annotation context manager is not reentrant")
         self.entered = True
+        _set_is_profiler_enabled(True)
         _enable_profiler(
             ProfilerConfig(
                 ProfilerState.ITT,
@@ -655,8 +744,9 @@ class emit_itt:
                 False,
                 False,
                 False,
-                _ExperimentalConfig()),
-            set()
+                _ExperimentalConfig(),
+            ),
+            set(),
         )
         return self
 
@@ -664,6 +754,7 @@ class emit_itt:
         if not self.enabled:
             return
         _disable_profiler()
+        _set_is_profiler_enabled(False)
         return False
 
 
@@ -751,6 +842,7 @@ class emit_nvtx:
         backward Function object.  You may need to make a judgment based on analytic knowledge of what
         the expected correspondence should be.
     """
+
     def __init__(self, enabled=True, record_shapes=False):
         self.enabled = enabled
         self.entered = False
@@ -763,6 +855,7 @@ class emit_nvtx:
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
+        _set_is_profiler_enabled(True)
         _enable_profiler(
             ProfilerConfig(
                 ProfilerState.NVTX,
@@ -771,8 +864,9 @@ class emit_nvtx:
                 False,
                 False,
                 False,
-                _ExperimentalConfig()),
-            set()
+                _ExperimentalConfig(),
+            ),
+            set(),
         )
         return self
 
@@ -781,6 +875,7 @@ class emit_nvtx:
             return
         torch.cuda.synchronize()
         _disable_profiler()
+        _set_is_profiler_enabled(False)
         return False
 
 
@@ -795,17 +890,19 @@ def load_nvprof(path):
 
 class EnforceUnique:
     """Raises an error if a key is seen more than once."""
+
     def __init__(self):
         self.seen = set()
 
     def see(self, *key):
         if key in self.seen:
-            raise RuntimeError('duplicate key: ' + str(key))
+            raise RuntimeError("duplicate key: " + str(key))
         self.seen.add(key)
 
 
 def parse_nvprof_trace(path):
     import sqlite3
+
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
 
@@ -828,14 +925,16 @@ def parse_nvprof_trace(path):
     functions_map = {}
     unique = EnforceUnique()
     for row in conn.execute(marker_query):
-        unique.see(row['marker_id'])
-        evt = FunctionEvent(id=row['marker_id'],
-                            node_id=0,  # missing a node_id when calling FunctionEvent. This is just to ensure
-                                        # that pytorch doesn't crash when creating a FunctionEvent() object
-                            name=strings[row['name']],
-                            start_us=row['start_time'],
-                            end_us=row['end_time'],
-                            thread=0)  # TODO: find in sqlite database
+        unique.see(row["marker_id"])
+        evt = FunctionEvent(
+            id=row["marker_id"],
+            node_id=0,  # missing a node_id when calling FunctionEvent. This is just to ensure
+            # that pytorch doesn't crash when creating a FunctionEvent() object
+            name=strings[row["name"]],
+            start_us=row["start_time"],
+            end_us=row["end_time"],
+            thread=0,
+        )  # TODO: find in sqlite database
         functions.append(evt)
         functions_map[evt.id] = evt
 
@@ -856,13 +955,13 @@ def parse_nvprof_trace(path):
     """
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
-        unique.see(row['marker_id'], row['runtime_id'])
+        unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2
-        assert (row['cbid'] == 211)
-        evt = functions_map[row['marker_id']]
-        evt.append_kernel(row['kernel_name'],
-                          0,
-                          row['kernel_end'] - row['kernel_start'])
+        assert row["cbid"] == 211
+        evt = functions_map[row["marker_id"]]
+        evt.append_kernel(
+            row["kernel_name"], 0, row["kernel_end"] - row["kernel_start"]
+        )
 
     functions.sort(key=lambda evt: evt.time_range.start)
     return functions
@@ -904,6 +1003,7 @@ class KinetoStepTracker:
     NOTE: Please do not use the KinetoStepTracker in modules beside the Optimizer
     for now. The result could be incorrect increments of the step count.
     """
+
     _current_step = -1
     _step_dict: Dict[str, int] = defaultdict(int)
 
@@ -930,8 +1030,10 @@ class KinetoStepTracker:
         if new_step > cls._current_step:
             delta = new_step - cls._current_step
             if delta > 1:
-                warn("Profiler step count has increased more than 1 - "
-                     f"current_step = {cls._current_step} step dict =  {cls._step_dict}")
+                warn(
+                    "Profiler step count has increased more than 1 - "
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
+                )
             for _ in range(0, delta):
                 _kineto_step()
             cls._current_step = new_step

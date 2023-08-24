@@ -5,7 +5,7 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import HAS_NUMPY, istype, np
+from ..utils import istype, np
 from .base import typestr, VariableTracker
 
 
@@ -33,7 +33,7 @@ class ConstantVariable(VariableTracker):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        if HAS_NUMPY and isinstance(value, np.number):
+        if isinstance(value, np.number):
             self.value = value.item()
         else:
             self.value = value
@@ -100,6 +100,11 @@ class ConstantVariable(VariableTracker):
         if istype(self.value, tuple):
             # empty tuple constant etc
             return variables.TupleVariable(
+                items=self.unpack_var_sequence(tx), source=self.source, **options
+            ).call_method(tx, name, args, kwargs)
+
+        if istype(self.value, list):
+            return variables.ListVariable(
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 

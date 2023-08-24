@@ -18,7 +18,6 @@ import time
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Pattern, Tuple
@@ -104,6 +103,14 @@ fragment PRReviews on PullRequestReviewConnection {
     author {
       login
     }
+    bodyText
+    createdAt
+    authorAssociation
+    editor {
+      login
+    }
+    databaseId
+    url
     state
   }
   pageInfo {
@@ -219,7 +226,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 targetUrl
               }
             }
-            pushedDate
             oid
           }
         }
@@ -622,9 +628,12 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
     return comment.author_login == "facebook-github-bot"
 
 
-def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
+def get_ghstack_prs(
+    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
+) -> List[Tuple["GitHubPR", str]]:
     """
-    Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
+    Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
+    @:param open_only: Only return open PRs
     """
     assert pr.is_ghstack_pr()
     entire_stack: List[Tuple[GitHubPR, str]] = []
@@ -645,7 +654,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         stacked_pr_num = int(m.group("number"))
         if stacked_pr_num != pr.pr_num:
             stacked_pr = GitHubPR(pr.org, pr.project, stacked_pr_num)
-            if stacked_pr.is_closed():
+            if open_only and stacked_pr.is_closed():
                 print(
                     f"Skipping {idx+1} of {len(rev_list)} PR (#{stacked_pr_num}) as its already been merged"
                 )
@@ -655,6 +664,8 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             entire_stack.append((pr, rev))
 
     for stacked_pr, rev in entire_stack:
+        if stacked_pr.is_closed():
+            continue
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
@@ -704,12 +715,6 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
-
-    def last_pushed_at(self) -> Optional[datetime]:
-        pushed_date = self.last_commit()["pushedDate"]
-        if pushed_date is None:
-            return None
-        return datetime.fromisoformat(pushed_date[:-1])
 
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
@@ -1008,6 +1013,16 @@ class GitHubPR:
         for comment in self.get_comments():
             if comment.database_id == database_id:
                 return comment
+
+        # The comment could have actually been a review left on the PR (the message written alongside the review).
+        # (This is generally done to trigger the merge right when a comment is left)
+        # Check those review comments to see if one of those was the comment in question.
+        for node in self.info["reviews"]["nodes"]:
+            # These review comments contain all the fields regular comments need
+            comment = self._comment_from_node(node)
+            if comment.database_id == database_id:
+                return comment
+
         raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
@@ -1037,9 +1052,18 @@ class GitHubPR:
         comment_id: Optional[int] = None,
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
-        ghstack_prs = get_ghstack_prs(repo, self)  # raises error if out of sync
+        ghstack_prs = get_ghstack_prs(
+            repo, self, open_only=False
+        )  # raises error if out of sync
+        pr_dependencies = []
         for pr, rev in ghstack_prs:
-            commit_msg = pr.gen_commit_message(filter_ghstack=True)
+            if pr.is_closed():
+                pr_dependencies.append(pr)
+                continue
+
+            commit_msg = pr.gen_commit_message(
+                filter_ghstack=True, ghstack_deps=pr_dependencies
+            )
             if pr.pr_num != self.pr_num:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
@@ -1050,9 +1074,14 @@ class GitHubPR:
                 )
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
-        return [x for x, _ in ghstack_prs]
+            pr_dependencies.append(pr)
+        return [x for x, _ in ghstack_prs if not x.is_closed()]
 
-    def gen_commit_message(self, filter_ghstack: bool = False) -> str:
+    def gen_commit_message(
+        self,
+        filter_ghstack: bool = False,
+        ghstack_deps: Optional[List["GitHubPR"]] = None,
+    ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
         filters out ghstack info"""
@@ -1068,6 +1097,8 @@ class GitHubPR:
         msg += msg_body
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
+        if ghstack_deps:
+            msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
@@ -1579,23 +1610,47 @@ def get_classifications(
     if merge_base is not None:
 
         def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+            d: Dict[str, Dict[str, Dict[str, Any]]],
+            key: str,
+            val: Dict[str, Any],
+            overwrite_failed_run_attempt: bool,
         ) -> None:
             key_no_suffix = remove_job_name_suffix(key)
             if key not in d[key_no_suffix]:
                 d[key_no_suffix][key] = val
                 return
 
-            if d[key_no_suffix][key]["id"] < val["id"]:
+            # When overwrite_failed_run_attempt is set to True, always overwrite
+            # the job with the result from the latest attempt. This option is for
+            # jobs from the pull request head_sha where the latest retry is used
+            # when merging
+            #
+            # When overwrite_failed_run_attempt is False, only overwrite the job
+            # with the result from the latest attempt if the latest retry failed.
+            # This option is for jobs from the merger_base where we want to record
+            # failures for broken trunk
+            if d[key_no_suffix][key]["id"] < val["id"] and (
+                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
+            ):
                 d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
             if rockset_result["head_sha"] == head_sha:
-                insert(head_sha_jobs, name, rockset_result)
+                insert(
+                    head_sha_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=True,
+                )
             else:
-                insert(merge_base_jobs, name, rockset_result)
+                insert(
+                    merge_base_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=False,
+                )
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
@@ -1910,18 +1965,6 @@ def merge(
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
     )
-
-    if pr.last_pushed_at() is None:
-        print(
-            f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?"
-        )
-    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
-        raise RuntimeError(
-            f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
-            "`@pytorchbot merge -r`\n"
-            "Or just rebase by leaving `@pytorchbot rebase` comment"
-        )
 
     start_time = time.time()
     last_exception = ""

@@ -7,6 +7,8 @@ from torchgen import local
 from torchgen.api import cpp
 from torchgen.api.types import BaseCType, Binding, NamedCType, tensorListT
 from torchgen.model import (
+    BaseTy,
+    BaseType,
     FunctionSchema,
     ListType,
     NativeFunction,
@@ -314,6 +316,7 @@ def is_foreach_func(f: NativeFunction) -> bool:
 # is functional for their backward derivatives (and forward derivatives in the future), i.e.,
 # they would find such one in `functional_info_by_signature`. There however are some exceptions:
 _foreach_with_inplace_ref = {"_foreach_zero_"}
+_foreach_with_tensor_overload = {"_foreach_mul.Tensor"}
 
 
 # Checks if `function_schema` is a native, non-foreach function which `f`, a foreach function
@@ -495,7 +498,11 @@ def gen_foreach_derivativeinfo(
                 )
             elif foreach_arg.type.is_tensor_like():
                 # Assuming TensorList / Tensor
-                assert isinstance(foreach_arg.type, ListType)
+                # assert isinstance(foreach_arg.type, ListType), f"{foreach_function.func.name}, {foreach_arg.type}"
+                assert isinstance(foreach_arg.type, ListType) or (
+                    foreach_arg.type == BaseType(BaseTy.Tensor)
+                    and str(foreach_function.func.name) in _foreach_with_tensor_overload
+                ), f"{foreach_function.func.name}, {foreach_arg.type}"
                 for suffix in ("_p", "_t"):
                     curr_expr = ref_arg.name + suffix
                     if curr_expr in modified_formula:

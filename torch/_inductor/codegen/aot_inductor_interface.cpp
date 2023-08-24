@@ -1,18 +1,19 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
-#define CONVERT_EXCEPTION_TO_ERROR_CODE(...)     \
-  try {                                          \
-    __VA_ARGS__                                  \
-  } catch (const std::exception& e) {            \
-    LOG(ERROR) << "Error: " << e.what();         \
-    return AOTInductorError::Failure;            \
-  } catch (...) {                                \
-    LOG(ERROR) << "Unknown exception occurred."; \
-    return AOTInductorError::Failure;            \
-  }                                              \
+#define CONVERT_EXCEPTION_TO_ERROR_CODE(...)                                  \
+  try {                                                                       \
+    __VA_ARGS__                                                               \
+  } catch (const std::exception& e) {                                         \
+    std::cerr << "Error: " << e.what() << std::endl;                          \
+    return AOTInductorError::Failure;                                         \
+  } catch (...) {                                                             \
+    std::cerr << "Unknown exception occurred." << std::endl;                  \
+    return AOTInductorError::Failure;                                         \
+  }                                                                           \
   return AOTInductorError::Success;
 
 extern "C" {
