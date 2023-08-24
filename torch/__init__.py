@@ -359,10 +359,9 @@ class SymBool:
         # SymInt and if they're used in an if clause, they will become
         # check equality.
         if isinstance(other, py_int):  # type: ignore[arg-type]
-            assert other in (0, 1), f"Unexpcted comparison with an interger other than 0/1. got {other}"
             return self.__int__() == other
         else:
-            raise RuntimeError(f"Cannot compare SymBool with {other}")
+            raise AssertionError(f"comparing a SymBool with {other} is not supported.")
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
