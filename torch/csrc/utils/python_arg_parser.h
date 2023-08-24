@@ -505,12 +505,13 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline PyObject* toPyObject(c10::SymInt symint) {
-  if (auto m = symint.maybe_as_int()) {
-    return THPUtils_packInt64(*m);
-  } else {
+  if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
+  } else {
+    auto m = symint.maybe_as_int();
+    return THPUtils_packInt64(*m);
   }
 }
 
@@ -518,14 +519,18 @@ inline void throw_intlist_exception(
     const torch::PythonArgs* args,
     size_t i,
     PyObject* obj,
-    size_t idx) {
+    size_t idx,
+    const std::exception& e = python_error()) {
+  std::string error = strlen(e.what())
+      ? e.what()
+      : std::string("type must be ") + args->signature.params[i].type_name() +
+          ",but got " + Py_TYPE(obj)->tp_name;
   throw TypeError(
-      "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
+      "%s(): argument '%s' failed to unpack the object at pos %zu with error \"%s\"",
       args->signature.name.c_str(),
       args->signature.params[i].name.c_str(),
-      args->signature.params[i].type_name().c_str(),
-      Py_TYPE(obj)->tp_name,
-      idx + 1);
+      idx + 1,
+      error.c_str());
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -538,7 +543,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   const auto size1 = signature.params[i].size;
   if (size1 > 0 && THPUtils_checkLong(args[i])) {
     return std::vector<c10::SymInt>(
-        size1, c10::SymInt(THPUtils_unpackIndex(args[i])));
+        size1, c10::SymInt(THPUtils_unpackLong(args[i])));
   }
 
   if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
@@ -576,7 +581,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         res.emplace_back(var.item<int64_t>());
         continue;
       } catch (std::exception& e) {
-        throw_intlist_exception(this, i, obj, idx);
+        throw_intlist_exception(this, i, obj, idx, e);
       }
       continue;
     } else {
@@ -585,9 +590,9 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
       if (THPUtils_checkLongExact(obj)) {
         // Fast path for plain numbers
         try {
-          res.emplace_back(THPUtils_unpackIndex(obj));
+          res.emplace_back(THPUtils_unpackLong(obj));
         } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
+          throw_intlist_exception(this, i, obj, idx, e);
         }
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
@@ -607,7 +612,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
             res.emplace_back(THPUtils_unpackIndex(obj));
           }
         } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
+          throw_intlist_exception(this, i, obj, idx, e);
         }
       }
     }
@@ -624,7 +629,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   PyObject* arg = args[i];
   const auto size1 = signature.params[i].size;
   if (size1 > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size1, THPUtils_unpackIndex(arg));
+    return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
   }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -644,7 +649,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         res[idx] = var.item<int64_t>();
         continue;
       } catch (std::exception& e) {
-        throw_intlist_exception(this, i, obj, idx);
+        throw_intlist_exception(this, i, obj, idx, e);
       }
     } else {
       // convert tensor to scalar outside of try / catch,
@@ -652,9 +657,9 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
       if (THPUtils_checkLongExact(obj)) {
         // Fast path for plain numbers
         try {
-          res[idx] = THPUtils_unpackIndex(obj);
+          res[idx] = THPUtils_unpackLong(obj);
         } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
+          throw_intlist_exception(this, i, obj, idx, e);
         }
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
@@ -668,7 +673,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         try {
           res[idx] = THPUtils_unpackIndex(obj);
         } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
+          throw_intlist_exception(this, i, obj, idx, e);
         }
       }
     }

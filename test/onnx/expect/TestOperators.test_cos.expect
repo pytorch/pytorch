@@ -8,7 +8,7 @@ graph {
     name: "Cos_0"
     op_type: "Cos"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Cos_0"
     type {
