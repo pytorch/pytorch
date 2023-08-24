@@ -2,7 +2,7 @@ import itertools
 from dataclasses import dataclass
 
 from .. import metrics
-from ..utils import ceildiv, sympy_product
+from ..utils import ceildiv
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
@@ -70,45 +70,79 @@ class ForeachKernel(Kernel):
 
     def __init__(self):
         super().__init__()
-        self.xblock_size = 1024  # Try tuning this value
-        self.yblock_size = 1
+        self.blocking_2d = False
+        self.block_size_1d = 1024  # Try tuning this value
+        self.block_size_2d = 32
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
-        self.block_count = 0
+        self.x_block_count = 0
+        self.y_block_count = 0
 
     @staticmethod
-    def _compute_num_blocks(tensor_elem_counts, block_size):
-        num_blocks = 0
-        for count in tensor_elem_counts:
-            num_blocks += ceildiv(count, block_size)
-
-        return num_blocks
+    def codegen_pid_offsets(code, block_count, lower_bound, prefix):
+        if block_count == 0:
+            code.splice(f"{prefix}pid_offset = {prefix}pid")
+        else:
+            code.splice(f"{prefix}pid_offset = {prefix}pid - {lower_bound}")
 
     def codegen_pid_range(self, code, num_elems):
-        num_blocks = ceildiv(num_elems, self.xblock_size)
-        upper_bound_pid = self.block_count + num_blocks
-        lower_bound_pid = self.block_count
-        if self.block_count == 0:
+        if self.blocking_2d:
+            x_elems, y_elems, _ = num_elems
+            num_x_blocks = ceildiv(x_elems, self.block_size_2d)
+            num_y_blocks = ceildiv(y_elems, self.block_size_2d)
+            upper_bound_y_pid = self.y_block_count + num_y_blocks
+            lower_bound_y_pid = self.y_block_count
+        else:
+            x_elems, _ = num_elems
+            num_x_blocks = ceildiv(x_elems, self.block_size_1d)
+
+        upper_bound_x_pid = self.x_block_count + num_x_blocks
+        lower_bound_x_pid = self.x_block_count
+
+        if self.x_block_count == 0 and self.y_block_count == 0:
             cond = "if"
         else:
             cond = "elif"
-        code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
+
+        x_pid_bounds_check = (
+            f"xpid >= {lower_bound_x_pid} and xpid < {upper_bound_x_pid}"
+        )
+
+        if self.blocking_2d:
+            code.splice(
+                f"{cond} (({x_pid_bounds_check}) and ypid >= {lower_bound_y_pid}) and ypid < {upper_bound_y_pid}:"
+            )
+        else:
+            code.splice(f"{cond} {x_pid_bounds_check}:")
+
         with code.indent():
-            if self.block_count == 0:
-                code.splice("pid_offset = pid")
-            else:
-                code.splice(f"pid_offset = pid - {lower_bound_pid}")
-        self.block_count += num_blocks
+            ForeachKernel.codegen_pid_offsets(
+                code, num_x_blocks, lower_bound_x_pid, "x"
+            )
+            self.x_block_count += num_x_blocks
+
+            if self.blocking_2d:
+                ForeachKernel.codegen_pid_offsets(
+                    code, num_y_blocks, lower_bound_y_pid, "y"
+                )
+                self.y_block_count += num_y_blocks
 
     def create_sub_kernel(self, *groups, index_dtype, mutations, reduction_hint):
         sub_kernel = TritonKernel(
             *groups,
             index_dtype=index_dtype,
             mutations=mutations,
-            pid_cache={"tl.program_id(0)": "pid_offset"},
+            pid_cache={
+                "tl.program_id(0)": "xpid_offset",
+                "tl.program_id(1)": "ypid_offset",
+            },
             reduction_hint=reduction_hint,
         )
+        if self.blocking_2d:
+            assert len(groups) == 3
+
+        self.blocking_2d |= groups[1] != 1 and len(groups) == 3
         metrics.generated_kernel_count -= 1
         sub_kernel.args = self.args
         sub_kernel.iter_vars_count = self.iter_vars_count
@@ -134,8 +168,8 @@ class ForeachKernel(Kernel):
 
     def grid(self):
         return (
-            self.block_count,
-            1,
+            self.x_block_count,
+            max(self.y_block_count, 1),
             1,
         )
 
@@ -156,15 +190,22 @@ class ForeachKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
 
         with code.indent():
-            code.splice("pid = tl.program_id(0)")
-            code.splice(f"XBLOCK: tl.constexpr = {self.xblock_size}")
-            code.splice(f"YBLOCK: tl.constexpr = {self.yblock_size}")
+            code.splice("xpid = tl.program_id(0)")
+            if self.blocking_2d:
+                code.splice("ypid = tl.program_id(1)")
+                code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
+                code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
+            else:
+                code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
 
             for sub_kernel in self.sub_kernels:
-                num_elems = int(sympy_product(sub_kernel.numels))
-                self.codegen_pid_range(code, num_elems)
+                assert len(sub_kernel.numels) <= 3
+                # TODO mlazos: support dynamic shapes
+                self.codegen_pid_range(code, tuple(int(x) for x in sub_kernel.numels))
                 with code.indent():
-                    code.splice(f"xnumel = {num_elems}")
+                    code.splice(f"xnumel = {sub_kernel.numels[0]}")
+                    if self.blocking_2d:
+                        code.splice(f"ynumel = {sub_kernel.numels[1]}")
                     sub_kernel.codegen_body()
                     code.splice(sub_kernel.body)
 
