@@ -32,6 +32,17 @@ log = logging.getLogger(__name__)
 
 # Raw data related
 class AutotunerRawData(NamedTuple):
+    """AutotunerRawData is the raw data containing all the necessary information of the kernel.
+
+    - When training the model
+        we dump the raw data to a pickle file and load it to do feature extraction.
+        this allows us to try different feature vectors without recompiling the kernels.
+    - When predicting the best configs in e2e run
+        we first extract the raw data from the kernel and then call the feature extraction
+        function of the model we are using.
+        see autotuner_predict() method below
+    """
+
     io_deps: Tuple[
         List[dependencies.Dep], List[dependencies.Dep], List[int], List[int], List[int]
     ]
@@ -44,6 +55,10 @@ class AutotunerRawData(NamedTuple):
 
 
 def get_reads_writes(cur_scheduler, node, src_code):
+    """Get the read and write info of the kernel, note that it's dependency-wise,
+    which means if some kernel loads a tensor multiple times, there will be multiple
+    read deps for that tensor.
+    """
     if isinstance(node, scheduler.NopKernelSchedulerNode):
         return 0
     reads = {dep.name for dep in node.read_writes.reads}
@@ -107,6 +122,7 @@ def get_reads_writes(cur_scheduler, node, src_code):
 # feature extraction related
 
 # op_dict needs to be deterministic
+# mapping Triton ops to integers
 OP_DICT = {
     "load": 0,
     "to_dtype": 1,
@@ -170,6 +186,8 @@ OP_DICT = {
 
 @dataclasses.dataclass
 class DepFeatureVector:
+    """Features related to a single dependency"""
+
     StarDepOrWeakDep: bool
     bytes: int
     strides: np.array
@@ -181,6 +199,8 @@ class DepFeatureVector:
 
 @dataclasses.dataclass
 class KernelFeatureVector:
+    """Features related to a single kernel"""
+
     kernel_category: int
     num_of_loops: int
     op_vec: np.array
@@ -201,6 +221,12 @@ class FeatureVector:
 
 
 class KernelCategory(IntEnum):
+    """Currently there are 3 kinds of kernels:
+    1. pointwise kernels
+    2. reduction kernels
+    3. persistent reduction kernels
+    """
+
     POINTWISE = 0
     REDUCTION = 1
     PERSISTENT_REDUCTION = 2
@@ -309,6 +335,30 @@ def dep_list(deps, strides, sizes, total_bytes, rw_lim, ndims_lim):
 
 
 class ModelType(IntEnum):
+    """Given a kernel K, and a set of configs C, we would like to build a model f
+    that predict the rankings of C by their corresponding running time t.
+
+    This is naturally a learning-to-rank problem, which has been studied for years in ML.
+    We use X to represent the feature vector of (K, c). Two common ways of loss formulation are:
+
+    - Pointwise: we let f directly predict the (probably normalized) running time t.
+               For each (K, c, t), loss = MSE_loss/L1_loss(f(K, c), t).
+
+    - Pairwise: we let f predict a score as a proxy for ordering for each pair of (K, c).
+               For each pair of (K, c1, t1) and (K, c2, t2), loss = BCE_loss(f(K, c1) > f(K, c2), t1 > t2).
+
+    We consider the following models:
+    0. XGB_BASELINE: the baseline model that uses XGBoost
+    1. NN_POINTWISE: the neural network model that uses pointwise loss
+    2. NN_PAIRWISE: the neural network model that uses pairwise loss
+    3. NN_PAIRWISE_SMALL: the neural network model that uses pairwise loss, but trained on a smaller dataset
+    that only contains the max autotune configs
+
+    The neural network models are implemented in AutotunerFFN class below.
+
+    Currently, 0 and 1 perform similarly, and 2 and 3 perform worse.
+    """
+
     XGB_BASELINE = 0
     NN_POINTWISE = 1
     NN_PAIRWISE = 2
@@ -316,6 +366,8 @@ class ModelType(IntEnum):
 
 
 class AutotunerFFN(nn.Module):
+    """The neural network model we used for autotuning."""
+
     def __init__(self, model_cfg):
         super().__init__()
 
@@ -352,6 +404,10 @@ class AutotunerFFN(nn.Module):
         self.activation = model_cfg["activation"]
 
     def get_feature_groups(self, x, show_progress=False):
+        """We separate out this function to speed up the feature extraction process during training.
+        Much of the time is spent on the feature extraction process. We first extract these feature
+        tensors and store them once for all the configs, and then we can just load them during training.
+        """
         device = "cuda"
 
         def normalize(x, positive=True):
@@ -535,6 +591,16 @@ def get_model(model_type: ModelType):
 
 # search space related
 class AutotunerSpaceCategory(IntEnum):
+    """The model can exlpore different search spaces. Currently we support the following spaces:
+
+    0. MAX_AUTOTUNE_TOP1: the model will predict the best config in max autotune configs
+    and send the top1 config to compile.
+    1. MAX_AUTOTUNE_TOP2: all the same as above, but send the top2 configs to profile and
+    2. RADIUS_1_TOP1: the model will predict the best config in the search space that is
+    within radius 1 of the max autotune configs, and send the top1 config to compile.
+    3. RADIUS_1_TOP2: all the same as above, but send the top2 configs to profile.
+    """
+
     MAX_AUTOTUNE_TOP1 = 0
     MAX_AUTOTUNE_TOP2 = 1
     RADIUS_1_TOP1 = 2
@@ -619,6 +685,12 @@ def load_model(autotuner_path):
 
 
 class AutotunerModel:
+    """Wrapper for the autotuner model. It can load the model from disk and
+    predict the best configs given a set of configs.
+
+    It provides a unified interface for the autotuner to use different models.
+    """
+
     model_type: ModelType
     # We only consider the last N_DIMS_LIM dimensions of strides and sizes
     ndims_lim: int
@@ -798,6 +870,10 @@ class AutotunerModel:
 
 
 def autotuner_predict(autotuner_raw_data, autotuner_path):
+    """The main function of the autotuner. It takes the raw data of the kernel
+    and the path to the autotuner model. It extracts feature vectors from the raw data
+    construct the search space and predict the best configs.
+    """
     autotuner_dict = autotuner_raw_data.autotuner_dict
     src = autotuner_raw_data.src_code
     # get max autotune heursitic configs
