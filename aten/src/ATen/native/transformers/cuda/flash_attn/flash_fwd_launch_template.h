@@ -14,7 +14,11 @@ namespace pytorch_flash {
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_N, bool Is_even_K, bool Return_softmax>
 __global__ void flash_fwd_kernel(Flash_fwd_params params) {
-    pytorch_flash::compute_attn<Kernel_traits, Is_dropout, Is_causal, Is_even_N, Is_even_K, Return_softmax>(params);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+        pytorch_flash::compute_attn<Kernel_traits, Is_dropout, Is_causal, Is_even_N, Is_even_K, Return_softmax>(params);
+    #else
+        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 5.3!");
+    #endif
 }
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal>

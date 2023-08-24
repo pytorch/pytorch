@@ -64,7 +64,7 @@ def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:
 
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"\n
- """
+"""
     include = f"#include <ATen/native/transformers/cuda/flash_attn/flash_{kernel.direction}_launch_template.h>\n"
     namespace = "namespace pytorch_flash{\n"
     namespace_end = "} // namespace pytorch_flash\n"

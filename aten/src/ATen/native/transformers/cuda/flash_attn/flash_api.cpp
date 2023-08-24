@@ -28,7 +28,6 @@
 
 #include <cstdint>
 #include <tuple>
-#include <ATen/ops/atan2_meta_dispatch.h>
 
 
 #ifdef USE_FLASH_ATTENTION

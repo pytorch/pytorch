@@ -27,7 +27,11 @@ __global__ void flash_bwd_dq_dk_dv_loop_kernel(Flash_bwd_params params) {
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_MN, bool Is_even_K>
 __global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(Flash_bwd_params params) {
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_even_MN, Is_even_K>(params);
+    #else
+        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 5.3!");
+    #endif
 }
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_N, bool Is_even_K>
