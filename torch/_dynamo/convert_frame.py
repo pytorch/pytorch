@@ -31,7 +31,12 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
-from .cache_size import compute_cache_size, exceeds_cache_size_limit, is_recompilation
+from .cache_size import (
+    CacheSizeRelevantForFrame,
+    compute_cache_size,
+    exceeds_cache_size_limit,
+    is_recompilation,
+)
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -302,7 +307,6 @@ def convert_frame_assert(
         if is_generator(code):
             unimplemented("generator")
         if exceeds_cache_size_limit(cache_size):
-            # cache_size >= config.cache_size_limit:
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -403,7 +407,7 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
-    cache_size: int,
+    cache_size: CacheSizeRelevantForFrame,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
     compile_id=None,
@@ -615,12 +619,10 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
-    ):
+    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks, frame_state)
+            result = inner_convert(frame, cache_entry, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
@@ -679,7 +681,7 @@ def replay(filename):
             export=False,
             export_constraints=None,
             hooks=Hooks(),
-            cache_size=0,
+            cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
         )
     except Exception:

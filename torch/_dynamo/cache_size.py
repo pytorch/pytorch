@@ -65,8 +65,15 @@ mentioned earlier.
 
 
 @dataclass
-class CacheSize:
-    """ """
+class CacheSizeRelevantForFrame:
+    """
+    We track the number of cache entries that have same id_match objects as the
+    given frame.
+
+    TODO(janimesh) - Consider adding a map from tuple_of_match_ids to count -
+    https://github.com/pytorch/pytorch/pull/107496#discussion_r1304564682 - this
+    could be useful for debugging as well.
+    """
 
     # Total number of CacheEntry objects in the Dynamo linked list
     num_cache_entries: int = 0
@@ -74,11 +81,11 @@ class CacheSize:
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
     num_cache_entries_with_same_id_matched_objs: int = 0
 
-    def __ge__(self, other):
+    def will_compilation_exceed(self, limit: int) -> bool:
+        # Checks if a compilation will exceed the given limit (thats why >=).
         return (
-            self.num_cache_entries >= other.num_cache_entries
-            or self.num_cache_entries_with_same_id_matched_objs
-            >= other.num_cache_entries_with_same_id_matched_objs
+            self.num_cache_entries >= config.accumulated_cache_size_limit
+            or self.num_cache_entries_with_same_id_matched_objs >= limit
         )
 
 
@@ -113,7 +120,9 @@ def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
     return True
 
 
-def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
+def compute_cache_size(
+    frame: types.FrameType, cache_entry
+) -> CacheSizeRelevantForFrame:
     # Walk the linked list to calculate the cache size
     num_cache_entries = 0
     num_cache_entries_with_same_id_matched_objs = 0
@@ -127,26 +136,26 @@ def compute_cache_size(frame: types.FrameType, cache_entry) -> CacheSize:
             num_cache_entries_with_same_id_matched_objs += 1
         cache_entry = cache_entry.next
 
-    return CacheSize(num_cache_entries, num_cache_entries_with_same_id_matched_objs)
+    return CacheSizeRelevantForFrame(
+        num_cache_entries, num_cache_entries_with_same_id_matched_objs
+    )
 
 
-def is_recompilation(cache_size: CacheSize) -> bool:
+def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     """
     If the frame (earlier parsed by compute_cache_size) has more than 1 cache
     entry with same ID_MATCH'd objects, then its a recompilation.
     """
-    # The first limit of config.accumulated_cache_size_limit is for the total
-    # number of cache entries, e.g., you can have 64 nn module instances, each
-    # one having an ID_MATCH guard, and each one having just 1 cache entry in
-    # the cache.  In this case, we can have 64 entries in the cache, but no
-    # recompilation because there is only one entry for each id_matched_obj.
-    return cache_size >= CacheSize(config.accumulated_cache_size_limit, 1)
+    # Note that you can have multiple entries in the cache but still not a
+    # recompile, e.g., you can have 64 nn module instances, each one having an
+    # ID_MATCH guard, and each one having just 1 cache entry in the cache.  In
+    # this case, we can have 64 entries in the cache, but no recompilation
+    # because there is only one entry for each id_matched_obj.
+    return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSize) -> bool:
+def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> bool:
     """
     Checks if we are exceeding the cache size limit.
     """
-    return cache_size >= CacheSize(
-        config.accumulated_cache_size_limit, config.cache_size_limit
-    )
+    return cache_size.will_compilation_exceed(config.cache_size_limit)
