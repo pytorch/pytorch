@@ -563,11 +563,11 @@ class LargeProtobufExportOutputSerializer:
         import onnx
 
         try:
-            onnx.save(export_output.model_proto, self._destination_path)
+            onnx.save_model(export_output.model_proto, self._destination_path)
         except ValueError:
             # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
             # Fallback to serializing the model with external data.
-            onnx.save(
+            onnx.save_model(
                 export_output.model_proto,
                 self._destination_path,
                 save_as_external_data=True,
