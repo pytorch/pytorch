@@ -303,7 +303,7 @@ Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   if (length == 0) {
     return output;
   }
-  auto output_as_real = at::view_as_real(output).index({at::indexing::Ellipsis, 0});
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
 
   mps::binary_mps_impl(iter, "polar");
