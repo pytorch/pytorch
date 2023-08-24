@@ -970,7 +970,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
 
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "The new group's rank should be within the the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(

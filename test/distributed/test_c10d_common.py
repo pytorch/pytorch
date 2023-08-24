@@ -1248,15 +1248,15 @@ class AbstractCommTest:
 
         group = dist.new_group(ranks=[1])
         self.assertEqual(dist.get_group_rank(group, 1), 0)
-        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+        with self.assertRaisesRegex(ValueError, "not part of group"):
             dist.get_group_rank(group, 0)
-        with self.assertRaisesRegex(RuntimeError, "not registered"):
+        with self.assertRaisesRegex(ValueError, "not registered"):
             dist.get_group_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_global_rank(group, 0), 1)
-        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+        with self.assertRaisesRegex(ValueError, "not part of group"):
             dist.get_global_rank(group, 1)
-        with self.assertRaisesRegex(RuntimeError, "not registered"):
+        with self.assertRaisesRegex(ValueError, "not registered"):
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
