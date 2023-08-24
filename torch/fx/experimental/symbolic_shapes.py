@@ -497,7 +497,6 @@ def expect_true(a, skip: int = 0):
 
 def guard_bool(a):
     if isinstance(a, SymBool):
-        breakpoint()
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
     assert type(a) is bool, a
     return a
@@ -1981,15 +1980,6 @@ class DimConstraints:
 
 
 TLS = threading.local()
-
-@contextmanager
-def _disable_specialize_zero_one(shape_env):
-    prev = shape_env.specialize_zero_one
-    try:
-        shape_env.specialize_zero_one = False
-        yield
-    finally:
-        shape_env.specialize_zero_one = prev
 
 class ShapeEnv:
     def __init__(
