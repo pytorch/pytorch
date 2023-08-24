@@ -533,7 +533,7 @@ def corrcoef(
         raise NotImplementedError
     xy_tensor = _xy_helper_corrcoef(x, y, rowvar)
 
-    is_half = dtype == torch.float16
+    is_half = (xy_tensor.dtype == torch.float16) and xy_tensor.is_cpu
     if is_half:
         # work around torch's "addmm_impl_cpu_" not implemented for 'Half'"
         dtype = torch.float32
@@ -563,7 +563,7 @@ def cov(
     if ddof is None:
         ddof = 1 if bias == 0 else 0
 
-    is_half = dtype == torch.float16
+    is_half = (m.dtype == torch.float16) and m.is_cpu
     if is_half:
         # work around torch's "addmm_impl_cpu_" not implemented for 'Half'"
         dtype = torch.float32
@@ -1143,7 +1143,7 @@ def vdot(a: ArrayLike, b: ArrayLike, /):
         t_b = t_b.flatten()
 
     dtype = _dtypes_impl.result_type_impl(t_a, t_b)
-    is_half = dtype == torch.float16
+    is_half = dtype == torch.float16 and (t_a.is_cpu or t_b.is_cpu)
     is_bool = dtype == torch.bool
 
     # work around torch's "dot" not implemented for 'Half', 'Bool'
@@ -1198,7 +1198,7 @@ def dot(a: ArrayLike, b: ArrayLike, out: Optional[OutArray] = None):
 
 def inner(a: ArrayLike, b: ArrayLike, /):
     dtype = _dtypes_impl.result_type_impl(a, b)
-    is_half = dtype == torch.float16
+    is_half = dtype == torch.float16 and (a.is_cpu or b.is_cpu)
     is_bool = dtype == torch.bool
 
     if is_half:
@@ -1334,7 +1334,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     target_dtype = _dtypes_impl.result_type_impl(*tensors) if dtype is None else dtype
 
     # work around 'bmm' not implemented for 'Half' etc
-    is_half = target_dtype == torch.float16
+    is_half = target_dtype == torch.float16 and all(t.is_cpu for t in tensors)
     if is_half:
         target_dtype = torch.float32
 
