@@ -1,5 +1,5 @@
 # The Tensor classes are added to this module by python_tensor.cpp
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Any
 
 import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
@@ -518,137 +518,60 @@ def as_sparse_gradcheck(gradcheck):
         """Same as :func:`torch.autograd.gradcheck` but with sparse tensors
         inputs and outputs support.
         """
-        masked = masked_grad = kwargs.pop('masked', False)
+        masked = kwargs.pop('masked', False)
         sparse_layouts = {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+        sparse_compressed_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+        sparse_block_layouts = {torch.sparse_bsr, torch.sparse_bsc}
         STRIDED_REPRESENTATION = '__STRIDED_REPRESENTATION__'
 
-        def _convert_to_strided_representation(obj):
-            """Convert a differentiable non-strided tensor to a representation
-            containing differentiable strided tensors only.
-            """
-            if isinstance(obj, torch.Tensor) and obj.requires_grad:
-                d = dict(layout=obj.layout, shape=obj.shape, original=obj)
-                device = obj.device
-                if obj.layout is torch.sparse_coo:
-                    obj = obj.coalesce()
-                    indices, values = obj.indices(), obj.values()
-                    d.update(is_coalesced=obj.is_coalesced())
-                    if masked:
-                        d.update(indices=indices)
-                        return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
-                    else:
-                        # Materialize unspecified elements with zero values
-                        full_obj = torch.ones(obj.shape, dtype=obj.dtype, device=obj.device).to_sparse(
-                            layout=torch.sparse_coo, dense_dim=obj.dense_dim())
-                        full_obj.values().sub_(1)
-                        full_obj += obj
-                        d.update(indices=full_obj.indices())
-                        return (STRIDED_REPRESENTATION, d, full_obj.values().requires_grad_(True))
-                elif obj.layout is torch.sparse_csr:
-                    compressed_indices = obj.crow_indices()
-                    plain_indices = obj.col_indices()
-                    values = obj.values()
-                    indices_dtype = compressed_indices.dtype
-                    batch_dim = compressed_indices.ndim - 1
-                    if masked:
-                        indices = torch._convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
-                        d.update(
-                            indices=indices,  # TODO: eliminate after gh-107373
-                            compressed_indices=compressed_indices,
-                            plain_indices=plain_indices)
-                        return (STRIDED_REPRESENTATION, d, values.requires_grad_(True))
-                    else:
-                        batch_shape = obj.shape[:batch_dim]
-                        dense_shape = values.shape[batch_dim + 1:]
-                        full_nnz = obj.shape[batch_dim:batch_dim + 2].numel()
-
-                        tmp = torch.ones(obj.shape[:batch_dim + 2], dtype=torch.int8, device=device).to_sparse(layout=obj.layout)
-                        full_compressed_indices = tmp.crow_indices().to(dtype=indices_dtype)
-                        full_plain_indices = tmp.col_indices().to(dtype=indices_dtype)
-                        full_compressed_indices.expand(*batch_shape, *full_compressed_indices.shape)
-                        full_plain_indices.expand(*batch_shape, *full_plain_indices.shape)
-
-                        full_values = torch.zeros((*batch_shape, full_nnz, *dense_shape), dtype=values.dtype, device=values.device)
-
-                        if values.numel() > 0:
-                            strides = torch.empty(obj.shape[batch_dim:batch_dim + 2]).stride()
-                            if batch_dim > 0:
-                                batch_compressed_indices = compressed_indices.view(-1, *compressed_indices.shape[batch_dim:])
-                                batch_plain_indices = plain_indices.view(-1, *plain_indices.shape[batch_dim:])
-                                batch_values = values.view(-1, *values.shape[batch_dim:])
-                                batch_full_values = full_values.view(-1, *full_values.shape[batch_dim:])
-                                for i in range(batch_shape.numel()):
-                                    # TODO: eliminate this for-loop after gh-104868 is fixed
-                                    indices = torch._convert_indices_from_csr_to_coo(
-                                        batch_compressed_indices[i], batch_plain_indices[i])
-                                    flatten_indices = (torch.tensor([strides], device=device, dtype=indices.dtype).T
-                                                       * indices).sum(0)
-                                    batch_full_values[i][flatten_indices] = batch_values[i]
-                            else:
-                                indices = torch._convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
-                                flatten_indices = (torch.tensor([strides], device=device, dtype=indices.dtype).T * indices).sum(0)
-                                full_values[flatten_indices] = values
-
-                        full_indices = torch.ones(obj.shape[:batch_dim + 2],
-                                                  device=device, dtype=torch.int8).nonzero().to(dtype=torch.int64).T
-                        d.update(
-                            indices=full_indices,  # TODO: eliminate full_indices after gh-107373 is fixed
-                            compressed_indices=full_compressed_indices,
-                            plain_indices=full_plain_indices)
-                        return (STRIDED_REPRESENTATION, d, full_values.requires_grad_(True))
-                elif obj.layout in {torch.sparse_bsr, torch.sparse_csc, torch.sparse_bsc}:
-                    raise NotImplementedError(f'converstion of {obj.layout} tensor to strided representation')
-                else:
-                    return obj
-            return obj
-
-        def _restore_from_strided_representation(d, values):
-            """Restore a non-strided differentiable tensor from its strided
-            representation.
-            """
-            if d['layout'] is torch.sparse_coo:
-                return torch.sparse_coo_tensor(d['indices'], values, size=d['shape'], is_coalesced=d['is_coalesced'])
-            elif d['layout'] in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-                dense_dim = d['original'].dense_dim()
-                batch_dim = d['compressed_indices'].ndim - 1
-                if batch_dim == 0 and dense_dim > 0:
-                    # TODO: remove this if-block after gh-107373 is fixed
-                    r = torch.sparse_coo_tensor(
-                        d['indices'], values, size=d['shape'], is_coalesced=True).to_sparse(layout=d['layout'])
-                    # TODO: use to_sparse(..., dense_dim=dense_dim)
-                    # and remove the assert below after gh-107451 is
-                    # fixed.
-                    assert r.dense_dim() == dense_dim, (r.dense_dim(), dense_dim)
-                    return r
-                return torch.sparse_compressed_tensor(d['compressed_indices'], d['plain_indices'], values,
-                                                      size=d['shape'], layout=d['layout'])
-            else:
-                raise ValueError(f'unsupported sparse layout: {d["layout"]}')
-
         def convert_to_strided_representation(args):
+            """Convert differentiable non-strided tensors to a representation
+            containing differentiable strided tensors.
+            """
             if not isinstance(args, (list, tuple)):
                 args = args,
-            new_args = []
-            for a in args:
-                if isinstance(a, torch.Tensor) and a.requires_grad:
-                    a_ = _convert_to_strided_representation(a)
-                    if a_ is not a:
-                        # strided representation needs to inserted to
-                        # arguments list element-wise because
-                        # gradcheck does not detect differentiable
-                        # inputs from deep Python structures.
-                        new_args.extend(a_)
-                        continue
-                new_args.append(a)
+            new_args: List[Any] = []
+            for obj in args:
+                if isinstance(obj, torch.Tensor) and obj.requires_grad and obj.layout in sparse_layouts:
+                    d = dict(layout=obj.layout, shape=obj.shape)
+                    if not masked:
+                        # Materialize unspecified elements with zero values
+                        batch_dim = obj.ndim - obj.dense_dim() - obj.sparse_dim()
+                        blocksize = obj.values().shape[batch_dim + 1:batch_dim + 3] if obj.layout in sparse_block_layouts else None
+                        full_mask = torch.ones(obj.shape, device=obj.device, dtype=torch.bool).to_sparse(
+                            layout=obj.layout, blocksize=blocksize, dense_dim=obj.dense_dim())
+                        obj = obj.to_dense().sparse_mask(full_mask)
+                    if obj.layout is torch.sparse_coo:
+                        d.update(indices=obj._indices(), is_coalesced=obj.is_coalesced())
+                        values = obj._values()
+                    elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        d.update(compressed_indices=obj.crow_indices(), plain_indices=obj.col_indices())
+                        values = obj.values()
+                    else:
+                        d.update(compressed_indices=obj.ccol_indices(), plain_indices=obj.row_indices())
+                        values = obj.values()
+                    new_args.extend((STRIDED_REPRESENTATION, d, values.requires_grad_(True)))
+                else:
+                    new_args.append(obj)
             return tuple(new_args)
 
         def restore_from_strided_representation(args):
+            """Restore non-strided differentiable tensosr from their strided
+            representations.
+            """
             new_args = []
             args = list(args)
             while args:
                 a = args.pop(0)
                 if a == STRIDED_REPRESENTATION:
-                    a = _restore_from_strided_representation(d=args.pop(0), values=args.pop(0))
+                    d, values = args.pop(0), args.pop(0)
+                    if d['layout'] is torch.sparse_coo:
+                        a = torch.sparse_coo_tensor(d['indices'], values, size=d['shape'], is_coalesced=d['is_coalesced'])
+                    elif d['layout'] in sparse_compressed_layouts:
+                        a = torch.sparse_compressed_tensor(d['compressed_indices'], d['plain_indices'], values,
+                                                           size=d['shape'], layout=d['layout'])
+                    else:
+                        raise NotImplementedError(f'conversion of {d["layout"]} strided representation to tensor')
                 new_args.append(a)
             return tuple(new_args)
 
@@ -660,7 +583,7 @@ def as_sparse_gradcheck(gradcheck):
             outputs = func(*restored_args, **kwargs)
 
             strided_outputs = tuple(outputs) if isinstance(outputs, (list, tuple)) else (outputs,)
-            strided_outputs = tuple((o.to_dense(masked_grad=masked_grad)
+            strided_outputs = tuple((o.to_dense(masked_grad=masked)
                                      if isinstance(o, torch.Tensor) and o.requires_grad and o.layout in sparse_layouts else o)
                                     for o in strided_outputs)
 

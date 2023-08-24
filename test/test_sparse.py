@@ -5076,13 +5076,12 @@ class TestSparseAny(TestCase):
             result = mask.to_dense().sparse_mask(mask)
             self.assertEqual(result, mask)
 
-    # TODO: @all_sparse_layouts('layout', include_strided=False)
-    @parametrize("layout", [subtest(torch.sparse_coo, name='SparseCOO'),
-                            subtest(torch.sparse_csr, name='SparseCSR')])
+    @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
     def test_as_sparse_gradcheck(self, layout, masked, fast_mode):
         gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
+        sparse_compressed_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
 
         def identity(x):
             return x
@@ -5100,7 +5099,7 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      values_mth,
                      ):
-            if layout is torch.sparse_csr and func.__name__ == 'values':
+            if layout in sparse_compressed_layouts and func.__name__ == 'values':
                 # FIXME: RuntimeError: indices expected sparse
                 # coordinate tensor layout but got SparseCsr. Likely
                 # works when gh-107126 is fixed.
@@ -5109,9 +5108,9 @@ class TestSparseAny(TestCase):
                     layout,
                     dtype=torch.float64,
                     # TODO: fix gh-104868  to enable batched samples:
-                    enable_batch=layout is not torch.sparse_csr,
+                    enable_batch=layout not in sparse_compressed_layouts,
                     enable_hybrid=not (
-                        layout is torch.sparse_csr and (
+                        layout in sparse_compressed_layouts and (
                             # FIXME: RuntimeError: sparse_mask(): the
                             # number of sparse dimensions in `self`
                             # should match that of the `mask`. Got
