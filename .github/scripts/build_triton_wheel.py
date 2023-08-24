@@ -59,7 +59,7 @@ def build_triton(
     commit_hash: str,
     build_conda: bool = False,
     build_rocm: bool = False,
-    py_version: Optional[str] = None
+    py_version: Optional[str] = None,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
