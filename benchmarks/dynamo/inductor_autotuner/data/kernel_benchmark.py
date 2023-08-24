@@ -53,7 +53,7 @@ def main(args):
                 if py.endswith(".best_config"):
                     cmd = "rm -rf " + py_path
                     print(cmd)
-                    os.system(cmd)
+                    subprocess.call(cmd, shell=True)
 
             # run kernel
             for py in listdir(kernel_path):
