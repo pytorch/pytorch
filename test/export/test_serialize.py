@@ -27,6 +27,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
     TemporaryFileName,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    find_library_location,
 )
 
 
@@ -528,6 +533,51 @@ class TestSaveLoad(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
                 loaded_ep = load(f)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSerializeCustomClass(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        if IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
+        torch.ops.load_library(str(lib_file_path))
+
+    def test_custom_class(self):
+        custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        def f(x):
+            return x + x
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                with ep.graph.inserting_before(node):
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_an_instance.default,
+                        (custom_obj,),
+                    )
+                    custom_node.meta["val"] = torch.ones(4, 4)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
+
+        serialized_vals = serialize(ep)
+        deserialized_ep = deserialize(*serialized_vals)
+
+        for node in deserialized_ep.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.target == torch.ops._TorchScriptTesting.take_an_instance.default
+            ):
+                arg = node.args[0]
+                self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
+                self.assertEqual(arg.top(), 7)
 
 
 if __name__ == '__main__':
