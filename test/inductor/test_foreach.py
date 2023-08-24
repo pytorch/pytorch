@@ -30,13 +30,16 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+
 bin_ops_under_test = [
     torch._foreach_add,
     torch._foreach_mul,
     torch._foreach_sub,
     torch._foreach_div,
     torch._foreach_maximum,
+    aten._foreach_copy,
 ]
+
 un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
