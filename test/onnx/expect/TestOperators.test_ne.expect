@@ -15,7 +15,7 @@ graph {
     name: "Not_1"
     op_type: "Not"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Equal_0"
     type {

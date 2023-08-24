@@ -56,7 +56,7 @@ graph {
     name: "Add_5"
     op_type: "Add"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Mul_0"
     type {
