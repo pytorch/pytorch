@@ -1070,6 +1070,7 @@ class TestForeach(TestCase):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
 
+    # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
@@ -1077,9 +1078,9 @@ class TestForeach(TestCase):
         allowed_dtypes=(torch.float64, torch.complex128),
     )
     @parametrize("inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace")
-    def test_forward_mode_ad(self, device, dtype, op, inplace):
-        if not op.supports_forward_ad:
-            self.skipTest("forward AD not supported")
+    def test_autodiff(self, device, dtype, op, inplace):
+        if not (op.supports_autograd or op.supports_forward_ad):
+            self.skipTest("neither reverse mode nor forward mode supported")
         if (not inplace) and op.has_no_out_of_place:
             self.skipTest("out-of-place not implemented")
         if inplace and op.has_no_in_place:
@@ -1115,37 +1116,34 @@ class TestForeach(TestCase):
                     return op.method_variant(tensorlist, *sample.args, **kwargs)
                 func = outplace_func
 
-            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, inplace)
+            working_sample, err_msg_pattern = check_autodiff_sample(op, sample, dtype, inplace)
+
+            def call_gradcheck():
+                gradcheck(
+                    func,
+                    sample.input,
+                    raise_exception=True,
+                    check_forward_ad=op.supports_forward_ad,
+                    check_batched_forward_grad=False,
+                    check_backward_ad=op.supports_autograd,
+                    check_batched_grad=False,
+                )
+
             if not working_sample:
                 if not err_msg_pattern:
                     # lhs of float64 and rhs of complex.
                     continue
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
-                    gradcheck(
-                        func,
-                        sample.input,
-                        raise_exception=True,
-                        check_forward_ad=True,
-                        check_batched_forward_grad=False,
-                        check_backward_ad=False,
-                        check_batched_grad=False,
-                    )
+                    call_gradcheck()
             else:
-                gradcheck(
-                    func,
-                    sample.input,
-                    raise_exception=True,
-                    check_forward_ad=True,
-                    check_backward_ad=False,
-                    check_batched_grad=False,
-                )
+                call_gradcheck()
 
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`
 # so that we can use this function as something like the first argument of `filter` function.
 # Even after moving this function to testing, I personally think it'd be better to check the error message.
-def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
+def check_autodiff_sample(op, sample, dtype, is_inplace):
     if op.name == "_foreach_abs" and is_inplace and dtype == torch.complex128:
         return False, "In-place abs is not supported for complex tensors."
     if (
@@ -1165,7 +1163,7 @@ def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
         isinstance(sample.args[0], complex)
     ))
     if rhs_arg_has_complex_number and dtype == torch.float64:
-        if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
+        if op.name in ("_foreach_clamp_max", "_foreach_clamp_min", "_foreach_maximum", "_foreach_minimum"):
             return False, "clamp is not supported for complex types"
         if not is_inplace:
             return False, ""
