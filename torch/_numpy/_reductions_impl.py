@@ -71,7 +71,7 @@ def argmax(
     *,
     keepdims: KeepDims = False,
 ):
-    if a.is_complex:
+    if a.is_complex():
         return NotImplemented
 
     axis = _util.allow_only_single_axis(axis)
@@ -91,7 +91,7 @@ def argmin(
     *,
     keepdims: KeepDims = False,
 ):
-    if a.is_complex:
+    if a.is_complex():
         return NotImplemented
 
     axis = _util.allow_only_single_axis(axis)
@@ -140,7 +140,7 @@ def amax(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
-    if a.is_complex:
+    if a.is_complex():
         return NotImplemented
 
     return a.amax(axis)
@@ -158,7 +158,7 @@ def amin(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
-    if a.is_complex:
+    if a.is_complex():
         return NotImplemented
 
     return a.amin(axis)
@@ -174,7 +174,7 @@ def ptp(
     out: Optional[OutArray] = None,
     keepdims: KeepDims = False,
 ):
-    if a.is_complex:
+    if a.is_complex():
         return NotImplemented
 
     return a.amax(axis) - a.amin(axis)
