@@ -1509,7 +1509,6 @@ class CppVecKernel(CppKernel):
 
         if non_contiguous:
             # TODO: support masked_load for non_contiguous path?
-            assert self._load_mask is None
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             tmpbufsize = f"{self.tiling_factor}"
             if dtype in DTYPE_LOWP_FP:
