@@ -86,7 +86,7 @@ def main(args):
                     # remove log and all_config if either of them does not exist
                     cmd = "rm -rf " + log_path + " " + all_config_path
                     print(cmd)
-                    os.system(cmd)
+                    subprocess.call(cmd, shell=True)
 
                 # make sure log and all_config do not exist
                 assert not os.path.exists(log_path) and not os.path.exists(

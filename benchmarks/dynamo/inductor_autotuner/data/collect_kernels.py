@@ -48,6 +48,7 @@ def main(args):
                 csv_reader = csv.reader(f, delimiter=",")
                 for row in csv_reader:
                     model_names.append(row[0])
+            model_names = model_names[1:]
             print(model_names)
 
             for model_name in model_names:
@@ -67,7 +68,7 @@ def main(args):
                             if file.endswith((".pkl", ".best_config")):
                                 cmd = "rm -rf " + file_path
                                 print(cmd)
-                                os.system(cmd)
+                                subprocess.call(cmd, shell=True)
 
                 # run benchmark
                 my_env = os.environ.copy()
@@ -75,16 +76,12 @@ def main(args):
                 my_env["TORCHINDUCTOR_DUMP_AUTOTUNER_DATA"] = "1"
                 my_env["TORCH_LOGS"] = "+inductor"
                 my_env["TORCHINDUCTOR_BENCHMARK_KERNEL"] = "1"
-                cmd = f"""python3 {benchmark_py} --{dtype} --performance --{mode} --inductor -d cuda"""
-                f"""--only {model_name} > {log_file} 2>&1"""
+                cmd = (
+                    f"""python3 {benchmark_py} --{dtype} --performance --{mode} --inductor -d cuda"""
+                    f""" --only {model_name} > {log_file} 2>&1"""
+                )
                 print(cmd)
-                try:
-                    pro = subprocess.Popen(
-                        cmd, env=my_env, shell=True, preexec_fn=os.setsid
-                    )
-                    pro.wait(timeout=None)
-                except subprocess.TimeoutExpired as exc:
-                    print(exc)
+                subprocess.check_call(cmd, env=my_env, shell=True)
 
 
 if __name__ == "__main__":
