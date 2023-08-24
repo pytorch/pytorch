@@ -10551,16 +10551,13 @@ Keyword args:
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
-    is_coalesced (bool, optional): When specified, set the coalesced
-        flag to :attr:`is_coalesced`. If ``True``, the caller is
+    is_coalesced (bool, optional): When``True``, the caller is
         responsible for providing tensor indices that correspond to a
-        coalesced tensor that is a prerequisite for various algoritms
-        that process tensor indices to produce expected results.  If
-        the :attr:`check_invariants` flag is False, no error will be
-        raised if the prerequisites are not met and this will likely
-        lead to silently incorrect results.
-        Default: if None, the coalesced flag may be estimated using
-        the conservative value ``False`` as an initial state.
+        coalesced tensor.  If the :attr:`check_invariants` flag is
+        False, no error will be raised if the prerequisites are not
+        met and this will lead to silently incorrect results.
+        Default: None, to save on overhead the resulting Tensor will
+        have the coalesced flag set to ``False``.
 
 Example::
 
