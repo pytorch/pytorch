@@ -8,7 +8,7 @@ graph {
     name: "Exp_0"
     op_type: "Exp"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Exp_0"
     type {

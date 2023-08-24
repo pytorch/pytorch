@@ -7,8 +7,6 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
-
 import torch
 from torch import sym_float, sym_int
 
@@ -33,6 +31,7 @@ from ..utils import (
     guard_if_dyn,
     is_utils_checkpoint,
     istype,
+    numpy_operator_wrapper,
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
@@ -514,6 +513,21 @@ class BuiltinVariable(VariableTracker):
                         args[1],
                     ]
 
+                # Interaction between ndarray and tensors:
+                #   We prefer the tensor op whenever there are tensors involved
+                if check_numpy_ndarray_args(args, kwargs) and not any(
+                    type(arg) == variables.TensorVariable for arg in args
+                ):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        numpy_operator_wrapper(self.fn),
+                        *proxy_args_kwargs(args, kwargs),
+                    )
+
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable, tx, proxy, **options
+                    )
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -553,11 +567,7 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    if check_numpy_ndarray_args(args, kwargs):
-                        cls = variables.NumpyNdarrayVariable
-                    else:
-                        cls = variables.TensorVariable
-                    return wrap_fx_proxy_cls(cls, tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
@@ -679,6 +689,8 @@ class BuiltinVariable(VariableTracker):
             # convert min/max to torch ops
             if b.is_python_constant():
                 if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
+
                     fn = variables.NumpyVariable(np.clip)
                 else:
                     fn = variables.TorchVariable(torch.clamp)
@@ -686,6 +698,8 @@ class BuiltinVariable(VariableTracker):
                 result = fn.call_function(tx, [a], kwargs)
             else:
                 if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
+
                     fn = {max: np.maximum, min: np.minimum}[self.fn]
                     fn = variables.NumpyVariable(fn)
                 else:
