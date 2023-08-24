@@ -21,13 +21,13 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import sympy
 
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 
 
 @dataclass
@@ -162,6 +162,9 @@ class IndexPropagation:
         return self._inner.index_expr(expr, dtype)
 
     def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
+        if isinstance(a, (list, tuple)):
+            return tuple(self.unwrap(v) for v in a)
+
         if not isinstance(a, IndexPropVar):
             return a
 
@@ -171,15 +174,22 @@ class IndexPropagation:
 
         return a.value
 
-    def fallback(self, name: str, args: Tuple, kwargs: Dict[str, Any]) -> IndexPropVar:
+    def wrap(self, a: Any) -> Union[IndexPropVar, Sequence[IndexPropVar]]:
+        if isinstance(a, (list, tuple)):
+            return tuple(self.wrap(v) for v in a)
+        return IndexPropVar(a)
+
+    def fallback(
+        self, name: str, args: Tuple, kwargs: Dict[str, Any]
+    ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
-        return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
+        return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
         self, name: str, args: Tuple, kwargs: Dict[str, Any]
-    ) -> Union[TypedExpr, IndexPropVar]:
+    ) -> IndexPropVar:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
             if not isinstance(a, IndexPropVar):
@@ -189,7 +199,13 @@ class IndexPropagation:
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
-        if new_expr is NotImplemented:
+        is_valid_expr = new_expr is not NotImplemented and (
+            # Inductor doesn't expect floating point in sympy expressions, but
+            # allow floating point constants to be propagated
+            isinstance(new_expr.expr, sympy.Number)
+            or new_expr.expr.is_integer
+        )
+        if not is_valid_expr:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
@@ -213,7 +229,12 @@ class IndexPropagation:
     def indirect_indexing(
         self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
+        # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
+        #     for SymPy expressions, so we don't want to repeat idx too much
+
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
-            return index.value.expr
+            # If we are turning a indirect indexing into direct, we need to wrap it.
+            index = index.value.expr
+            return index + Where(index >= 0, 0, size)
         return self.fallback("indirect_indexing", (index, size, check), {}).value

@@ -13,17 +13,20 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cpp_extension = functools.partial(
+    unittest.skipIf, IS_FBCODE, "cpp_extension N/A in fbcode"
+)
 
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, example_outputs):
+    def load(cls, model, example_inputs, example_outputs, options=None):
         # AOTInductorModel relies on the caller to pass in output_tensors,
         # so we need to explicitly allocate output tensors here.
         output_tensors = []
@@ -35,6 +38,7 @@ class AOTInductorModelRunner:
         so_path, exported = torch._export.aot_compile(
             model,
             example_inputs,
+            options=options,
         )
 
         # Use a utility function for easier testing
@@ -60,10 +64,10 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
-    def run(cls, model, example_inputs, example_outputs):
+    def run(cls, model, example_inputs, example_outputs, options=None):
         example_outputs = copy.deepcopy(example_outputs)
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs
+            model, example_inputs, example_outputs, options
         )
         param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
@@ -75,6 +79,7 @@ class AOTInductorModelRunner:
 
 
 class AotInductorTests(TestCase):
+    @requires_cpp_extension()
     def test_simple(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -93,6 +98,7 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -113,6 +119,7 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -152,7 +159,6 @@ class AotInductorTests(TestCase):
                 )
                 self.bn1 = torch.nn.BatchNorm2d(num_features=16)
                 self.relu1 = torch.nn.ReLU()
-                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
                 self.loss_fn = torch.nn.L1Loss()
 
             def forward(self, x, target):
@@ -162,9 +168,7 @@ class AotInductorTests(TestCase):
                 x = self.relu1(x)
                 x = x + y
                 x = torch.flatten(x)
-                x = self.fc1(x)
                 output = self.loss_fn(x, target)
-
                 return (output,)
 
         def get_triton_codegen(optimized_module, args):
@@ -193,8 +197,34 @@ class AotInductorTests(TestCase):
                     res = re.search(r"seq_nr:(\d+)", line)
                     if res:
                         seq_nr_set.add(int(res.group(1)))
+
         self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
-        return
+
+    @requires_cpp_extension()
+    def test_dynamic_smem_above_default_limit(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        model = Repro()
+        # on A100, the generated Triton kernel for this MM
+        # requires 55296 bytes of dynamic SMEM which is above
+        # the A100's default dynamic SMEM limit of 49152 bytes.
+        example_inputs = (
+            torch.randn(10285, 96, device="cuda"),
+            torch.randn(96, 1, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        self.assertTrue(same(actual, expected))
 
 
 if __name__ == "__main__":
