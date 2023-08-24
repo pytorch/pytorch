@@ -14,8 +14,6 @@ from enum import auto, Enum
 from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch
-
-import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
@@ -154,11 +152,6 @@ class CachingAutotuner(KernelInterface):
 
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
-        )
-
-        # pre-create the profiler context manager to reduce latency
-        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.meta.get("kernel_name", "triton kernel")
         )
 
     def precompile(self, warm_cache_only_with_cc=None):
@@ -406,25 +399,11 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
-
-        # guard the record_function_ctx and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on. Note that
-        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
-        # it is faster than entering and exiting a context manager, even if the context
-        # manager is a nullcontext.
-        if autograd_profiler._is_profiler_enabled:
-            with self.record_function_ctx:
-                return launcher(
-                    *args,
-                    grid=grid,
-                    stream=stream,
-                )
-        else:
-            return launcher(
-                *args,
-                grid=grid,
-                stream=stream,
-            )
+        return launcher(
+            *args,
+            grid=grid,
+            stream=stream,
+        )
 
 
 def _find_names(obj):

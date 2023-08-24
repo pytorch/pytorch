@@ -11,9 +11,6 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._functorch.aot_autograd import to_fun
-from torch._higher_order_ops.wrap import wrap
-
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
 
 class MockSubclass(torch.Tensor):
@@ -122,74 +119,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
 
-    def test_compile_with_fake_tensor_dynamic_dim(self):
+    def test_compile_with_fake_tensor(self):
         x = torch.randn([3, 4])
+        x2 = torch.randn([4, 3])
+        cnt = torch._dynamo.testing.CompileCounter()
 
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return torch.sin(x)
 
-        def test_dynamic_dim(f, x, dim_dynamic, exp_frame_count, exp_op_count):
-            torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounter()
+        f(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
-            opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        f(x2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
 
-            x1 = torch.rand_like(x)
-            f(x)
-            f(torch.randn([4, 3]))
-            shape_env = ShapeEnv()
-            with torch._subclasses.fake_tensor.FakeTensorMode(
-                shape_env=shape_env
-            ) as fake_mode:
-                x_fake = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                )
-                x1_fake = fake_mode.from_tensor(
-                    x1, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                )
-                opt_f(x_fake)
-                opt_f(x1_fake)
+        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
+            fake_tensor = fake_mode.from_tensor(x)
+            f(fake_tensor)
 
-            self.assertEqual(cnt.frame_count, exp_frame_count)
-            self.assertEqual(cnt.op_count, exp_op_count)
-
-        test_dynamic_dim(f, x, DimDynamic.DYNAMIC, 1, 1)
-        test_dynamic_dim(f, x, DimDynamic.DUCK, 1, 1)
-        test_dynamic_dim(f, x, DimDynamic.STATIC, 1, 1)
-
-    def test_compile_with_fake_tensor_automatic_dynamic(self):
-        def f(x):
-            return torch.sin(x)
-
-        def test_automatic_dynamic(f, inps, dim_dynamic, exp_frame_count, exp_op_count):
-            torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounter()
-            opt_f = torch.compile(f, backend=cnt, fullgraph=True)
-
-            shape_env = ShapeEnv()
-            with torch._subclasses.fake_tensor.FakeTensorMode(
-                shape_env=shape_env
-            ) as fake_mode:
-                for inp in inps:
-                    fake_inp = fake_mode.from_tensor(
-                        inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
-                    )
-                    opt_f(fake_inp)
-            self.assertEqual(cnt.frame_count, exp_frame_count)
-            self.assertEqual(cnt.op_count, exp_op_count)
-
-        x = torch.randn([3, 4])
-        y = torch.randn([4, 5])
-        z = torch.randn([5, 6])
-        a = torch.randn([3, 5])
-        b = torch.randn([4, 4])
-        for dim_dynamic in [DimDynamic.DYNAMIC, DimDynamic.DUCK, DimDynamic.STATIC]:
-            # Recompile once, first with dim 0 and 1 become Dynamic
-            test_automatic_dynamic(f, [x, y, z], dim_dynamic, 2, 2)
-            # Recompile 2 times, first with dim 1 become Dynamic, second with dim 0 becomes Dynamic.
-            test_automatic_dynamic(f, [x, a, z], dim_dynamic, 3, 3)
-            # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
-            test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 3)
 
     def test_compile_with_functionalization(self):
         x = torch.randn([3, 4])
@@ -267,61 +219,6 @@ class GraphModule(torch.nn.Module):
                 f(x_view)
         finally:
             torch._disable_functionalization()
-
-    def test_compile_higher_order_with_functionalization(self):
-        backend = EagerRecordGraphAndInputs()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def f(x):
-            return wrap(lambda x: x.add_(1.0), x)
-
-        def check_count_and_graph(
-            exp_frame_count, exp_op_count, exp_n_graph, exp_graph
-        ):
-            self.assertEqual(cnt.frame_count, exp_frame_count)
-            self.assertEqual(cnt.op_count, exp_op_count)
-            self.assertEqual(len(backend.graphs), exp_n_graph)
-            actual = normalize_gm(
-                backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
-            )
-            self.assertExpectedInline(actual, exp_graph)
-
-        t = torch.randn([3, 4])
-        t_clone = t.clone()
-        t_clone2 = t.clone()
-        f(t)
-
-        expected_graph = """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
-
-        wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
-
-    class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
-            return add_
-"""
-        check_count_and_graph(1, 1, 1, expected_graph)
-
-        ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)
-        # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 2, 2, expected_graph)
-
-        try:
-            x = torch._to_functional_tensor(t_clone2, mirror_autograd_meta=True)
-            torch._enable_functionalization(reapply_views=False)
-            aot_f_out = f(x)
-        finally:
-            torch._disable_functionalization()
-
-        # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 3, 3, expected_graph)
 
 
 if __name__ == "__main__":

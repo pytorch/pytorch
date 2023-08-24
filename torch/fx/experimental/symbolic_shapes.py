@@ -2209,19 +2209,11 @@ class ShapeEnv:
                            ex: torch.Tensor,
                            source: Source,
                            dynamic_dims: DimList[DimDynamic],
-                           constraint_dims: DimList[DimConstraint]) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, dynamic_dims, constraint_dims)
-
-    def _produce_dyn_sizes_from_int_tuple(self,
-                                          tensor_size: Tuple[int],
-                                          source: Source,
-                                          dynamic_dims: DimList[DimDynamic],
-                                          constraint_dims: List[DimConstraint]
-                                          ) -> List[sympy.Expr]:
-        assert all(isinstance(val, int) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
+                           constraint_dims: DimList[DimConstraint],
+                           ) -> List[sympy.Expr]:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
-        for i, val in enumerate(tensor_size):
+        for i, val in enumerate(ex.size()):
             size.append(self.create_symbol(
                 val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
             ))
@@ -2240,53 +2232,6 @@ class ShapeEnv:
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-
-
-        # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
-        # We create symbols in shape_env using the backed hints behind SymInt.
-
-        # Case 1: when SymInt is backed, dynamo can proceed with FakeTensors that have concrete shape.
-        # produce_guards will trigger specializations on the outer stuff
-
-        # Case 2: when the SymInt is unbacked, we will throw an data dependent error in require_hint().
-        #
-        # It's probably good for now but it's important to note that this approach has implications for
-        # the original shape_env when checking guards in different order.
-
-        # Example:
-        # ---------
-        # Consider a function "opt_f" as shown below:
-
-        # @torch.compile()
-        # def opt_f(x: bool, y: Tensor):
-        #   if x == True:
-        #     return y + torch.randn([4])
-        #   else:
-        #     return y
-        # Depending on the sequence of calls, we might install two different sets of guards:
-
-        # 1. opt_f(False, y):
-        #    - "x == False" (always works for any size y)
-
-        # 2. opt_f(True, y):
-        #    - Triggers recompilation and results in guards like:
-        #      - "x == True and y.size(0) == 4"
-        #      - (or "y.size(0) == 4 and x == True")
-
-        # The order of checking the guards matters. In this specific example:
-        # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-        # we may have an unnessary shape speciliazation for y.
-        def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
-            assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt):
-                assert maybe_sym.node.shape_env is not self, \
-                    "expect the symbol is created from an shape env other than current one."
-                return maybe_sym.node.require_hint()
-            return maybe_sym
-
-        ex_size = tuple(maybe_specialize_sym_int_with_hint(sz) for sz in ex.size())
-        ex_stride = tuple(maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride())
-        ex_storage_offset = maybe_specialize_sym_int_with_hint(ex.storage_offset())
         dim = ex.dim()
 
         # Reimplement the legacy behavior
@@ -2318,31 +2263,31 @@ class ShapeEnv:
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, dynamic_dims, constraint_dims)
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims, constraint_dims)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
+        for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
-                ex_size[i] * ex_stride[i]: size[i] * stride[i]
+                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex_stride[i] >= 0
+                if stride[i] is not None and ex.stride()[i] >= 0
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None]
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
             )
             for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
+                if stride[i] is None and ex.stride()[i] in candidates:
+                    stride[i] = candidates[ex.stride()[i]]
+                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
 
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
                     [
-                        (ex_stride[i], i)
+                        (ex.stride()[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
                     ]
@@ -2357,7 +2302,7 @@ class ShapeEnv:
 
         sym_sizes = [
             self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i))
-            for i, (sym, hint) in enumerate(zip(size, ex_size))
+            for i, (sym, hint) in enumerate(zip(size, ex.size()))
         ]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -2365,14 +2310,14 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)
+                stride_expr, hint=ex.stride(i), source=TensorPropertySource(source, TensorProperty.STRIDE, i)
             ))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
-            ex_storage_offset,
+            ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
-        ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created

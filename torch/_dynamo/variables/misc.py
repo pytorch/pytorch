@@ -8,7 +8,7 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
@@ -275,7 +275,7 @@ class AutogradFunctionVariable(VariableTracker):
         if (
             requires_grad
             and torch.is_grad_enabled()
-            and config.capture_autograd_function
+            and torch._dynamo.config.capture_autograd_function
         ):
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
@@ -818,9 +818,6 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if not config.trace_numpy:
-            unimplemented(f"numpy.{self.value}()")
-
         from ..utils import numpy_to_tensor_wrapper
 
         from .tensor import NumpyNdarrayVariable
@@ -866,7 +863,7 @@ class NumpyVariable(VariableTracker):
     def as_proxy(self):
         # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
         #  into NumpyVariable for instances/objects and NumpyVariable for types.
-        if config.trace_numpy and isinstance(self.value, type):
+        if isinstance(self.value, type):
             # retrieve attribute str. E.g., "float32" if given np.float32
 
             attr = self.value.__name__

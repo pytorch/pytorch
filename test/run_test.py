@@ -37,22 +37,34 @@ from torch.utils import cpp_extension
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# using tools/ to optimize test run.
-sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.export_test_times import TEST_TIMES_FILE
-from tools.stats.upload_metrics import emit_metric
-from tools.testing.test_selections import (
-    calculate_shards,
-    get_reordered_tests,
-    get_test_case_configs,
-    NUM_PROCS,
-    ShardedTest,
-    THRESHOLD,
-)
+try:
+    # using tools/ to optimize test run.
+    sys.path.insert(0, str(REPO_ROOT))
+    from tools.stats.export_test_times import TEST_TIMES_FILE
+    from tools.stats.upload_metrics import emit_metric
+    from tools.testing.test_selections import (
+        calculate_shards,
+        get_reordered_tests,
+        get_test_case_configs,
+        NUM_PROCS,
+        ShardedTest,
+        THRESHOLD,
+    )
 
-HAVE_TEST_SELECTION_TOOLS = True
-# Make sure to remove REPO_ROOT after import is done
-sys.path.remove(str(REPO_ROOT))
+    HAVE_TEST_SELECTION_TOOLS = True
+except ImportError as e:
+
+    class ShardedTest:
+        pass
+
+    NUM_PROCS = 2
+    HAVE_TEST_SELECTION_TOOLS = False
+    print(
+        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
+    )
+finally:
+    # Make sure to remove REPO_ROOT after import is done
+    sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -975,7 +987,7 @@ def get_pytest_args(
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error and IS_CI:
+        if not options.continue_through_error and IS_CI and HAVE_TEST_SELECTION_TOOLS:
             pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
@@ -1447,16 +1459,17 @@ def do_sharding(
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
 
-    # Do sharding
-    shards = calculate_shards(
-        num_shards,
-        selected_tests,
-        test_file_times,
-        must_serial=must_serial,
-        sort_by_time=sort_by_time,
-    )
-    _, tests_from_shard = shards[which_shard - 1]
-    selected_tests = tests_from_shard
+    if HAVE_TEST_SELECTION_TOOLS:
+        # Do sharding
+        shards = calculate_shards(
+            num_shards,
+            selected_tests,
+            test_file_times,
+            must_serial=must_serial,
+            sort_by_time=sort_by_time,
+        )
+        _, tests_from_shard = shards[which_shard - 1]
+        selected_tests = tests_from_shard
 
     return selected_tests
 
@@ -1618,7 +1631,7 @@ def main():
 
     prioritized_tests = []
     general_tests = selected_tests
-    if IS_CI:
+    if IS_CI and HAVE_TEST_SELECTION_TOOLS:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
         (prioritized_tests, general_tests) = get_reordered_tests(general_tests)
@@ -1690,7 +1703,7 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-        if IS_CI:
+        if IS_CI and HAVE_TEST_SELECTION_TOOLS:
             emit_metric("td_experiment_1", metrics_dict)
 
     all_failures = prioritized_failures + general_failures

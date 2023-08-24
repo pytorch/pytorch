@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipLazy, skipMeta, skipXLA)
+    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types_and,
 )
@@ -476,7 +476,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t[2, 0], v[0])
 
     # Lazy hasn't implemented unbind yet.
-    @skipLazy
+    @onlyNativeDeviceTypes
     def test_unbind_view(self, device) -> None:
         t = torch.zeros((5, 5), device=device)
         tup = torch.unbind(t)
@@ -509,7 +509,7 @@ class TestViewOps(TestCase):
 
     # TODO: Fix this test for LTC. There is an interaction with dynamic shapes here that is broken,
     # causing asserts to trigger.
-    @skipLazy
+    @onlyNativeDeviceTypes
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
@@ -724,7 +724,7 @@ class TestViewOps(TestCase):
 
     @skipMeta
     # self.is_view_of reports false positives for lazy
-    @skipLazy
+    @onlyNativeDeviceTypes
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
@@ -752,7 +752,7 @@ class TestViewOps(TestCase):
 
     @skipMeta
     # self.is_view_of reports false positives for lazy
-    @skipLazy
+    @onlyNativeDeviceTypes
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
@@ -763,8 +763,7 @@ class TestViewOps(TestCase):
 
     # This test use as_strided to construct a tensor with overlapping memory,
     # which is not handled by the functionalization pass.
-    @skipLazy
-    @skipXLA
+    @onlyNativeDeviceTypes
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim

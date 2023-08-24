@@ -482,10 +482,8 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
-            if not config.trace_numpy:
-                unimplemented("Tensor.numpy(). config.trace_numpy is False")
             if not np:
-                unimplemented("Tensor.numpy(). NumPy is not available")
+                unimplemented("Tensor.numpy. NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:
