@@ -158,18 +158,16 @@ class TestForeach(TestCase):
             kwargs = sample.kwargs
             disable_fastpath = kwargs.pop("disable_fastpath")
             expect_fastpath = not (noncontiguous or disable_fastpath)
-            # # TODO(crcrpar): push this processing to sample func.
+            # TODO(crcrpar): push this processing to sample func.
             if op in foreach_pointwise_op_db:
                 values = kwargs.pop("values", None)
                 if values is not None:
                     sample.args = (*sample.args, values)
+            ref_input, ctxmgr = sample.input, nullcontext()
             if inplace:
                 with torch.no_grad():
                     ref_input = [t.clone().detach() for t in sample.input]
                 ctxmgr = InplaceForeachVersionBumpCheck(self, sample.input)
-            else:
-                ref_input = sample.input
-                ctxmgr = nullcontext()
             try:
                 with ctxmgr:
                     actual = func([sample.input, *sample.args], self.is_cuda, expect_fastpath, **kwargs)
