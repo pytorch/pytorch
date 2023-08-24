@@ -465,6 +465,31 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
+unfusible = lambda x: aten.special_bessel_j0(x)
+class NoopTests(TestCase):
+    def test_noop_clones(self):
+        def f(a):
+            b = a.clone()
+            b = unfusible(b)
+            return b
+
+        inp = T(10)
+        self.assertExpectedInline(count_numel(f, inp), """20""")
+
+        def f(a):
+            b = a.clone()
+            c = unfusible(b)
+            return b, c
+        self.assertExpectedInline(count_numel(f, inp), """40""")
+
+    def test_noop_slice_scatter(self):
+        def f(a):
+            b = aten.slice_scatter(a, a)
+            c = unfusible(b)
+            return c
+        inp = T(10)
+        self.assertExpectedInline(count_numel(f, inp), """20""")
+
 
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
