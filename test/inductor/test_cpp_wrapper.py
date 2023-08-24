@@ -68,8 +68,8 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
     device = "cuda"
 
 
-# conv2d will fallback for dynamic shapes; the fallback path is not yet supported
 test_failures_cpp_wrapper = {
+    # conv2d will fallback for dynamic shapes; the fallback path is not yet supported
     "test_conv2d_unary_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
@@ -79,12 +79,13 @@ test_failures_cpp_wrapper = {
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
+    # aten._native_multi_head_attention.default is not yet supported for dynamic shapes
+    "test_multihead_attention_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
 }
 
 test_failures_cuda_wrapper = {
-    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
@@ -183,8 +184,10 @@ if RUN_CPU:
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
+        BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
+        BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
@@ -205,6 +208,7 @@ if RUN_CPU:
         BaseTest("test_tensor2"),  # constant input
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
+        BaseTest("test_view_as_real"),
     ]:
         make_test_case(
             item.name,
@@ -284,11 +288,15 @@ if RUN_CUDA:
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
-        BaseTest(
-            "test_convolution1",
-            device=None,
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
+        # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
+        # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
+        # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
+        # Ideally, it should succeed for whatever kernels.
+        # BaseTest(
+        #     "test_convolution1",
+        #     device=None,
+        #     tests=test_select_algorithm.TestSelectAlgorithm(),
+        # ),
         BaseTest(
             "test_mm_plus_mm2",
             device=None,

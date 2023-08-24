@@ -2,6 +2,9 @@ import functools
 import itertools
 import logging
 import operator
+from typing import List, Optional, Union
+
+from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -16,7 +19,6 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
-    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -24,10 +26,11 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    register_replacement,
+    remove_extra_clones,
     stable_topological_sort,
 )
 from ..virtualized import V
+from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
 log = logging.getLogger(__name__)
@@ -61,6 +64,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
+        group_batch_fusion_post_grad_passes(gm.graph)
+        remove_extra_clones(gm.graph)
+
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
         if is_inference:
@@ -81,7 +87,6 @@ def lazy_init():
     from .quantization import register_quantization_lowerings
 
     register_quantization_lowerings()
-    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -144,7 +149,103 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+
+
+def cuda_and_enabled_mixed_mm(match):
+    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
+        match.kwargs["mat1"].meta.get("val"), "is_cuda", False
+    )
+
+
+def cuda_and_enabled_mixed_mm_and_not_int8(match):
+    return (
+        cuda_and_enabled_mixed_mm(match)
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+        and getattr(match.kwargs["mat2"].meta.get("val"), "dtype", torch.int8)
+        != torch.int8
+    )  # bitshift numerics in triton and pytorch don't match for torch.int8
+
+
+"""
+    this is intended to be used to unpack a [K,N] int4 tensor from a [K/2, N] uint4x2 tensor
+    (where the int4 and uint4x2 are represented with int8 and uint8 respectively)
+    where every other row of the int4 is packed with the row above it as:
+    uint4x2[k,n] = (8+int4[2*k,n])+(8+int4[2*k+1,n])<<4
+
+    unpack formulas:
+    int4[2*k,n]=(uint4x2[k,n] & 0xF) - 8
+    int4[2*k+1,n]=(uint4x2[k,n] >> 4) - 8
+
+    thus matching on unpack formula:
+    torch.mm(mat1, torch.cat((mat2 & 0xF, mat2>>4),1).reshape(mat2_mm_shape).to(mat2_dtype).sub(8))
+
+    note: although the unpack formula in pytorch and the triton kernel is designed for a uint8 mat2, the behavior
+    of the kernel matches the pytorch formula for all dtypes except torch.int8
+    where the bitwise numerics in triton do not match those in pytorch.
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm.default,
+        KeywordArg("mat1"),
+        CallFunction(
+            aten.sub.Tensor,
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(
+                    aten.reshape.default,
+                    CallFunction(
+                        aten.cat.default,
+                        ListOf(
+                            CallFunction(
+                                aten.bitwise_and.Scalar,
+                                KeywordArg("mat2"),
+                                0xF,
+                            ),
+                            CallFunction(
+                                aten.__rshift__.Scalar,
+                                KeywordArg("mat2"),
+                                4,
+                            ),
+                        ),
+                        1,
+                    ),
+                    KeywordArg("mat2_mm_shape"),
+                ),
+                KeywordArg("mat2_dtype"),
+            ),
+            8,
+        ),
+    ),
+    extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
+)
+def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
+        mat1, mat2, mat2_mm_shape, mat2_dtype
+    )
+
+
+"""
+    torch.mm(mat1, mat2.to(mat2_dtype))
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("mat2"),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=cuda_and_enabled_mixed_mm,
+)
+def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
 
 
 @register_graph_pattern(
@@ -220,7 +321,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size = None
+    new_size: Optional[Union[List[Expr], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -237,6 +338,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         offsets_start.append(new_size[dim] - shape[dim])
         offsets_end.append(new_size[dim])
 
+    assert new_size is not None
     dtype = functools.reduce(
         torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
     )
@@ -352,70 +454,6 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
-def addmm_relu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.relu(output)
-
-
-def addmm_relu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
-
-
-def addmm_gelu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.gelu(output)
-
-
-def addmm_gelu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
-
-
-def should_replace_addmm_activation(match):
-    if config.max_autotune_gemm:
-        # keep addmm for tuning
-        return False
-
-    input = match.kwargs["input"].meta["val"]
-    # conditions of epilogue fusion in _addmm_activation
-    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
-
-
-def register_addmm_activation_replacement():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    else:
-        device = "cpu"
-
-    # sizes/values dont actually matter for initial trace
-    # once we get a possible match we re-trace with the actual values and verify the match still holds
-
-    inp = functools.partial(torch.empty, (5,), device=device)
-    mat1 = functools.partial(torch.empty, (3, 4), device=device)
-    mat2 = functools.partial(torch.empty, (4, 5), device=device)
-
-    for pattern, replacement, args in [
-        (
-            addmm_relu_pattern,
-            addmm_relu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-        (
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-    ]:
-        register_replacement(
-            pattern,
-            replacement,
-            args,
-            inference_graph,
-            inference_patterns,
-            extra_check=should_replace_addmm_activation,
-        )
-
-
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -478,3 +516,37 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or use.target.is_view:
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
+
+
+@register_graph_pattern(
+    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    pass_dict=pass_patterns[2],
+)
+def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
+    if not inp.meta["val"].is_cuda:
+        return
+
+    output = match.output_node()
+    if not all(is_pointwise_use(use) for use in output.users):
+        return
+
+    def repl(inp, x1, x2):
+        return x1 @ x2 + inp
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])

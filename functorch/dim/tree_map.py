@@ -5,7 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 from functorch._C import dim
+
 tree_flatten = dim.tree_flatten
+
 
 def tree_map(fn, tree):
     vs, unflatten = tree_flatten(tree)

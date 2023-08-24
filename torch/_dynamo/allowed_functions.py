@@ -8,14 +8,22 @@ import math
 import operator
 import types
 import warnings
+
 from typing import cast, Dict, Optional, Set
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+
 import torch
+import torch._functorch.deprecated as deprecated_func
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import HAS_NUMPY, is_safe_constant, np
+from .utils import is_safe_constant, NP_SUPPORTED_MODULES
 
 """
 A note on allowed functions:
@@ -108,6 +116,7 @@ def _disallowed_function_ids():
         torch.set_autocast_gpu_dtype,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
+        torch.Tensor.__init__,
     ]
     if torch.distributed.is_available():
         from torch.distributed import _functional_collectives
@@ -160,6 +169,7 @@ def _allowed_function_ids():
             "torch._C.inductor.",
             "torch.fx.",
             "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -192,8 +202,14 @@ def _allowed_function_ids():
 
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
-                # We want to trace through `grad`
-                if obj is torch.func.grad:
+
+                # We want to trace through `grad` and `vmap`
+                if obj in (
+                    torch.func.grad,
+                    deprecated_func.grad,
+                    torch.func.vmap,
+                    deprecated_func.vmap,
+                ):
                     continue
 
                 if isinstance(obj, types.ModuleType):
@@ -213,7 +229,9 @@ def _allowed_function_ids():
     # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(method, types.MethodDescriptorType):
+        if isinstance(
+            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
     for idx in _disallowed_function_ids():
@@ -224,6 +242,12 @@ def _allowed_function_ids():
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
+
+
+@make_function_id_set
+def _allowed_user_defined_function_ids():
+    rv = {}
+    return rv
 
 
 @make_function_id_set
@@ -251,16 +275,15 @@ def _builtin_function_ids():
 @make_function_id_set
 def _numpy_function_ids():
     rv = dict()
-    if HAS_NUMPY:
-        for mod in (np, np.random):
-            rv.update(
-                {
-                    id(v): f"{mod.__name__}.{k}"
-                    for k, v in mod.__dict__.items()
-                    if callable(v)
-                    and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-                }
-            )
+    for mod in NP_SUPPORTED_MODULES:
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
     return rv
 
 
@@ -291,6 +314,10 @@ def is_allowed(obj):
     )
 
 
+def is_user_defined_allowed(obj):
+    return id(obj) in _allowed_user_defined_function_ids
+
+
 def torch_get_name(obj, default):
     """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
@@ -305,7 +332,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    if HAS_NUMPY:
-        return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
-    else:
+    if np is None:
         return False
+    return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids

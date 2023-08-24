@@ -2,6 +2,7 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/SequenceNumber.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -49,28 +50,6 @@ struct DisableFuncTorch {
         back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
   c10::impl::ExcludeDispatchKeyGuard front_guard_;
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
-};
-
-struct MultithreadingEnabled {
-  MultithreadingEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
-  }
-  ~MultithreadingEnabled() {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
-  }
-  bool old_;
-};
-
-struct ViewReplayEnabled {
-  ViewReplayEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
-  }
-  ~ViewReplayEnabled() {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
-  }
-  bool old_;
 };
 
 struct DisableAutocast {
@@ -264,6 +243,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
+  m.def("_get_sequence_nr", &at::sequence_number::peek);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_us", &ProfilerResult::trace_start_us)
@@ -458,10 +438,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher");
   py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
-  py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
-      _C_m, "_MultithreadingEnabled");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
-  py_context_manager<ViewReplayEnabled, bool>(_C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -511,7 +488,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled()) {
+      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -754,6 +731,82 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_multithreading_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_multithreading_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_multithreading_enabled");
+  }
+  auto multithreading_enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_multithreading_enabled(
+      multithreading_enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_multithreading_enabled(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_view_replay_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_view_replay_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_view_replay_enabled");
+  }
+  auto view_replay_enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_view_replay_enabled(
+      view_replay_enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -890,72 +943,6 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_fake_tensor_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (arg != Py_None) {
-    Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::set_fake_mode(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_proxy_tensor_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (arg != Py_None) {
-    Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::set_proxy_mode(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* unset_fake_tensor_mode(PyObject* _unused, PyObject* _unused2) {
-  HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::unset_fake_mode();
-  auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* unset_proxy_tensor_mode(
-    PyObject* _unused,
-    PyObject* _unused2) {
-  HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::unset_proxy_mode();
-  auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_fake_tensor_mode(PyObject* _unused, PyObject* _unused2) {
-  HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::get_fake_mode();
-  if (mode != c10::nullopt) {
-    auto* r = (*mode)->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_proxy_tensor_mode(PyObject* _unused, PyObject* _unused2) {
-  HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::get_proxy_mode();
-  if (mode != c10::nullopt) {
-    auto* r = (*mode)->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -998,7 +985,9 @@ static PyObject* get_dispatch_stack_at(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
+static PyObject* len_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
   HANDLE_TH_ERRORS
   const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
   return utils::wrap(static_cast<int64_t>(len));
@@ -1068,6 +1057,19 @@ static PyMethodDef methods[] = { // NOLINT
      is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
+    {"_is_multithreading_enabled",
+     is_multithreading_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_multithreading_enabled",
+     castPyCFunctionWithKeywords(set_multithreading_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_view_replay_enabled", is_view_replay_enabled, METH_NOARGS, nullptr},
+    {"_set_view_replay_enabled",
+     castPyCFunctionWithKeywords(set_view_replay_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
@@ -1093,12 +1095,6 @@ static PyMethodDef methods[] = { // NOLINT
      len_torch_function_stack,
      METH_NOARGS,
      nullptr},
-    {"_set_proxy_tensor_mode", set_proxy_tensor_mode, METH_O, nullptr},
-    {"_unset_proxy_tensor_mode", unset_proxy_tensor_mode, METH_NOARGS, nullptr},
-    {"_get_proxy_tensor_mode", get_proxy_tensor_mode, METH_NOARGS, nullptr},
-    {"_set_fake_tensor_mode", set_fake_tensor_mode, METH_O, nullptr},
-    {"_unset_fake_tensor_mode", unset_fake_tensor_mode, METH_NOARGS, nullptr},
-    {"_get_fake_tensor_mode", get_fake_tensor_mode, METH_NOARGS, nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
      METH_O,

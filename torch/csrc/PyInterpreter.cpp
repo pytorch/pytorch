@@ -153,7 +153,7 @@ py::object torchDispatchFromTensorImpl(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   // TODO: there should be a shorter way to spell this
   // TODO: fix the constness of target
   at::Tensor self_t = at::Tensor(
@@ -280,7 +280,7 @@ void ConcretePyInterpreterVTable::dispatch(
 
   py::gil_scoped_acquire g;
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
@@ -659,19 +659,19 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "Symshape must be a list or a tuple");
-  std::vector<c10::SymInt> symints;
+  py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = py::cast<c10::SymInt>(elm);
     // TODO: the buffer will need to be made owning later
-    symints.emplace_back(si);
+    symints.append(si.as_int_unchecked());
   }
-  // Allocate an array on the heap and copy elements from symints.
-  int64_t len = symints.size();
-  c10::SymInt* ptr = new c10::SymInt[len];
-  std::copy(symints.begin(), symints.end(), ptr);
-  auto ret = c10::SymIntArrayRef(ptr, len);
-  return ret;
+
+  auto result = values_from_buffer(self, symints);
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -770,18 +770,19 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "Symshape must be a list or a tuple");
-  std::vector<c10::SymInt> symints;
+  py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.emplace_back(si);
+    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
+                                    : c10::SymInt{py::cast<int64_t>(elm)};
+    symints.append(si.as_int_unchecked());
   }
-  int64_t len = symints.size();
-  c10::SymInt* ptr = new c10::SymInt[len];
-  std::copy(symints.begin(), symints.end(), ptr);
-  auto ret = c10::SymIntArrayRef(ptr, len);
-  return ret;
+
+  auto result = values_from_buffer(self, symints);
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 

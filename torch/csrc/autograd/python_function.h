@@ -35,6 +35,11 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
+
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
@@ -99,6 +104,11 @@ struct THPFunction {
   // but there are certain use cases where that is not feasible:
   // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
   bool materialize_non_diff_grads;
+
+  // This is enabled by compiled autograd as a way to signal to AotAutograd it
+  // should call the original FX graph rather than compiling.
+  bool compiled_autograd_tracing;
+  std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;

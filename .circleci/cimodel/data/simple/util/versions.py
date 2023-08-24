@@ -12,7 +12,9 @@ class MultiPartVersion:
         with the prefix string.
         """
         if self.parts:
-            return [self.prefix + str(self.parts[0])] + [str(part) for part in self.parts[1:]]
+            return [self.prefix + str(self.parts[0])] + [
+                str(part) for part in self.parts[1:]
+            ]
         else:
             return [self.prefix]
 
