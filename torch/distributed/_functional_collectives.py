@@ -6,7 +6,7 @@ import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_wrapper_tensor
+from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
@@ -291,6 +291,15 @@ def reduce_scatter_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
+# This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
+# Today, this maps 1:1 with "aten ops that are views".
+def _is_view_op(tgt):
+    assert isinstance(tgt, torch._ops.OpOverload)
+    schema = tgt._schema
+    if len(schema.arguments) > 0:
+        first_arg = schema.arguments[0]
+        # check if op is a view
+        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
@@ -321,24 +330,43 @@ class AsyncCollectiveTensor(torch.Tensor):
         return r
 
     def __repr__(self):
+        wait_tensor(self.elem)
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
         wait_tensor(self.elem)
         return self
 
+    def _get_acs_underlying_tensor(self):
+        """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
+        return self.elem
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        is_view_op = _is_view_op(func)
+
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
-            wait_tensor(e.elem)
+            if not is_view_op:
+                wait_tensor(e.elem)
             return e.elem
+
+        def wrap(e: torch.Tensor):
+            # wait_tensor is idepotent and will do stream sync only once
+            assert not isinstance(e, AsyncCollectiveTensor)
+            res = AsyncCollectiveTensor(e)
+            _register_tensor_wrapper(res)
+            return res
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
+        # View ops dont require a sync, so we should re-wrap the outputs.
+        if is_view_op:
+            out = tree_map_only(torch.Tensor, wrap, out)
 
         return out
 
@@ -426,7 +454,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_wrapper_tensor(res, self)
+    _register_tensor_wrapper(res)
     return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):

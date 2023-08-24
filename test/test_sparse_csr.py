@@ -233,6 +233,10 @@ class TestSparseCompressed(TestCase):
             index_dtypes = [torch.int64]
         else:
             index_dtypes = [torch.int32, torch.int64]
+        if dtype.is_floating_point or dtype.is_complex:
+            requires_grad_lst = [False, True]
+        else:
+            requires_grad_lst = [False]
         for index_dtype in index_dtypes:
             for expected_device in expected_devices:
                 for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
@@ -258,25 +262,36 @@ class TestSparseCompressed(TestCase):
                         plain_indices = plain_indices.tolist()
                         values = values.tolist()
 
-                    if use_factory_function:
-                        if shape_and_device_inference:
-                            sparse = factory_function(compressed_indices, plain_indices, values)
+                    for requires_grad in requires_grad_lst:
+                        if use_factory_function:
+                            if shape_and_device_inference:
+                                sparse = factory_function(
+                                    compressed_indices, plain_indices, values, requires_grad=requires_grad)
+                            else:
+                                sparse = factory_function(
+                                    compressed_indices, plain_indices, values, size,
+                                    dtype=dtype, device=expected_device, requires_grad=requires_grad)
                         else:
-                            sparse = factory_function(compressed_indices, plain_indices, values, size,
-                                                      dtype=dtype, device=expected_device)
-                    else:
-                        if shape_and_device_inference:
-                            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, layout=layout)
-                        else:
-                            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
-                                                                    dtype=dtype, layout=layout, device=expected_device)
-                    self.assertEqual(layout, sparse.layout)
-                    self.assertEqual(size, sparse.shape)
-                    self.assertEqual(compressed_indices_expect, compressed_indices_mth(sparse))
-                    self.assertEqual(plain_indices_expect, plain_indices_mth(sparse))
-                    self.assertEqual(values_expect, sparse.values())
-                    self.assertEqual(sparse.device, sparse.values().device)
-                    self.assertEqual(sparse.device, expected_device)
+                            if shape_and_device_inference:
+                                sparse = torch.sparse_compressed_tensor(
+                                    compressed_indices, plain_indices, values,
+                                    layout=layout, requires_grad=requires_grad)
+                            else:
+                                sparse = torch.sparse_compressed_tensor(
+                                    compressed_indices, plain_indices, values, size,
+                                    dtype=dtype, layout=layout, device=expected_device, requires_grad=requires_grad)
+
+                        self.assertEqual(layout, sparse.layout)
+                        self.assertEqual(size, sparse.shape)
+                        self.assertEqual(compressed_indices_expect, compressed_indices_mth(sparse))
+                        self.assertEqual(plain_indices_expect, plain_indices_mth(sparse))
+                        self.assertEqual(values_expect, sparse.values())
+                        self.assertEqual(sparse.device, sparse.values().device)
+                        self.assertEqual(sparse.device, expected_device)
+                        self.assertEqual(sparse.values().requires_grad, requires_grad)
+                        self.assertEqual(sparse.requires_grad, requires_grad)
+                        self.assertFalse(compressed_indices_mth(sparse).requires_grad)
+                        self.assertFalse(plain_indices_mth(sparse).requires_grad)
 
     @skipMeta
     @sparse_compressed_nonblock_layouts()
@@ -1980,13 +1995,11 @@ class TestSparseCSR(TestCase):
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
-    @skipCUDAIf(
-        not _check_cusparse_spgemm_available(),
-        "cuSparse Generic API SpGEMM is not available"
-    )
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
+        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
+            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)

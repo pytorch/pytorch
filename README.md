@@ -44,6 +44,8 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 
 ## More About PyTorch
 
+[Learn the basics of PyTorch](https://pytorch.org/tutorials/beginner/basics/intro.html)
+
 At a granular level, PyTorch is a library that consists of the following components:
 
 | Component | Description |
@@ -439,7 +441,7 @@ Three-pointers to get you started:
 
 ## Releases and Contributing
 
-Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 

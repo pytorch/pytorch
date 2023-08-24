@@ -40,16 +40,9 @@ from pytorch_test_common import (
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, errors, verification
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
-
-# The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
-# The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = (
-    _constants.ONNX_MAX_OPSET - 1
-)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -165,7 +158,7 @@ def _parametrize_rnn_args(arg_name):
 
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(
-        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+        onnx_test_common.MIN_ONNX_OPSET_VERSION, onnx_test_common.MAX_ONNX_OPSET_VERSION
     ),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
@@ -299,7 +292,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self,
             ):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
                 scale_1 = self.weight.reshape(1, -1, 1, 1)
@@ -1888,15 +1881,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(prev_default)
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
@@ -1912,23 +1901,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
-
         # 1. x,y are int, and output is float.
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
-        torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
@@ -4308,7 +4294,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
                 # Constant folding will be triggerred for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
@@ -4327,7 +4313,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(2))
+                self.register_buffer("weight", torch.ones(2))
 
             def forward(self, x):
                 # shape is of rank 0
@@ -4342,7 +4328,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.rb = torch.nn.Buffer(torch.randn(1, 1, 3, 1, 1))
+                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
 
             def forward(self, x):
                 x += self.rb[0]
@@ -9488,7 +9474,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
@@ -10989,7 +10975,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
-                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
                 self.const = 2
 
             @staticmethod
@@ -11051,7 +11037,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.embedding_dim = embedding_dim
                 self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
-                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
 
             @staticmethod
             def get_embedding(embedding_dim: int):

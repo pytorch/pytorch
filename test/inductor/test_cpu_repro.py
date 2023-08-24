@@ -15,6 +15,7 @@ from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
+from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
     CppVecKernelChecker,
@@ -253,6 +254,64 @@ class CPUReproTests(TestCase):
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
+    @config.patch(implicit_fallbacks=True)
+    def test_multihead_attention_cpu(self):
+        def fn(
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ):
+            return torch._native_multi_head_attention(
+                q,
+                k,
+                v,
+                embed_dim,
+                num_heads,
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                mask,
+                need_weights,
+            )
+
+        B = 1
+        T = 3
+        embed_dim = 6
+        num_heads = 2
+        q = torch.randn([B, T, embed_dim])
+        k = torch.randn([B, T, embed_dim])
+        v = torch.randn([B, T, embed_dim])
+        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
+        qkv_bias = torch.randn([3 * embed_dim])
+        proj_weight = torch.randn([3 * embed_dim, embed_dim])
+        proj_bias = torch.randn([3 * embed_dim])
+        mask = None
+        need_weights = False
+
+        inps = [
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ]
+        self.common(fn, inps)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
@@ -384,6 +443,7 @@ class CPUReproTests(TestCase):
                         inps_var = [v_var]
                         self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    @slowTest
     def test_lstm_packed(self):
         params_dict = {
             "unbatched": [True, False],
@@ -1560,6 +1620,17 @@ class CPUReproTests(TestCase):
             shape_env=None,
             num_static_inputs=0,
         )
+
+        def set_opt_dtype(graph):
+            for node in graph.nodes:
+                if node.target == "constant":
+                    if OptimizationContext.key in node.meta:
+                        opt_ctx = node.meta[OptimizationContext.key]
+                    else:
+                        opt_ctx = OptimizationContext()
+                    opt_ctx.dtype = node.args[-1]
+                    node.meta[OptimizationContext.key] = opt_ctx
+
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
         ):
@@ -1570,48 +1641,56 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
                 i32_iinfo = np.iinfo(np.int32)
                 f32_iinfo = np.finfo(np.float32)
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, np.inf
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, -np.inf
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
                 )
@@ -2101,6 +2180,15 @@ class CPUReproTests(TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_invalid_index_of_empty_tensor(self):
+        def fn(a):
+            b = a[[0]]
+            return b
+
+        a = torch.tensor([])
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(a)
+
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -2281,6 +2369,33 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_scalar_mul_bfloat16(self):
+        def f(x):
+            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
+
+        metrics.reset()
+        x = torch.randn(4, 5, dtype=torch.bfloat16)
+        self.common(f, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_bf16_zeros(self):
+        def fn():
+            x = torch.zeros(1, 1, 32, dtype=torch.bfloat16)
+            return x
+
+        self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":

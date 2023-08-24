@@ -9,6 +9,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -96,6 +97,10 @@ class _KinetoProfile:
         self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
+        self.use_device = None
+        privateuse1_backend = _get_privateuse1_backend_name()
+        if privateuse1_backend != "privateuseone":
+            self.use_device = privateuse1_backend
 
     def start(self):
         self.prepare_trace()
@@ -109,6 +114,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
+            use_device=None,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -139,11 +145,10 @@ class _KinetoProfile:
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
 
-            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
-            is_cuda11_or_lower = (torch.version.cuda is not None) and (
-                [int(x) for x in torch.version.cuda.split(".")] < [12, 0]
-            )
-            if is_cuda11_or_lower and hasattr(torch, "_inductor"):
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes.
+            # This is a known issue in CUDA 11 but we have also occasionally
+            # observed it in CUDA 12
+            if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
 
                 if inductor_config.triton.cudagraphs:
@@ -256,6 +261,9 @@ class _KinetoProfile:
         Output: File written as JSON or gzipped JSON
         """
         # Default to device 0, if unset. Fallback on cpu.
+        if device is None and self.use_device and self.use_device != "cuda":
+            device = self.use_device + ":0"
+
         if device is None:
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -594,13 +602,11 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
-        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):

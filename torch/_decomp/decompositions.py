@@ -19,7 +19,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int
+from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -179,11 +179,6 @@ def hardtanh_backward(
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
-@register_decomposition(aten.hardshrink_backward)
-def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
-
-
 @register_decomposition(aten.hardswish)
 @pw_cast_for_opmath
 def hardswish(self: Tensor) -> Tensor:
@@ -267,11 +262,6 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
-@register_decomposition(aten.softshrink_backward)
-def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
-
-
 @register_decomposition(aten._prelu_kernel)
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self > 0, self, weight * self)
@@ -286,6 +276,43 @@ def _prelu_kernel_backward(
     input_grad = torch.where(self > 0, grad_output, weight * grad_output)
     weight_grad = torch.where(self > 0, 0.0, self * grad_output)
     return (input_grad, weight_grad)
+
+
+@register_decomposition(aten.rrelu_with_noise)
+@aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    assert generator is None
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper)
+        output = torch.where(not_positive, self * r, self)
+        noise.copy_(torch.where(not_positive, r, 1))
+        return output
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope)
+
+
+@register_decomposition(aten.rrelu_with_noise_)
+@aten.rrelu_with_noise_.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise_(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -690,12 +717,12 @@ def slice_forward(
 
     if start_val < 0:
         start_val = 0
-    elif start_val >= sizes[dim]:
+    elif start_val > sizes[dim]:
         start_val = sizes[dim]
 
     if end_val < start_val:
         end_val = start_val
-    elif end_val >= sizes[dim]:
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -1015,6 +1042,16 @@ def logit_backward(
         )
 
 
+@register_decomposition(aten.dropout)
+@aten.dropout.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.dropout.default.py_impl(DispatchKey.Autograd)
+def dropout(input: Tensor, p: float, train: Optional[bool]):
+    if train and p != 0:
+        return aten.native_dropout(input, p, train)[0]
+    else:
+        return input.clone()
+
+
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train and p != 0:
@@ -1145,15 +1182,23 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
-    if sum(split_sizes) != self.shape[dim]:
-        raise ValueError(
-            "Split sizes don't add up to the tensor's size in the given dimension"
-        )
+    torch._check_with(
+        ValueError,
+        sum(split_sizes) == self.shape[dim],
+        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+    )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
+        torch._check(
+            length >= 0,
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
+        # We know this is true thanks to the sum, but this assertion helps
+        # out our internal reasoning
+        expect_true(start_idx + length <= self.shape[dim])
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
@@ -1509,6 +1554,7 @@ def native_batch_norm(
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
 @aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+@aten.native_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def native_batch_norm_decomposition(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1644,6 +1690,26 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+def device_hint(tensor):
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device
+    else:
+        return None
+
+
+def wrap_output_with_input_device_(x, common_device):
+    # wrap meta tensor
+    if common_device is not None and x.device.type == "meta":
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode()
+        fake_mode.in_kernel_invocation = True
+        converter = fake_mode.fake_tensor_converter
+        return converter.from_meta_and_device(fake_mode, x, common_device)
+
+    return x
+
+
 @register_decomposition(aten._to_copy)
 def _to_copy(
     x: Tensor,
@@ -1660,6 +1726,7 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
+    common_device = device_hint(x)
     if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
@@ -1668,6 +1735,11 @@ def _to_copy(
         x = torch._prims.device_put(x, device)
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
+        dtype_converted = True
+    # In case of dtype promotion, faketensor converted into tensor.
+    # Need to convert into faketensor if input was a faketensor.
+    if dtype_converted:
+        x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
@@ -2155,6 +2227,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
+    input_dtype = torch.float if input.dtype == torch.uint8 else input.dtype
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
         # Indices are computed as following:
@@ -2162,7 +2235,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
         osize = output_size[d]
-        output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
+        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
@@ -2994,6 +3067,64 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+@register_decomposition([aten._unsafe_index])
+def _index(x, indices):
+    return aten.index(x, indices)
+
+
+def _nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        if n_dims > 1:
+            shape = [
+                1,
+            ] * n_dims
+            shape[channel_dim] = weight.shape[0]
+            w = weight.view(shape)
+        else:
+            w = weight
+        self = self * w
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
+
+    result = torch.where(target != ignore_index, result, 0)
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = self.new_full((), 0.0)
+        return result, total_weight
+
+    if weight is not None:
+        w = w.expand(self.shape)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
+        total_weight = wsum.sum()
+    else:
+        total_weight = (target != ignore_index).sum().to(self)
+
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        result = result.sum() / total_weight
+
+    return result, total_weight
+
+
 @register_decomposition(aten.nll_loss_forward)
 def nll_loss_forward(
     self: Tensor,
@@ -3018,43 +3149,18 @@ def nll_loss_forward(
         weight.dim() == 1 and weight.numel() == n_classes
     ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
 
-    # self can be [N, C] or [C]
-    # target can be [N] or []
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
-    n_dims = self.dim()
-    channel_dim = 1
-    if n_dims < 2:
-        channel_dim = 0
 
-    if weight is not None:
-        w = weight.unsqueeze(0) if n_dims > 1 else weight
-        self = self * w
-    safe_target = torch.where(target != ignore_index, target, 0)
-    safe_target_ = safe_target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-
-    result = torch.where(target != ignore_index, result, 0)
-
-    if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = self.new_full((), 0.0)
-        return result, total_weight
-
-    if weight is not None:
-        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
-        wsum = torch.where(target != ignore_index, wsum, 0)
-        total_weight = wsum.sum()
-    else:
-        total_weight = (target != ignore_index).sum().to(self)
-
-    if reduction == Reduction.SUM.value:
-        result = result.sum()
-    elif reduction == Reduction.MEAN.value:
-        result = result.sum() / total_weight
-
-    return result, total_weight
+@register_decomposition(aten.nll_loss2d_forward)
+def nll_loss2d_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
 
 # These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
@@ -3085,6 +3191,83 @@ def _upsample_cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
 # Need this instead of just sum() to keep mypy happy
 def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
     return reduce(torch.add, ts)
+
+
+def _linspace_from_neg_one(
+    num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device
+):
+    if num_steps <= 1:
+        return torch.tensor(0, device=device, dtype=dtype)
+
+    a = ((num_steps - 1) / num_steps) if not align_corners else 1
+    return torch.linspace(-a, a, steps=num_steps, device=device, dtype=dtype)
+
+
+def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    # Using padding and summation generates a single kernel vs using torch.stack where 3 kernels generated
+    # corresponding to each individual tensor: grid_x, grid_y, grid_one
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(h, 1, 1)
+    grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_one
+
+
+def _make_base_grid_5d(theta: Tensor, d: int, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, h, 1, 1)
+    grid_z = _linspace_from_neg_one(d, align_corners, dtype, device).view(d, 1, 1, 1)
+    grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_z + grid_one
+
+
+def _affine_grid_generator_4d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, h, w = size
+    base_grid = _make_base_grid_4d(theta, h, w, align_corners=align_corners)
+    # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (h * w, 3, 1) * (n, 1, 3, 2) -> (n, h * w, 2)
+    grid = (base_grid.view(-1, 3, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, h, w, 2)
+
+
+def _affine_grid_generator_5d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, d, h, w = size
+    base_grid = _make_base_grid_5d(theta, d, h, w, align_corners=align_corners)
+    # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (d * h * w, 4, 1) * (n, 1, 4, 3) -> (n, h * w, 3)
+    grid = (base_grid.view(-1, 4, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, d, h, w, 3)
+
+
+@register_decomposition(aten.affine_grid_generator)
+@pw_cast_for_opmath
+def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
+    torch._check(
+        len(size) in (4, 5),
+        lambda: "affine_grid_generator needs 4d (spatial) or 5d (volumetric) inputs.",
+    )
+    if len(size) == 4:
+        return _affine_grid_generator_4d(theta, size, align_corners=align_corners)
+    else:
+        return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
 
 
 @register_decomposition(aten.grid_sampler_2d)

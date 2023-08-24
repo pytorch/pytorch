@@ -31,8 +31,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest,
-    TEST_WITH_CROSSREF, skipIfTorchDynamo,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
+    TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -1637,6 +1637,7 @@ else:
             'replication_pad3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchDynamo("Warning is not raised.")
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
@@ -2447,7 +2448,7 @@ else:
             self.assertTrue(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -2895,6 +2896,7 @@ else:
             self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @slowTestIf(TEST_WITH_TORCHINDUCTOR)
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_extreme_cases(self, device, dtype):
         # Test behaviour for inf and nan values
@@ -4036,7 +4038,6 @@ else:
         self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
-    @skipIfTorchInductor("RuntimeError: Trying to create tensor with negative dimension -1: [-1]")
     def test_dim_function_empty(self, device):
         shape = (0, 1, 2, 0)
         x = torch.randn(shape, device=device)
@@ -4189,7 +4190,8 @@ else:
                 torch.index_select(w, 1, ind_05)
             with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
                 torch.index_select(s, 0, ind_empty)
-        self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
@@ -6008,6 +6010,7 @@ class TestTorch(TestCase):
                     self.assertEqual(added, -tensor)
 
     @skipIfTorchInductor("AssertionError: RuntimeError not raised by <lambda>")
+    @set_default_dtype(torch.double)
     def test_index_add_correctness(self):
         # Check whether index_add can get correct result when
         # alpha is 1, and dtype of index is torch.long,
@@ -7271,21 +7274,21 @@ tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj
         self.assertExpectedInline(str(y), expected_str)
 
         # test dtype
-        torch.set_default_dtype(torch.float)
-        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float):
+            x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf], dtype=torch.float64)'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test changing default dtype
-        torch.set_default_dtype(torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float64):
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf])'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test summary
         x = torch.zeros(10000)
@@ -8680,8 +8683,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, desc, 'The argument description "{}" in {} can be '
-                                              'replaced by {{{}}}'.format(v, func, k))
+                    self.assertNotIn(v, desc, f'The argument description "{v}" in {func} can be '
+                                              f'replaced by {{{k}}}')
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
@@ -8717,8 +8720,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
                     self.assertFalse(has_doc,
-                                     'New docs have been added for {}, please remove '
-                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
+                                     f'New docs have been added for {full_name}, please remove '
+                                     'it from the skipped list in TestTorch.test_doc')
                 else:
                     self.assertTrue(has_doc, f'{full_name} is missing documentation')
 

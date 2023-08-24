@@ -5,9 +5,10 @@ import operator
 import sympy
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch
+from torch._dynamo.exc import TorchDynamoException
 import torch.fx
 import torch.fx.traceback as fx_traceback
 
@@ -41,6 +42,101 @@ try:
     # and the FX nodes (see [Note: PopulateValidator]) that go through
     # 'ShapeEnv.evaluate_expr' function. Finally, we run the validation.
     # (see [Note: TranslationValidator])
+
+    # Better Z3 to string implementation (for a small fraction of Z3).
+    #
+    # Here are the things we clean before showing the Z3 expression:
+    #   - Rename a few ops (e.g. "Distinct" ==> "!=")
+    #
+    #   - Ignore ToInt and ToReal operations:
+    #     usually they don't really matter
+    #
+    #   - Transform (ToInt (/ ...)) into (idiv ...):
+    #     this is the pattern for floor division
+    #
+    #   - Collect a chain of the same operations into one
+    def z3str(e: z3.ExprRef) -> str:
+        assert z3.is_expr(e), f"unsupported expression type: {e}"
+
+        def get_args_str(e: z3.ExprRef) -> List[str]:
+            return [z3str(e.arg(i)) for i in range(e.num_args())]
+
+        # First, we simplify the given expression.
+        # This is done using rewriting rules, so shouldn't take long.
+        e = z3.simplify(e)
+
+
+        # Only support function applications.
+        # Even Z3 "variables" are, in fact, function applications.
+        if not z3.is_app(e):
+            raise ValueError(f"can't print Z3 expression: {e}")
+
+        if z3.is_int_value(e) or z3.is_rational_value(e):
+            return e.as_string()  # type: ignore[attr-defined]
+
+        decl = e.decl()
+        kind = decl.kind()
+        op = str(decl)
+        args = get_args_str(e)
+
+        if kind == z3.Z3_OP_POWER:
+            op = "pow"
+
+        elif kind in (z3.Z3_OP_ADD, z3.Z3_OP_MUL):
+            # Collect the arguments of chains of ADD and MUL.
+            # This is safe, since they are associative.
+
+            def collect_str_args(e):
+                if not (z3.is_app(e) and e.decl().kind() == kind):
+                    return [z3str(e)]
+                else:
+                    return [
+                        x
+                        for i in range(e.num_args())
+                        for x in collect_str_args(e.arg(i))
+                    ]
+
+            args = collect_str_args(e)
+
+        elif kind == z3.Z3_OP_NOT:
+            # Revert some conversions that z3.simplify applies:
+            #   - a != b ==> (Not (== a b)) ==> (!= a b)
+            #   - a < b ==> (Not (<= b a)) ==> (> b a)
+            #   - a > b ==> (Not (<= a b)) ==> (> a b)
+
+            assert e.num_args() == 1
+            arg = e.arg(0)
+
+            assert z3.is_app(arg)
+            argkind = arg.decl().kind()
+
+            logic_inverse = {
+                z3.Z3_OP_EQ: "!=",
+                z3.Z3_OP_LE: ">",
+                z3.Z3_OP_GE: "<",
+            }
+
+            if argkind in logic_inverse:
+                op = logic_inverse[argkind]
+                args = get_args_str(arg)
+
+        elif kind in (z3.Z3_OP_TO_INT, z3.Z3_OP_TO_REAL):
+            assert e.num_args() == 1
+            argstr = z3str(e.arg(0))
+
+            # Check if it's the floor division pattern.
+            if argstr.startswith("(/"):
+                return "(idiv" + argstr[2:]
+
+            # Otherwise, just ignore it.
+            return argstr
+
+        elif kind == z3.Z3_OP_UNINTERPRETED:
+            assert e.num_args() == 0
+            return str(decl)
+
+        string = op + " " + " ".join(args)
+        return f"({string.rstrip()})"
 
     # Implementation of Python semantics as Z3 expressions.
     #
@@ -233,11 +329,11 @@ try:
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
             if dtype is torch.int64:
-                return z3.IntVal(value)
+                return z3.IntVal(int(value))
             if dtype is torch.double:
-                return z3.RealVal(value)
+                return z3.RealVal(float(value))
             if dtype is torch.bool:
-                return z3.BoolVal(value)
+                return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
@@ -289,6 +385,8 @@ try:
     # happens: target is TRUE, but source is FALSE.
     class TranslationValidator:
         def __init__(self) -> None:
+            log.debug("new instance")
+
             # Mapping of SymPy symbols to Z3 variables.
             self.symbols: Dict[sympy.Symbol, z3.ExprRef] = {}
 
@@ -315,6 +413,8 @@ try:
         def add_var(self, symbol: sympy.Symbol, type: Type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]
+
+            log.debug("new variable: %s (%s)", symbol.name, type.__name__)
 
             if type is int:
                 var = z3.Int(symbol.name)
@@ -348,11 +448,16 @@ try:
             return z3expr
 
         def add_source_expr(self, e: z3.BoolRef) -> None:
+            if e not in self._source_exprs:
+                log.debug("add source guard: %s", z3str(e))
             self._source_exprs.add(e)
 
         def add_target_expr(self, e: sympy.Expr) -> None:
             self._check_freesymbols(e)
-            self._target_exprs.add(self.to_z3_boolean_expr(e))
+            z3expr = self.to_z3_boolean_expr(e)
+            if e not in self._target_exprs:
+                log.debug("add target guard: %s", z3str(z3expr))
+            self._target_exprs.add(z3expr)
 
         def add_assertion(self, e: Union[z3.BoolRef, sympy.Basic]) -> None:
             if isinstance(e, sympy.Basic):
@@ -361,26 +466,17 @@ try:
             else:
                 ref = e
             assert isinstance(ref, z3.BoolRef)
+            if ref not in self._assertions:
+                log.debug("add assertion: %s", z3str(ref))
             self._assertions.add(ref)
 
-        # The result of a validation run.
-        @dataclass
-        class Result:
-            success: bool
-
-            # Mapping of the name of each free variable to the value assigned to it.
-            model: Optional[z3.ModelRef] = None
-
-            # List of the source expressions that failed due to the assignment.
-            failed_source_expr: Optional[List[z3.BoolRef]] = None
-
-        def validate(self) -> "TranslationValidator.Result":
+        def validate(self) -> None:
             from torch._dynamo.utils import dynamo_timed
 
             if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
                 # If there are no source/target expressions, there's nothing we really
                 # wish to prove. So, we just return.
-                return self.Result(success=True)
+                return None
 
             # Here, we use "QF_NRA" logic for the solver:
             #   "Quantifier-free Non-linear Real Arithmetic".
@@ -411,10 +507,11 @@ try:
                 # Target expressions are unsound.
                 # Log the found model and the source expressions that failed.
                 model = solver.model()
-                return self.Result(
-                    success=False,
-                    model=model,
-                    failed_source_expr=[inp for inp in self._source_exprs if not model.evaluate(inp)],
+                raise ValidationException(
+                    model, self._assertions, self._target_exprs,
+                    failed_source_exprs=[
+                        inp for inp in self._source_exprs if not model.evaluate(inp)
+                    ]
                 )
             else:
                 if r == z3.unknown:
@@ -426,7 +523,7 @@ try:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                return self.Result(success=True)
+
 except ImportError:
     _HAS_Z3 = False
 else:
@@ -450,6 +547,30 @@ def assert_z3_installed_if_tv_set():
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
     )
+
+
+class ValidationException(TorchDynamoException):
+    def __init__(self, model, assertions, target_exprs, failed_source_exprs):
+        assert _HAS_Z3
+
+        def symbolstr(sym) -> str:
+            return f"{sym}: {model[sym]}"
+
+        def joinlines(xs) -> str:
+            return "\n".join(f"  ==> {x}" for x in xs)
+
+        model_str = joinlines(map(symbolstr, model))
+        assertions_str = joinlines(map(z3str, assertions))
+        target_exprs_str = joinlines(map(z3str, target_exprs))
+        failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
+
+        super().__init__(
+            "translation validation failed.\n\n"
+            "Model:\n" + model_str + "\n\n"
+            "Assertions:\n" + assertions_str + "\n\n"
+            "Target Expressions:\n" + target_exprs_str + "\n\n"
+            "Failed Source Expressions:\n" + failed_source_exprs_str
+        )
 
 # Checks when this module is loaded.
 assert_z3_installed_if_tv_set()

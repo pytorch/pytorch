@@ -21,10 +21,6 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-if torch.distributed.is_available():
-    from torch.distributed._tensor import DeviceMesh
-    from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-
 try:
     from . import test_functions
 except ImportError:
@@ -1455,7 +1451,7 @@ class MockModule(torch.nn.Module):
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.linear = torch.nn.Linear(10, 10)
-        self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
+        self.register_buffer("buf0", torch.randn(10, 10))
 
     def forward(self, x):
         return self.relu(self.linear(x) + self.buf0)
@@ -1504,7 +1500,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
+                self.register_buffer("buf0", torch.randn(10, 10))
 
             def forward(self, x):
                 return self.r(torch.sin(x)) + self.buf0
@@ -1531,7 +1527,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.nn.Buffer(torch.randn(10, 10)))
+                self.register_buffer("buf0", torch.randn(10, 10))
                 self.register_parameter(
                     name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
                 )
@@ -1551,6 +1547,87 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         # Check all attributes, parameters and buffers
         self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
+
+    def test_no_recompile_on_nn_guarded_modules(self):
+        size = (10, 10)
+        cache_size_limit = 1
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(*size)
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.linear(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # Each submod is compiled separately and has a different nn module
+        # guard. Ensure that recompilation logic is handle correctly.
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            x = torch.randn(*size)
+            mod(x)
+            self.assertEqual(cnts.frame_count, num_submodules)
+
+    def test_cache_size_limit_on_guarded_nn_modules(self):
+        cache_size_limit = 2
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.relu(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # For the third iteration, we would reach the cache size limit, and
+        # therefore the total number of expected frame count is 2 *
+        # num_submodules.
+        with unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            for size in [
+                (4,),
+                (4, 4),
+                (4, 4, 4),
+            ]:
+                x = torch.randn(size)
+                mod(x)
+        self.assertEqual(cnts.frame_count, 2 * num_submodules)
 
     def test_recursion(self):
         mod = MockModule()
@@ -2112,43 +2189,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
-
-
-if torch.distributed.is_available():
-    from torch.testing._internal.distributed._tensor.common_dtensor import (
-        DTensorTestBase,
-        with_comms,
-    )
-
-    class TestDTensorCompile(DTensorTestBase):
-        def setUp(self):
-            super().setUp()
-
-        @property
-        def world_size(self) -> int:
-            return 2
-
-        @with_comms
-        def test_dtensor_fullgraph(self):
-            class SimpleMLP(torch.nn.Module):
-                def __init__(self, device):
-                    super().__init__()
-                    self.net1 = torch.nn.Linear(5, 1024, device=device)
-                    self.relu = torch.nn.ReLU()
-                    self.net2 = torch.nn.Linear(1024, 4, device=device)
-
-                def forward(self, x):
-                    return self.net2(F.relu(self.net1(x)))
-
-            mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-            model = SimpleMLP(self.device_type)
-            model = parallelize_module(model, mesh, PairwiseParallel())
-            inp = torch.rand(20, 5, device=self.device_type)
-            out = model(inp)
-            compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
-            compiled_out = compiled_mod(inp)
-            self.assertEqual(compiled_out, out)
 
 
 if __name__ == "__main__":

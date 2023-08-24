@@ -126,7 +126,7 @@ Attribute.__doc__ = """
         del AttributeModule
         del m
 
-    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Attribute`:
 
     .. testcode::
 
@@ -257,7 +257,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         else:
             raise RuntimeError(
                 "Cannot re-assign modules in a ScriptModule with non-scripted "
-                "module, tried to replace existing module '{}': {}".format(k, v)
+                f"module, tried to replace existing module '{k}': {v}"
             )
 
     def __getitem__(self, k):
@@ -733,7 +733,9 @@ if _enabled:
             r"""
             save(f, _extra_files={})
 
-            See :func:`torch.jit.save <torch.jit.save>` for details.
+            See :func:`torch.jit.save <torch.jit.save>` witch accepts a file-like object.
+            This function, torch.save(), converts the object to a string, treating it as a path.
+            DO NOT confuse these two functions when it comes to the 'f' parameter functionality.
             """
             return self._c.save(str(f), **kwargs)
 
@@ -1322,6 +1324,8 @@ def script(
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+    else:
+        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
@@ -1398,7 +1402,7 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
                 loc,
                 "Default parameters on overloads do not affect the runtime so they "
                 "must equal to the default parameter on the implementation function. Found on "
-                "parameter {name}".format(name=name),
+                f"parameter {name}",
             )
 
 
@@ -1457,9 +1461,9 @@ def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
     if _jit_internal._get_fn_overloads(qual_name) or _try_get_jit_cached_overloads(obj):
         raise RuntimeError(
-            "Function {} cannot be directly compiled because it"
+            f"Function {qual_name} cannot be directly compiled because it"
             " is overloaded. It must be used in a context of a function"
-            " where its inputs can determine which overload to call.".format(qual_name)
+            " where its inputs can determine which overload to call."
         )
 
 

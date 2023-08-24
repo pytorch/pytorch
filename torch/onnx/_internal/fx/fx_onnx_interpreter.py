@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import operator
 import re
 import types
@@ -16,6 +17,7 @@ import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
+    _pass,
     diagnostics,
     onnxfunction_dispatcher,
     op_validation,
@@ -33,6 +35,17 @@ def _fx_node_to_onnx_message_formatter(
     **kwargs,
 ) -> str:
     return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
+
+
+@_beartype.beartype
+def _fx_graph_to_onnx_message_formatter(
+    fn: Callable,
+    self,
+    fx_graph_module: torch.fx.GraphModule,
+    *args,
+    **kwargs,
+) -> str:
+    return f"FX Graph: {fx_graph_module._get_name()}. "
 
 
 def _location_from_fx_stack_trace(
@@ -396,9 +409,8 @@ class FxOnnxInterpreter:
             diagnostic = self.diagnostic_context.inflight_diagnostic(
                 rule=diagnostics.rules.fx_node_to_onnx
             )
-            diagnostic.with_additional_message(
-                f"### PyTorch source information\n```\n{node_stack_trace}\n```"
-            )
+            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
+                diagnostic.info("```\n%s\n```", node_stack_trace)
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)
@@ -439,7 +451,10 @@ class FxOnnxInterpreter:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
+    @diagnostics.diagnose_call(
+        diagnostics.rules.fx_graph_to_onnx,
+        diagnostic_message_formatter=_fx_graph_to_onnx_message_formatter,
+    )
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
@@ -459,8 +474,35 @@ class FxOnnxInterpreter:
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
         """
+        diagnostic = self.diagnostic_context.inflight_diagnostic()
+        with diagnostic.log_section(logging.DEBUG, "FX Graph:"):
+            diagnostic.debug(
+                "```\n%s\n```",
+                diagnostics.LazyString(fx_graph_module.print_readable, False),
+            )
+
+        if parent_onnxscript_graph is not None:
+            # If parent_onnxscript_graph is provided, we assume fx_graph_module is a
+            # submodule representing a forward call of an nn.Module.
+            # Compose package and version where the nn.Module is defined as domain name
+            # for the local function.
+
+            onnx_meta: Optional[_pass.GraphModuleOnnxMeta] = fx_graph_module.meta.get(
+                "onnx"
+            )
+            if onnx_meta is None:
+                raise RuntimeError(
+                    f"ONNX meta is not found in submodule {fx_graph_module._get_name()}. "
+                    f"Only submodules produced by `Modularize` pass is supported in ONNX export."
+                )
+
+            onnx_domain = onnx_meta.package_info.to_onnx_domain_string()
+        else:
+            # Leave as default domain name for the root module.
+            onnx_domain = None
+
         onnxscript_graph = onnxscript_graph_building.TorchScriptGraph(
-            parent_onnxscript_graph
+            parent_onnxscript_graph, domain_name=onnx_domain
         )
         onnxscript_tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
             onnxscript_graph
@@ -498,6 +540,9 @@ class FxOnnxInterpreter:
                     onnxscript_tracer,
                     fx_name_to_onnxscript_value,
                 )
+
+        with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
 
         return onnxscript_graph
 
@@ -597,7 +642,6 @@ class FxOnnxInterpreter:
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
-        # TODO(titaiwang): diagnostic rules.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
             onnx_args=onnx_args,

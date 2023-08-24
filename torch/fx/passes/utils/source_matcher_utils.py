@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Any, Type
+from typing import Dict, List, Any, Type, Optional, Callable
 import logging
 import os
 
@@ -50,7 +50,8 @@ class SourcePartition:
 @compatibility(is_backward_compatible=False)
 def get_source_partitions(
     graph: Graph,
-    wanted_sources: List[Any]
+    wanted_sources: List[Any],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Dict[Any, List[SourcePartition]]:
     """
     Args:
@@ -107,6 +108,20 @@ def get_source_partitions(
         )
 
     ret: Dict[Type[Any], List[SourcePartition]] = {}
+
+    if filter_fn:
+        # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the
+        # filter condition
+        filtered_modules = {}
+        for tp, name_to_partition in modules.items():
+            filtered_name_to_partition = {
+                name: partition
+                for name, partition in name_to_partition.items()
+                if all(map(filter_fn, partition))
+            }
+            filtered_modules[tp] = filtered_name_to_partition
+        modules = filtered_modules
+
     for k, v in modules.items():
         ret[k] = [make_partition(partition, k) for partition in v.values()]
 

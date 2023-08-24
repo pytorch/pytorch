@@ -895,6 +895,14 @@ def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
     return False
 
 
+def _is_make_fx_tracing():
+    if not torch.jit.is_scripting():
+        torch_dispatch_mode_stack = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+        return any(type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode for x in torch_dispatch_mode_stack)
+    else:
+        return False
+
+
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces as described in the paper:
@@ -964,6 +972,11 @@ class MultiheadAttention(Module):
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
                  kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
+        if embed_dim <= 0 or num_heads <= 0:
+            raise ValueError(
+                f"embed_dim and num_heads must be greater than 0,"
+                f" got embed_dim={embed_dim} and num_heads={num_heads} instead"
+            )
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.embed_dim = embed_dim
@@ -1095,6 +1108,11 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
 
+        why_not_fast_path = ''
+        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
+           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
+            why_not_fast_path = "floating-point masks are not supported for fast path."
+
         is_batched = query.dim() == 3
 
         key_padding_mask = F._canonical_mask(
@@ -1115,7 +1133,6 @@ class MultiheadAttention(Module):
         )
 
 
-        why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
@@ -1164,6 +1181,8 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
+            elif _is_make_fx_tracing():
+                why_not_fast_path = "we are running make_fx tracing"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = ("some Tensor argument's device is neither one of "
                                      f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}")
@@ -1334,7 +1353,12 @@ class PReLU(Module):
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
         super().__init__()
-        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
+        self.init = init
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)

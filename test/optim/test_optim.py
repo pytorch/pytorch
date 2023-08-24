@@ -689,7 +689,13 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p)
+                # Increasing the tolerance as we are collating lots of ops together for optimizers and
+                # the designated tolerances are for single op only.
+                single_rtol, single_atol = torch.testing._comparison.get_tolerances(mt_p.dtype, rtol=None, atol=None)
+                rtol = 5 * single_rtol
+                atol = 5 * single_atol
+
+                self.assertEqual(st_p, mt_p, rtol=rtol, atol=atol)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
@@ -697,15 +703,7 @@ class TestOptim(TestCase):
 
                 for k in st_p_state:
                     actual = mt_p_state[k]
-                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
-                    # `step` Tensor is 1D while usually it's 0D.
-                    if (
-                        k == "step"
-                        and isinstance(actual, torch.Tensor)
-                        and actual.ndim == 1
-                    ):
-                        actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual)
+                    self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
@@ -813,6 +811,10 @@ class TestOptim(TestCase):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
+                if optimizer_constructor.__name__ == "NAdam":
+                    # with capturable in NAdam, we have 3 extra intermediates for the
+                    # bias_correction, mus, and mu_nexts
+                    nintermediates = 5
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
@@ -830,20 +832,37 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
+            (
+                optim.Adam,
+                dict(lr=torch.tensor(.001), weight_decay=1.0, amsgrad=True,
+                     capturable=True, maximize=True)
+            ),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
+            (
+                optim.AdamW,
+                dict(lr=torch.tensor(.001), weight_decay=0.0, amsgrad=False,
+                     capturable=True, maximize=True)
+            ),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3, capturable=True)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3, capturable=True)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
             (
                 optim.NAdam,
                 dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
+            ),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3,
+                     decoupled_weight_decay=True, capturable=True),
             ),
             (
                 optim.SGD,
@@ -922,6 +941,7 @@ class TestOptim(TestCase):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
+                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
@@ -1088,11 +1108,25 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=torch.tensor(1e-3),
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.Adam)
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
         self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1101,6 +1135,11 @@ class TestOptim(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.Adam(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.Adam(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -1143,13 +1182,33 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.AdamW(
+                [weight, bias],
+                lr=torch.tensor(1e-3),
+                weight_decay=1,
+                amsgrad=True,
+                maximize=maximize,
+                foreach=False,  # foreach for lr tensors tested in multi configs
+            ),
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
         self._test_complex_2d(optim.AdamW)
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
         self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
         self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(
+            optim.AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
+        ))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
+
+        with self.assertRaisesRegex(
+            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
+        ):
+            optim.AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -2004,6 +2063,28 @@ class TestOptim(TestCase):
         opt.load_state_dict(opt.state_dict())
         self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
         self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_get_load_state_dict_cast_hook_handle(self):
+        param = torch.rand(2, 3, requires_grad=True, device="cpu")
+        param.grad = torch.rand_like(param)
+        opt = optim.Adadelta([param], lr=0.001)
+
+        # Simulate saving and loading state_dict after init'ing state with step()
+        opt.step()
+        cpu_state_dict = opt.state_dict()
+
+        param_cuda = torch.rand(2, 3, requires_grad=True, device="cuda")
+        param_cuda.grad = torch.rand_like(param_cuda)
+        opt_cuda = optim.Adadelta([param_cuda], lr=0.001)
+        handle = opt_cuda.get_load_state_dict_cast_hook_handle()
+        handle.remove()
+
+        opt_cuda.load_state_dict(cpu_state_dict)
+
+        # Assert that casting to CUDA did not happen for the param state
+        # since the cast hook has been removed
+        self.assertEqual(opt_cuda.state[param_cuda]["square_avg"].device, torch.device("cpu"))
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):

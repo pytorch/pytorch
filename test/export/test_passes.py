@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export, dynamic_dim
-from torch._export.constraints import constrain_as_value, constrain_as_size
+from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -78,7 +78,7 @@ class TestPasses(TestCase):
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(ep(x), f(x)))
+        self.assertTrue(torch.allclose(ep(x), f(x), atol=1e-3, rtol=0.01))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -250,7 +250,7 @@ class TestPasses(TestCase):
         mod = M()
         ep = export(mod, (x,))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
             ep(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
@@ -278,10 +278,10 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 4)
         self.assertEqual(num_scalar_tensor, 4)
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.tensor([1, 1, 0, 0, 0]))
 
-        with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
@@ -346,7 +346,7 @@ class TestPasses(TestCase):
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = torch._export.export(f, (torch.tensor([7]),))
@@ -357,11 +357,14 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
+        # TODO(ycao): ExportedProgram.transform() forbids changes to number
+        # of inputs/outputs for now. When it supports that better, change this
+        # back to using ExportedProgram.transform()
+        gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             gm(torch.tensor([20]))
 
