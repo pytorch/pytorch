@@ -84,9 +84,20 @@ struct C10_API PyObjectSlot {
   // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
   // returns a nullopt.  If it is definitely invalid, raises an error.
   //
+  // If `ignore_hermetic_tls` is false and this function is called from a
+  // hermetic context (ie, `HermeticPyObjectTLS::get_state()` is true), then
+  // nullopt is returned. If `ignore_hermetic_tls` is true, then the hermetic
+  // context is ignored, allowing you to check the interpreter tag of a
+  // nonhermetic PyObject from within a hermetic context. This is necessary
+  // because there are some cases where the deallocator function of a
+  // nonhermetic PyObject is called from within a hermetic context, so it must
+  // be properly treated as a nonhermetic PyObject.
+  //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
-  c10::optional<PyObject*> check_pyobj(PyInterpreter* self_interpreter) const {
+  c10::optional<PyObject*> check_pyobj(
+      PyInterpreter* self_interpreter,
+      bool ignore_hermetic_tls) const {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);
@@ -99,7 +110,7 @@ struct C10_API PyObjectSlot {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      if (c10::impl::HermeticPyObjectTLS::get_state()) {
+      if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
         return c10::nullopt;
       } else {
         return c10::make_optional(_unchecked_untagged_pyobj());
@@ -125,7 +136,7 @@ struct C10_API PyObjectSlot {
   bool check_interpreter(PyInterpreter* interpreter);
 
   // Check if the PyObjectSlot is holding a PyObject, owned or non-owned
-  bool has_pyobj();
+  bool has_pyobj_nonhermetic();
 
   bool owns_pyobj();
 

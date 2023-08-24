@@ -42,7 +42,7 @@ PyObject* THPStorage_NewWithStorage(
       "Storage is not possible. Make sure your class inherits from Storage.");
 
   auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter());
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
@@ -75,9 +75,12 @@ PyObject* THPStorage_NewWithStorage(
   s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
 
   if (!c10::impl::HermeticPyObjectTLS::get_state()) {
+    s->is_hermetic = false;
     const auto& storage = THPStorage_Unpack(s);
     storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(
         getPyInterpreter(), obj, status);
+  } else {
+    s->is_hermetic = true;
   }
 
   return obj;
@@ -98,19 +101,24 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   // interpreter than the current one, create a new StorageImpl that points to
   // the same data and then create the Python storage from that.
   // NOTE: This is only supposed to happen in MultiPy
-  if (pyobj_slot->has_pyobj() &&
+  if (pyobj_slot->has_pyobj_nonhermetic() &&
       !pyobj_slot->check_interpreter(getPyInterpreter())) {
     return THPStorage_NewWithStorage(
         THPStorageClass,
         c10::newStorageImplFromRefcountedDataPtr(storage),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
-  c10::optional<PyObject*> maybe_pyobj =
-      pyobj_slot->check_pyobj(getPyInterpreter());
+  c10::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status;
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
+      TORCH_CHECK(
+          THPStorage_Check(obj),
+          "Expected a storage type, but got ",
+          Py_TYPE(obj)->tp_name);
+
       if (pyobj_slot->owns_pyobj()) {
         pyobj_slot->set_owns_pyobj(false);
         reinterpret_cast<THPStorage*>(obj)->cdata =
@@ -138,8 +146,13 @@ static bool THPStorage_isPreservable(THPStorage* self) {
   }
   auto const& storage = THPStorage_Unpack(self);
 
+  if (self->is_hermetic) {
+    return false;
+  }
+
   if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
+          getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
+      c10::make_optional((PyObject*)self)) {
     return false;
   }
   if (storage.use_count() <= 1) {
@@ -149,13 +162,33 @@ static bool THPStorage_isPreservable(THPStorage* self) {
 }
 
 static bool THPStorage_tryPreserve(THPStorage* self) {
-  const auto& storage = THPStorage_Unpack(self);
-
   if (!THPStorage_isPreservable(self)) {
     return false;
   }
 
+  const auto& storage = THPStorage_Unpack(self);
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+
+  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
+      getPyInterpreter(),
+      /*ignore_hermetic_tls=*/true);
+  // NOTE: It is possible to just set the PyObjectSlot here, but the point is
+  // that we should have already set PyObjectSlot when the storage PyObject was
+  // created.
+  TORCH_INTERNAL_ASSERT(
+      maybe_pyobj.has_value(),
+      "Trying to preserve a Python storage whose PyObjectSlot does not have a PyObject");
+
+  PyObject* pyobj = *maybe_pyobj;
+
+  TORCH_CHECK(
+      THPStorage_Check(pyobj),
+      "Expected a storage type, but got ",
+      Py_TYPE(pyobj)->tp_name);
+
+  TORCH_INTERNAL_ASSERT(
+      (void*)pyobj == (void*)self,
+      "Python storage and the PyObject in the internal PyObjectSlot are not at the same address");
 
   TORCH_INTERNAL_ASSERT(!storage_impl->pyobj_slot()->owns_pyobj());
 
