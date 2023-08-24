@@ -20,16 +20,19 @@ def efficient_conv_bn_eval_forward(bn: nn.modules.batchnorm._BatchNorm,
     if conv.bias is not None:
         bias_on_the_fly = conv.bias
     else:
+        assert bn.running_var is not None
         bias_on_the_fly = torch.zeros_like(bn.running_var)
 
     if bn.weight is not None:
         bn_weight = bn.weight
     else:
+        assert bn.running_var is not None
         bn_weight = torch.ones_like(bn.running_var)
 
     if bn.bias is not None:
         bn_bias = bn.bias
     else:
+        assert bn.running_var is not None
         bn_bias = torch.zeros_like(bn.running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
