@@ -493,6 +493,10 @@ class AutotunerFFN(nn.Module):
         return self.forward_(self.get_feature_groups(x))
 
 
+class Autotuner_FFN(AutotunerFFN):
+    pass
+
+
 def get_model(model_type: ModelType):
     if model_type == ModelType.XGB_BASELINE:
         import xgboost

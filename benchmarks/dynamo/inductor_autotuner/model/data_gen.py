@@ -56,7 +56,7 @@ def main(args):
     kernel_counter = 0
     seen_kernels = set()
 
-    X_all = list()
+    x_all = list()
     y_all = list()
     y_baseline_all = list()
     y_normalized_all = list()
@@ -139,6 +139,8 @@ def main(args):
                         num_warps = config.pop("num_warps")
                         num_stages = config.pop("num_stages")
                         timing = config.pop("timing")
+                        # n_regs, shared, n_spills are only available after compilation
+                        # while we want to predict before compilation
                         config.pop("n_regs")
                         config.pop("shared")
                         config.pop("n_spills")
@@ -156,11 +158,11 @@ def main(args):
                 y_normalized_list = [y_best / y_ for y_ in y_list]
 
                 # Get feature vector
-                X_list = autotuner_model.get_feature_vec(
+                x_list = autotuner_model.get_feature_vec(
                     config_list, autotuner_raw_data
                 )
 
-                X_all.extend(X_list)
+                x_all.extend(x_list)
                 y_all.extend(y_list)
                 y_normalized_all.extend(y_normalized_list)
                 y_baseline_all.extend([baseline_timing] * len(y_list))
@@ -170,7 +172,7 @@ def main(args):
     # Split the data by qid
     # Note that X might not be np.array, so using array as indices might not work
     # which is also why many of the following code is not so numpy style
-    assert len(X_all) == len(y_all) == len(qid_all)
+    assert len(x_all) == len(y_all) == len(qid_all)
     np.random.seed(args.seed)
     qid_unique = np.random.permutation(np.unique(qid_all))
     qid_train_unique = qid_unique[: int(len(qid_unique) * train_split)]
@@ -178,14 +180,14 @@ def main(args):
 
     def get_data_from_qid(qid_set):
         qid_set = set(qid_set)
-        X = list()
+        x = list()
         y = list()
         y_baseline = list()
         y_normalized = list()
         qid = list()
         for i in tqdm.tqdm(range(len(qid_all))):
             if qid_all[i] in qid_set:
-                X.append(X_all[i])
+                x.append(x_all[i])
                 y.append(y_all[i])
                 y_baseline.append(y_baseline_all[i])
                 y_normalized.append(y_normalized_all[i])
@@ -195,18 +197,18 @@ def main(args):
         for i in range(1, len(qid)):
             assert qid[i] >= qid[i - 1]
 
-        return X, y, y_baseline, y_normalized, qid
+        return x, y, y_baseline, y_normalized, qid
 
     print("Generating training data...")
     (
-        X_train,
+        x_train,
         y_train,
         y_baseline_train,
         y_normalized_train,
         qid_train,
     ) = get_data_from_qid(qid_train_unique)
     print("Generating testing data...")
-    X_test, y_test, y_baseline_test, y_normalized_test, qid_test = get_data_from_qid(
+    x_test, y_test, y_baseline_test, y_normalized_test, qid_test = get_data_from_qid(
         qid_test_unique
     )
 
@@ -216,11 +218,11 @@ def main(args):
         ModelType.NN_PAIRWISE_SMALL,
     ]:
         print("Getting training feature groups...")
-        X_train = autotuner_model.model.get_feature_groups(X_train, show_progress=True)
-        X_train = tuple(X_group.to("cpu") for X_group in X_train)
+        x_train = autotuner_model.model.get_feature_groups(x_train, show_progress=True)
+        x_train = tuple(X_group.to("cpu") for X_group in x_train)
         print("Getting testing feature groups...")
-        X_test = autotuner_model.model.get_feature_groups(X_test, show_progress=True)
-        X_test = tuple(X_group.to("cpu") for X_group in X_test)
+        x_test = autotuner_model.model.get_feature_groups(x_test, show_progress=True)
+        x_test = tuple(X_group.to("cpu") for X_group in x_test)
 
     def save(file_name, obj):
         print("Saving " + file_name + "...", len(obj))
@@ -228,12 +230,12 @@ def main(args):
             pickle.dump(obj, file)
 
     # Save the data
-    save("X_train.pkl", X_train)
+    save("X_train.pkl", x_train)
     save("y_train.pkl", y_train)
     save("y_baseline_train.pkl", y_baseline_train)
     save("y_normalized_train.pkl", y_normalized_train)
     save("qid_train.pkl", qid_train)
-    save("X_test.pkl", X_test)
+    save("X_test.pkl", x_test)
     save("y_test.pkl", y_test)
     save("y_baseline_test.pkl", y_baseline_test)
     save("y_normalized_test.pkl", y_normalized_test)
@@ -245,20 +247,20 @@ def main(args):
 
         def get_pairwise_data(X, y, qid):
             pointer = 0
-            X_pairwise = list(), list()
+            x_pairwise = list(), list()
             y_pairwise = list()
 
             for id in tqdm.tqdm(np.unique(np.array(qid))):
-                X_group = list()
+                x_group = list()
                 y_group = list()
                 while pointer < len(qid) and qid[pointer] == id:
-                    X_group.append(pointer)
+                    x_group.append(pointer)
                     y_group.append(y[pointer] if not np.isinf(y[pointer]) else 1e6)
                     assert np.max(np.array(y_group)) <= 1e6, y_group
                     pointer += 1
                 dedup = dict()
-                for i in range(len(X_group)):
-                    random_indices = np.random.permutation(len(X_group))
+                for i in range(len(x_group)):
+                    random_indices = np.random.permutation(len(x_group))
                     counter = 0
                     for j in random_indices:
                         counter += 1
@@ -267,29 +269,29 @@ def main(args):
                         if (i, j) in dedup or (j, i) in dedup:
                             continue
                         if y_group[i] > y_group[j]:
-                            X_pairwise[0].append(X_group[i])
-                            X_pairwise[1].append(X_group[j])
+                            x_pairwise[0].append(x_group[i])
+                            x_pairwise[1].append(x_group[j])
                             y_pairwise.append(y_group[i] - y_group[j])
                         elif y_group[i] < y_group[j]:
-                            X_pairwise[0].append(X_group[j])
-                            X_pairwise[1].append(X_group[i])
+                            x_pairwise[0].append(x_group[j])
+                            x_pairwise[1].append(x_group[i])
                             y_pairwise.append(y_group[j] - y_group[i])
                         dedup[(i, j)] = True
                         dedup[(j, i)] = True
 
-            X_pairwise = tuple(np.array(X_side) for X_side in X_pairwise)
-            X_pairwise = (
-                tuple(X_group[X_pairwise[0]] for X_group in X),
-                tuple(X_group[X_pairwise[1]] for X_group in X),
+            x_pairwise = tuple(np.array(X_side) for X_side in x_pairwise)
+            x_pairwise = (
+                tuple(xg[x_pairwise[0]] for xg in X),
+                tuple(xg[x_pairwise[1]] for xg in X),
             )
-            return X_pairwise, y_pairwise
+            return x_pairwise, y_pairwise
 
         print("Generating pairwise training data...")
         X_pairwise_train, y_pairwise_train = get_pairwise_data(
-            X_train, y_train, qid_train
+            x_train, y_train, qid_train
         )
         print("Generating pairwise testing data...")
-        X_pairwise_test, y_pairwise_test = get_pairwise_data(X_test, y_test, qid_test)
+        X_pairwise_test, y_pairwise_test = get_pairwise_data(x_test, y_test, qid_test)
         save("X_pairwise_train.pkl", X_pairwise_train)
         save("y_pairwise_train.pkl", y_pairwise_train)
         save("X_pairwise_test.pkl", X_pairwise_test)

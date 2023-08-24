@@ -35,10 +35,10 @@ def main(args):
         with open(file_name, "rb") as f:
             return pickle.load(f)
 
-    X_train = load("X_train.pkl")
+    x_train = load("X_train.pkl")
     y_train = load("y_normalized_train.pkl")
 
-    X_test = load("X_test.pkl")
+    x_test = load("X_test.pkl")
     y_test = load("y_normalized_test.pkl")
 
     y_train = np.array(y_train)
@@ -47,15 +47,15 @@ def main(args):
     autotuner = AutotunerModel(ModelType.NN_POINTWISE)
 
     if full_train:
-        X = tuple(
-            torch.concatenate([X_train[i], X_test[i]]) for i in range(len(X_train))
+        x = tuple(
+            torch.concatenate([x_train[i], x_test[i]]) for i in range(len(x_train))
         )
         y = np.concatenate([y_train, y_test])
     else:
-        X = X_train
+        x = x_train
         y = y_train
 
-    def get_loss(X_loss, y_loss):
+    def get_loss(x_loss, y_loss):
         test_batch_size = 8192 * 8
         mse_loss_sum = 0
         mae_loss_sum = 0
@@ -63,10 +63,10 @@ def main(args):
 
         with torch.no_grad():
             for i in range(0, y_loss.shape[0], test_batch_size):
-                X_loss_batch = tuple(
-                    X_group[i : i + test_batch_size].to("cuda") for X_group in X_loss
+                x_loss_batch = tuple(
+                    xg[i : i + test_batch_size].to("cuda") for xg in x_loss
                 )
-                y_pred = autotuner.model.forward_(X_loss_batch)
+                y_pred = autotuner.model.forward_(x_loss_batch)
                 mse_loss = torch.nn.functional.mse_loss(
                     y_pred.squeeze(),
                     torch.from_numpy(y_loss[i : i + test_batch_size]).to("cuda"),
@@ -85,15 +85,15 @@ def main(args):
     autotuner.model.to("cuda")
     optimizer = torch.optim.Adam(autotuner.model.parameters(), lr=lr)
     print("X")
-    for X_group in X:
-        print(X_group.shape)
+    for xg in x:
+        print(xg.shape)
     print("y", y.shape)
 
     for epoch in range(n_epoch):
         autotuner.model.train()
 
         permutation = np.random.permutation(y.shape[0])
-        X_epoch = tuple(X_group[permutation] for X_group in X)
+        x_epoch = tuple(xg[permutation] for xg in x)
         y_epoch = y[permutation]
 
         train_mse_loss = 0
@@ -101,11 +101,9 @@ def main(args):
 
         for i in tqdm.tqdm(range(0, y_epoch.shape[0], batch_size)):
             optimizer.zero_grad()
-            X_tuple_batch = tuple(
-                X_group[i : i + batch_size].to("cuda") for X_group in X_epoch
-            )
+            x_tuple_batch = tuple(xg[i : i + batch_size].to("cuda") for xg in x_epoch)
             y_batch = torch.from_numpy(y_epoch[i : i + batch_size]).to("cuda").float()
-            y_pred = autotuner.model.forward_(X_tuple_batch)
+            y_pred = autotuner.model.forward_(x_tuple_batch)
 
             loss = torch.nn.functional.mse_loss(
                 y_pred.squeeze(), y_batch, reduction="mean"
@@ -125,7 +123,7 @@ def main(args):
             end=" ||| ",
         )
 
-        mse_loss, mae_loss = get_loss(X_test, y_test)
+        mse_loss, mae_loss = get_loss(x_test, y_test)
         print(f"Test: epoch={epoch} rmse = {np.sqrt(mse_loss)}, mae = {mae_loss}")
 
         # dump model

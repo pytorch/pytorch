@@ -27,11 +27,11 @@ def main(args):
         with open(file_name, "rb") as f:
             return pickle.load(f)
 
-    X_train = load("X_train.pkl")
+    x_train = load("X_train.pkl")
     y_train = load("y_normalized_train.pkl")
     qid_train = load("qid_train.pkl")
 
-    X_test = load("X_test.pkl")
+    x_test = load("X_test.pkl")
     y_test = load("y_normalized_test.pkl")
     qid_test = load("qid_test.pkl")
 
@@ -46,26 +46,26 @@ def main(args):
     autotuner = AutotunerModel(ModelType.XGB_BASELINE)
 
     if full_train:
-        X = np.concatenate([X_train, X_test])
+        x = np.concatenate([x_train, x_test])
         y = np.concatenate([y_train, y_test])
     else:
-        X = X_train
+        x = x_train
         y = y_train
 
     autotuner.model.fit(
-        X,
+        x,
         y,
-        eval_set=[(X_test, y_test)],
+        eval_set=[(x_test, y_test)],
         verbose=True,
     )
 
     qid_test_unique = np.unique(qid_test)
     for test_id in qid_test_unique[:10]:
         print(test_id)
-        X_test = np.array(X_test)
+        x_test = np.array(x_test)
         qid_test = np.array(qid_test)
         y_test = np.array(y_test)
-        scores = autotuner.score_(X_test[qid_test == test_id])
+        scores = autotuner.score_(x_test[qid_test == test_id])
         indices = np.argsort(scores)
         print(scores[indices])
         print(y_test[qid_test == test_id][indices])

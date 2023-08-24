@@ -29,12 +29,12 @@ def main(args):
         with open(file_name, "rb") as f:
             return pickle.load(f)
 
-    X_train = load("X_train.pkl")
+    x_train = load("X_train.pkl")
     y_train = load("y_train.pkl")
     y_baseline_train = load("y_baseline_train.pkl")
     qid_train = load("qid_train.pkl")
 
-    X_test = load("X_test.pkl")
+    x_test = load("X_test.pkl")
     y_test = load("y_test.pkl")
     y_baseline_test = load("y_baseline_test.pkl")
     qid_test = load("qid_test.pkl")
@@ -64,27 +64,27 @@ def main(args):
 
         for i, test_id in enumerate(qid_unique):
             if autotuner.model_type == ModelType.XGB_BASELINE:
-                X_group = list()
+                x_group = list()
                 y_group = list()
                 while pointer < len(qid) and qid[pointer] == test_id:
-                    X_group.append(X[pointer])
+                    x_group.append(X[pointer])
                     y_group.append(y[pointer])
                     y_baseline_ = y_baseline[pointer]
                     pointer += 1
-                scores = autotuner.score_(X_group)
+                scores = autotuner.score_(x_group)
             else:
-                X_group = list()
+                x_group = list()
                 y_group = list()
                 while pointer < len(qid) and qid[pointer] == test_id:
-                    X_group.append(pointer)
+                    x_group.append(pointer)
                     y_group.append(y[pointer])
                     y_baseline_ = y_baseline[pointer]
                     pointer += 1
-                X_group = np.array(X_group)
-                X_group = tuple(Xg[X_group].to("cuda") for Xg in X)
+                x_group = np.array(x_group)
+                x_group = tuple(Xg[x_group].to("cuda") for Xg in X)
                 autotuner.model.eval()
                 scores = (
-                    autotuner.model.forward_(X_group).squeeze().cpu().detach().numpy()
+                    autotuner.model.forward_(x_group).squeeze().cpu().detach().numpy()
                 )
                 if autotuner.model_type == ModelType.NN_POINTWISE:
                     scores = scores * -1
@@ -127,9 +127,9 @@ def main(args):
         print("counter", counter, "ratio", counter / len(qid_unique) * 100)
 
     print("###################################################### Training set:")
-    measure(X_train, y_train, y_baseline_train, qid_train)
+    measure(x_train, y_train, y_baseline_train, qid_train)
     print("###################################################### Testing set:")
-    measure(X_test, y_test, y_baseline_test, qid_test)
+    measure(x_test, y_test, y_baseline_test, qid_test)
 
 
 if __name__ == "__main__":
