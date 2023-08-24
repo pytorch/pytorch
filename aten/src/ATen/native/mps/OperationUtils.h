@@ -223,23 +223,31 @@ struct MPSGraphCache
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
     __block MPSCachedGraph* cachedGraph = nil;
+    __block std::optional<c10::TypeError> type_err;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync(serialQueue_, ^() {
 
-      // verify the cached entry doesn't already exist
-      if (cache_.count(hash) != 0) {
-        auto& entry = cache_.at(hash);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-        cachedGraph = entry.cachedGraph_;
-      } else {
-        cachedGraph = createCacheBlock();
-        CacheEntry entry(key, cachedGraph);
-        cache_.emplace(hash, entry);
-        profileCachedGraph(entry);
+      try {
+        // verify the cached entry doesn't already exist
+        if (cache_.count(hash) != 0) {
+          auto& entry = cache_.at(hash);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+          cachedGraph = entry.cachedGraph_;
+        } else {
+          cachedGraph = createCacheBlock();
+          CacheEntry entry(key, cachedGraph);
+          cache_.emplace(hash, entry);
+          profileCachedGraph(entry);
+        }
+      } catch (const c10::TypeError &err) {
+        type_err = err;
       }
     });
+    if (type_err) {
+        throw *type_err;
+    }
     return cachedGraph;
   }
 
