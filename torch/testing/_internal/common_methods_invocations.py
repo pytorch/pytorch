@@ -8346,12 +8346,11 @@ class ForeachRightmostArgType(enum.Enum):
 class ForeachSampleInput(SampleInput):
     ref_args: Any
     ref_kwargs: Dict[Any, Any]
-    expected_error_msg_pattern: str
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ref_args = self.args
         self.ref_kwargs = {k: self.kwargs[k] for k in self.kwargs if k != "disable_fastpath"}
-        self.expected_error_msg_pattern = ""
 
 
 class foreach_inputs_sample_func:
