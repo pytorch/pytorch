@@ -31,25 +31,6 @@ parser.add_argument(
 parser.add_argument("--end-model", type=str, default=None, help="see --start-model")
 
 
-def kernel_iter(model_path):
-    for kernel in sorted(listdir(model_path)):
-        kernel_path = join(model_path, kernel)
-        if not isdir(kernel_path):
-            continue
-        for py in listdir(kernel_path):
-            py_path = join(kernel_path, py)
-            if not py.endswith(".py"):
-                continue
-
-            # skip graph python file
-            with open(py_path) as file:
-                content = file.read()
-                if "AsyncCompile()" in content:
-                    print("Skip " + py_path + " GRAPH")
-                    continue
-            yield kernel, py, kernel_path, py_path
-
-
 def main(args):
     kernel_dir = args.kernel_dir
 
