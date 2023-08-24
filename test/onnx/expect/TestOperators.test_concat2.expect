@@ -14,7 +14,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Concat_0"
     type {

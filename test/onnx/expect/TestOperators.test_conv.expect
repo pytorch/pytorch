@@ -40,7 +40,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 13
     dims: 16
