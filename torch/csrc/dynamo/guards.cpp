@@ -54,8 +54,8 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -113,8 +113,8 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];

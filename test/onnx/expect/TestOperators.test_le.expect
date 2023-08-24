@@ -9,7 +9,7 @@ graph {
     name: "LessOrEqual_0"
     op_type: "LessOrEqual"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::LessOrEqual_0"
     type {
