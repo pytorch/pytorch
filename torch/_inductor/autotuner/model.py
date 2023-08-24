@@ -30,7 +30,7 @@ from torch._inductor.virtualized import V
 log = logging.getLogger(__name__)
 
 
-### Raw data related
+# Raw data related
 class AutotunerRawData(NamedTuple):
     io_deps: Tuple[
         List[dependencies.Dep], List[dependencies.Dep], List[int], List[int], List[int]
@@ -104,7 +104,7 @@ def get_reads_writes(cur_scheduler, node, src_code):
     )
 
 
-### feature extraction related
+# feature extraction related
 
 # op_dict needs to be deterministic
 OP_DICT = {
@@ -305,7 +305,7 @@ def dep_list(deps, strides, sizes, total_bytes, rw_lim, ndims_lim):
     return res
 
 
-### model arch related
+# model arch related
 
 
 class ModelType(IntEnum):
@@ -533,7 +533,7 @@ def get_model(model_type: ModelType):
             raise AssertionError("Unknown model type")
 
 
-### search space related
+# search space related
 class AutotunerSpaceCategory(IntEnum):
     MAX_AUTOTUNE_TOP1 = 0
     MAX_AUTOTUNE_TOP2 = 1
@@ -607,7 +607,7 @@ class SearchSpaceGenerator(CoordescTuner):
         return res
 
 
-### AutotunerModel related
+# AutotunerModel related
 
 
 @functools.lru_cache(None)
