@@ -275,8 +275,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
     weight = L[aten.permute](weight, [1, 0])
 
     if x.get_size()[0] != 1:
-        if inductor_config.conv_force_channels_last:
-            x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
+        x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
     else:
         x.realize()
         x.freeze_layout()
@@ -376,12 +375,11 @@ def convolution(
     # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
-        if inductor_config.conv_force_channels_last:
-            V.graph.num_channels_last_conv += 1
-            x = ir.ExternKernel.require_channels_last(x)
-            # TODO maybe we can convert weights to channels last just once before
-            # running the model.
-            weight = ir.ExternKernel.require_channels_last(weight)
+        V.graph.num_channels_last_conv += 1
+        x = ir.ExternKernel.require_channels_last(x)
+        # TODO maybe we can convert weights to channels last just once before
+        # running the model.
+        weight = ir.ExternKernel.require_channels_last(weight)
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)

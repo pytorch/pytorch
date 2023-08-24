@@ -12,7 +12,6 @@ from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 import sympy
 
 import torch
-import torch._inductor.config as inductor_config
 import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
@@ -367,10 +366,9 @@ class GraphLowering(torch.fx.Interpreter):
         """
         output_set = set()
         for n in reversed(self.module.graph.nodes):
-            if inductor_config.conv_force_channels_last:
-                if n.target == torch.ops.aten.convolution.default:
-                    output_set.add(n)
-                    continue
+            if n.target == torch.ops.aten.convolution.default:
+                output_set.add(n)
+                continue
 
             for user in n.users:
                 if user in output_set:
@@ -672,12 +670,11 @@ class GraphLowering(torch.fx.Interpreter):
                     pass
 
         self.finalize()
-        if inductor_config.conv_force_channels_last:
-            log.debug(
-                "Force channels last inputs for %d conv for the current graph with id %d",
-                self.num_channels_last_conv,
-                self.graph_id,
-            )
+        log.debug(
+            "Force channels last inputs for %d conv for the current graph with id %d",
+            self.num_channels_last_conv,
+            self.graph_id,
+        )
 
     def finalize(self):
         for buf in self.buffers:

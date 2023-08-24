@@ -165,29 +165,6 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
-# Provides a way to toggle the enforcement of NHWC fallbacks for convolutions
-# this is necessary if they are less performant
-if torch.version.hip:
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-    else:
-        gpu_name = ""
-
-    # Will replace with gcnArch number when available in device properties
-    # For now should capture MI200 devices
-    if "MI2" in gpu_name:
-        conv_force_channels_last = (
-            os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
-        )
-    else:
-        conv_force_channels_last = (
-            os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "0") == "1"
-        )
-else:
-    conv_force_channels_last = (
-        os.environ.get("TORCHINDUCTOR_ENFORCE_NHWC_CONV", "1") == "1"
-    )
-
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
