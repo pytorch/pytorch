@@ -77,7 +77,7 @@ def main(args):
                 pkl_path = join(kernel_path, py + ".pkl")
                 all_config_path = join(kernel_path, kernel_name + ".all_config")
 
-                ## Sanith check, make sure log, pkl, and all_config exist
+                # Sanith check, make sure log, pkl, and all_config exist
                 # assert isfile(log_path), log_path
                 # assert isfile(pkl_path), pkl_path
                 # assert isfile(all_config_path), all_config_path
@@ -95,7 +95,7 @@ def main(args):
                 autotuner_raw_data = pickle.load(open(pkl_path, "rb"))
                 src_code = autotuner_raw_data.src_code
 
-                ## Sanity check, making sure the metadata is correct
+                # Sanity check, making sure the metadata is correct
                 src_code = src_code.replace("KERNEL_NAME", "triton_")
                 assert src_code == src
 
