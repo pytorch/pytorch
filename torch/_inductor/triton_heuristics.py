@@ -182,10 +182,7 @@ class CachingAutotuner(KernelInterface):
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
 
-        # Setting device_type="hip" on ROCm to pass down to triton
-        # Currently an issue arises if device_type is left at cuda
-        # with TORCHINDUCTOR_COMPILE_THREADS > 1
-        # https://github.com/ROCmSoftwarePlatform/triton/issues/266
+        # Setting device_type="hip" required on ROCm to pass down to triton
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
