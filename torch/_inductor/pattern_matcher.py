@@ -402,17 +402,29 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
-            return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+        if not self._match_fns(node):
+            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users {}", self)
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
+        _args = node.args
+        _kwargs = node.kwargs
+        if len(_args) != len(self.args) or len(_kwargs) != len(self.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            arg_types = [type(node.args[i]) for i in range(len(node.args))]
+            kwarg_types = {k: type(node.kwargs[k]) for k in node.kwargs.keys()}
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs, arg_types, kwarg_types
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            else:
+                _args, _kwargs = normalized_args_and_kwargs
+
+        node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch("args_structure {} {}", node_spec, self_spec)
