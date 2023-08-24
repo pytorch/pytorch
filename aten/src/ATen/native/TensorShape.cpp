@@ -1602,12 +1602,13 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-// overload for symbolic shapes and strides.
-template <>
+// specialization for symbolic shapes and strides.
+// SymIntArrayRef/ArrayRef<c10::SymInt> and SmallVector<c10::SymInt>/SymDimVector
+template <template <typename...> typename Container>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
-    const c10::SymIntArrayRef& sizes,
-    const c10::SymIntArrayRef& strides) {
+    const Container<c10::SymInt>& sizes,
+    const Container<c10::SymInt>& strides) {
   //caller should make sure that sizes and strides are valid for self
   //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
