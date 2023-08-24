@@ -263,9 +263,6 @@ def deserialize_torch_artifact(serialized: bytes) -> Union[Dict[str, torch.Tenso
     return torch.load(buffer)
 
 
-
-
-
 def _sympy_int_to_int(val: sympy.Expr):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
@@ -782,7 +779,7 @@ class ExportedProgramSerializer:
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes, bytes]:
+    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
         serialized_graph_module = (
             GraphModuleSerializer(
                 exported_program.graph_signature,
@@ -802,7 +799,6 @@ class ExportedProgramSerializer:
                 schema_version=SCHEMA_VERSION,
             ),
             serialize_torch_artifact(exported_program.state_dict),
-            serialize_torch_artifact(exported_program.original_traced_arguments)
         )
 
 
@@ -1282,7 +1278,6 @@ class ExportedProgramDeserializer:
 
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes,
-        serialized_original_traced_args: bytes,
     ) -> ep.ExportedProgram:
         if serialized_exported_program.schema_version != SCHEMA_VERSION:
             raise SerializeError(
@@ -1311,7 +1306,6 @@ class ExportedProgramDeserializer:
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
         state_dict = deserialize_torch_artifact(serialized_state_dict)
-        original_args = deserialize_torch_artifact(serialized_original_traced_args)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
 
 
@@ -1324,7 +1318,6 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
             module_call_graph,
-            original_args,  # type: ignore[arg-type]
         )
         return upgrader.upgrade(exported_program)
 
@@ -1379,15 +1372,15 @@ class EnumEncoder(json.JSONEncoder):
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
-) -> Tuple[bytes, bytes, bytes]:
-    serialized_exported_program, serialized_state_dict, serialized_orig_args = (
+) -> Tuple[bytes, bytes]:
+    serialized_exported_program, serialized_state_dict = (
         ExportedProgramSerializer(opset_version).serialize(exported_program)
     )
     json_program = json.dumps(
         dataclasses.asdict(serialized_exported_program), cls=EnumEncoder
     )
     json_bytes = json_program.encode('utf-8')
-    return json_bytes, serialized_state_dict, serialized_orig_args
+    return json_bytes, serialized_state_dict
 
 
 def _dict_to_dataclass(cls, data):
@@ -1425,7 +1418,6 @@ def _dict_to_dataclass(cls, data):
 def deserialize(
     exported_program_bytes: bytes,
     state_dict: bytes,
-    original_traced_args: bytes,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ep.ExportedProgram:
     exported_program_str = exported_program_bytes.decode('utf-8')
@@ -1433,5 +1425,5 @@ def deserialize(
     serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
     return (
         ExportedProgramDeserializer(expected_opset_version)
-        .deserialize(serialized_exported_program, state_dict, original_traced_args)
+        .deserialize(serialized_exported_program, state_dict)
     )

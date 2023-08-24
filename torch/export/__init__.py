@@ -234,7 +234,7 @@ class ExportedProgram:
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
-        original_traced_arguments: Tuple[Any, ...] = None,
+        original_traced_arguments: Tuple[Any, ...] = (),
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,

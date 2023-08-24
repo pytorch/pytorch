@@ -442,6 +442,7 @@ def save(
     from .serde.serialize import serialize
     from .serde.schema import SCHEMA_VERSION
     serialized_program, serialized_state_dict = serialize(ep, opset_version)
+    serialized_orig_args = serialize_torch_artifact(ep.original_traced_arguments)
 
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
@@ -450,6 +451,7 @@ def save(
         # Save serialized_ep and serialized_state_dict to the zip file
         zipf.writestr('serialized_exported_program.json', serialized_program)
         zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        zipf.writestr('serialized_original_args.json', serialized_orig_args)
         zipf.writestr('version', str(SCHEMA_VERSION))
 
         # Add extra files if provided
@@ -482,10 +484,12 @@ def load(
         # Load serialized_ep and serialized_state_dict from the zip file
         serialized_ep = zipf.read('serialized_exported_program.json')
         serialized_state_dict = zipf.read('serialized_state_dict.json')
+        serialized_orig_args = zipf.read('serialized_original_args.json')
 
         # Deserialize ExportedProgram
-        from .serde.serialize import deserialize
+        from .serde.serialize import deserialize, deserialize_torch_artifact
         ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+        original_args = deserialize_torch_artifact(serialized_orig_args)
 
         # Populate extra_files map
         if extra_files is not None:
