@@ -1877,7 +1877,7 @@
   indices: non_differentiable
   values: grad.sparse_mask(result)._values()
 
-- name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   compressed_indices: non_differentiable
   plain_indices: non_differentiable
   # TODO: remove to_dense after gh-107381 is fixed
@@ -1895,7 +1895,10 @@
 - name: values(Tensor(a) self) -> Tensor(a)
   dispatch:
     Default:
-      self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
+      self: "grad.defined() ? (self.layout() == c10::kSparse) ? at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes(), self.options(), /*is_coalesced=*/true) :
+             (self.layout() == c10::kSparseCsr || self.layout() == c10::kSparseBsr) ? at::_sparse_compressed_tensor_unsafe_symint(self.crow_indices(), self.col_indices(), grad, self.sym_sizes(), self.options()) :
+             (self.layout() == c10::kSparseCsc || self.layout() == c10::kSparseBsc) ? at::_sparse_compressed_tensor_unsafe_symint(self.ccol_indices(), self.row_indices(), grad, self.sym_sizes(), self.options()) :
+             not_implemented(\"values\") : Tensor()"
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 

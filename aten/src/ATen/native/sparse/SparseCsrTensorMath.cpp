@@ -255,14 +255,12 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
       result_values,
       result_sizes,
-      result_values.scalar_type(),
-      sparse.layout(),
-      result_values.device());
+      sparse.options().dtype(result_values.scalar_type()));
 }
 
 template <typename op_t>
@@ -337,14 +335,12 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
                                                                  [&]{ return input.col_indices(); },
                                                                  [&]{ return input.row_indices(); });
 
-  auto result = at::native::_sparse_compressed_tensor_unsafe(
+  auto result = at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
       result_values,
       input.sizes(),
-      result_values.scalar_type(),
-      input.layout(),
-      result_values.device());
+      input.options().dtype(result_values.scalar_type()));
 
   return result;
 }
@@ -394,14 +390,12 @@ Tensor sparse_mask_sparse_compressed(
     Tensor compressed_indices, plain_indices;
     std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
     auto mask_values = mask.values();
-    auto dense_mask = at::native::_sparse_compressed_tensor_unsafe(
+    auto dense_mask = at::_sparse_compressed_tensor_unsafe(
         compressed_indices,
         plain_indices,
         at::ones({1}, self.options().dtype(kBool)).expand_as(mask_values),
         self.sizes(),
-        kBool,
-        mask.layout(),
-        self.device()).to_dense();
+        self.options().dtype(kBool).layout(mask.layout())).to_dense();
     return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         mask.layout(), "sparse_mask_sparse_compressed",
         [&] {

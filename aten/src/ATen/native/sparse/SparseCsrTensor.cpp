@@ -350,10 +350,10 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
 }
 
 
-Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
+Tensor _sparse_compressed_tensor_unsafe_symint(const Tensor& compressed_indices,
                                         const Tensor& plain_indices,
                                         const Tensor& values,
-                                        IntArrayRef size,
+                                        c10::SymIntArrayRef size,
                                         c10::optional<ScalarType> dtype,
                                         c10::optional<Layout> layout,
                                         c10::optional<Device> device,
@@ -364,12 +364,23 @@ Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
   if (at::globalContext().checkSparseTensorInvariants()) {
-    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_);
+    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, C10_AS_INTARRAYREF_SLOW(size), layout_);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
   get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
   return self;
+}
+
+Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
+                                        const Tensor& plain_indices,
+                                        const Tensor& values,
+                                        IntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
+  return at::native::_sparse_compressed_tensor_unsafe_symint(compressed_indices, plain_indices, values, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 template <Layout required_layout>

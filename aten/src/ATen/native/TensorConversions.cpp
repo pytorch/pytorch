@@ -289,14 +289,12 @@ Tensor _to_copy(
           true, // force copy since we are in _to_copy
           memory_format);
 
-    return at::native::_sparse_compressed_tensor_unsafe(
+    return at::_sparse_compressed_tensor_unsafe(
         new_compressed_indices,
         new_plain_indices,
         new_values,
         self.sizes(),
-        new_values.scalar_type(),
-        self.layout(),
-        new_values.device());
+        self.options().dtype(new_values.scalar_type()));
   }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
@@ -1064,14 +1062,12 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, const Tensor& self_
   }
 
   // Create compressed sparse matrix with the target layout.
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
         compressed_indices,
         plain_indices,
         values,
         self.sizes(),
-        values.scalar_type(),
-        target_layout,
-        values.device());
+        self.options().dtype(values.scalar_type()).layout(target_layout));
 }
 
 Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
@@ -1397,9 +1393,7 @@ static Tensor sparse_compressed_to_flipped(
       new_plain_indices,
       new_values,
       self.sizes(),
-      new_values.scalar_type(),
-      flipped_layout,
-      new_values.device());
+      self.options().dtype(new_values.scalar_type()).layout(flipped_layout));
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
@@ -1761,14 +1755,12 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
             });
       });
 
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       result_compressed_indices,
       result_plain_indices,
       result_values,
       self.sizes(),
-      result_values.scalar_type(),
-      target_layout,
-      result_values.device());
+      self.options().dtype(result_values.scalar_type()).layout(target_layout));
 }
 
 Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
