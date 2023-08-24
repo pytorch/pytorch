@@ -784,7 +784,6 @@ def mps_ops_error_inputs_modifier(ops):
 
         # unsupported complex dtypes
         'masked_fill',
-        'gradient',
         'fft.hfft',
         'fft.irfft',
 
