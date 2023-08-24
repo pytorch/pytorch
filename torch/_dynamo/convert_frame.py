@@ -403,7 +403,11 @@ def convert_frame_assert(
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    _convert_frame_assert._clone_with_backend = lambda backend: convert_frame_assert(backend, one_graph, export, export_constraints)  # type: ignore[attr-defined]
+
+    def _clone_with_backend(backend):
+        return convert_frame_assert(backend, one_graph, export, export_constraints)
+
+    _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
