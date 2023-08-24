@@ -10759,7 +10759,7 @@ class TestConsistency(TestCaseMPS):
             if len(diff_cpu_out) == 0:
                 continue
             # rand_like does not work with certain dtypes, so cast to double and cast back
-            cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=t.dtype) for t in diff_cpu_out)
+            cpu_grad_outputs = tuple(torch.rand_like(t, dtype=torch.double).to(dtype=t.dtype) for t in diff_cpu_out)
             mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
             # Compare computed gradients with cpu given random grad_output vector
