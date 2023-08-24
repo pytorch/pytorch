@@ -1891,6 +1891,28 @@ class DimConstraints:
             if s in self._marked_dynamic
         ])
 
+    def remove_redundant_dynamic_results(self):
+        candidates_for_removal = []
+        dynamic_results = set()
+        for dc in self._dynamic_results:
+            # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
+            # There is no change in behavior since 2 is the default lower bound.
+            dc_ = re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
+            if dc != dc_:
+                candidates_for_removal.append(dc_)
+            else:
+                dynamic_results.add(dc_)
+        for dc in candidates_for_removal:
+            # remove dynamic_dim(t, 0) as a constraint when dynamic_dim(t, 0) also
+            # appears as part of another constraint
+            found = False
+            for other_dc in dynamic_results:
+                if dc in other_dc:
+                    found = True
+            if not found:
+                dynamic_results.add(dc)
+        self._dynamic_results = dynamic_results
+
     def prettify_results(self, original_signature: inspect.Signature):
         # Note: Model inputs are wrapped as LocalSource in dynamo.
         # LocalSource.name() wraps the name with L[""]. We use regular
@@ -1927,11 +1949,6 @@ class DimConstraints:
                 sorted_groups.append((arg, sorted(dcs)))
             return sorted_groups
 
-        # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
-        # There is no change in behavior since 2 is the default lower bound.
-        def remove_default_lower_bound(dc):
-            return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
-
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
         args_index = {}
         for i, arg in enumerate(signature.parameters.keys()):
@@ -1965,13 +1982,13 @@ class DimConstraints:
         if self._dynamic_results:
             grouped_dynamic_results = group(self._dynamic_results, args_index)
             buf += "\nThe following dimensions CAN be dynamic."
-            buf += "\nYou can use the following code to specify the constraints they must satisfy:"
+            buf += "\nPlease use the following code to specify the constraints they must satisfy:"
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             print_results(
                 grouped_dynamic_results,
                 indent * 2,
-                lambda result: f"{remove_default_lower_bound(result)},",
+                lambda result: f"{result},",
             )
             buf += f"\n{indent}]\n```\n"
         return buf
