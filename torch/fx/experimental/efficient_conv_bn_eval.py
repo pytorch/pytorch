@@ -95,7 +95,8 @@ def efficient_conv_bn_eval_graph_transform(fx_model):
         # first, and then optimize them later.
         conv_node = node.args[0]
         bn_node = node
-        pairs.append([conv_node, bn_node])
+        if modules[bn_node.target].track_running_stats:
+            pairs.append([conv_node, bn_node])
 
     for conv_node, bn_node in pairs:
         # set insertion point
