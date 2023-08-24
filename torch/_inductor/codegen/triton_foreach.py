@@ -1,4 +1,5 @@
 import itertools
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -42,7 +43,7 @@ class ForeachKernel(Kernel):
         assert len(subkernel_nodes) >= 1
 
         partition_state_1d = PartitionState([], [], 0)
-        partition_state_2d = PartitionState([], [], 0)
+        yelem_to_partition_state_2d = defaultdict(lambda: PartitionState([], [], 0))
 
         for node in subkernel_nodes:
             fused_nodes = node.get_nodes()
@@ -60,14 +61,19 @@ class ForeachKernel(Kernel):
                     partition_state_1d, read_write_count, node_info
                 )
             else:
+                y_elem = tiled_groups[0]
+                partition_state_2d = yelem_to_partition_state_2d[y_elem]
                 ForeachKernel._update_partition(
                     partition_state_2d, read_write_count, node_info
                 )
 
         partition_state_1d.finalize()
-        partition_state_2d.finalize()
+        all_partitions = partition_state_1d.partitions
+        for partition_state_2d in yelem_to_partition_state_2d.values():
+            partition_state_2d.finalize()
+            all_partitions.extend(partition_state_2d.partitions)
 
-        return partition_state_1d.partitions + partition_state_2d.partitions
+        return all_partitions
 
     def __init__(self):
         super().__init__()
