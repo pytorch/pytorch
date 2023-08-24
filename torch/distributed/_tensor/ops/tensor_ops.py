@@ -43,7 +43,6 @@ aten = torch.ops.aten
         aten.detach.default,
         aten.equal.default,
         aten.is_same_size.default,
-        aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
     ]
 )
 def default_strategy(
@@ -109,6 +108,7 @@ def create_like_strategy(
         aten.new_full.default,
         aten.new_ones.default,
         aten.new_zeros.default,
+        aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
     ]
 )
 def new_factory_strategy(
