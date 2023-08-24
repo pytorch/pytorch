@@ -23,7 +23,7 @@ pip_install \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
-  transformers==4.31.0
+  transformers==4.25.1
 
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.

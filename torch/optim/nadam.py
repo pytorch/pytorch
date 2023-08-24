@@ -35,7 +35,6 @@ class NAdam(Optimizer):
             group.setdefault('foreach', None)
             group.setdefault('capturable', False)
             group.setdefault('differentiable', False)
-            group.setdefault('decoupled_weight_decay', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -137,11 +136,10 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}\textbf{if} \: \lambda \neq 0
-            &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
-            &\hspace{15mm} \theta_t \leftarrow \theta_t - \gamma \lambda \theta_{t-1}                    \\
-            &\hspace{10mm}\textbf{else}                                                          \\
-            &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{5mm}\textbf{if} \: \lambda \neq 0 \text{ and not } \textit{decoupled\_weight\_decay} \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}        \\
             &\hspace{5mm} \mu_t \leftarrow \beta_1 \big(1 - \frac{1}{2}  0.96^{t \psi} \big)     \\
             &\hspace{5mm} \mu_{t+1} \leftarrow \beta_1 \big(1 - \frac{1}{2} 0.96^{(t+1)\psi}\big)\\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
@@ -281,12 +279,11 @@ def _single_tensor_nadam(params: List[Tensor],
 
         bias_correction2 = 1 - beta2 ** step
 
-        if weight_decay != 0:
-            if decoupled_weight_decay:
-                # Perform stepweight decay
-                param.mul_(1 - lr * weight_decay)
-            else:
-                grad = grad.add(param, alpha=weight_decay)
+        if weight_decay != 0 and not decoupled_weight_decay:
+            grad = grad.add(param, alpha=weight_decay)
+        else:
+            # Perform stepweight decay
+            param.mul_(1 - lr * weight_decay)
 
         # calculate the momentum cache \mu^{t} and \mu^{t+1}
         mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
@@ -353,12 +350,11 @@ def _multi_tensor_nadam(params: List[Tensor],
         # update steps
         torch._foreach_add_(grouped_state_steps, 1)
 
-        if weight_decay != 0:
-            if decoupled_weight_decay:
-                # Perform stepweight decay
-                torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
-            else:
-                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+        if weight_decay != 0 and not decoupled_weight_decay:
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+        else:
+            # Perform stepweight decay
+            torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)

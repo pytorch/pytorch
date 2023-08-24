@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
-import parameterized  # type: ignore[import]
+import parameterized
 import pytorch_test_common
 import torch
 import torch.onnx
@@ -27,7 +27,7 @@ from torch.onnx._internal.fx import (
 from torch.testing._internal import common_utils
 
 try:
-    import torchvision  # type: ignore[import]
+    import torchvision
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -560,53 +560,21 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    def test_gpt2_tiny_from_config(self):
-        # Model
-        config = transformers.GPT2Config(
-            num_hidden_layers=4,
-            vocab_size=8096,
-            hidden_size=16,
-            intermediate_size=16,
-            max_position_embeddings=512,
-            num_attention_heads=2,
-            hidden_dropout_prob=0.0,
-            attention_dropout_prob=0.0,
-        )
-        model = transformers.GPT2Model(config).eval()
+    def test_gpt2_tiny(self):
+        model_name = "sshleifer/tiny-gpt2"
+        # Download pytorch model
+        model = transformers.AutoModel.from_pretrained(model_name)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
-        def input_generator(batch: int, seq: int):
-            input_ids = torch.randint(0, 8096, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-            return input_ids, attention_mask, position_ids
-
-        # Encoded inputs
-        input_ids, attention_mask, position_ids = input_generator(2, 128)
-
-        # Another encoded inputs to test dynamic shapes
-        (
-            another_input_ids,
-            another_attention_mask,
-            another_position_ids,
-        ) = input_generator(3, 256)
+        # Transform input tokens
+        inputs = tokenizer("Hello world!", return_tensors="pt")
+        another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
-            (input_ids,),
-            input_kwargs={
-                "attention_mask": attention_mask,
-                "position_ids": position_ids,
-            },
-            additional_test_inputs=[
-                (
-                    (another_input_ids,),
-                    {
-                        "attention_mask": another_attention_mask,
-                        "position_ids": another_position_ids,
-                    },
-                )
-            ],
+            [],
+            input_kwargs=inputs,
+            additional_test_inputs=[((), another_inputs)],
         )
 
     def test_prims_device_put(self):
@@ -782,20 +750,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
-        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
-        "https://github.com/huggingface/transformers/issues/21013"
-    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
-        device = "cpu"
 
         def create_model() -> nn.Module:
-            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+            return transformers.AutoModel.from_pretrained(model_name)
 
         def create_args():
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
@@ -978,17 +940,11 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
-        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
-        "https://github.com/huggingface/transformers/issues/21013"
-    )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
-        device = "cpu"
 
         def create_model() -> nn.Module:
-            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+            return transformers.AutoModel.from_pretrained(model_name)
 
         def create_args():
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
@@ -1056,22 +1012,22 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "HF Bloom model does not need `model.load_state_dict` to work."
     )
     def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
-        config = transformers.BloomConfig()
-        batch, seq = 4, 256
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
+        model_name = "bigscience/bloom-560m"
 
         def create_args():
             return tuple()
 
-        def create_kwargs():
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            return {"input_ids": input_ids, "attention_mask": attention_mask}
+        def create_kwargs(model_name=model_name):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            return tokenizer("Hello world!", return_tensors="pt")
 
         def create_model():
-            return transformers.BloomModel(config).eval()
+            return AutoModel.from_pretrained(model_name)
 
         self._test_fake_tensor_mode_exporter(
-            "huggingface_bigscience_bloom_560m",
+            model_name.replace("/", "_"),
             create_model,
             create_args,
             create_kwargs,

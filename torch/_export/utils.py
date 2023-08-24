@@ -2,10 +2,6 @@ import dataclasses
 
 from typing import Any, List, Optional, Tuple
 
-import torch
-
-from torch._export import ExportedProgram
-
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -56,27 +52,3 @@ def register_dataclass_as_pytree_node(
         None,
         None,
     )
-
-
-def is_param(program: ExportedProgram, node: torch.fx.Node) -> bool:
-    """
-    Checks if the given node is a parameter within the exported program
-    """
-
-    return node.name in program.graph_signature.inputs_to_parameters
-
-
-def get_param(
-    program: ExportedProgram,
-    node: torch.fx.Node,
-) -> Optional[torch.nn.Parameter]:
-    """
-    Returns the parameter associated with the given node in the exported program.
-    Returns None if the node is not a parameter within the exported program
-    """
-
-    if is_param(program, node):
-        parameter_name = program.graph_signature.inputs_to_parameters[node.name]
-        return program.state_dict[parameter_name]
-
-    return None

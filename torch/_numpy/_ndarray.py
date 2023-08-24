@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 import math
 import operator
-from typing import Sequence
 
 import torch
 
@@ -423,30 +422,9 @@ class ndarray:
             return self.__getitem__(args)
 
     def __getitem__(self, index):
-        tensor = self.tensor
-
-        def neg_step(i, s):
-            if not (isinstance(s, slice) and s.step is not None and s.step < 0):
-                return s
-
-            nonlocal tensor
-            tensor = torch.flip(tensor, (i,))
-
-            # Account for the fact that a slice includes the start but not the end
-            assert isinstance(s.start, int) or s.start is None
-            assert isinstance(s.stop, int) or s.stop is None
-            start = s.stop + 1 if s.stop else None
-            stop = s.start + 1 if s.start else None
-
-            return slice(start, stop, -s.step)
-
-        if isinstance(index, Sequence):
-            index = type(index)(neg_step(i, s) for i, s in enumerate(index))
-        else:
-            index = neg_step(0, index)
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
-        return ndarray(tensor.__getitem__(index))
+        return ndarray(self.tensor.__getitem__(index))
 
     def __setitem__(self, index, value):
         index = _util.ndarrays_to_tensors(index)
