@@ -332,7 +332,7 @@ class TorchVariable(VariableTracker):
             return TorchFunctionDisableVariable.create(tx, **options)
         elif any(
             [self.value is method for method in
-             StreamMethodContainer().get_all_methods('create_stream_context_method')]
+             StreamMethodContainer().get_all_methods('create_stream_context')]
         ):
             log.warning(
                 str(StreamMethodContainer().get_method_by_device('create_stream_context_method', args[0].device)) +
@@ -342,7 +342,7 @@ class TorchVariable(VariableTracker):
             return StreamContextVariable.create(tx, args[0], **options)
         elif any(
             [self.value is method for method in
-             StreamMethodContainer().get_all_methods('create_stream_method')]
+             StreamMethodContainer().get_all_methods('create_stream')]
         ):
             match_device = None
             for device, method in StreamMethodContainer().create_stream_method.items():
