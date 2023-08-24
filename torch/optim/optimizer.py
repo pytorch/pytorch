@@ -789,6 +789,7 @@ class Optimizer:
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
+        from torch._dynamo.utils import get_static_address_type
         foreach = self.defaults.get('foreach', False) or self.defaults.get('fused', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
@@ -804,7 +805,7 @@ class Optimizer:
             for group in self.param_groups:
                 for p in group['params']:
                     if p.grad is not None:
-                        if set_to_none:
+                        if set_to_none and get_static_address_type(p.grad) is not None:
                             p.grad = None
                         else:
                             if p.grad.grad_fn is not None:
