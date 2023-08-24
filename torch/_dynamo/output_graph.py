@@ -832,6 +832,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
+        # NB: Typically (i.e., for graph compile from RETURN_VALUE),
+        # symbolic_locals will be empty at this point, as prune_dead_locals
+        # will clear out all of symbolic_locals because RETURN_VALUE is the
+        # last instruction and no more locals are used.  The fanciness here
+        # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
