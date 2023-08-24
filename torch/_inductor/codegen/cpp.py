@@ -783,9 +783,9 @@ class CppVecOverrides(OpOverrides):
     def masked(mask, body, other):
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
-        code.writeline(f"auto {var} = [&]")
-        with V.kernel.swap_buffers(code), code.indent():
-            with V.kernel.masked(mask) as new_mask:
+        with V.kernel.masked(mask) as new_mask:
+            code.writeline(f"auto {var} = [&]")
+            with V.kernel.swap_buffers(code), code.indent():
                 result = body()
                 code.writeline(f"return {result};")
         code.writeline(";")
