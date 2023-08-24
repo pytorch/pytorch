@@ -2735,7 +2735,8 @@ class ForeachFuncInfo(OpInfo):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
             return []
         return self.sample_inputs_func.sample_zero_size_tensor_inputs(
-            self, device, dtype, requires_grad, **kwargs)
+            self, device, dtype, requires_grad, **kwargs
+        )
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
