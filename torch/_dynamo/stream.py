@@ -59,7 +59,7 @@ class StreamMethodContainer:
         return ret_method
 
 
-    def register_stream_method(self, container: str, device: str, *method_args):
+    def register_stream_method(self, container: str, device: str, method_args):
         self.__register(container, device, method_args)
 
 
@@ -67,7 +67,7 @@ class StreamMethodContainer:
         return self.__get_all(container)
 
 
-    def get_one_method(self, container: str, device: str):
+    def get_method_by_device(self, container: str, device: str):
         return self.__get(container, device)
 
 
