@@ -255,7 +255,6 @@ class DTensorTest(DTensorTestBase):
 
         # test backward new_empty_strided with sharding works correctly
         my_dtensor.to_local().sum().backward()
-        print(my_dtensor.grad)
         local_tensor.sum().backward()
         self.assertEqual(
             my_dtensor.grad.redistribute(placements=[Replicate()]).to_local(),
