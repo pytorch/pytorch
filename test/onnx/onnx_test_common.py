@@ -7,6 +7,7 @@ import contextlib
 import copy
 import dataclasses
 import io
+import logging
 import os
 import unittest
 import warnings
@@ -32,6 +33,7 @@ import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
@@ -265,27 +267,37 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
-        export_output = torch.onnx.dynamo_export(
-            ref_model,
-            *ref_input_args,
-            **ref_input_kwargs,
-            export_options=torch.onnx.ExportOptions(
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-            ),
-        )
+        export_error: Optional[torch.onnx.OnnxExporterError] = None
+        try:
+            export_output = torch.onnx.dynamo_export(
+                ref_model,
+                *ref_input_args,
+                **ref_input_kwargs,
+                export_options=torch.onnx.ExportOptions(
+                    op_level_debug=self.op_level_debug,
+                    dynamic_shapes=self.dynamic_shapes,
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        verbosity_level=logging.DEBUG
+                    ),
+                ),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            export_error = e
+            export_output = e.export_output
 
-        if not skip_dynamic_shapes_check:
-            assert_dynamic_shapes(export_output, self.dynamic_shapes)
-
-        if verbose:
-            export_output.diagnostic_context.dump(
+        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+            export_output.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
-                ".sarif",
-                compress=False,
+                ".sarif"
             )
+
+        if export_error is not None:
+            raise export_error
+
+        if not skip_dynamic_shapes_check:
+            assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
         _compare_pytorch_onnx_with_ort(
             export_output,
@@ -352,19 +364,23 @@ def run_ort(
     # with nested functions.
     # Ref: https://github.com/microsoft/onnxruntime/issues/15849
     try:
-        import onnx.inliner
+        import onnx.inliner  # type: ignore[import]
     except ImportError:
         warnings.warn("Cannot import onnx.inliner. Skip inlining model.")
     else:
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)
+            model_proto = onnx.load(buffer)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            buffer = inlined_model_proto.SerializeToString()
+            ort_model = buffer
         else:
             assert isinstance(ort_model, str)
-            buffer = ort_model
-
-        model_proto = onnx.load(buffer)
-        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
-        ort_model = inlined_model_proto.SerializeToString()
+            # NOTE: inline_local_functions doesn't work with >2GB models,
+            # so we need to load the model without external data to inline.
+            model_proto = onnx.load(ort_model, load_external_data=False)
+            inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+            onnx.save(inlined_model_proto, ort_model)
 
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()
@@ -443,7 +459,7 @@ def _compare_pytorch_onnx_with_ort(
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
 # TODO(titaiwang): Change this when more versions are supported

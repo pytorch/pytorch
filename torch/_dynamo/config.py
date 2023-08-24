@@ -251,6 +251,9 @@ translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
 
+# Trace through NumPy or graphbreak
+trace_numpy = True
+
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
 numpy_default_float = "float64"
@@ -289,6 +292,11 @@ capture_func_transforms = True
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
+
+# wraps (un)equalities with 'Not' class after recording the correct expression
+# in the FX graph. This should incorrectly construct the divisible and replacement
+# lists, and incorrectly issue guards.
+inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
