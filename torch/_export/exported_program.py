@@ -309,7 +309,8 @@ def _create_graph_module_for_export(root, graph):
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
             "but you can still run the ExportedProgram, and if needed, you can "
-            "run the graph module eagerly using torch.fx.Interpreter."
+            "run the graph module eagerly using torch.fx.Interpreter.",
+            stacklevel=2,
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph

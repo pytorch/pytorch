@@ -28,7 +28,7 @@ def _get_modified_tests() -> Set[str]:
     try:
         changed_files = query_changed_files()
     except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
+        warn(f"Can't query changed test files due to {e}", stacklevel=1)
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 

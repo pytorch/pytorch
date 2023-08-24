@@ -2312,6 +2312,23 @@ def forward(self, x):
         constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
 
+    def test_remove_redundant_dynamic_dim_in_error_message(self):
+        def foo(x, y):
+            if x.shape[0] == y["k"].shape[0]:
+                return x + 1
+            else:
+                return x - 1
+
+        a = torch.randn(3)
+        b = torch.randn(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
+        ):
+            torch._export.export(
+                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+            )
+
     @config.patch(
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,

@@ -1540,6 +1540,7 @@ def _export(
             f"Note that dynamo_export() is in preview. Please report errors with "
             f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
             category=errors.OnnxExporterWarning,
+            stacklevel=2,
         )
 
     if export_modules_as_functions and opset_version < 15:

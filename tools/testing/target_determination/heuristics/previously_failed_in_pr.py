@@ -30,7 +30,8 @@ def _get_previously_failing_tests() -> Set[str]:
 
     if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
         warn(
-            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}"
+            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}",
+            stacklevel=1
         )
         return set()
 
