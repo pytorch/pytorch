@@ -1,5 +1,6 @@
 import argparse
 import os
+import csv
 import subprocess
 from os import listdir
 from os.path import isdir, join
@@ -44,9 +45,9 @@ def main(args):
             model_list_path = model_list_path
             model_names = []
             with open(model_list_path) as f:
-                for line in f.readlines()[1:]:
-                    line = line.split(",")[0]
-                    model_names.append(line)
+                csv_reader = csv.reader(f, delimiter=",")
+                for row in csv_reader:
+                    model_names.append(row[0])
             print(model_names)
 
             for model_name in model_names:
@@ -74,7 +75,8 @@ def main(args):
                 my_env["TORCHINDUCTOR_DUMP_AUTOTUNER_DATA"] = "1"
                 my_env["TORCH_LOGS"] = "+inductor"
                 my_env["TORCHINDUCTOR_BENCHMARK_KERNEL"] = "1"
-                cmd = f"""python3 {benchmark_py} --{dtype} --performance --{mode} --inductor -d cuda --only {model_name} > {log_file} 2>&1"""
+                cmd = f"""python3 {benchmark_py} --{dtype} --performance --{mode} --inductor -d cuda"""
+                f"""--only {model_name} > {log_file} 2>&1"""
                 print(cmd)
                 try:
                     pro = subprocess.Popen(
