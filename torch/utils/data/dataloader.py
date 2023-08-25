@@ -598,26 +598,7 @@ class _BaseDataLoaderIter:
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-
-        # NOTE [RNG re-seeding in Dataloader workers]
-        # When num_workers > 0, we need to ensure that all RNGs are different across workers.
-        # That concerns the builtin random module, numpy RNG, and torch Generators.
-        # We do that by generating a base seed (one per Generator), and we then re-seed the Generators in `_worker_loop()`.
-        # - For the default Generator, we sample its base seed just below (self._base_seed) via the `generator`
-        #   parameter that was passed to `Dataloader(...)`.
-        #   We also use this _base_seed to re-seed the numpy and builtin RNGs.
-        # - For all other Generator objects g, their base seed should only depend on g, not on the `generator` parameter.
-        #
-        # We generate _base_seed for the default Generator here, but for the other Generators, we generate their seed
-        # later in _worker_loop(). Why? Because if we were generating the seeds here, we would have to give _worker_loop()
-        # a Generator -> base_seed mapping, and that is really difficult to do (a simple dict would fail because Generators
-        # can't be pickled, and other solutions get very complex very fast).
-        self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
-        for g in _utils.worker._non_default_cpu_generators():
-            # We just consume the RNG here. This is to ensure different RNGs for consecutive epochs.
-            # The base seed for those generators will be generated with _worker_loop().
-            _utils.worker._generate_seed(generator=g)
-
+        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"

@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -17,7 +17,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   output {
     name: "1"
     type {
@@ -36,5 +36,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }
