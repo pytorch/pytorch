@@ -6244,8 +6244,19 @@ class AllToAllSingle(CollectiveKernelAlloc):
         group_size: int,
     ):
         x_realized = cls.realize_input(x)
+
+        new_size = x_realized.get_size()
+        if output_split_sizes is not None:
+            new_size[0] = sum(output_split_sizes)
+
+        layout = FlexibleLayout(
+            device=x_realized.get_device(),
+            dtype=x_realized.get_dtype(),
+            size=new_size,
+        )
+
         return AllToAllSingle(
-            layout=x_realized.get_layout(),
+            layout=layout,
             inputs=[x_realized],
             constant_args=[output_split_sizes, input_split_sizes, tag, ranks, group_size],
         )
@@ -6266,3 +6277,6 @@ class AllToAllSingle(CollectiveKernelAlloc):
             f"ranks={ranks}, "
             f"group_size={group_size})",
         )
+
+    def apply_constraint(self):
+        pass
