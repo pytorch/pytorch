@@ -428,7 +428,7 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device, f"stream value is not equal to the passed device"
+        assert value.device.type == device, "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value

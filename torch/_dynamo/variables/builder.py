@@ -566,8 +566,8 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif any([isinstance(value, stream_instance) for stream_instance in 
-            StreamMethodContainer().get_all_methods('create_stream')]
+        elif any(
+            [isinstance(value, stream_instance) for stream_instance in StreamMethodContainer().get_all_methods('stream_class')]
         ):
             return StreamVariable(
                 None,
@@ -1336,8 +1336,8 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif proxy.node.target in StreamMethodContainer().get_all_methods('create_stream') or \
-        proxy.node.target in StreamMethodContainer().get_all_methods('current_stream'):
+    elif proxy.node.target in StreamMethodContainer().get_all_methods('stream_class') or \
+            proxy.node.target in StreamMethodContainer().get_all_methods('current_stream'):
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(proxy, example_value, example_value.device.type, **options)
     elif isinstance(example_value, int) and proxy.node.target in [

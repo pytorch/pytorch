@@ -342,10 +342,10 @@ class TorchVariable(VariableTracker):
             return StreamContextVariable.create(tx, args[0], **options)
         elif any(
             [self.value is method for method in
-             StreamMethodContainer().get_all_methods('create_stream')]
+             StreamMethodContainer().get_all_methods('stream_class')]
         ):
             match_device = None
-            for device, method in StreamMethodContainer().create_stream_method.items():
+            for device, method in StreamMethodContainer().stream_class.items():
                 if self.value is method[0]:
                     match_device = device
             return wrap_fx_proxy_cls(
@@ -353,7 +353,7 @@ class TorchVariable(VariableTracker):
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    StreamMethodContainer().get_method_by_device('create_stream_method', match_device),
+                    StreamMethodContainer().get_method_by_device('stream_class', match_device),
                     (),
                     {},
                 ),
