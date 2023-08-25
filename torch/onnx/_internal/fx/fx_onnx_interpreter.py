@@ -808,7 +808,8 @@ class FxOnnxInterpreter:
     ):
         # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
         # but they are different to ONNX. We need to distinguish them.
-        # Constant tensors are inputs of the graph, and buffer/weights are initializers.
+        # Constant tensors should become ONNX constants in the graph, while buffers/weights ONNX initializers.
+        # For now they are all converted to ONNX initializers.
 
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)

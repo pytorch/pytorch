@@ -954,9 +954,10 @@ class Exporter:
                 op_level_debug=self.options.op_level_debug,
             )
 
-            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting,
-            # otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
-            # not valid
+            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
+            # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
+            # not valid.
+            # Concrete data is expected to be filled for those initializers later during `ExportOutput.save`.
             if self.options.fake_context is not None:
                 initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
                 for (
