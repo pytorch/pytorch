@@ -329,10 +329,7 @@ PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
           "attribute '%s' already has a docstring",
           m->d_getset->name);
     }
-    // This field is not const for python < 3.7 yet the content is
-    // never modified.
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    m->d_getset->doc = const_cast<char*>(doc_str);
+    m->d_getset->doc = doc_str;
   } else if (Py_TYPE(obj) == &PyType_Type) {
     PyTypeObject* t = (PyTypeObject*)obj;
     if (t->tp_doc) {
@@ -459,8 +456,7 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  dlMTensor->deleter(dlMTensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
