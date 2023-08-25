@@ -10,6 +10,8 @@ from functorch.experimental.control_flow import UnsupportedAliasMutationExceptio
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
+
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
@@ -247,6 +249,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
+    @skipIfNoDynamoSupport
     @unittest.expectedFailure
     def test_cond_functionalized(self):
         def true_fn(x):
@@ -293,6 +296,7 @@ class TestControlFlowTraced(TestCase):
         gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
+    @skipIfNoDynamoSupport
     @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
@@ -1199,6 +1203,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, main(p, pred, xs, y))
         self.check_map_count(gm, 2)
 
+    @skipIfNoDynamoSupport
     @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
         def true_fn(x):
@@ -1226,6 +1231,7 @@ class TestControlFlowTraced(TestCase):
         placeholder_cnts = [cnt_placeholder(mod) for mod in gm.children()]
         self.assertTrue(all(cnt == exp_arg_num for cnt in placeholder_cnts))
 
+    @skipIfNoDynamoSupport
     def test_cond_with_tensor_closure(self):
         a = torch.ones(2, 3)
         b = torch.ones(2, 3) + 1
@@ -1245,6 +1251,7 @@ class TestControlFlowTraced(TestCase):
         # expected branches takes [x, a, b] as input
         self._check_closure_correcly_lifted(foo, args=(inp, ), exp_res=res, exp_arg_num=3)
 
+    @skipIfNoDynamoSupport
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -1269,6 +1276,7 @@ class TestControlFlowTraced(TestCase):
         self._check_closure_correcly_lifted(foo, args=(inp,), exp_res=res, exp_arg_num=3)
 
 
+    @skipIfNoDynamoSupport
     def test_cond_with_module_python_scalar_closure(self):
 
         def foo(x):
@@ -1287,6 +1295,7 @@ class TestControlFlowTraced(TestCase):
         # python scalar b is not lifted as input, so both branches take (x, a)
         self._check_closure_correcly_lifted(foo, args=(inp,), exp_res=res, exp_arg_num=2)
 
+    @skipIfNoDynamoSupport
     def test_cond_nested_with_closure(self):
         a = torch.ones(1, 1)
         b = torch.ones(1, 1) + 1
