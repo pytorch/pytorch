@@ -4574,7 +4574,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                         rnn(input)
 
-    @set_default_dtype(torch.double)
     def test_RNN_input_size_zero(self):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for device in get_all_device_types():
