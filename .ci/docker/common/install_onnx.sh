@@ -4,6 +4,10 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+retry () {
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+}
+
 # A bunch of custom pip dependencies for ONNX
 pip_install \
   beartype==0.10.4 \
@@ -25,7 +29,7 @@ pip_install \
   transformers==4.31.0
 
 pip_install coloredlogs packaging
-pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230824005
+retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
 
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.
