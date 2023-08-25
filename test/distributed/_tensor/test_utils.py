@@ -1,8 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
+import itertools
+
 import torch
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed._tensor._utils import compute_local_offset, compute_local_shape
+from torch.distributed._tensor._utils import (
+    compute_local_offset,
+    compute_local_shape,
+    compute_local_shape_and_global_offset,
+)
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Replicate, Shard
 
@@ -12,125 +18,147 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
-import torch.distributed as dist
 
 class UtilTest(DTensorTestBase):
     @property
     def world_size(self):
         return 8
 
-    # @with_comms
-    # def test_compute_local_offset_1d(self):
+    @with_comms
+    def test_compute_local_offset_1d(self):
         # mesh: 8 * 1
-        # mesh_tensor = torch.arange(self.world_size)
-        # device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        # my_rank = device_mesh.get_rank()
-        # size = torch.Size([10])
+        mesh_tensor = torch.arange(self.world_size)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        my_rank = device_mesh.get_rank()
+        size = torch.Size([10])
 
-        # placement = [Shard(0)]
-        # local_size = compute_local_shape(size, device_mesh, placement)
-        # local_offset = compute_local_offset(size, device_mesh, placement)
-        # print(f"rank:{dist.get_rank()}, my_rank:{my_rank}, local_size:{local_size}, local_offset:{local_offset}")
+        placement = [Shard(0)]
+        local_size = compute_local_shape(size, device_mesh, placement)
+        local_offset = compute_local_offset(size, device_mesh, placement)
 
-        # tensor = torch.ones([10])
-        # tensor_lists = list(torch.chunk(tensor, self.world_size, dim=0))
-        # # chunk_sizes = [2, 2, 2, 2, 2, 0, 0, 0]
-        # chunk_sizes = [
-        #     tensor_lists[idx].size(dim=0) if idx < len(tensor_lists) else 0
-        #     for idx, tensor in enumerate(range(self.world_size))
-        # ]
+        tensor = torch.ones([10])
+        tensor_lists = list(torch.chunk(tensor, self.world_size, dim=0))
+        # chunk_sizes = [2, 2, 2, 2, 2, 0, 0, 0]
+        chunk_sizes = [
+            tensor_lists[idx].size(dim=0) if idx < len(tensor_lists) else 0
+            for idx, tensor in enumerate(range(self.world_size))
+        ]
 
-        # self.assertEqual(local_size[0], chunk_sizes[my_rank])
-        # # Offset for empty shard on the current dimension is equal to
-        # # global tensor dim size on the current dimension.
-        # self.assertEqual(local_offset[0], sum(chunk_sizes[:my_rank]))
+        self.assertEqual(local_size[0], chunk_sizes[my_rank])
+        # Offset for empty shard on the current dimension is equal to
+        # global tensor dim size on the current dimension.
+        self.assertEqual(local_offset[0], sum(chunk_sizes[:my_rank]))
 
     @with_comms
-    def test_compute_local_offset_2d(self):
-        # mesh_tensor= torch.arange(self.world_size)
-        mesh_tensor= torch.arange(self.world_size).view(2, -1)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        placements = [Shard(0), Shard(0)]
-        # placements = [Shard(0)]
-        my_rank = device_mesh.get_rank()
-        size = torch.Size([8, 4])
+    def test_compute_local_shape_2d(self):
+        # mesh: 4 * 2
+        mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
+        size = torch.Size([8, 6])
 
-        dtensor = distribute_tensor(torch.arange(32).view(8, 4), device_mesh, placements)
-        # print(f"rank: {device_mesh.get_rank()}, dtensor: {dtensor}")
+        # replicate, replicate
+        placements1 = [Replicate(), Replicate()]
+        local_size1 = compute_local_shape(size, mesh, placements1)
+        self.assertEqual(local_size1, torch.Size([8, 6]))
 
-        local_size = compute_local_shape(size, device_mesh, placements)
-        local_offset = compute_local_offset(size, device_mesh, placements)
-        # print(f"rank:{dist.get_rank()}, my_rank:{my_rank}, local_size:{local_size}, local_offset:{local_offset}")
+        # replicate, shard
+        placements2 = [Replicate(), Shard(0)]
+        local_size2 = compute_local_shape(size, mesh, placements2)
+        self.assertEqual(local_size2, torch.Size([4, 6]))
 
-        # tensor = torch.arange(10)
-        # tensor_lists_dim_0 = (list(torch.chunk(tensor, mesh_tensor.size(dim=0))))
-        # tensor_lists_dim_2 = []
-        # for t in tensor_lists_dim_0:
-        #     tensor_lists_dim_2.append(list(torch.chunk(t, mesh_tensor.size(dim=1))))
+        # shard, shard
+        placements3 = [Shard(0), Shard(1)]
+        local_size3 = compute_local_shape(size, mesh, placements3)
+        self.assertEqual(local_size3, torch.Size([2, 3]))
 
-        # print(tensor_lists_dim_2)
+    @with_comms
+    def test_compute_local_shape_2d_uneven(self):
+        # mesh: 4 * 2
+        mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
+        size = torch.Size([7, 7])
+        rank_coordinates = mesh.get_coordinate()
 
-        # dtensor = distribute_tensor(tensor, device_mesh, placements=placements)
-        # print(f"rank:{dist.get_rank()}, dtensor:{dtensor}")
+        # replicate, shard
+        placements2 = [Replicate(), Shard(0)]
+        local_size2 = compute_local_shape(size, mesh, placements2)
+        if rank_coordinates[1] < 1:
+            self.assertEqual(local_size2, torch.Size([4, 7]))
+        else:
+            self.assertEqual(local_size2, torch.Size([3, 7]))
 
+        # shard, shard
+        placements3 = [Shard(0), Shard(1)]
+        local_size3 = compute_local_shape(size, mesh, placements3)
+        # first dim
+        if rank_coordinates[0] < 3:
+            self.assertEqual(local_size3[0], 2)
+        else:
+            self.assertEqual(local_size3[0], 1)
+        # second dim
+        if rank_coordinates[1] < 1:
+            self.assertEqual(local_size3[1], 4)
+        else:
+            self.assertEqual(local_size3[1], 3)
 
-        # tensor_lists_dim_1 = []
-        # for tensor_list in tensor_lists_dim_0:
-        #     tensor_lists_dim_1.append(list.torch.chunk(tensor_list, mesh_tensor.size(dim=1)))
-        # print(f"tensor_lists_dim_2:{tensor_lists_dim_2}")
-        # print(f"tensor_lists:{tensor_lists_dim_1}")
+    @with_comms
+    def test_compute_local_shape_and_global_offset_1D(self):
+        one_d_placements = [[Shard(0)], [Replicate()]]
 
-    # @with_comms
-    # def test_compute_local_shape_2d(self):
-    #     # mesh: 4 * 2
-    #     mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
-    #     mesh = DeviceMesh(self.device_type, mesh_tensor)
-    #     size = torch.Size([8, 6])
+        for placements in one_d_placements:
+            mesh_tensor = torch.arange(self.world_size)
+            device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+            global_tensor = torch.arange(64).view(8, 8)
+            global_shape = global_tensor.size()
 
-    #     # replicate, replicate
-    #     placements1 = [Replicate(), Replicate()]
-    #     local_size1 = compute_local_shape(size, mesh, placements1)
-    #     self.assertEqual(local_size1, torch.Size([8, 6]))
+            dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+            local_size, global_offset = compute_local_shape_and_global_offset(
+                global_shape, device_mesh, placements
+            )
 
-    #     # replicate, shard
-    #     placements2 = [Replicate(), Shard(0)]
-    #     local_size2 = compute_local_shape(size, mesh, placements2)
-    #     self.assertEqual(local_size2, torch.Size([4, 6]))
+            # TODO: make this test cleaner and work for nD
+            dim0_start = global_offset[0]
+            dim0_end = global_offset[0] + local_size[0]
 
-    #     # shard, shard
-    #     placements3 = [Shard(0), Shard(1)]
-    #     local_size3 = compute_local_shape(size, mesh, placements3)
-    #     self.assertEqual(local_size3, torch.Size([2, 3]))
+            # Check the local tensor of dtensor is exactly the same
+            # if we slice the global_tensor with local_size and global_offset
+            self.assertEqual(
+                dtensor.to_local(),
+                global_tensor[dim0_start:dim0_end],
+            )
 
-    # @with_comms
-    # def test_compute_local_shape_2d_uneven(self):
-    #     # mesh: 4 * 2
-    #     mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
-    #     mesh = DeviceMesh(self.device_type, mesh_tensor)
-    #     size = torch.Size([7, 7])
-    #     rank_coordinates = mesh.get_coordinate()
+    @with_comms
+    def test_compute_local_shape_and_global_offset_2D(self):
+        two_d_placements_options = [Shard(0), Shard(1), Replicate()]
+        # Generating 6 two-d placements combinations
+        two_d_placements = list(
+            itertools.combinations_with_replacement(two_d_placements_options, 2)
+        )
 
-    #     # replicate, shard
-    #     placements2 = [Replicate(), Shard(0)]
-    #     local_size2 = compute_local_shape(size, mesh, placements2)
-    #     if rank_coordinates[1] < 1:
-    #         self.assertEqual(local_size2, torch.Size([4, 7]))
-    #     else:
-    #         self.assertEqual(local_size2, torch.Size([3, 7]))
+        for placements in two_d_placements:
+            # mesh: 2 * 4
+            mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
+            device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+            global_tensor = torch.arange(64).view(8, 8)
+            global_shape = global_tensor.size()
 
-    #     # shard, shard
-    #     placements3 = [Shard(0), Shard(1)]
-    #     local_size3 = compute_local_shape(size, mesh, placements3)
-    #     # first dim
-    #     if rank_coordinates[0] < 3:
-    #         self.assertEqual(local_size3[0], 2)
-    #     else:
-    #         self.assertEqual(local_size3[0], 1)
-    #     # second dim
-    #     if rank_coordinates[1] < 1:
-    #         self.assertEqual(local_size3[1], 4)
-    #     else:
-    #         self.assertEqual(local_size3[1], 3)
+            dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+            local_size, global_offset = compute_local_shape_and_global_offset(
+                global_shape, device_mesh, placements
+            )
+
+            # TODO: make this test cleaner and work for nD
+            dim0_start = global_offset[0]
+            dim0_end = global_offset[0] + local_size[0]
+            dim1_start = global_offset[1]
+            dim1_end = global_offset[1] + local_size[1]
+
+            # Check the local tensor of dtensor is exactly the same
+            # if we slice the global_tensor with local_size and global_offset
+            self.assertEqual(
+                dtensor.to_local(),
+                global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
+            )
 
 
 if __name__ == "__main__":

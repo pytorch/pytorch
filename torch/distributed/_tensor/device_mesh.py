@@ -306,7 +306,6 @@ def init_device_mesh(
         >>> # xdoctest: +SKIP
         >>> from torch.distributed._tensor.device_mesh import init_device_mesh
         >>>
-        >>> one_d_mesh = init_device_mesh("cuda", mesh_shape=(8,))
         >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
     """
     if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
