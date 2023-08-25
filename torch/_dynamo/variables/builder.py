@@ -11,7 +11,10 @@ import re
 import types
 from typing import List, NamedTuple, Optional, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch
 
@@ -303,7 +306,9 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
-        entries.append((np.ndarray, cls.wrap_numpy_ndarray))
+
+        if config.trace_numpy and np:
+            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -472,6 +477,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif is_numpy(value):
+            assert np
             return NumpyVariable(
                 value,
                 source=self.source,
@@ -549,7 +555,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, np.number):
+        elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -997,6 +1003,7 @@ class VariableBuilder:
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):
+        assert np is not None
         assert isinstance(value, np.ndarray)
 
         source = NumpyTensorSource(self.get_source())
@@ -1240,10 +1247,23 @@ def wrap_fx_proxy_cls(
 
     initial_example_value = example_value
 
+    def _is_functional_tensor_fakified_by_dynamo(x):
+        if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+            reapply_views = torch._C._functionalization_reapply_views_tls()
+            unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+            return (
+                isinstance(unwrapped, FakeTensor)
+                and unwrapped.fake_mode == tx.fake_mode
+            )
+        return False
+
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not (
+                isinstance(value, FakeTensor)
+                or _is_functional_tensor_fakified_by_dynamo(value)
+            ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -1257,7 +1277,7 @@ def wrap_fx_proxy_cls(
         elif (
             isinstance(example_value, FakeTensor)
             and example_value.fake_mode is tx.fake_mode
-        ):
+        ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
         elif isinstance(example_value, torch.Tensor):
