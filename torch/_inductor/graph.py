@@ -893,12 +893,12 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         self.wrapper_code = wrapper_code_gen_cls()
 
-    def codegen(self):
+    def codegen(self, gm=None):
         from .scheduler import Scheduler
 
         self.init_wrapper_code()
 
-        self.scheduler = Scheduler(self.buffers)
+        self.scheduler = Scheduler(self.buffers, gm)
         assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
@@ -920,10 +920,10 @@ class GraphLowering(torch.fx.Interpreter):
         return total_bytes, node_counts, node_runtimes
 
     @dynamo_timed
-    def compile_to_module(self):
+    def compile_to_module(self, gm=None):
         from .codecache import PyCodeCache
 
-        code, linemap = self.codegen()
+        code, linemap = self.codegen(gm)
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
         mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
@@ -945,7 +945,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
-    def compile_to_fn(self):
+    def compile_to_fn(self, gm=None):
         if self.aot_mode and self.cpp_wrapper:
             from .codecache import AotCodeCache
 
@@ -955,7 +955,7 @@ class GraphLowering(torch.fx.Interpreter):
             # Directly return the file path with the compiled code
             return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
-            return self.compile_to_module().call
+            return self.compile_to_module(gm).call
 
     def get_output_names(self):
         assert self.graph_outputs is not None
