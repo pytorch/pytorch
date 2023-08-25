@@ -1,5 +1,4 @@
 import dataclasses
-import inspect
 import io
 import re
 import pathlib
@@ -338,14 +337,20 @@ def export(
         loss_output=graph_signature.backward_signature.loss_output
     ) if graph_signature.backward_signature is not None else None
 
+    def to_str_list(sig_component: List[Any]):
+        return [str(v) for v in sig_component]
+
+    def to_str_dict(sig_component: Dict[Any, Any]):
+        return {str(k): str(v) for k, v in sig_component.items()}
+
     export_graph_signature = ExportGraphSignature(
-        parameters=graph_signature.parameters,
-        buffers=graph_signature.buffers,
-        user_inputs=graph_signature.user_inputs,
-        user_outputs=graph_signature.user_outputs,
-        inputs_to_parameters=graph_signature.inputs_to_parameters,
-        inputs_to_buffers=graph_signature.inputs_to_buffers,
-        buffers_to_mutate=graph_signature.buffers_to_mutate,
+        parameters=to_str_list(graph_signature.parameters),
+        buffers=to_str_list(graph_signature.buffers),
+        user_inputs=to_str_list(graph_signature.user_inputs),
+        user_outputs=to_str_list(graph_signature.user_outputs),
+        inputs_to_parameters=to_str_dict(graph_signature.inputs_to_parameters),
+        inputs_to_buffers=to_str_dict(graph_signature.inputs_to_buffers),
+        buffers_to_mutate=to_str_dict(graph_signature.buffers_to_mutate),
         backward_signature=export_backward_signature
     )
 
@@ -433,48 +438,6 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
-    """
-    Saves an :class:`ExportedProgram` to a file-like object. It can then be
-    loaded using the Python API :func:`torch._export.load <torch._export.load>`.
-
-    Args:
-        ep (ExportedProgram): The exported program to save.
-
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
-            implement write and flush) or a string containing a file name.
-
-        extra_files (Optional[Dict[str, Any]]): Map from filename to contents
-            which will be stored as part of f.
-
-        opset_version (Optional[Dict[str, int]]): A map of opset names
-            to the version of this opset
-
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import torch._export
-        import io
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        ep = torch._export.export(MyModule(), torch.randn(5))
-
-        # Save to file
-        torch._export.save(ep, 'exported_program.pt2')
-
-        # Save to io.BytesIO buffer
-        buffer = io.BytesIO()
-        torch._export.save(ep, buffer)
-
-        # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
-        torch._export.save(ep, 'exported_program.pt2', extra_files=extra_files)
-    """
     from .serde.serialize import serialize
     from .serde.schema import SCHEMA_VERSION
     serialized_program, serialized_state_dict = serialize(ep, opset_version)
@@ -501,48 +464,6 @@ def load(
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ExportedProgram:
-    """
-    Loads an :class:`ExportedProgram` previously saved with
-    :func:`torch._export.save <torch._export.save>`.
-
-    Args:
-        ep (ExportedProgram): The exported program to save.
-
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
-            implement write and flush) or a string containing a file name.
-
-        extra_files (Optional[Dict[str, Any]]): The extra filenames given in
-            this map would be loaded and their content would be stored in the
-            provided map.
-
-        expected_opset_version (Optional[Dict[str, int]]): A map of opset names
-            to expected opset versions
-
-    Returns:
-        An :class:`ExportedProgram` object
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import torch._export
-        import io
-
-        # Load ExportedProgram from file
-        ep = torch._export.load('exported_program.pt2')
-
-        # Load ExportedProgram from io.BytesIO object
-        with open('exported_program.pt2', 'rb') as f:
-            buffer = io.BytesIO(f.read())
-        buffer.seek(0)
-        ep = torch._export.load(buffer)
-
-        # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch._export.load('exported_program.pt2', extra_files=extra_files)
-        print(extra_files['foo.txt'])
-    """
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
 
