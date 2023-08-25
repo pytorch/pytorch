@@ -259,3 +259,4 @@ class ExportedProgram:
     range_constraints: Dict[str, RangeConstraint]
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
     schema_version: int
+    original_traced_arguments: str
