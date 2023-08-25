@@ -304,24 +304,7 @@ def _prod(x):
     return s
 
 def _tensor_nbytes(numel, dtype):
-    sizes = {
-        torch.complex64: 8,
-        torch.complex128: 16,
-        torch.float16: 2,
-        torch.bfloat16: 2,
-        torch.float32: 4,
-        torch.float64: 8,
-        torch.int8: 1,
-        torch.int16: 2,
-        torch.int32: 4,
-        torch.int64: 8,
-        torch.uint8: 1,
-        torch.bool: 1,
-    }
-    if dtype not in sizes:
-        raise NotImplementedError("Don't know the size of dtype ", dtype)
-
-    return numel * sizes[dtype]
+    return numel * dtype.itemsize
 
 def _size_of(node: fx.Node) -> int:
     if 'val' in node.meta:
