@@ -655,19 +655,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
         ),
     ),
@@ -679,19 +672,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
         ),
     ),
@@ -703,19 +689,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
         ),
     ),
@@ -727,19 +706,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
         ),
     ),
@@ -751,19 +723,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
         ),
     ),
@@ -775,19 +740,12 @@ python_ref_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
         ),
     ),
@@ -803,19 +761,12 @@ python_ref_db: List[OpInfo] = [
         ],
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
         ),
     ),
@@ -831,19 +782,12 @@ python_ref_db: List[OpInfo] = [
         ],
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
         ),
     ),
@@ -852,19 +796,12 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="fft.rfftn",
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
         ),
     ),
@@ -880,19 +817,12 @@ python_ref_db: List[OpInfo] = [
         ],
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
         ),
     ),
@@ -908,19 +838,12 @@ python_ref_db: List[OpInfo] = [
         ],
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                # device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     # device_type="cuda",
             # ),
             # TODO: investigate failure
             DecorateInfo(
@@ -942,19 +865,12 @@ python_ref_db: List[OpInfo] = [
         ],
         skips=(
             # FIXME: not being handled correctly
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFFT",
-                "test_fft_half_and_bfloat16_errors",
-                dtypes=[torch.bfloat16],
-                device_type="cuda",
-            ),
             # DecorateInfo(
             #     unittest.expectedFailure,
             #     "TestFFT",
             #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.float16, torch.bfloat16],
-            #     device_type="cpu",
+            #     dtypes=[torch.bfloat16],
+            #     device_type="cuda",
             # ),
             # TODO: investigate failure
             DecorateInfo(
