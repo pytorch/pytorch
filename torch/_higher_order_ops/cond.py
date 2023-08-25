@@ -63,7 +63,7 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 
 def cond_compiled(pred, true_fn, false_fn, args):
-    if not torch._dynamo.is_dynamo_supported() or torch._dynamo.is_compiling():
+    if torch._dynamo.is_compiling() or not torch._dynamo.is_dynamo_supported():
         return cond(pred, true_fn, false_fn, args)
 
     def wrapper(pred, true_fn, false_fn, args):

@@ -2869,7 +2869,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list/tuple but got",
+            "Expected a list or tuple but got",
         ):
             torch._dynamo.export(
                 f_non_list_operands,
@@ -2935,8 +2935,7 @@ def forward(self, x):
 
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Expected branch out type to be a single tensor",
+            torch._dynamo.exc.UserError, "Expected branch to return a single tensor"
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -2964,8 +2963,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Expected branch out type to be a single tensor",
+            torch._dynamo.exc.UserError, "Expected branch to return a single tensor"
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,

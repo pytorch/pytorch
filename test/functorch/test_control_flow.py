@@ -6,11 +6,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
-from functorch.experimental.control_flow import UnsupportedAliasMutationException
+from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
-from torch._higher_order_ops.cond import cond_compiled as cond
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
@@ -287,7 +286,7 @@ class TestControlFlowTraced(TestCase):
             return x.cos()
 
         def f(x):
-            return cond(x.all(), true_fn, false_fn, [x,])
+            return cond(x.all(), true_fn, false_fn, (x,))
 
         inp = torch.ones(1, 2)
         gm_non_functional = make_fx(f, tracing_mode="real")(inp)
@@ -655,7 +654,7 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected branch out type to be a single tensor",
+            "Expected branch to return a single tensor",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -820,7 +819,7 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected branch out type to be a single tensor",
+            "Expected branch to return a single tensor",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 

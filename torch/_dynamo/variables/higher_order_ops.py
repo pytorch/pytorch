@@ -332,7 +332,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not isinstance(args[3], (ListVariable, TupleVariable)):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Expected a list/tuple but got {args[3].python_type()}",
+                f"Expected a list or tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
@@ -401,7 +401,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if not isinstance(ret_val, TensorVariable):
                 raise UserError(
                     UserErrorType.DYNAMIC_CONTROL_FLOW,
-                    "Expected branch out type to be a single tensor",
+                    "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
 
