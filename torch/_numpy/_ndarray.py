@@ -146,7 +146,7 @@ ri_dunder = {
     "mul": "multiply",
     "truediv": "divide",
     "floordiv": "floor_divide",
-    "pow": "float_power",
+    "pow": "power",
     "mod": "remainder",
     "and": "bitwise_and",
     "or": "bitwise_or",
