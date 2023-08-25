@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
-from torch._dynamo.eval_frame import Constraint
+from torch.export import Constraint
 
 _TAGS: Dict[str, Dict[str, Any]] = {
     "torch": {
