@@ -1070,7 +1070,7 @@ class KernelTemplate:
         return None
 
     @staticmethod
-    def fake_get_dtype(fake_out):
+    def _fake_get_dtype(fake_out):
         _get_dtype_real = V.graph.get_dtype
 
         def get_dtype(name):

@@ -118,8 +118,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
 
@@ -150,8 +150,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         for config in int8_mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -193,15 +193,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (inp_expanded, mat1, mat2),
-                layout,
+                input_nodes=(inp_expanded, mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
     if use_cutlass_template(layout):
-        cutlass_template = CutlassGemmTemplate([mat1, mat2, inp_expanded], layout, alpha=alpha, beta=beta, input_reorder=[2,0,1])
+        cutlass_template = CUTLASSGemmTemplate([mat1, mat2, inp_expanded], layout, alpha=alpha, beta=beta, input_reorder=[2,0,1])
         ops = cutlass_template.gen_ops()
         for op in ops:
             cutlass_template.maybe_append_choice(
@@ -234,8 +234,8 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     for config in mm_configs(m, n, k):
         mm_template.maybe_append_choice(
             choices,
-            (mat1, mat2),
-            layout,
+            input_nodes=(mat1, mat2),
+            layout=layout,
             **mm_options(config, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)

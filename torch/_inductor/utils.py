@@ -727,7 +727,7 @@ def is_big_gpu(index):
         return False
     return True
 
-def _use_template_for_cuda() -> bool:
+def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
         (
             config.max_autotune
@@ -735,6 +735,7 @@ def _use_template_for_cuda() -> bool:
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
+        and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -743,17 +744,15 @@ def use_triton_template(layout, *, enable_int32=False):
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     return (
-        _use_template_for_cuda()
+        _use_template_for_cuda(layout, layout_dtypes)
         and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
-        and layout.dtype in layout_dtypes
     )
 
 def use_cutlass_template(layout):
     layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
     return (
-        _use_template_for_cuda()
+        _use_template_for_cuda(layout, layout_dtypes)
         and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
-        and layout.dtype in layout_dtypes
     )
 
 def use_aten_gemm_kernels():

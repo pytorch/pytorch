@@ -1,4 +1,5 @@
 import copy
+import logging
 import re
 from typing import List, Optional
 
@@ -13,7 +14,10 @@ from ..common import IndentedBuffer
 
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
-from .cuda_template import CutlassTemplate
+from .cuda_template import CUTLASSTemplate
+
+log = logging.getLogger(__name__)
+
 
 # Only supports alpha * A@B + beta * C now.
 # TODO: Support arbitrary epilogue after epilogue visitor is released in cutlass 3.2.
@@ -26,13 +30,6 @@ GEMM_TEMPLATE = r"""
 extern "C" {
 {{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
-  // printf("X: %p\n", (void*)(X));
-  // printf("W: %p\n", (void*)(W));
-  // printf("Bias: %p\n", (void*)(Bias));
-  // printf("Y: %p\n", (void*)(Y));
-  // printf("workspace size: %p\n", (void*)(workspace_size));
-  // printf("workspace: %p\n", (void*)(workspace));
-  // printf("stream: %p\n", (void*)(stream));
   {{kernel.check_not_null(X)}}
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
@@ -78,13 +75,13 @@ extern "C" {
 
 GEMM_ARGS_CUTLASS_2X = r"""
   int64_t batch_stride_x = {{kernel.stride(X, -3)}};
-  int64_t row_stride_x = {{kernel.row_stride(X)}};
+  int64_t row_stride_x = {{kernel.row_or_column_stride(X)}};
   int64_t batch_stride_w = {{kernel.stride(W, -3)}};
-  int64_t row_stride_w = {{kernel.row_stride(W)}};
+  int64_t row_stride_w = {{kernel.row_or_column_stride(W)}};
   int64_t batch_stride_bias = {{kernel.stride(Bias, -3)}};
-  int64_t row_stride_bias = {{kernel.row_stride(Bias)}};
+  int64_t row_stride_bias = {{kernel.row_or_column_stride(Bias)}};
   int64_t batch_stride_y = {{kernel.stride(Y, -3)}};
-  int64_t row_stride_y = {{kernel.row_stride(Y)}};
+  int64_t row_stride_y = {{kernel.row_or_column_stride(Y)}};
   // Initialize GemmUniversalInstance arguments.
   arguments = {
     {{template.gemm_mode()}},  // GemmUniversalMode mode
@@ -143,7 +140,7 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
 """
 
 
-class CutlassGemmTemplate(CutlassTemplate):
+class CUTLASSGemmTemplate(CUTLASSTemplate):
     # Calculates alpha * X@W + beta * Bias
 
     def __init__(
@@ -192,7 +189,7 @@ class CutlassGemmTemplate(CutlassTemplate):
 
     @staticmethod
     def layout_match(torch_layout, cutlass_layout) -> bool:
-        return CutlassGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
+        return CUTLASSGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
 
     @staticmethod
     def set_alignment(torch_layout, op_element) -> bool:
@@ -258,11 +255,11 @@ class CutlassGemmTemplate(CutlassTemplate):
     def swap_XW(op: cutlass_gemm_op.GemmOperation) -> cutlass_gemm_op.GemmOperation:
         # Swap X and W in GemmOperation.
         new_op = copy.deepcopy(op)
-        new_op.A.layout = CutlassGemmTemplate.flip_cutlass_layout(new_op.A.layout)
-        new_op.B.layout = CutlassGemmTemplate.flip_cutlass_layout(new_op.B.layout)
+        new_op.A.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.A.layout)
+        new_op.B.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.B.layout)
         new_op.A, new_op.B = new_op.B, new_op.A
-        new_op.C.layout = CutlassGemmTemplate.flip_cutlass_layout(new_op.C.layout)
-        new_op.D.layout = CutlassGemmTemplate.flip_cutlass_layout(new_op.D.layout)
+        new_op.C.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.C.layout)
+        new_op.D.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.D.layout)
         return new_op
 
     def filter_op(
@@ -309,7 +306,7 @@ class CutlassGemmTemplate(CutlassTemplate):
         op = copy.deepcopy(op)
 
         # Set output layout.
-        op.D.layout = CutlassGemmTemplate.cutlass_layout(self.output_node.get_layout())
+        op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())
 
         # Filter ops by alignments and set alignments.
         if not (
@@ -326,7 +323,7 @@ class CutlassGemmTemplate(CutlassTemplate):
         # Set bias layout and alignment.
         if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
-            op.C.layout = CutlassGemmTemplate.cutlass_layout(Bias.get_layout())
+            op.C.layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
             if not self.set_alignment(Bias.get_layout(), op.C):
                 return None
         else:
@@ -352,7 +349,7 @@ class CutlassGemmTemplate(CutlassTemplate):
                 num_3x_ops += 1
             else:
                 num_2x_ops += 1
-        print(f"Got cutlass configs: {len(res)=}, {num_3x_ops=}, {num_2x_ops=}")
+        log.debug(f"Got cutlass configs: {len(res)=}, {num_3x_ops=}, {num_2x_ops=}")
         return list(res)
 
     def gemm_mode(self) -> str:
