@@ -605,9 +605,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 continue
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            if (
-                get_node_storage(node) in output_storages
-                and get_node_storage(src) in input_storages
+            if get_node_storage(node) in output_storages and (
+                get_node_storage(src) in input_storages
+                or get_node_storage(src) in output_storages
             ):
                 continue
             is_valid, args, kwargs = get_fake_args_kwargs(node)
