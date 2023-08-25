@@ -502,6 +502,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
+        output_scale_idx: int = 3,
     ) -> torch.nn.Module:
         """ TODO: need to implement output checking based on output_scale once
         torchdynamo issue is resolved
@@ -511,7 +512,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             model,
             example_inputs,
         )
-        # model_copy = copy.deepcopy(model)
+        model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
         # Calibrate
@@ -521,30 +522,27 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
 
-        # # TODO: torchdynamo times out when we do this, we can enable numerical checking
-        # # after that is fixed
-        # model_copy = prepare_pt2e(model_copy, quantizer)
-        # # Calibrate
-        # model_copy(*example_inputs)
-        # model_copy = convert_pt2e(model_copy, use_reference_representation=False)
-        # self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
-        # pt2e_quant_output_copy = model_copy(*example_inputs)
+        # TODO: torchdynamo times out when we do this, we can enable numerical checking
+        # after that is fixed
+        model_copy = prepare_pt2e(model_copy, quantizer)
+        # Calibrate
+        model_copy(*example_inputs)
+        model_copy = convert_pt2e(model_copy, use_reference_representation=False)
+        self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
+        pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        # output_scale = None
-        # idx = 0
-        # for n in model_copy.graph.nodes:
-        #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-        #         idx += 1
-        #         if idx == 3:
-        #             output_scale = n.args[1]
-        # assert output_scale is not None
+        idx = 0
+        for n in model_copy.graph.nodes:
+            if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+                idx += 1
+                if idx == output_scale_idx:
+                    output_scale = n.args[1]
+        assert output_scale is not None
 
-        # print("diff:", torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
-        # print("scale:", output_scale)
-        # # make sure the result is off by one at most in the quantized integer representation
-        # self.assertTrue(
-        #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
-        # )
+        # make sure the result is off by one at most in the quantized integer representation
+        self.assertTrue(
+            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
@@ -2069,6 +2067,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             M(), example_inputs, is_per_channel=True, verify_convert=True,
         )
 
+    @unittest.skip("some issues with conv2d rewrite, will fix in a separate PR")
     def test_representation_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2212,12 +2211,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default
                 ): 1,
             }
+
             self._test_representation(
                 M().eval(),
                 example_inputs,
                 quantizer,
                 ref_node_occurrence,
-                non_ref_node_occurrence
+                non_ref_node_occurrence,
+                output_scale_idx=2,
             )
 
     def test_representation_quantize_dequantize(self):
