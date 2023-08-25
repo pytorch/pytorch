@@ -27,6 +27,8 @@ ALLOWABLE_OPS = [
     torch.ops.aten.convolution.default,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
+    torch.ops.aten.div.Tensor,
+    torch.ops.aten.div.Scalar,
 ]
 
 
@@ -84,6 +86,7 @@ out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-define
 out_dtype.fallthrough(DispatchKey.ADInplaceOrView)  # type: ignore[attr-defined]
 out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
 out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+out_dtype.fallthrough(DispatchKey.PreDispatch)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):

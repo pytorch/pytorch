@@ -57,7 +57,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
-  return PyLong_FromVoidPtr(const_cast<void*>(self_.data()));
+  return PyLong_FromVoidPtr(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -109,7 +109,6 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
       allocator,
       /*resizable=*/true);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   return THPStorage_New(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
@@ -168,7 +167,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
       new_tensor.copy_(src_tensor);
       storage.set_data_ptr_noswap(
-          std::move(const_cast<at::DataPtr&>(new_tensor.storage().data_ptr())));
+          std::move(new_tensor.storage().mutable_data_ptr()));
       storage.unsafeGetStorageImpl()->set_allocator(
           new_tensor.storage().unsafeGetStorageImpl()->allocator());
       storage.set_nbytes(new_tensor.storage().nbytes());
@@ -224,6 +223,7 @@ static PyObject* THPStorage_fromBuffer(
           args,
           keywds,
           argtypes,
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &obj,
           &byte_order_str,
@@ -248,8 +248,7 @@ static PyObject* THPStorage_fromBuffer(
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool do_byte_swap;
+  bool do_byte_swap = false;
   if (!is_endian_independent) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
@@ -283,8 +282,7 @@ static PyObject* THPStorage_fromBuffer(
     return nullptr;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t size_bytes;
+  size_t size_bytes = 0;
   if (count < 0) {
     if ((buffer.len - offset) % element_size != 0) {
       PyErr_SetString(
@@ -297,7 +295,7 @@ static PyObject* THPStorage_fromBuffer(
       return nullptr;
     }
     size_bytes = buffer.len - offset;
-    count = size_bytes / element_size;
+    count = static_cast<Py_ssize_t>(size_bytes / element_size);
   } else {
     size_bytes = count * element_size;
   }
@@ -400,8 +398,7 @@ static PyObject* THPStorage_fromFile(
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const char* filename;
+  const char* filename = nullptr;
   Py_ssize_t nbytes = 0;
   int shared = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -410,6 +407,7 @@ static PyObject* THPStorage_fromFile(
           args,
           keywds,
           "s|in",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &filename,
           &shared,
