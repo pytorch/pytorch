@@ -24,6 +24,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
@@ -63,7 +64,8 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 
 def cond_compiled(pred, true_fn, false_fn, args):
-    if torch._dynamo.is_compiling():
+    # "Windows not yet supported for torch.compile"
+    if torch._dynamo.is_compiling() or IS_WINDOWS:
         return cond(pred, true_fn, false_fn, args)
 
     def wrapper(pred, true_fn, false_fn, args):
