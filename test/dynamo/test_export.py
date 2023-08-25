@@ -2156,6 +2156,35 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
+    def test_dataclass_input(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Tensors:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        def f(t):
+            return t.x + t.y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
+        ):
+            torch._dynamo.export(
+                f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
+            )
+
+    def test_none_out(self):
+        def f(x, y):
+            _ = x + y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
