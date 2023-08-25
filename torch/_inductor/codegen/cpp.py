@@ -294,6 +294,12 @@ class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
 
+    def _print_Where(self, expr):
+        c = self.paren(self.doprint(expr.args[0]))
+        p = self.paren(self.doprint(expr.args[1]))
+        q = self.paren(self.doprint(expr.args[2]))
+        return f"{c} ? {p} : {q}"
+
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
@@ -2649,14 +2655,19 @@ class CppKernelProxy(CppKernel):
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
-                with CppVecKernelChecker(
-                    deepcopy(self.kernel_group.args),
-                    parallel_num_threads(),
-                    tiling_factor,
-                    tiling_indices[-1],
-                ) as vec_checker:
-                    run(vec_checker)
-                if vec_checker.simd_vec:
+                could_vec = True
+                for tiling_indice in tiling_indices:
+                    with CppVecKernelChecker(
+                        deepcopy(self.kernel_group.args),
+                        parallel_num_threads(),
+                        tiling_factor,
+                        tiling_indice,
+                    ) as vec_checker:
+                        run(vec_checker)
+                        could_vec = could_vec and vec_checker.simd_vec
+                        if not could_vec:
+                            break
+                if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2:
