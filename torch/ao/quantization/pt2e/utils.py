@@ -1,16 +1,15 @@
 import torch
 from torch.fx import (
-    Graph,
     GraphModule,
     Node,
 )
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
+from torch._export import capture_pre_autograd_graph
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -42,10 +41,12 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv args: input, weight, bias, stride, padding, dilation, transposed, ...
+    # conv2d args: input, weight, bias, stride, padding, dilation, ...
+    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
+    # easy tweaks
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = conv_node.args[6]
+    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -67,6 +68,10 @@ def fold_bn_weights_into_conv_node(
 
     # update the weight and bias for conv
     conv_args = list(conv_node.args)
+    # filling in the default bias argument
+    if len(conv_args) == 2:
+        conv_args.append(None)
+
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
     assert isinstance(weight_attr_name, str)
@@ -108,11 +113,11 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.convolution.default:
+        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
-        conv_bias_node = conv_node.args[2]
+        conv_bias_node = conv_node.args[2] if len(conv_node.args) > 2 else None
         fold_bn_weights_into_conv_node(conv_node, conv_weight_node, conv_bias_node, bn_node, m)
 
     m.graph.eliminate_dead_code()
@@ -138,15 +143,10 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
-    # Avoid circular imports
-    import torch._dynamo
-    aten_pattern, _ = torch._dynamo.export(
+    aten_pattern = capture_pre_autograd_graph(
         pattern,
-        aten_graph=True,
-        tracing_mode="real",
-    )(
-        *copy.deepcopy(example_inputs),
-        **kwargs,
+        example_inputs,
+        kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
@@ -173,26 +173,6 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
         if n.target in _MAP:
             n.target = _MAP[n.target]
 
-def _is_dropout_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
-    original_graph: Graph,
-    pattern_graph: Graph,
-) -> bool:
-    """
-    Match filter for the subgraph rewriter that returns True if the matched
-    graph includes all the ops used in the aten dropout pattern.
-    """
-    ops_to_match = {
-        torch.ops.aten.empty_like.default,
-        torch.ops.aten.bernoulli_.float,
-        torch.ops.aten.div_.Scalar,
-        torch.ops.aten.mul.Tensor,
-    }
-    for n in match.nodes_map.values():
-        if n.target in ops_to_match:
-            ops_to_match.remove(n.target)
-    return len(ops_to_match) == 0
-
 def _replace_dropout_for_eval(m: GraphModule):
     """
     Replace the aten training dropout pattern with a noop, intended for eval.
@@ -215,27 +195,11 @@ def _replace_dropout_for_eval(m: GraphModule):
     match_pattern = get_aten_graph_module(dropout_train, example_inputs)
     replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
-    # Note: The match pattern looks like:
-    #
-    #   empty_like_default = torch.ops.aten.empty_like.default(x)
-    #   bernoulli__float = torch.ops.aten.bernoulli_.float(empty_like_default)
-    #   div__scalar = torch.ops.aten.div_.Scalar(bernoulli__float, 0.5)
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, div__scalar)
-    #
-    # We need to use `ignore_literals=True` here to handle arbitrary dropout
-    # probability (not just 0.5). However, without a match filter, this would
-    # also match any mul op, since `div__scalar` is also a literal, e.g.:
-    #
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, 0.8)
-    #
-    # Therefore, we need both `ignore_literals=True` and `_is_dropout_filter`
-    # to make sure we are in fact replacing the dropout pattern.
-
     replace_pattern_with_filters(
         m,
         match_pattern,
         replacement_pattern,
-        match_filters=[_is_dropout_filter],
+        match_filters=[],
         ignore_literals=True,
     )
     m.recompile()

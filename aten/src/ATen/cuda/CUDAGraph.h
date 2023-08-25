@@ -19,7 +19,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  void capture_begin(MempoolId_t pool={0, 0});
+  void capture_begin(MempoolId_t pool={0, 0}, cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void replay();
   void reset();
