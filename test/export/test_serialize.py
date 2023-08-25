@@ -78,7 +78,7 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
@@ -103,7 +103,7 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,))
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
@@ -146,7 +146,7 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         )
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
@@ -170,7 +170,7 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,))
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
@@ -206,6 +206,13 @@ class TestDeserialize(TestCase):
                 self.assertTrue(torch.allclose(orig, loaded))
             else:
                 self.assertEqual(orig, loaded)
+
+        self.assertEqual(len(ep.original_traced_arguments), len(deserialized_ep.original_traced_arguments))
+        for arg1, arg2 in zip(ep.original_traced_arguments, deserialized_ep.original_traced_arguments):
+            if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
+                self.assertTrue(torch.allclose(arg1, arg2))
+            else:
+                self.assertEqual(type(arg1), type(arg2))
 
         def _check_graph_nodes(gm1, gm2, _check_meta=True):
             # TODO: The _check_meta flag bypasses checking for
@@ -436,9 +443,7 @@ class TestSchemaVersioning(TestCase):
         serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
         serialized_ep.schema_version = -1
         with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
-            ExportedProgramDeserializer().deserialize(
-                serialized_ep, serialized_state_dict
-            )
+            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
 
 
 class TestOpVersioning(TestCase):
