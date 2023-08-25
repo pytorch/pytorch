@@ -138,6 +138,11 @@ class GraphArgument:
     graph: 'Graph'
 
 
+@dataclass
+class CustomObjArgument:
+    blob: str
+
+
 # This is actually a union type
 @dataclass(repr=False)
 class Argument(_Union):
@@ -162,6 +167,7 @@ class Argument(_Union):
     as_sym_bools: List[SymBoolArgument]
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
+    as_custom_obj: CustomObjArgument
 
 
 @dataclass
@@ -191,6 +197,7 @@ class Graph:
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
+    is_single_tensor_return: bool = False
 
 
 @dataclass

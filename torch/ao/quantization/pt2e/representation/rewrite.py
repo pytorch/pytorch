@@ -12,6 +12,8 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from typing import Optional, Callable, Tuple, Any
 from dataclasses import dataclass
 
+from functools import partial
+
 __all__ = [
     "reference_representation_rewrite",
 ]
@@ -86,10 +88,29 @@ def _reference_quantized_conv2d(
         None, stride, padding, dilation, transposed, output_padding, groups)
     # Note: we are quantizing bias with these scales without signal from user, but it might be OK
     bias_scale = x_scale * weight_scale
-    bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale)
+    # bias quantization to int32 uses bias_scale = x_scale * weight_scale due to:
+    # Take linear calculation for example
+    # Out_(i, j)_fp32 = Sum_(over k)[X_(i, k)_fp32 * W_(i, k)_fp32] + bias_(i)_fp32
+    # Represent X, W fp32 as their dequant transforms
+    # A_fp32 = (A_q - A_zero_point)/A_scale
+    # Out_(i, j)_fp32 = Sum_(over k)[(X_(i, k)_fp32 - X_zp) * X_scale * (W_(i, k)_fp32 - W_zp) * W_scale] + bias_(i)_fp32
+    # Factor out X_scale and W_scale
+    # Out_(i, j)_fp32 = ((X_scale * W_scale) * Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)]) + bias_(i)_fp32
+    # In order to addition of bias_(i)_fp32 inside, we must do
+    # Out_(i, j)_fp32 = (X_scale * W_scale) * (Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)] + (1 / (X_scale * W_scale)) * bias_(i)_fp32)W_scale  # noqa: B950
+    # Note we had to multiply bias_fp32 qith X_scale * W_scale = bias_scale
+    # Thus bias quantization to int32 must be with X_scale * W_scale
+
+    bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
+    # Unsqueeze to match broadcast dims
+    # Unfortnuately I cannot do bias_i32.unsqueeze(0) due to literal matching nightmare
+    # in graph pattern replacement
+    bias_i32 = bias_i32.unsqueeze(-1)
+    bias_i32 = bias_i32.unsqueeze(-1)
+    acc_i32 = acc_i32 + bias_i32
     # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
     acc_i32 = out_dtype(
-        torch.ops.aten.mul.Tensor, torch.int32, acc_i32 + bias_i32, x_scale * weight_scale / out_scale) + out_zero_point
+        torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
@@ -361,8 +382,6 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
         literal_to_ph_idx={1: 3, -128: 4, 127: 5}
     )
 
-def _replace_ph_qconv(gm: torch.fx.GraphModule):
-    return _replace_literals_with_new_placeholders(gm, merge_dup=True, exclude_literals=[1])
 
 @dataclass
 class _RewriteInfo:
@@ -383,10 +402,8 @@ _REWRITE_INFO_LIST = [
         _QUANTIZED_CONV2d_EXAMPLE_INPUTS,
         _qdq_quantized_conv2d,
         _reference_quantized_conv2d,
-        _replace_literals_with_new_placeholders,
-        _replace_literals_with_new_placeholders,
-        # _replace_ph_qconv,
-        # _replace_ph_qconv
+        partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
+        partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
