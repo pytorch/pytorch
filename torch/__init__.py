@@ -354,14 +354,6 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
-    def __eq__(self, other):
-        # This can happen in dynamo, where we convert SymBool to a
-        # SymInt and if they're used in an if clause, they will become
-        # check equality.
-        if isinstance(other, py_int):  # type: ignore[arg-type]
-            return self.__int__() == other
-        return NotImplemented
-
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
