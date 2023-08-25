@@ -36,7 +36,6 @@
 
 #include <ATen/ATen.h>
 
-#include <autograd/function_hook.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
@@ -341,12 +340,12 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  if (!tensor.defined() || tensor.use_count() <= 1) {
+    return false;
+  }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
-    return false;
-  }
-  if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
   return true;
