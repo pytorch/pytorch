@@ -7,7 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from typing import Dict, List
+from typing import Dict, List, Tuple, Union
 
 import numpy
 import sympy
@@ -386,7 +386,6 @@ def cexpr_index(index):
 class RecordOptimizationContext:
     def __init__(self, func_name: str = ""):
         self.func_name = func_name
-        self.current_node: torch.fx.Node = None
         self.opt_ctx: OptimizationContext = None
 
     def __enter__(self):
@@ -1173,9 +1172,9 @@ class CppKernel(Kernel):
 
     def __init__(self, args, num_threads):
         super().__init__(args)
-        self.call_ranges = None
-        self.ranges = None
-        self.itervars = None
+        self.call_ranges: Tuple[int, ...] = tuple()
+        self.ranges = []
+        self.itervars = []
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
@@ -1281,7 +1280,7 @@ class CppKernel(Kernel):
         )
 
     def set_ranges(self, lengths, reduction_lengths):
-        if self.call_ranges:
+        if len(self.call_ranges):
             assert self.call_ranges == tuple(lengths) + tuple(
                 reduction_lengths
             ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
@@ -1413,10 +1412,10 @@ class CppKernel(Kernel):
     @contextlib.contextmanager
     def write_to_suffix(self):
         prior = (self.loads, self.compute, self.stores, self.cse)
-        self.loads = IndentedBuffer()
-        self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
-        self.cse = self.cse.clone()
+        self.loads: IndentedBuffer = IndentedBuffer()
+        self.compute: IndentedBuffer = IndentedBuffer()
+        self.stores: IndentedBuffer = IndentedBuffer()
+        self.cse: CSE = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
         self.reduction_suffix.splice(self.compute)
@@ -1657,7 +1656,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                     ]
                 else:
                     raise AssertionError(
-                        f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+                        f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
             self.reduction_suffix.writelines(store_lines)
 
@@ -1846,14 +1845,14 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack = contextlib.ExitStack()
 
         # Cache all the load result
-        self.load_supported_dtypes: list[torch.dtype] = [
+        self.load_supported_dtypes: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
             torch.float16,
             torch.bool,
             torch.uint8,
         ]
-        self.store_supported_dtypes: list[torch.dtype] = [
+        self.store_supported_dtypes: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -1861,7 +1860,7 @@ class CppVecKernelChecker(CppVecKernel):
         ]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
         # vectorization would not support it as it is hard to determine the vec dtype
-        self.store_dtypes: list[torch.dtype] = []
+        self.store_dtypes: List[torch.dtype] = []
         # The dtype is used for vectorization
         self.vec_dtype: torch.dtype = torch.float32
 
@@ -2080,7 +2079,7 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.simd_vec
 
             @staticmethod
-            def __getattr__(name):
+            def __getattr__(name):  # type: ignore[misc]
                 def inner(*args, **kwargs):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
@@ -2115,7 +2114,7 @@ class CppVecKernelChecker(CppVecKernel):
                     # VecKernel override dtype for constant
                     # Vectorization only support int32/fp32 now
                     # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = numpy.iinfo(numpy.int32)
+                    i32_iinfo: numpy.iinfo[numpy.int32] = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
                         and val <= i32_iinfo.max
@@ -2123,7 +2122,7 @@ class CppVecKernelChecker(CppVecKernel):
                     ):
                         opt_ctx.dtype = torch.int32
 
-                    f32_iinfo = numpy.finfo(numpy.float32)
+                    f32_iinfo: numpy.finfo[numpy.float32] = numpy.finfo(numpy.float32)
                     if dtype == torch.double:
                         if (
                             (val <= f32_iinfo.max and val >= f32_iinfo.min)
@@ -2173,7 +2172,7 @@ class CppVecKernelChecker(CppVecKernel):
 
                     vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        i32_iinfo: numpy.iinfo[numpy.int32] = numpy.iinfo(numpy.int32)
                         return (
                             expr.is_number
                             and expr <= i32_iinfo.max
@@ -2316,7 +2315,7 @@ class CppKernelProxy(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.kernel_group = kernel_group
         self.loop_nest = None
-        self.call_ranges = None
+        self.call_ranges: Tuple[int, ...] = tuple()
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
     def data_type_propagation(self, nodes):
@@ -2737,10 +2736,9 @@ class CppScheduling(BaseScheduling):
     def get_kernel_group(self):
         from .wrapper import CppWrapperCodeGen
 
+        self.kernel_group: KernelGroup = KernelGroup()
         if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
             self.kernel_group = CppWrapperKernelGroup()
-        else:
-            self.kernel_group = KernelGroup()
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
@@ -2909,13 +2907,13 @@ class LoopLevel:
     simd_omp: bool = False
     simd_vec: bool = False
     collapsed: bool = False
-    reduction_var_map: Dict[str, str] = None
-    parent: "LoopLevel" = None
+    reduction_var_map: Dict[str, str] = dataclasses.field(default_factory=dict)
+    parent: Union["LoopLevel", None] = None
     # the next inner level of the loop, empty if it is inner-most
     # contains >1 LoopLevel if the inner level of loop is split
     inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
     # kernel assigned to this loop level, only valid when it is a leaf
-    kernel: CppKernel = None
+    kernel: Union[CppKernel, None] = None
 
     def __post_init__(self):
         # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
@@ -2948,10 +2946,12 @@ class LoopLevel:
             loop = self
             if loop.is_reduction():
                 loop.reduction_var_map = kernel.reduction_var_map.copy()
-                loop = loop.parent
+                if loop.parent is not None:
+                    loop = loop.parent
                 while loop is not None and loop.is_reduction():
                     loop.reduction_var_map.update(kernel.reduction_var_map)
-                    loop = loop.parent
+                    if loop.parent is not None:
+                        loop = loop.parent
             return
         assert len(self.inner) == 1
         self.inner[0].set_kernel(kernel)
@@ -3079,8 +3079,8 @@ class LoopNestWithSplit:
     both inner-most and outer levels.
     """
 
-    root: List[LoopLevel] = None
-    kernel: CppKernel = None
+    root: List[LoopLevel] = dataclasses.field(default_factory=list)
+    kernel: Union[CppKernel, None] = None
 
     @staticmethod
     def build(kernel: CppKernel):
@@ -3091,14 +3091,15 @@ class LoopNestWithSplit:
 
         root: List[LoopLevel] = []
         levels: List[LoopLevel] = root
-        loop: LoopLevel = None
+        loop: Union[LoopLevel, None] = None
         for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
+            assert isinstance(reduction_depth, int)
             if loop_idx >= reduction_depth:
                 loop.reduction_var_map = kernel.reduction_var_map.copy()
             levels.append(loop)
             levels = loop.inner
-        loop_nest = LoopNestWithSplit(root, len(itervars))
+        loop_nest = LoopNestWithSplit(root, kernel)
         if loop:
             loop.kernel = kernel
         else:
