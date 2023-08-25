@@ -1830,6 +1830,34 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             qconfig_mapping,
         )
 
+    def test_qat_conv_no_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self, has_relu: bool):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        # simple conv
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(has_relu=False), example_inputs, is_per_channel=False, verify_convert=True,
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(has_relu=False), example_inputs, is_per_channel=True, verify_convert=True,
+        )
+        # conv + relu
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(has_relu=True), example_inputs, is_per_channel=False, verify_convert=True,
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(has_relu=True), example_inputs, is_per_channel=True, verify_convert=True,
+        )
+
     def test_prepare_qat_conv_bn_fusion(self):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         m = TestHelperModules.ConvWithBNRelu(relu=False)
@@ -1929,6 +1957,25 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m1 = TestHelperModules.ConvWithBNRelu(relu=True)
         self._verify_symmetric_qnnpack_qat_graph(
             m1, example_inputs, is_per_channel=True, has_relu=True
+        )
+
+    def test_qat_conv_bn_relu_fusion_no_conv_bias(self):
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
+        example_inputs = (torch.randn(3, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(
+            m1, example_inputs, is_per_channel=False, has_relu=True, has_bias=False,
+        )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
+        self._verify_symmetric_qnnpack_qat_numerics(
+            m1, example_inputs, is_per_channel=False, verify_convert=True,
+        )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
+        self._verify_symmetric_qnnpack_qat_graph(
+            m1, example_inputs, is_per_channel=True, has_relu=True, has_bias=False,
+        )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
+        self._verify_symmetric_qnnpack_qat_numerics(
+            m1, example_inputs, is_per_channel=True, verify_convert=True,
         )
 
     def test_qat_inplace_add_relu(self):
