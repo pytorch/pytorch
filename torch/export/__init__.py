@@ -595,6 +595,9 @@ class Constraint(_ConstraintTarget):
 
     """
 
+    constraint_range: StrictMinMaxConstraint
+    shared: Optional[_ConstraintTarget]
+
     def __init__(self):
         raise NotImplementedError(
             "Can't directly construct Constraint object. Please use torch.export.dynamic_dim API instead."
@@ -604,7 +607,6 @@ class Constraint(_ConstraintTarget):
         bare_instance = object.__new__(cls)
         return bare_instance
 
-    @typing.no_type_check
     @classmethod
     def _create_constraint(
         cls,
@@ -622,7 +624,6 @@ class Constraint(_ConstraintTarget):
         instance.shared = shared
         return instance
 
-    @typing.no_type_check
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -667,21 +668,17 @@ class Constraint(_ConstraintTarget):
         # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
         # which is not reliable
         return {
-            "t_id": self.t_id,  # type: ignore[attr-defined]
-            "dim": self.dim,  # type: ignore[attr-defined]
-            "min": self.constraint_range.vr.lower,  # type: ignore[attr-defined]
-            "max": self.constraint_range.vr.upper,  # type: ignore[attr-defined]
+            "t_id": self.t_id,
+            "dim": self.dim,
+            "min": self.constraint_range.vr.lower,
+            "max": self.constraint_range.vr.upper,
             "shared": (
                 None
-                if self.shared is None  # type: ignore[attr-defined]
-                else {
-                    "t_id": self.shared.t_id,  # type: ignore[attr-defined]
-                    "dim": self.shared.dim,  # type: ignore[attr-defined]
-                }
+                if self.shared is None
+                else {"t_id": self.shared.t_id, "dim": self.shared.dim}
             ),
         }
 
-    @typing.no_type_check
     def __eq__(self, other):
         if not isinstance(other, Constraint):
             raise TypeError(
