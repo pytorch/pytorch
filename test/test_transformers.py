@@ -1744,6 +1744,21 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @parametrize("dtype", [torch.float, torch.float16])
+    def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
+        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim = 1, 32, 64
+        seq_len_q, seq_len_kv = 8192, 8192
+        query = make_tensor((batch, num_heads, seq_len_q, head_dim))
+        kv_shape = (batch, num_heads, seq_len_kv, head_dim)
+        key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+        mask = torch.randn((batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype)
+        with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, mask)
+        out.sum().backward()
+
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     @parametrize("head_dims_match", [True, False])
