@@ -323,7 +323,6 @@ PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
     PyGetSetDescrObject* m = (PyGetSetDescrObject*)obj;
     if (m->d_getset->doc) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
       return PyErr_Format(
           PyExc_RuntimeError,
           "attribute '%s' already has a docstring",
@@ -1023,8 +1022,7 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
-static PyMethodDef TorchMethods[] = {
+static PyMethodDef TorchMethods[] = { // NOLINT
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
@@ -1300,7 +1298,6 @@ PyObject* initModule() {
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 
-// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ASSERT_TRUE(cmd) \
   if (!(cmd))            \
   return nullptr
