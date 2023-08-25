@@ -230,8 +230,10 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_kernel_split_arg_limit_list(self, op):
+        # NB: foeach_copy won't pass this test because it will dce one set of buffers
+
         def fn(a, b):
             return op(a, b)
 
@@ -313,7 +315,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_consumer_scalar(self, op):
         def fn(a0, a1):
             c = op([a0, a1], 4.7)
@@ -353,7 +355,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.mul(a0, b0)
