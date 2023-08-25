@@ -2131,8 +2131,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
         ref_node_occurrence = {
-            # TODO[tmanlaibaatar]: out_dtype is lost in capture_pre_autograd_graph currently
-            # ns.call_function(out_dtype): 2,
+            ns.call_function(out_dtype): 2,
         }
 
         self._test_representation(
