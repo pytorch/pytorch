@@ -339,6 +339,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
+        wait_tensor(self.elem)
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
