@@ -96,19 +96,18 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
-    if type(k) == DispatchKey:
-        from torch._ops import pop_mode_for_key
-        # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
-        # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
-        # that we push onto these per-dispatch-key-mode-stacks.
-        return pop_mode_for_key(k)
-    else:
+    if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
         return _pop_torch_dispatch_stack(k)
+    from torch._ops import pop_mode_for_key
+    # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
+    # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
+    # that we push onto these per-dispatch-key-mode-stacks.
+    return pop_mode_for_key(k)
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None, mode_key: Optional[torch._C._TorchDispatchModeKey] = None):
-    old = _pop_mode(k, mode_key)
+def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
+    old = _pop_mode(k)
     try:
         yield old
     finally:
