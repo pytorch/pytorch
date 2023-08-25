@@ -15,7 +15,7 @@ import sys
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 try:
@@ -39,11 +39,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    EqualityConstraint,
-    is_concrete_int,
-    SYMPY_INTERP,
-)
+from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -879,8 +875,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List[ReferenceType[object]] = []
-        self._seen_ids: Set[int] = set()
+        self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
 
         # Note: right overrides left
@@ -935,7 +930,7 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
         )
-        self._seen_ids.clear()
+        self._weakrefs.clear()
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
@@ -1017,10 +1012,11 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if is_concrete_int(dim):
-                        converted.append(int(dim))
+                    if isinstance(dim, int):
+                        converted.append(dim)
                     else:
-                        converted.append(None)
+                        assert isinstance(dim, torch.SymInt)
+                        converted.append(dim.node.maybe_as_int())
                 return converted
 
             dynamic_dims_sizes = [
@@ -1137,16 +1133,19 @@ class CheckFunctionManager:
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
-    def invalidate(self, ref):
+    def invalidate(self):
         # A weakref is no longer valid, self.check_fn should return false
         self.valid = False
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
         try:
-            if id(obj) not in self._seen_ids:
-                self._weakrefs.append(weakref.ref(obj, self.invalidate))
-                self._seen_ids.add(id(obj))
+            if id(obj) not in self._weakrefs:
+                # We will clear the _weakrefs dict at the end of __init__
+                # function, which will delete the callbacks as well. Therefore,
+                # we are using a finalizer which is kept alive.
+                self._weakrefs[id(obj)] = weakref.ref(obj)
+                weakref.finalize(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
