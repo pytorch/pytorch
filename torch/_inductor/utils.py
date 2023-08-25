@@ -246,7 +246,7 @@ def freeze_inputs(f):
         args = [freeze_value(x) for x in args]
         return f(*args)
 
-    wrapped.cache_info = f.cache_info
+    wrapped.cache_info = f.cache_info  # type: ignore[attr-defined]
     return wrapped
 
 
@@ -805,7 +805,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
