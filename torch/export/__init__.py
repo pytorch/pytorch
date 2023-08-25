@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -570,22 +571,19 @@ class ExportedProgram:
                     assert node.target != torch.ops.higher_order._export_tracepoint
 
 
-@dataclasses.dataclass
 class _ConstraintTarget:
     """
     This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`torch.export.dynamic_dim`.
     """
 
-    w_tensor: Any  # weakref to torch.Tensor
-    # TODO: We don't need t_id; we can get it off of w_tensor
-    t_id: int
-    dim: int
+    def __init__(self, w_tensor: Any, t_id: int, dim: int):
+        self.w_tensor = w_tensor  # weakref to torch.Tensor
+        # TODO: We don't need t_id; we can get it off of w_tensor
+        self.t_id = t_id
+        self.dim = dim
 
 
-# TODO(ycao): Disable constructor of Constraint so that it can only be constructed
-# with dynamic_dim
-@dataclasses.dataclass
 class Constraint(_ConstraintTarget):
     """
 
@@ -597,12 +595,34 @@ class Constraint(_ConstraintTarget):
 
     """
 
-    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
-    # Represent that `constraint_range` is shared with another _ConstraintTarget, which
-    # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[_ConstraintTarget] = None
+    def __init__(self):
+        raise NotImplementedError(
+            "Can't directly construct Constraint object. Please use torch.export.dynamic_dim API instead."
+        )
 
+    def __new__(cls):
+        bare_instance = object.__new__(cls)
+        return bare_instance
+
+    @typing.no_type_check
+    @classmethod
+    def _create_constraint(
+        cls,
+        w_tensor: Any,
+        t_id: int,
+        dim: int,
+        constraint_range: StrictMinMaxConstraint,
+        shared: Optional[_ConstraintTarget] = None,
+    ):
+        instance = cls.__new__(cls)
+        instance.w_tensor = w_tensor
+        instance.t_id = t_id
+        instance.dim = dim
+        instance.constraint_range = constraint_range
+        instance.shared = shared
+        return instance
+
+    @typing.no_type_check
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -610,7 +630,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(
+        return Constraint._create_constraint(
             self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
         )
 
@@ -647,20 +667,21 @@ class Constraint(_ConstraintTarget):
         # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
         # which is not reliable
         return {
-            "t_id": self.t_id,
-            "dim": self.dim,
-            "min": self.constraint_range.vr.lower,
-            "max": self.constraint_range.vr.upper,
+            "t_id": self.t_id,  # type: ignore[attr-defined]
+            "dim": self.dim,  # type: ignore[attr-defined]
+            "min": self.constraint_range.vr.lower,  # type: ignore[attr-defined]
+            "max": self.constraint_range.vr.upper,  # type: ignore[attr-defined]
             "shared": (
                 None
-                if self.shared is None
+                if self.shared is None  # type: ignore[attr-defined]
                 else {
-                    "t_id": self.shared.t_id,
-                    "dim": self.shared.dim,
+                    "t_id": self.shared.t_id,  # type: ignore[attr-defined]
+                    "dim": self.shared.dim,  # type: ignore[attr-defined]
                 }
             ),
         }
 
+    @typing.no_type_check
     def __eq__(self, other):
         if not isinstance(other, Constraint):
             raise TypeError(
@@ -671,7 +692,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
-        return Constraint(
+        return Constraint._create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,

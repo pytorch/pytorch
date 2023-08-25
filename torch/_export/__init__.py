@@ -79,7 +79,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
             f" but got {index}, which is out of bounds for the given tensor."
         )
 
-    return Constraint(
+    return Constraint._create_constraint(
         weakref.ref(t),
         id(t),
         index,

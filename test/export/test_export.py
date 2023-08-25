@@ -8,6 +8,7 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map
 from torch import Tensor
+from torch.export import Constraint
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import register_dataclass_as_pytree_node, is_param, get_param
@@ -939,6 +940,13 @@ class TestExport(TestCase):
         re_exported_v2 = torch._export.export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
+
+    def test_constraint_directly_construct(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Can't directly construct Constraint object. Please use torch.export.dynamic_dim"
+        ):
+            _ = Constraint()
 
 
 if __name__ == '__main__':
