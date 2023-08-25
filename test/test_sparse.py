@@ -481,6 +481,27 @@ class TestSparse(TestSparseBase):
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
+    @coalescedonoff
+    @dtypes(torch.double)
+    def test_ctor_is_coalesced_with_gradcheck(self, device, dtype, coalesced):
+        for sparse_size, nnz in (((3, 3), 5), ((2, 3, 1, 5), 11)):
+            t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size, dtype, device, coalesced)
+            self.assertEqual(t.is_coalesced(), coalesced)
+
+            def func(indices, values, shape, is_coalesced):
+                s = torch.sparse_coo_tensor(indices, values, shape, check_invariants=True, is_coalesced=is_coalesced)
+                self.assertEqual(s.is_coalesced(), is_coalesced)
+                return s.to_dense(masked_grad=False)
+
+            if coalesced:
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
+            else:
+                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
+                with self.assertRaisesRegex(RuntimeError,
+                                            "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
+                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
+
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
