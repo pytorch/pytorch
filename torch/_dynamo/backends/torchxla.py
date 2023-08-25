@@ -4,11 +4,7 @@ import warnings
 from functorch.compile import make_boxed_func
 
 from ..backends.common import aot_autograd
-from ..backends.registry import (
-    register_experimental_backend as register_experimental_backend,
-)
-
-from .registry import register_backend
+from .registry import register_experimental_backend, register_backend
 
 log = logging.getLogger(__name__)
 
