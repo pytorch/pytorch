@@ -455,6 +455,9 @@ class FlatParamHandle:
             from ``named_parameters()``.
     """
 
+    # Attributes for rate limiting
+    _free_event_queue: _FreeEventQueue
+
     ##################
     # INITIALIZATION #
     ##################
@@ -539,14 +542,14 @@ class FlatParamHandle:
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
-        # Attributes for wait system for rate limiting
-        self._free_event_queue: Optional[_FreeEventQueue] = None
+        # Attributes for rate limiting
         self._limit_all_gathers: Optional[bool] = None
 
-    def init_wait_system(self,
+    def init_wait_system(
+        self,
         free_event_queue: _FreeEventQueue,
         limit_all_gathers: bool,
-    ):
+    ) -> None:
         self._free_event_queue = free_event_queue
         self._limit_all_gathers = limit_all_gathers
 
