@@ -11,7 +11,7 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union, Iterable
 
 import sympy
 
@@ -19,7 +19,7 @@ import torch
 import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import pytree_to_str, str_to_pytree
+from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_map_only
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -242,28 +242,25 @@ def deserialize_signature(sig: GraphSignature) -> ep.ExportGraphSignature:
     )
 
 
-def serialize_state_dict(state_dict: Dict[str, Any]) -> bytes:
+def serialize_torch_artifact(artifact: Union[Dict[str, Any], Iterable[Any]]) -> bytes:
     buffer = io.BytesIO()
-    state_dict = dict(state_dict)
-    for name in state_dict:
-        # This is a workaround for backend's tensor deserialization problem:
-        # unpickleTensor() always create a tensor on the device where it was originally saved
-        # This behavior is bad for multi-gpu training, as we wish to directly load the tensor
-        # on the designated device.
-        # For now, we simply move the tensor to cpu before saving.
-        # TODO: this should be fixed by deserialization instead.
-        state_dict[name] = state_dict[name].cpu()
-    torch.save(state_dict, buffer)
+    # This is a workaround for backend's tensor deserialization problem:
+    # unpickleTensor() always create a tensor on the device where it was originally saved
+    # This behavior is bad for multi-gpu training, as we wish to directly load the tensor
+    # on the designated device.
+    # For now, we simply move the tensor to cpu before saving.
+    # TODO: this should be fixed by deserialization instead.
+    artifact = tree_map_only(torch.Tensor, lambda t: t.cpu(), artifact)
+    torch.save(artifact, buffer)
     return buffer.getvalue()
 
 
-def deserialize_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
+def deserialize_torch_artifact(serialized: bytes) -> Union[Dict[str, torch.Tensor], List[torch.Tensor]]:
     if len(serialized) == 0:
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     return torch.load(buffer)
-
 
 
 def _sympy_int_to_int(val: sympy.Expr):
@@ -792,6 +789,9 @@ class ExportedProgramSerializer:
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
+        serialized_original_arguments = base64.b64encode(
+            serialize_torch_artifact(exported_program.original_traced_arguments)
+        ).decode('utf-8')
 
         return (
             ExportedProgram(
@@ -800,8 +800,9 @@ class ExportedProgramSerializer:
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
+                original_traced_arguments=serialized_original_arguments,
             ),
-            serialize_state_dict(exported_program.state_dict),
+            serialize_torch_artifact(exported_program.state_dict),
         )
 
 
@@ -1308,18 +1309,22 @@ class ExportedProgramDeserializer:
 
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
-        state_dict = deserialize_state_dict(serialized_state_dict)
+        state_dict = deserialize_torch_artifact(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
+        original_traced_arguments = deserialize_torch_artifact(
+            base64.b64decode(serialized_exported_program.original_traced_arguments)
+        )
 
         exported_program = ep.ExportedProgram(
             graph_module,
             graph_module.graph,
             sig,
             call_spec,
-            state_dict,
+            state_dict,  # type: ignore[arg-type]
             range_constraints,
             equality_constraints,
             module_call_graph,
+            original_traced_arguments,  # type: ignore[arg-type]
         )
         return upgrader.upgrade(exported_program)
 

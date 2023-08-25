@@ -434,6 +434,7 @@ def export(
         range_constraints,
         equality_constraints,
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        args,
     )
 
     exported_program = exported_program.transform(
