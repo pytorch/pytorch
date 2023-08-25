@@ -940,6 +940,18 @@ class TestExport(TestCase):
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
 
+    def test_constrain_as_size_error(self):
+
+        def f(x):
+            a = x.item()
+            return torch.full((a, 4), 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Tried to use data-dependent value in the subsequent computation"
+        ):
+            _ = export(f, (torch.tensor(6),))
+
 
 if __name__ == '__main__':
     run_tests()
