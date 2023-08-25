@@ -1,7 +1,7 @@
 import torch
+from torch._export.constraints import constrain_as_size
 
 from torch._export.db.case import export_case
-from torch._export.constraints import constrain_as_size
 
 
 @export_case(
