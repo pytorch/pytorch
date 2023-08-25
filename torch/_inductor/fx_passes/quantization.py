@@ -69,6 +69,28 @@ dequantize_qconv_pt2e_pattern = CallFunction(
     Arg(),  # algorithm
 )
 
+dequantize_accum_pattern = CallFunction(
+    aten.mul.Tensor,
+    CallFunction(
+        aten.sub.Tensor,
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("accum"),
+            KeywordArg("accum_dq_dtype"),
+        ),
+        KeywordArg("accum_zp"),
+    ),
+    KeywordArg("accum_scale"),
+)
+
+
+def generate_pattern_with_binary(binary_post_op, computation_call, extra_input_pattern):
+    return CallFunction(
+        binary_post_op,
+        computation_call,
+        extra_input_pattern,
+    )
+
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
@@ -179,6 +201,67 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
+def _register_quantized_conv_binary_lowering(
+    pattern,
+    pass_number,
+    computation_op,
+    fp32_output,
+    binary_unary_attr,
+):
+    @register_lowering_pattern(pattern, pass_number=pass_number)
+    def qconv_binary(match: Match, *args, **kwargs):
+        x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
+        accum, accum_scale, accum_zp = (
+            kwargs["accum"],
+            kwargs["accum_scale"],
+            kwargs["accum_zp"],
+        )
+        packed_weight, w_scale, w_zp = (
+            kwargs["packed_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+        b, stride, padding, dilation, groups = (
+            kwargs["b"],
+            kwargs["stride"],
+            kwargs["padding"],
+            kwargs["dilation"],
+            kwargs["groups"],
+        )
+        o_inv_scale, o_zero_point = (
+            kwargs["o_inv_scale"],
+            kwargs["o_zp"],
+        )
+
+        computation_args = (
+            x,
+            x_scale,
+            x_zp,
+            accum,
+            accum_scale,
+            accum_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            b,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            binary_unary_attr.binary_op_name,
+            binary_unary_attr.alpha,
+            binary_unary_attr.unary_op_name,
+            binary_unary_attr.scalars_attr,
+            binary_unary_attr.algorithm_attr,
+        )
+        return L[computation_op](*computation_args)
+
+    return qconv_binary
+
+
 def _register_quantization_unary_fusion():
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
@@ -208,8 +291,56 @@ def _register_quantization_unary_fusion():
         )
 
 
+def _register_quantization_binary_fusion():
+    class BinaryUnaryAttr:
+        def __init__(
+            self,
+            binary_op_name: str,
+            alpha=None,
+            unary_op_name: str = "none",
+            scalars_attr=None,
+            algorithm_attr=None,
+        ):
+            self.binary_op_name = binary_op_name
+            self.alpha = alpha if alpha else 1.0
+            self.unary_op_name = unary_op_name
+            self.scalars_attr = scalars_attr if scalars_attr else []
+            self.algorithm_attr = algorithm_attr if algorithm_attr else ""
+
+    binary_replace_patterns = {
+        BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_binary(
+                aten.add.Tensor,
+                dequantize_qconv_pt2e_pattern,
+                dequantize_accum_pattern,
+            )
+        ),
+        BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_unary(
+                generate_pattern_with_binary(
+                    aten.add.Tensor,
+                    dequantize_qconv_pt2e_pattern,
+                    dequantize_accum_pattern,
+                ),
+                aten.relu.default,
+            )
+        ),
+    }
+
+    for binary_unary_attr, patterns in binary_replace_patterns.items():
+        # Register qconv2d_binary_unary pattern for ExternKernel Lowering
+        _register_quantized_conv_binary_lowering(
+            patterns,
+            0 if binary_unary_attr.unary_op_name != "none" else 1,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+            False,  # fp32_output
+            binary_unary_attr,  # binary_unary_attr
+        )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
+    _register_quantization_binary_fusion()
 
 
 def _is_valid_dequant_promotion_pattern(match):
