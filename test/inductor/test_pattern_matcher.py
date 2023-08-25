@@ -555,8 +555,10 @@ class TestPaternMatcher(TestCase):
         # good case
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
-            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [2, 3, 5], 1)
-            return [s ** 2 for s in split_with_sizes]
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
 
         args = [
             torch.randn(2, 2, device="cuda"),
@@ -573,8 +575,10 @@ class TestPaternMatcher(TestCase):
         # cat node has other users
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
-            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [2, 3, 5], 1)
-            return [s ** 2 for s in split_with_sizes] + [cat ** 3]
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes] + [cat**3]
 
         args = [
             torch.randn(2, 2, device="cuda"),
@@ -591,8 +595,10 @@ class TestPaternMatcher(TestCase):
         # cat and split dims are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
-            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [2, 3, 5], 0)
-            return [s ** 2 for s in split_with_sizes]
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 0
+            )
+            return [s**2 for s in split_with_sizes]
 
         args = [
             torch.randn(10, 2, device="cuda"),
@@ -610,7 +616,7 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
-            return [s ** 2 for s in split_with_sizes]
+            return [s**2 for s in split_with_sizes]
 
         args = [
             torch.randn(2, 2, device="cuda"),
@@ -627,8 +633,10 @@ class TestPaternMatcher(TestCase):
         # cat input sizes and split sizes are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
-            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [2, 5, 3], 1)
-            return [s ** 2 for s in split_with_sizes]
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 5, 3], 1
+            )
+            return [s**2 for s in split_with_sizes]
 
         args = [
             torch.randn(2, 2, device="cuda"),
