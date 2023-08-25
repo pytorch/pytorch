@@ -1298,7 +1298,7 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug(f"CUDA command: {res}", flush=True)
+    log.debug(f"CUDA command: {res}")
     return res
 
 

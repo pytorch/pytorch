@@ -4763,6 +4763,9 @@ class MutableBox(IRNode):
     def get_layout(self):
         return self.layout
 
+    def get_size(self):
+        return self.data.get_size()
+
     def __str__(self):
         if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("

@@ -335,8 +335,7 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, node: ir.TritonTemplateBuffer):
-        name = node.get_name()
+    def call_kernel(self, name: str, node: ir.TritonTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
 
@@ -435,7 +434,7 @@ class TritonTemplate(KernelTemplate):
             index_dtype="tl.int32",
         )
         with patch.object(
-            V.graph, "get_dtype", self.fake_get_dtype(fake_out)
+            V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
@@ -728,6 +727,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
+        if make_benchmark_fn.cache_info().currsize or log.getEffectiveLevel() == logging.DEBUG:
             self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug(f"selected choice: {str(selected_choice)}")
