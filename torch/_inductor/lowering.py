@@ -1340,6 +1340,60 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
+        )
+        def qconvolution_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            accum: TensorBox,
+            accum_scale,
+            accum_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    accum,
+                    accum_scale,
+                    accum_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
         if torch._C.has_mkl:
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
