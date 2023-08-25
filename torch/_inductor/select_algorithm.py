@@ -780,10 +780,10 @@ class AlgorithmSelectorCache(PersistentCache):
             return timing
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_process
+            from .autotune_process import tuning_pool
 
             # do the optional warmup
-            tuning_process.initialize()
+            tuning_pool.initialize()
 
         autotune_start_ts = time.time()
         timings = self.lookup(
@@ -834,39 +834,34 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def benchmark_in_current_process(choice):
-            if DEBUG:
-                start_ts = time.time()
-            out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
-            return result
+        def benchmark_in_current_process(choices):
+            timings = {}
+            for choice in choices:
+                out.zero_()
+                if isinstance(choice, ExternKernelCaller):
+                    # aten kernels want the offset baked in for sliced tensors
+                    result = choice.benchmark(*example_inputs_extern, out=out_extern)
+                else:
+                    # triton templates want the base pointer for sliced tensors
+                    result = choice.benchmark(*example_inputs, out=out)
+                if VERIFY:
+                    torch.testing.assert_close(out_extern, expected, **VERIFY)
+                torch.cuda.synchronize()  # shake out any CUDA errors
+                timings[choice] = result
+
+            return timings
 
         def benchmark_in_sub_process(choice):
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            if isinstance(choice, ExternKernelCaller):
-                return benchmark_in_current_process(choice)
-
             from . import autotune_process
 
-            if DEBUG:
-                start_ts = time.time()
+            # only benchmark triton kernel in sub process for now.
+            # ATen/Extern kernel are still benchmarked in the current process.
+            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
-            out = autotune_process.benchmark_in_sub_process(
-                choice,
-            )
-            if DEBUG:
-                elapse = time.time() - start_ts
-                print(f"MultiProcessTuning {choice}: {elapse}")
-            return out
+            timings = benchmark_in_current_process(extern)
+            timings.update(autotune_process.benchmark_in_sub_process(triton))
+            return timings
 
         benchmark = (
             benchmark_in_sub_process
