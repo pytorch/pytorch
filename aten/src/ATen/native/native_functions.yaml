@@ -406,7 +406,7 @@
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CPU, CUDA, Meta: view_as_complex
+    CPU, CUDA, MPS, Meta: view_as_complex
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
@@ -1599,6 +1599,7 @@
 - func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: polar_out
+    MPS: polar_out_mps
 
 - func: constant_pad_nd(Tensor self, SymInt[] pad, Scalar value=0) -> Tensor
   variants: function
@@ -2944,13 +2945,13 @@
     CPU: _validate_compressed_sparse_indices_cpu
     CUDA: _validate_compressed_sparse_indices_cuda
 
-- func: _cufft_get_plan_cache_size(int device_index) -> int
+- func: _cufft_get_plan_cache_size(DeviceIndex device_index) -> int
 
-- func: _cufft_get_plan_cache_max_size(int device_index) -> int
+- func: _cufft_get_plan_cache_max_size(DeviceIndex device_index) -> int
 
-- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
+- func: _cufft_set_plan_cache_max_size(DeviceIndex device_index, int max_size) -> ()
 
-- func: _cufft_clear_plan_cache(int device_index) -> ()
+- func: _cufft_clear_plan_cache(DeviceIndex device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3247,6 +3248,14 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
+
+- func: _cslt_compress(Tensor input) -> Tensor
+  dispatch:
+    CUDA: _cslt_compress
+
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, bool transpose_result=False) -> Tensor
+  dispatch:
+    CUDA: _cslt_sparse_mm
 
 - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
@@ -5301,7 +5310,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
-  tags: core
 
 - func: split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
