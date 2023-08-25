@@ -161,9 +161,7 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
-#          ls -la "${RUNNER_TEMP}"
           ls -la "${RUNNER_TEMP}"/artifacts
-
           rm -rf "${RUNNER_TEMP}"/artifacts
           mkdir "${RUNNER_TEMP}"/artifacts
 
