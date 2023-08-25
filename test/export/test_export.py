@@ -10,7 +10,13 @@ from functorch.experimental.control_flow import map
 from torch import Tensor
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
-from torch._export.utils import register_dataclass_as_pytree_node, is_param, get_param
+from torch._export.utils import (
+    get_buffer,
+    get_param,
+    is_buffer,
+    is_param,
+    register_dataclass_as_pytree_node,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -456,6 +462,21 @@ class TestExport(TestCase):
         self.assertEqual(num_params, 2)
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
+
+    def test_buffer_util(self):
+        ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45), ))
+        num_buffer = 0
+        buffer = []
+
+        for node in ep.graph.nodes:
+            if is_buffer(ep, node):
+                num_buffer += 1
+                buffer.append(get_buffer(ep, node))
+        self.assertEqual(num_buffer, 3)
+
+        self.assertEqual(buffer[0].shape, torch.Size([100]))  # running_mean
+        self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
+        self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
 
     def test_export_dynamo_config(self):
