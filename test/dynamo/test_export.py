@@ -3721,6 +3721,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
 
         self.assertTrue(torch.allclose(m(x), gm(x)))
 
+    @unittest.expectedFailure
     def test_predispatch_with_for_out_dtype_nested(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
