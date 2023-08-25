@@ -380,15 +380,6 @@ class ExportedProgram:
 
         return unlift_exported_program_lifted_states(self)
 
-    # TODO(ycao): Remove this after migration.
-    def transform(self, *passes: PassType) -> "ExportedProgram":
-        """
-        .. warning::
-            Do not use.
-
-        """
-        return self._transform(*passes)
-
     def _transform(self, *passes: PassType) -> "ExportedProgram":
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             RangeConstraint,

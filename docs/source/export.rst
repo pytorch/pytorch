@@ -14,7 +14,6 @@ torch.export
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
-    .. automethod:: transform
     .. automethod:: validate
     .. automethod:: module
 
