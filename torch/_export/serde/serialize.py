@@ -342,6 +342,7 @@ class GraphModuleSerializer:
         self.graph_signature = graph_signature
         self.call_spec = call_spec
         self.module_call_graph = module_call_graph
+        self.state_dict: Dict[str, torch.Tensor] = {}
 
     @contextmanager
     def save_graph_state(self):
@@ -526,9 +527,17 @@ class GraphModuleSerializer:
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
                 assert isinstance(arg.target, str)
-                with self.save_graph_state():
-                    graph = self.serialize_graph(getattr(arg.graph.owning_module, arg.target))
-                return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
+                attr = getattr(arg.graph.owning_module, arg.target)
+
+                if isinstance(attr, torch.Tensor):
+                    self.state_dict[arg.name] = attr
+                    return Argument.create(as_tensor=TensorArgument(name=arg.name))
+                elif isinstance(attr, torch.fx.GraphModule):
+                    with self.save_graph_state():
+                        graph = self.serialize_graph(attr)
+                    return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
+                else:
+                    raise SerializeError(f"Unsupported getattr attribute {arg.target} with type: {type(attr)}")
             elif self.is_sym_int_arg(arg):
                 return Argument.create(as_sym_int=SymIntArgument.create(as_name=arg.name))
             elif self.is_sym_bool_arg(arg):
@@ -575,9 +584,15 @@ class GraphModuleSerializer:
                 return Argument.create(as_sym_bools=values)
             elif all(isinstance(a, torch.fx.Node) for a in arg):
                 # list of tensors
-                return Argument.create(
-                    as_tensors=[TensorArgument(name=a.name) for a in arg],
-                )
+                arguments = []
+                for a in arg:
+                    if a.op == "get_attr":
+                        assert isinstance(a.target, str)
+                        attr = getattr(a.graph.owning_module, a.target)
+                        assert isinstance(attr, torch.Tensor)
+                        self.state_dict[a.name] = attr
+                    arguments.append(TensorArgument(name=a.name))
+                return Argument.create(as_tensors=arguments)
             elif any(isinstance(a, torch.fx.Node) for a in arg):
                 def serialize_optional_tensor_args(a):
                     if a is None:
@@ -780,18 +795,21 @@ class ExportedProgramSerializer:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
     def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
-        serialized_graph_module = (
-            GraphModuleSerializer(
-                exported_program.graph_signature,
-                exported_program.call_spec,
-                exported_program.module_call_graph
-            ).serialize(exported_program.graph_module)
+        gm_serializer = GraphModuleSerializer(
+            exported_program.graph_signature,
+            exported_program.call_spec,
+            exported_program.module_call_graph
+        )
+        serialized_graph_module = gm_serializer.serialize(
+            exported_program.graph_module
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
         serialized_original_arguments = base64.b64encode(
             serialize_torch_artifact(exported_program.original_traced_arguments)
         ).decode('utf-8')
+
+        exported_program.state_dict.update(gm_serializer.state_dict)
 
         return (
             ExportedProgram(
@@ -903,6 +921,16 @@ class GraphModuleDeserializer:
 
     def deserialize_graph_output(self, output) -> torch.fx.Node:
         if isinstance(output.value, TensorArgument):
+            if output.value.name in self.state_dict:
+                val = self.state_dict[output.value.name]
+                setattr(self.module, output.value.name, val)
+                node = self.graph.create_node(
+                    "get_attr",
+                    output.value.name,
+                    name=output.value.name,
+                )
+                node.meta = {"val": ""}
+                return node
             return self.serialized_name_to_node[output.value.name]
         elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
             return self.serialized_name_to_node[output.value.as_name]
@@ -1006,11 +1034,13 @@ class GraphModuleDeserializer:
         self,
         serialized_graph_module: GraphModule,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
+        state_dict: Optional[Dict[str, torch.Tensor]] = None
     ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, List[ep.ModuleCallEntry], Dict[str, sympy.Symbol]]:
         self.shape_env = symbolic_shapes.ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(shape_env=self.shape_env)
         self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
         self.symbol_name_to_range = {} if symbol_name_to_range is None else symbol_name_to_range
+        self.state_dict = {} if state_dict is None else state_dict
 
         self.deserialize_graph(serialized_graph_module.graph)
 
@@ -1078,6 +1108,14 @@ class GraphModuleDeserializer:
         elif isinstance(value, Device):
             return deserialize_device(value)
         elif isinstance(value, TensorArgument):
+            if value.name in self.state_dict:
+                val = self.state_dict[value.name]
+                setattr(self.module, value.name, val)
+                return self.graph.create_node(
+                    "get_attr",
+                    value.name,
+                    name=value.name,
+                )
             return self.serialized_name_to_node[value.name]
         elif isinstance(value, (int, float, bool)):
             return value
@@ -1089,7 +1127,21 @@ class GraphModuleDeserializer:
             if len(value) == 0:
                 return []
             elif isinstance(value[0], TensorArgument):
-                return [self.serialized_name_to_node[arg.name] for arg in value]
+                result = []
+                for arg in value:
+                    if arg.name in self.state_dict:
+                        val = self.state_dict[arg.name]
+                        setattr(self.module, arg.name, val)
+                        result.append(
+                            self.graph.create_node(
+                                "get_attr",
+                                arg.name,
+                                name=arg.name,
+                            )
+                        )
+                    else:
+                        result.append(self.serialized_name_to_node[arg.name])
+                return result
             elif isinstance(value[0], (int, float, bool)):
                 # convert from serialized.python.types.List to python list
                 return list(value)
@@ -1299,6 +1351,7 @@ class ExportedProgramDeserializer:
             .deserialize(
                 serialized_exported_program.graph_module,
                 symbol_name_to_range,
+                state_dict,
             )
         )
         range_constraints = self.deserialize_range_constraints(
