@@ -2803,9 +2803,6 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64, torch.complex128]),
-                   # These fail only on ROCm
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
-                                dtypes=[torch.complex32], active_if=TEST_WITH_ROCM),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),

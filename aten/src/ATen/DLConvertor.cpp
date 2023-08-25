@@ -1,6 +1,9 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
 
+#include <iostream>
+#include <sstream>
+
 using namespace std;
 namespace at {
 

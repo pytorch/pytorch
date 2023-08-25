@@ -31,7 +31,14 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
+
+# controls the maximum number of cache entries with a guard on same ID_MATCH'd
+# object. It also controls the maximum size of cache entries if they don't have
+# any ID_MATCH'd guards.
+# TODO(janimesh) - Reduce this value to a smaller number once stability is reached.
 cache_size_limit = 64
+# controls the maximum number of entries for a code object.
+accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -250,6 +257,9 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+
+# Trace through NumPy or graphbreak
+trace_numpy = True
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
