@@ -188,6 +188,64 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
+    def test_max_autotune_multi_backends_regular_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
+    def test_max_autotune_multi_backends_mm_bias(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b, bias):
+            return torch.nn.functional.linear(a, b, bias)
+
+        a = torch.randn(2048, 51456).cuda().half()
+        b = torch.randn(4096, 51456).cuda().half()
+        bias = torch.randn(4096).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+            }
+        ):
+            Y = mm(a, b, bias)
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b, bias)
+            torch.testing.assert_close(Y_compiled, Y)
+
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic):
         """
@@ -202,6 +260,8 @@ class TestDoBench(TestCase):
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            Y = addmm(x, a, b)
+            torch.testing.assert_close(Y_compiled, Y)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
@@ -217,6 +277,39 @@ class TestDoBench(TestCase):
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
+    def test_max_autotune_addmm_multi_backends(self, max_autotune_gemm_backends):
+        """
+        Make sure autotuning addmm in sub processes work without crashes.
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def addmm(x, a, b, alpha, beta):
+            return torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+        def compare_results(m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]) -> None:
+            x = torch.randn(x_shape).cuda().half()
+            a = torch.randn(m, k).cuda().half()
+            b = torch.randn(k, n).cuda().half()
+            y_expected = addmm(x, a, b, alpha, beta)
+
+            compiled_fn = torch.compile(addmm, dynamic=False)
+            y = compiled_fn(x, a, b, alpha, beta)
+            torch.testing.assert_close(y, y_expected)
+
+        with config.patch({
+            "max_autotune": True,
+            "autotune_in_subproc": False,
+            "max_autotune_gemm_backends": max_autotune_gemm_backends,
+        }):
+            # No broadcast
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 2048])
+            # Broadcast first dim.
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
+            # Broadcast last dim.
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     @skipIfRocm
     def test_autotune_conv1x1(self):

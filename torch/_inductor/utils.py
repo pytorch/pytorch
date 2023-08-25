@@ -727,23 +727,34 @@ def is_big_gpu(index):
         return False
     return True
 
-
-def use_triton_template(layout, *, enable_int32=False):
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-    if enable_int32:
-        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+def _use_template_for_cuda() -> bool:
     return (
         (
             config.max_autotune
             or config.max_autotune_gemm
             or config.search_autotune_cache
         )
-        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
         and layout.device.type == "cuda"
-        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    if enable_int32:
+        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    return (
+        _use_template_for_cuda()
+        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+        and layout.dtype in layout_dtypes
+    )
+
+def use_cutlass_template(layout):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    return (
+        _use_template_for_cuda()
+        and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
+        and layout.dtype in layout_dtypes
+    )
 
 def use_aten_gemm_kernels():
     return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
