@@ -4540,7 +4540,6 @@ class TestSparseAny(TestCase):
 
         for args, kwargs in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
-                enable_hybrid=layout is torch.sparse_coo,  # TODO: remove after gh-107373 is resolved
                 enable_batch=False,  # TODO: remove after gh-104868 is resolved
                 output_tensor=False):
             values_offset = 1 if layout is torch.sparse_coo else 2
@@ -4566,7 +4565,7 @@ class TestSparseAny(TestCase):
                                     lambda i, v, sz: cnstr(i, v, sz, **kwargs_).to_dense(masked_grad=masked),
                                     args_, masked=masked)
                             else:
-                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and 0:
                                     # TODO: remove this if-block after gh-107370 is resolved
                                     continue
                                 torch.autograd.gradcheck(
@@ -5031,6 +5030,51 @@ class TestSparseAny(TestCase):
 
                 torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, result.values(),
                                                               result.shape, result.layout)
+
+    @all_sparse_layouts('mask_layout', include_strided=False)
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_sparse_mask(self, mask_layout, device, dtype):
+        input_layout = torch.strided
+        mask_dtype = torch.bool
+        for mask in self.generate_simple_inputs(mask_layout, dtype=mask_dtype, device=device,
+                                                enable_hybrid=False, enable_batch=False):
+
+            x = make_tensor(mask.shape, dtype=dtype, device=device).to_sparse(layout=input_layout)
+
+            result = x.sparse_mask(mask)
+
+            # Check invariant `x.sparse_mask(mask).<indices> == mask.<indices>`
+            if mask_layout is torch.sparse_coo:
+                self.assertEqual(result._indices(), mask._indices())
+                ones = torch.sparse_coo_tensor(mask._indices(),
+                                               torch.ones_like(mask._values(), dtype=x.dtype),
+                                               mask.shape,
+                                               is_coalesced=mask.is_coalesced())
+            elif mask_layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertEqual(result.crow_indices(), mask.crow_indices())
+                self.assertEqual(result.col_indices(), mask.col_indices())
+                ones = torch.sparse_compressed_tensor(mask.crow_indices(), mask.col_indices(),
+                                                      torch.ones_like(mask.values(), dtype=x.dtype),
+                                                      mask.shape, layout=mask.layout)
+            else:
+                self.assertEqual(result.ccol_indices(), mask.ccol_indices())
+                self.assertEqual(result.row_indices(), mask.row_indices())
+                ones = torch.sparse_compressed_tensor(mask.ccol_indices(), mask.row_indices(),
+                                                      torch.ones_like(mask.values(), dtype=x.dtype),
+                                                      mask.shape, layout=mask.layout)
+
+            # Check invariant:
+            #  x.sparse_mask(mask).to_dense() == x.mul(sparse_xyz_tensor(<mask indices>,
+            #                                          ones_like(<mask values>)).to_dense())
+            expected = x.mul(ones.to_dense())
+
+            self.assertEqual(result.to_dense(), expected)
+
+            # Check invariant `mask.to_dense().sparse_mask(mask) == mask`
+            result = mask.to_dense().sparse_mask(mask)
+            self.assertEqual(result, mask)
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
