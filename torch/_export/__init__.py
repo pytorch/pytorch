@@ -173,8 +173,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
-            if fake_val is not None:
-                assert isinstance(fake_val, torch.Tensor)
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
@@ -377,15 +376,16 @@ def export(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    # TODO: we should add runtime assertions for them
+    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    index = 0
+    total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and "val" in node.meta:
-            s = node.meta['val']
-            if (
-                isinstance(s, torch.SymInt) and
-                isinstance(fake_mode.shape_env.var_to_sources[s.node.expr][0], ConstantSource)
-            ):
-                node.meta['val'] = s.node.hint
+        if node.op == "placeholder":
+            if index >= total_param_buffers:
+                user_arg = flat_args[index - total_param_buffers]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
 
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -418,7 +418,6 @@ def export(
 
         node.meta["is_torch_exported"] = True
 
-    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
     range_constraints, equality_constraints = _process_constraints(
         gm,
         export_graph_signature,
