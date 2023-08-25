@@ -39,6 +39,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import ExternKernelNode
 from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
@@ -295,6 +296,7 @@ def compile_fx_inner(
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ):
     """
     Inductor API that compiles a single graph.
@@ -336,6 +338,7 @@ def compile_fx_inner(
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
         "layout_opt": layout_opt,
+        "extern_node_serializer": extern_node_serializer,
     }
 
     compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
@@ -489,6 +492,7 @@ def fx_codegen_and_compile(
     is_inference: bool = False,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> CompiledFxGraph:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -545,6 +549,7 @@ def fx_codegen_and_compile(
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
+            extern_node_serializer=extern_node_serializer,
         )
         with V.set_graph_handler(graph):  # type: ignore[call-arg]
             graph.run(*example_inputs)
@@ -860,11 +865,17 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
+    extern_node_serializer = config_patches.pop("extern_node_serializer", None)
+
     with mock.patch.object(_in_aot_compilation, "value", True):
         return compile_fx(
             model_,
             example_inputs_,
-            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            inner_compile=functools.partial(
+                inner_compile,
+                aot_mode=True,
+                extern_node_serializer=extern_node_serializer,
+            ),
             config_patches=config_patches,
         )
 

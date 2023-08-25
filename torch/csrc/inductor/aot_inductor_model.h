@@ -7,6 +7,7 @@
 #include <ATen/ATen.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/inductor/proxy_executor.h>
 
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
   {                                               \
@@ -51,12 +52,13 @@ class AOTInductorModelBase {
   void run(
       const std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
-      cudaStream_t stream) {
+      cudaStream_t stream,
+      ProxyExecutor* proxy_executor = nullptr) {
     AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
     AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
 
     auto* model = static_cast<Model*>(this);
-    model->run_impl(inputs, outputs, stream);
+    model->run_impl(inputs, outputs, stream, proxy_executor);
     C10_CUDA_CHECK(cudaEventRecord(run_finished_, stream));
   }
 
@@ -178,7 +180,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   void run_impl(
       const std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
-      cudaStream_t stream);
+      cudaStream_t stream,
+      ProxyExecutor* proxy_executor);
 
   static std::unique_ptr<AOTInductorModel> Create() {
     return std::make_unique<AOTInductorModel>();

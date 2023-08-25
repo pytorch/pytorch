@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -165,6 +165,7 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
         user_visible_outputs=frozenset(),
         layout_opt=None,
+        extern_node_serializer=None,
     ):
         super().__init__(gm)
 
@@ -196,6 +197,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        # See `ProxyExecutor Design Note` in ir.py for more details
+        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_node_serializer: Optional[
+            Callable[[List[ir.ExternKernelNode]], Any]
+        ] = extern_node_serializer
         self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
@@ -961,8 +967,24 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            serialized_extern_kernel_nodes = None
+            if (
+                config.is_fbcode()
+                and self.extern_kernel_nodes
+                and self.extern_node_serializer
+            ):
+                serialized_extern_kernel_nodes = self.extern_node_serializer(
+                    self.extern_kernel_nodes
+                )
+                output_code_log.debug(
+                    "Serialized Extern Kernel Nodes: \n%s",
+                    serialized_extern_kernel_nodes,
+                )
+
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(self, code, cuda=self.cuda)
+            return AotCodeCache.compile(
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+            )
         else:
             return self.compile_to_module().call
 

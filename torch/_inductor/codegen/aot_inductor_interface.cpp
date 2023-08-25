@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
 #include <iostream>
+#include <torch/csrc/inductor/proxy_executor.h>
 #include <stdexcept>
 #include <vector>
 
@@ -49,7 +50,8 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
-    AOTInductorStreamHandle stream_handle) {
+    AOTInductorStreamHandle stream_handle,
+    AOTInductorProxyExecutorHandle proxy_executor_handle) {
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
@@ -69,8 +71,11 @@ AOTInductorError AOTInductorModelContainerRun(
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+
+  torch::aot_inductor::ProxyExecutor* proxy_executor = reinterpret_cast<torch::aot_inductor::ProxyExecutor*>(proxy_executor_handle);
+
   CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { container->run(input_tensors, output_tensors, stream); })
+      { container->run(input_tensors, output_tensors, stream, proxy_executor); })
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(
