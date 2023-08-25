@@ -3120,7 +3120,7 @@ def forward(self, x):
                     int_pred = create_symint_from_symbool(pred)
                     gm, guards = torch._dynamo.export(f)(int_pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
-                    # self.assertExpectedInline(actual, exp_graph[i])
+                    self.assertExpectedInline(actual, exp_graph[i])
                     shape_env_guards = [
                         guard for guard in guards if "SHAPE_ENV" in guard.guard_types
                     ]
@@ -3135,14 +3135,14 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         sin = arg1.sin();  arg1 = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
