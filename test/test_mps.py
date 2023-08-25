@@ -503,7 +503,6 @@ def mps_ops_modifier(ops):
         'ormqr': None,
         'pca_lowrank': None,
         'pinverse': None,
-        # 'polar': None,
         'polygamma': None,
         'polygammapolygamma_n_0': None,
         'polygammapolygamma_n_1': None,
