@@ -1364,11 +1364,6 @@ class TorchPatcher:
             torch.optim.LBFGS,
         }
         for opt in optimizer_classes:
-            # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
-            # through the optimizer init without failing. See #107789
-            opt.register_load_state_dict_pre_hook = disable(
-                opt.register_load_state_dict_pre_hook
-            )
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
