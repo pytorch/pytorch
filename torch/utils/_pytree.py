@@ -419,81 +419,94 @@ class _TreeSpecSchema:
     context: DumpableContext
     children_spec: List['_TreeSpecSchema']
 
+class _ProtocolFn(NamedTuple):
+    treespec_to_json: Callable[[TreeSpec], DumpableContext]
+    json_to_treespec: Callable[[DumpableContext], TreeSpec]
+
+_SUPPORTED_PROTOCOLS: Dict[int, _ProtocolFn] = {}
+
+
+def _treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
+    if isinstance(spec, LeafSpec):
+        return _TreeSpecSchema(None, None, [])
+
+    if spec.type not in SUPPORTED_SERIALIZED_TYPES:
+        raise NotImplementedError(f"Serializing {spec.type} in pytree is not registered.")
+
+    serialize_node_def = SUPPORTED_SERIALIZED_TYPES[spec.type]
+
+    serialized_type = serialize_node_def.serialized_type
+
+    if serialize_node_def.to_dumpable_context is None:
+        try:
+            serialized_context = json.dumps(spec.context)
+        except TypeError as e:
+            raise TypeError(
+                "Unable to serialize context. "
+                "Please make the context json dump-able, or register a "
+                "custom serializer using _register_pytree_node."
+            ) from e
+    else:
+        serialized_context = serialize_node_def.to_dumpable_context(spec.context)
+
+    child_schemas = [_treespec_to_json(child) for child in spec.children_specs]
+
+    return _TreeSpecSchema(serialized_type, serialized_context, child_schemas)
+
+def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
+    if (
+        json_schema["type"] is None and
+        json_schema["context"] is None and
+        len(json_schema["children_spec"]) == 0
+    ):
+        return LeafSpec()
+
+    if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree is not registered.')
+
+    typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]
+    serialize_node_def = SUPPORTED_SERIALIZED_TYPES[typ]
+
+    if serialize_node_def.from_dumpable_context is None:
+        try:
+            context = json.loads(json_schema["context"])
+        except TypeError:
+            raise TypeError(
+                "Unable to deserialize context. "
+                "Please make the context json load-able, or register a "
+                "custom serializer using _register_pytree_node."
+            )
+    else:
+        context = serialize_node_def.from_dumpable_context(json_schema["context"])
+
+    children_spec = []
+    for child_string in json_schema["children_spec"]:
+        children_spec.append(_json_to_treespec(child_string))
+
+    return TreeSpec(typ, context, children_spec)
+
+
+_SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
+
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
-    def treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
-        if isinstance(spec, LeafSpec):
-            return _TreeSpecSchema(None, None, [])
-
-        if spec.type not in SUPPORTED_SERIALIZED_TYPES:
-            raise NotImplementedError(f"Serializing {spec.type} in pytree is not registered.")
-
-        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[spec.type]
-
-        serialized_type = serialize_node_def.serialized_type
-
-        if serialize_node_def.to_dumpable_context is None:
-            try:
-                serialized_context = json.dumps(spec.context)
-            except TypeError as e:
-                raise TypeError(
-                    "Unable to serialize context. "
-                    "Please make the context json dump-able, or register a "
-                    "custom serializer using _register_pytree_node."
-                ) from e
-        else:
-            serialized_context = serialize_node_def.to_dumpable_context(spec.context)
-
-        child_schemas = [treespec_to_json(child) for child in spec.children_specs]
-
-        return _TreeSpecSchema(serialized_type, serialized_context, child_schemas)
-
     if protocol is None:
         protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL
 
-    json_spec = treespec_to_json(treespec)
+    if protocol in _SUPPORTED_PROTOCOLS:
+        json_spec = _SUPPORTED_PROTOCOLS[protocol].treespec_to_json(treespec)
+    else:
+        raise ValueError(f"Unknown protocol {protocol}. Available protocols: {list(_SUPPORTED_PROTOCOLS.keys())}")
+
     str_spec = json.dumps((protocol, dataclasses.asdict(json_spec)))
     return str_spec
 
 def treespec_loads(data: str) -> TreeSpec:
     protocol, json_schema = json.loads(data)
 
-    if protocol != DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL:
-        raise ValueError(f"Protocol mismatch: {protocol} != {DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL}")
-
-    def json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
-        if (
-            json_schema["type"] is None and
-            json_schema["context"] is None and
-            len(json_schema["children_spec"]) == 0
-        ):
-            return LeafSpec()
-
-        if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
-            raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree is not registered.')
-
-        typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]
-        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[typ]
-
-        if serialize_node_def.from_dumpable_context is None:
-            try:
-                context = json.loads(json_schema["context"])
-            except TypeError:
-                raise TypeError(
-                    "Unable to deserialize context. "
-                    "Please make the context json load-able, or register a "
-                    "custom serializer using _register_pytree_node."
-                )
-        else:
-            context = serialize_node_def.from_dumpable_context(json_schema["context"])
-
-        children_spec = []
-        for child_string in json_schema["children_spec"]:
-            children_spec.append(json_to_treespec(child_string))
-
-        return TreeSpec(typ, context, children_spec)
-
-    return json_to_treespec(json_schema)
+    if protocol in _SUPPORTED_PROTOCOLS:
+        return _SUPPORTED_PROTOCOLS[protocol].json_to_treespec(json_schema)
+    raise ValueError(f"Unknown protocol {protocol}. Available protocols: {list(_SUPPORTED_PROTOCOLS.keys())}")
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
 def pytree_to_str(spec: TreeSpec) -> str:

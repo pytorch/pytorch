@@ -377,6 +377,22 @@ TreeSpec(TupleVariable, None, [*,
         with self.assertRaises(AttributeError):
             treespec_dumps("random_blurb")
 
+    def test_pytree_serialize_bad_protocol(self):
+        import json
+
+        Point = namedtuple("Point", ["x", "y"])
+        spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
+
+        with self.assertRaisesRegex(ValueError, "Unknown protocol"):
+            treespec_dumps(spec, -1)
+
+        serialized_spec = treespec_dumps(spec)
+        protocol, data = json.loads(serialized_spec)
+        bad_protocol_serialized_spec = json.dumps((-1, data))
+
+        with self.assertRaisesRegex(ValueError, "Unknown protocol"):
+            treespec_loads(bad_protocol_serialized_spec)
+
 
 instantiate_parametrized_tests(TestPytree)
 
