@@ -3624,6 +3624,27 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
 
         self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
 
+    def test_inplace_buffer_update(self):
+        class UpdateBufferModel(torch.nn.Module):
+            def __init__(self):
+                super(UpdateBufferModel, self).__init__()
+                self.register_buffer("x", torch.zeros(4, 8, 64))
+
+            def forward(self, incr):
+                self.x += incr
+                return self.x
+
+        model = UpdateBufferModel()
+        incr = torch.ones(4, 8, 64)
+
+        _ = model(incr)
+        r = model(incr)
+        self.assertTrue(torch.allclose(r, incr * 2))
+        em = torch._export.export(model, (incr,))
+        _ = em(incr)
+        er = em(incr)
+        self.assertTrue(torch.allclose(er, incr * 4))
+
     def test_param_buffer_safe_from_mutation_recurse(self):
         class Child(torch.nn.Module):
             def __init__(self):
