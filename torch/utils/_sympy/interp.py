@@ -92,7 +92,6 @@ def sympy_interp(
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     handler_name = handlers()[expr.func]
-    print("handling:", handler_name, expr, args)
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1
