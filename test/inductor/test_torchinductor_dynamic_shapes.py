@@ -46,7 +46,8 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # calling div on only symint args
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -58,9 +59,6 @@ if TEST_WITH_ROCM:
         ("cuda"), is_skip=True
     )
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
 
@@ -200,6 +198,19 @@ class TestInductorDynamic(TestCase):
         res = opt(x, (5, 5), (2, 2))
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    def test_slice_scatter(self, device):
+        def fn(i):
+            s3 = i.size(0)
+            x = torch.ones(64, s3, device=device)
+            y = torch.ones(64, s3 // 2, device=device)
+            return torch.slice_scatter(x, y, 1, s3 // 2, 2 * (s3 // 2))
+
+        a = torch.randn(16, device=device)
+        cfn = self.compile_fn(fn)
+        expect = fn(a)
+        actual = cfn(a)
+        self.assertEqual(expect, actual)
 
     def test_slice_index_changing_sign(self, device):
         def fn(x, y):

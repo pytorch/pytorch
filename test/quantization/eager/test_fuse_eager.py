@@ -421,7 +421,44 @@ class TestFuseEager(QuantizationTestCase):
         self.assertEqual(counter['pre_forwards'] - before_fusion_pre_count, 2 * len(self.img_data_1d))
         self.assertEqual(counter['forwards'] - before_fusion_post_count, 2 * len(self.img_data_1d))
 
+    def test_fuse_modules_with_nested_hooks(self):
+        r"""Test case that checks whether a nested module with sub-sub modules registered with hooks
+        can be safely fused. Safeguard for issues similar to https://github.com/pytorch/pytorch/issues/105063
+        in the future.
+        """
+        def myhook(*x):
+            return ""
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = ModelWithSequentialFusion().eval()
+
+                for sub_model in model.modules():
+                    if isinstance(sub_model, nn.Sequential):
+                        for layer in sub_model:
+                            if hasattr(layer, 'register_forward_hook'):
+                                layer.register_forward_hook(myhook)
+
+                fuse_modules(model, [['features.0.0', 'features.0.1', 'features.0.2']], inplace=True)
+                self.assertEqual(
+                    type(model.features[0][0]),
+                    nni.ConvReLU2d,
+                    msg="Fused submodule Conv + folded BN"
+                )
+                self.assertEqual(
+                    type(model.features[0][1]),
+                    nn.Identity,
+                    msg="Fused submodule (skipped BN)"
+                )
+                self.assertEqual(
+                    type(model.features[0][2]),
+                    nn.Identity,
+                    msg="Non-fused submodule Conv"
+                )
+
+
 if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_quantization.py TESTNAME\n\n"
+        "instead."
+    )

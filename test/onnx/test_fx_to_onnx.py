@@ -4,15 +4,15 @@ from __future__ import annotations
 import tempfile
 
 import onnx
-import pytest
 import pytorch_test_common
 import torch
+import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import diagnostics
+from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
 
@@ -20,7 +20,7 @@ def assert_has_diagnostics(
     diagnostic_context: diagnostics.DiagnosticContext,
     rule: infra.Rule,
     level: infra.Level,
-    expected_error_node: str,
+    expected_node: str,
 ):
     rule_level_pairs = (rule.id, level.name.lower())
     sarif_log = diagnostic_context.sarif_log()
@@ -35,13 +35,13 @@ def assert_has_diagnostics(
                 rule_level_pairs == id_level_pair
                 and result.message.text
                 and result.message.markdown
-                and expected_error_node in result.message.text
+                and expected_node in result.message.text
             ):
                 return
 
     raise AssertionError(
         f"Expected diagnostic results of rule id and level pair {rule_level_pairs} "
-        f"not found with expected error node {expected_error_node} and "
+        f"not found with expected error node {expected_node} and "
         f"Actual diagnostic results: {actual_results}"
     )
 
@@ -84,7 +84,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
         self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
-    def test_mnist(self):
+    @common_utils.parametrize(
+        "diagnostic_rule",
+        [
+            common_utils.subtest(
+                diagnostics.rules.find_opschema_matched_symbolic_function,
+                name="optional_inputs",
+            ),
+            common_utils.subtest(
+                diagnostics.rules.op_level_debugging,
+                name="get_attr_node_in_op_level_debug",
+            ),
+        ],
+    )
+    def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -107,7 +120,16 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _ = dynamo_export(MNISTModel(), tensor_x, export_options=self.export_options)
+        export_output = dynamo_export(
+            MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostic_rule,
+            diagnostics.levels.NONE,
+            expected_node="aten.convolution.default",
+        )
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -134,7 +156,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
+        export_output = dynamo_export(
+            TopKModel(), x, export_options=self.export_options
+        )
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -155,32 +179,28 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output.diagnostic_context,
             diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.embedding.default",
+            expected_node="aten.embedding.default",
         )
 
-    @common_utils.parametrize(
-        "op_level_debug, rule, expected_error_node",
-        [
-            common_utils.subtest(
-                (
-                    True,
-                    diagnostics.rules.op_level_debugging,
-                    "aten.convolution.default",
-                ),
-                name="bypassing_failed_op_level_debug",
-            ),
-            common_utils.subtest(
-                (
-                    False,
-                    diagnostics.rules.find_opschema_matched_symbolic_function,
-                    "aten.convolution.default",
-                ),
-                name="found_nearest_match",
-            ),
-        ],
-    )
-    def test_unsupported_function_schema_raises_diagnostic_warning(
-        self, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
+        self,
+    ):
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return input.new_zeros(())
+
+        x = torch.randn((2, 3), dtype=torch.float32)
+        export_output = dynamo_export(TraceModel(), x)
+
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.WARNING,
+            expected_node="aten.new_zeros.default",
+        )
+
+    def test_perfect_match_on_sequence_and_bool_attributes(
+        self,
     ):
         class TraceModel(torch.nn.Module):
             def __init__(self):
@@ -194,27 +214,56 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(20, 16, 50, 50)
         export_output = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=op_level_debug)
+            TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            rule,
-            diagnostics.levels.WARNING,
-            expected_error_node=expected_error_node,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.NONE,
+            expected_node="aten.convolution.default",
         )
 
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
         class TraceModel(torch.nn.Module):
             def forward(self, input):
-                return torch.ops.aten.add(input, input)
+                return torch.ops.aten.add.Tensor(input, input)
+
+        onnx_registry = torch.onnx.OnnxRegistry()
+        self.assertTrue(
+            onnx_registry.is_registered_op(
+                namespace="aten", op_name="add", overload="Tensor"
+            )
+        )
+        # TODO: Replace this example with a torch custom op when overload is supported
+        # Currently, torch only supports custom op with namespace and op_name
+        aten_add_Tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="add", overload="Tensor"
+        )
+        onnx_registry._registry.pop(aten_add_Tensor)
 
         x = torch.tensor(3)
-        export_output = dynamo_export(TraceModel(), x)
+        export_output = dynamo_export(
+            TraceModel(), x, export_options=ExportOptions(onnx_registry=onnx_registry)
+        )
         assert_has_diagnostics(
             export_output.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.add.Tensor",
+            expected_node="aten.add.Tensor",
+        )
+
+    def test_aten_clone_does_not_raise_warning_of_lack_of_memory_format(self):
+        class CustomModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.clone(input, memory_format=torch.preserve_format)
+
+        x = torch.tensor(3)
+        export_output = dynamo_export(CustomModule(), x)
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.NONE,
+            expected_node="aten.clone.default",
         )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
@@ -273,12 +322,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         with torch.onnx.enable_fake_mode() as fake_context:
             x = torch.rand(5, 2, 2)
             model = Model()
+            export_options = ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, x, export_options=export_options
+            )
 
-        # Export the model with fake inputs and parameters
-        export_options = ExportOptions(fake_context=fake_context)
-        export_output = torch.onnx.dynamo_export(
-            model, x, export_options=export_options
-        )
         assert (
             export_output is not None
         ), "ExportOutput must be created on successful export"
@@ -330,47 +378,222 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             fake_model = Model()
             fake_x = torch.rand(5, 2, 2)
 
-        # Scenario 1: Fake model and fake input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=None)
-            _ = torch.onnx.dynamo_export(
-                fake_model, fake_x, export_options=export_options
+            # TODO: Split each scenario on its own test case
+            # Scenario 1: Fake model and fake input WITHOUT ExportOptions(fake_context=...)
+            with self.assertRaises(torch.onnx.OnnxExporterError):
+                export_options = ExportOptions(fake_context=None)
+                _ = torch.onnx.dynamo_export(
+                    fake_model, fake_x, export_options=export_options
+                )
+
+            # Scenario 2: Fake model and real input WITHOUT fake_context
+            with self.assertRaises(torch.onnx.OnnxExporterError):
+                export_options = ExportOptions(fake_context=None)
+                _ = torch.onnx.dynamo_export(
+                    fake_model, real_x, export_options=export_options
+                )
+
+            # Scenario 3: Real model and real input WITH fake_context
+            with self.assertRaises(torch.onnx.OnnxExporterError):
+                export_options = ExportOptions(fake_context=fake_context)
+                _ = torch.onnx.dynamo_export(
+                    real_model, real_x, export_options=export_options
+                )
+
+            # Scenario 4: Fake model and real input WITH fake_context
+            with self.assertRaises(torch.onnx.OnnxExporterError):
+                export_options = ExportOptions(fake_context=fake_context)
+                _ = torch.onnx.dynamo_export(
+                    fake_model, real_x, export_options=export_options
+                )
+
+    # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
+    # 1. Pre-trained model is too big for CI
+    # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
+    def test_fake_tensor_mode_huggingface_gpt2(self):
+        config = transformers.GPT2Config()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.GPT2Model(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_bigscience_bloom(self):
+        config = transformers.BloomConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.BloomModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_open_llama(self):
+        config = transformers.OpenLlamaConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.OpenLlamaModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_google_t5(self):
+        config = transformers.T5Config()
+        device = "cpu"
+        batch, seq = 4, 256
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.T5Model(config).to(device).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=decoder_input_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_openai_whisper(self):
+        config = transformers.WhisperConfig()
+        feature_extractor = transformers.WhisperFeatureExtractor()
+        device = "cpu"
+        batch = 4
+        with torch.onnx.enable_fake_mode() as fake_context:
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
+            )
+            decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
+            model = transformers.AutoModel.from_config(config).to(device).eval()
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_features,
+                decoder_input_ids=decoder_input_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    # TODO: From Config/Model
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "SymFloat in OnnxFUnction attribute is not supported yet."
+    )
+    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
+        # TODO: Make this test work with config
+        # Dolly has no config on transformers
+        model_name = "databricks/dolly-v2-3b"
+        device = "cpu"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, **inputs, export_options=export_options
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "AssertionError: Mutating module attribute seq_len_cached during export."
+        "self.seq_len_cached = seq_len"
+    )
+    def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
+        config = transformers.FalconConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.FalconModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment. "
+        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow"
+    )
+    def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
+        # TODO: Make this test work with config
+        # mpt-7b has no config on transformers
+        model_name = "mosaicml/mpt-7b"
+        device = "cpu"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name, trust_remote_code=True
+            )
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+            model = (
+                transformers.AutoModelForCausalLM.from_pretrained(
+                    model_name, trust_remote_code=True
+                )
+                .to(device)
+                .eval()
             )
 
-        # Scenario 2: Fake model and real input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=None)
-            _ = torch.onnx.dynamo_export(
-                fake_model, real_x, export_options=export_options
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, **inputs, export_options=export_options
             )
-
-        # Scenario 3: Real model and fake input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=None)
-            _ = torch.onnx.dynamo_export(
-                real_model, fake_x, export_options=export_options
-            )
-
-        # Scenario 4: Real model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=fake_context)
-            _ = torch.onnx.dynamo_export(
-                real_model, real_x, export_options=export_options
-            )
-
-        # Scenario 5: Fake model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=fake_context)
-            _ = torch.onnx.dynamo_export(
-                fake_model, real_x, export_options=export_options
-            )
-
-        # Scenario 6: Real model and fake input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=fake_context)
-            _ = torch.onnx.dynamo_export(
-                real_model, fake_x, export_options=export_options
-            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
 
 
 if __name__ == "__main__":

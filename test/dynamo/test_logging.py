@@ -11,9 +11,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
+from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+
+from torch.testing._internal.common_utils import find_free_port, munge_exc
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
@@ -110,20 +112,33 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT dynamo_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
+Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+
+from user code:
+   File "test_logging.py", line N, in dynamo_error_fn
+    output = output.add(torch.ones(10, 10))""",  # noqa: B950
+        )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_inductor_error(self, records):
         exitstack = contextlib.ExitStack()
         import torch._inductor.lowering
@@ -146,8 +161,22 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
-        self.assertIsInstance(records[0].msg, str)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT inductor_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+  File "test_logging.py", line N, in throw
+    raise AssertionError()
+torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))""",
+        )
 
         exitstack.close()
 
@@ -157,7 +186,7 @@ class LoggingTests(LoggingTestCase):
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super(ToyModel, self).__init__()
+                super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
                     torch.nn.Linear(1024, 1024),
@@ -408,6 +437,130 @@ print("arf")
         )
         self.assertIn("[rank0]:", stderr.decode("utf-8"))
 
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call(self, records):
+        def fn(x, y):
+            return (x * 2) @ (y * 3)
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        self.assertEqual(len(records), 3)
+        # only get last 2 lines
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            return (x * 2) @ (y * 3)
+                    ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return (x * 2) @ (y * 3)
+                              ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[2],
+            """\
+            return (x * 2) @ (y * 3)
+                   ~~~~~~~~^~~~~~~~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call_inline_call(self, records):
+        def g(x):
+            return x * 2
+
+        def f(x):
+            return g(g(x))
+
+        fn_opt = torch._dynamo.optimize("eager")(f)
+        fn_opt(torch.randn(3, 3))
+
+        self.assertEqual(len(records), 4)
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            return g(g(x))
+                     ~^^^""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[2],
+            """\
+            return g(g(x))
+                   ~^^^^^^""",
+        )
+        self.assertExpectedInline(
+            messages[3],
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call_graph_break(self, records):
+        def fn(x):
+            x = x * 2
+            torch._dynamo.graph_break()
+            return x * 3
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(3, 3))
+
+        self.assertEqual(len(records), 2)
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            x = x * 2
+                ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return x * 3
+                   ~~^~~""",
+        )
+
+    @make_logging_test(**torch._logging.DEFAULT_LOGGING)
+    def test_default_logging(self, records):
+        def fn(a):
+            if a.sum() < 0:
+                a = torch.sin(a)
+            else:
+                a = torch.cos(a)
+            print("hello")
+            return a + 1
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(10, 10))
+        fn_opt(-torch.ones(10, 5))
+
+        self.assertGreater(len([r for r in records if ".__graph_breaks" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__recompiles" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".symbolic_shapes" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__guards" in r.name]), 0)
+        self.assertGreater(
+            len([r for r in records if "return a + 1" in r.getMessage()]), 0
+        )
+
 
 # single record tests
 exclusions = {
@@ -421,7 +574,12 @@ exclusions = {
     "perf_hints",
     "not_implemented",
     "trace_source",
+    "trace_call",
     "custom_format_test_artifact",
+    "onnx",
+    "onnx_diagnostics",
+    "guards",
+    "verbose_guards",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -202,10 +202,8 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
     except Exception as e:
         message = (
-            "'%s' module version string is malformed '%s' and cannot be compared"
-            " with tuple %s"
-        ) % (
-            module.__name__, module.__version__, str(req_version_tuple)
+            f"'{module.__name__}' module version string is malformed '{module.__version__}' and cannot be compared"
+            f" with tuple {str(req_version_tuple)}"
         )
         if error_if_malformed:
             raise RuntimeError(message) from e
@@ -549,9 +547,9 @@ def _check_dill_version(pickle_module) -> None:
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
-                "'torch' supports dill >= %s, but you have dill %s."
+                "'torch' supports dill >= {}, but you have dill {}."
                 " Please upgrade dill or switch to 'pickle'"
-            ) % (
+            ).format(
                 '.'.join([str(num) for num in required_dill_version]),
                 pickle_module.__version__
             ))
@@ -559,9 +557,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(
@@ -869,7 +867,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -913,9 +911,9 @@ def load(
             loading only tensors, primitive types and dictionaries
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
-            are moved to the location that they were tagged with when saving, or specified by `map_location`. This
-            second step is a no-op if the final location is CPU. When the `mmap` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, f is mmaped.
+            are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
+            second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -1085,11 +1083,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                         if file_size == 0:
                             f.write(lines)
                         elif file_size != len(lines) or f.read() != lines:
-                            raise IOError
+                            raise OSError
                     msg = ("Saved a reverse patch to " + file_name + ". "
                            "Run `patch -p0 < " + file_name + "` to revert your "
                            "changes.")
-                except IOError:
+                except OSError:
                     msg = ("Tried to save a patch, but couldn't create a "
                            "writable file " + file_name + ". Make sure it "
                            "doesn't exist and your working directory is "
@@ -1221,7 +1219,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 res = typed_storage
             return res
         else:
-            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+            raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
     _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
@@ -1250,7 +1248,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+        raise RuntimeError(f"Invalid protocol version: {protocol_version}")
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = UnpicklerWrapper(f, **pickle_load_args)
@@ -1308,7 +1306,7 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-class StorageType():
+class StorageType:
     def __init__(self, name):
         self.dtype = _get_dtype_from_pickle_storage_type(name)
 

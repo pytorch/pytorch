@@ -9,7 +9,7 @@ from .utils import dominated_nodes
 
 
 def val_expressable_in_32_bits(val):
-    if hasattr(val, "is_Boolean") and val.is_Boolean:
+    if getattr(val, "is_Boolean", False):
         return True
 
     if isinstance(val, sympy.Expr):
@@ -59,9 +59,6 @@ def try_to_reduce_precision(node, bounds, indirect_vars, indices, replacement_va
             indirect_var = indirect_vars[idx]
 
             # We check that we can compute all the indices it's involved in with int32
-            # TODO The current implementation does not handle the case were an indexing
-            #      has two indirect indexing variables
-            #      This can be fixed using the function bound_sympy
             for index, expr in indices.items():
                 if indirect_var in expr.free_symbols:
                     index_val = replacement_vals[index]

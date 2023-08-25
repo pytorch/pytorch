@@ -620,12 +620,12 @@ public:
   c10::SymFloat toSymFloat() const&;
 
   IValue(c10::SymBool i) {
-    if (i.is_symbolic()) {
+     if (auto mi = i.maybe_as_bool()) {
+      tag = Tag::Bool;
+      payload.u.as_int = *mi;
+    } else {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
-    } else {
-      tag = Tag::Bool;
-      payload.u.as_bool = i.as_bool_unchecked();
     }
   }
 
@@ -1112,8 +1112,10 @@ public:
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy() const;
-  IValue deepcopy(HashAliasedIValueMap& memo) const;
+  IValue deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo,
+      c10::optional<at::Device> device = c10::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {

@@ -18,7 +18,6 @@ import time
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Pattern, Tuple
@@ -27,6 +26,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_fetch_json_list,
+    gh_fetch_merge_base,
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
@@ -76,16 +76,20 @@ class WorkflowCheckState:
 
 class FlakyRule:
     def __init__(self, name: str, captures: List[str]):
-        self.name = name
-        self.captures = captures
+        self.name = re.compile(name)
+        self.captures = [re.compile(r) for r in captures]
 
     def matches(self, job: Optional[Dict[str, Any]]) -> bool:
         return (
             job is not None
-            and self.name in job.get("name", "")
+            and self.name.search(job.get("name", "")) is not None
             and job.get("failure_captures") is not None
             and all(
-                capture in job.get("failure_captures", []) for capture in self.captures
+                any(
+                    r.search(capture) is not None
+                    for capture in job.get("failure_captures", [])
+                )
+                for r in self.captures
             )
         )
 
@@ -99,6 +103,14 @@ fragment PRReviews on PullRequestReviewConnection {
     author {
       login
     }
+    bodyText
+    createdAt
+    authorAssociation
+    editor {
+      login
+    }
+    databaseId
+    url
     state
   }
   pageInfo {
@@ -214,7 +226,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 targetUrl
               }
             }
-            pushedDate
             oid
           }
         }
@@ -449,6 +460,9 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# This could be set to -1 to ignore all flaky and broken trunk failures. On the
+# other hand, using a large value like 10 here might be useful in sev situation
+IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -614,12 +628,15 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
     return comment.author_login == "facebook-github-bot"
 
 
-def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
+def get_ghstack_prs(
+    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
+) -> List[Tuple["GitHubPR", str]]:
     """
-    Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
+    Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
+    @:param open_only: Only return open PRs
     """
     assert pr.is_ghstack_pr()
-    entire_stack: List[Tuple["GitHubPR", str]] = []
+    entire_stack: List[Tuple[GitHubPR, str]] = []
     # For ghstack, cherry-pick commits based from origin
     orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', pr.head_ref())}"
     rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
@@ -637,7 +654,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         stacked_pr_num = int(m.group("number"))
         if stacked_pr_num != pr.pr_num:
             stacked_pr = GitHubPR(pr.org, pr.project, stacked_pr_num)
-            if stacked_pr.is_closed():
+            if open_only and stacked_pr.is_closed():
                 print(
                     f"Skipping {idx+1} of {len(rev_list)} PR (#{stacked_pr_num}) as its already been merged"
                 )
@@ -647,6 +664,8 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             entire_stack.append((pr, rev))
 
     for stacked_pr, rev in entire_stack:
+        if stacked_pr.is_closed():
+            continue
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
@@ -697,17 +716,30 @@ class GitHubPR:
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
-    def last_pushed_at(self) -> Optional[datetime]:
-        pushed_date = self.last_commit()["pushedDate"]
-        if pushed_date is None:
-            return None
-        return datetime.fromisoformat(pushed_date[:-1])
-
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_merge_base(self) -> str:
-        return cast(str, self.info["baseRefOid"])
+        if self.merge_base:
+            return self.merge_base
+
+        last_commit_oid = self.last_commit()["oid"]
+        # NB: We could use self.base_ref() here for regular PR, however, that doesn't
+        # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
+        # so let's just use main instead
+        self.merge_base = gh_fetch_merge_base(
+            self.org, self.project, last_commit_oid, "main"
+        )
+
+        # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
+        # points to the base ref associated with the PR or, in other words, the head of main
+        # when the PR is created or rebased. This is not necessarily the merge base commit,
+        # but it could serve as a fallback in most cases and it's readily available as part
+        # of the PR info
+        if not self.merge_base:
+            self.merge_base = cast(str, self.info["baseRefOid"])
+
+        return self.merge_base
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -981,6 +1013,16 @@ class GitHubPR:
         for comment in self.get_comments():
             if comment.database_id == database_id:
                 return comment
+
+        # The comment could have actually been a review left on the PR (the message written alongside the review).
+        # (This is generally done to trigger the merge right when a comment is left)
+        # Check those review comments to see if one of those was the comment in question.
+        for node in self.info["reviews"]["nodes"]:
+            # These review comments contain all the fields regular comments need
+            comment = self._comment_from_node(node)
+            if comment.database_id == database_id:
+                return comment
+
         raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
@@ -1010,9 +1052,18 @@ class GitHubPR:
         comment_id: Optional[int] = None,
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
-        ghstack_prs = get_ghstack_prs(repo, self)  # raises error if out of sync
+        ghstack_prs = get_ghstack_prs(
+            repo, self, open_only=False
+        )  # raises error if out of sync
+        pr_dependencies = []
         for pr, rev in ghstack_prs:
-            commit_msg = pr.gen_commit_message(filter_ghstack=True)
+            if pr.is_closed():
+                pr_dependencies.append(pr)
+                continue
+
+            commit_msg = pr.gen_commit_message(
+                filter_ghstack=True, ghstack_deps=pr_dependencies
+            )
             if pr.pr_num != self.pr_num:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
@@ -1023,9 +1074,14 @@ class GitHubPR:
                 )
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
-        return [x for x, _ in ghstack_prs]
+            pr_dependencies.append(pr)
+        return [x for x, _ in ghstack_prs if not x.is_closed()]
 
-    def gen_commit_message(self, filter_ghstack: bool = False) -> str:
+    def gen_commit_message(
+        self,
+        filter_ghstack: bool = False,
+        ghstack_deps: Optional[List["GitHubPR"]] = None,
+    ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
         filters out ghstack info"""
@@ -1041,6 +1097,8 @@ class GitHubPR:
         msg += msg_body
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
+        if ghstack_deps:
+            msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
@@ -1063,7 +1121,12 @@ class GitHubPR:
         ignore_current_checks: Optional[List[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
-        merge_rule, pending_checks, failed_checks = find_matching_merge_rule(
+        (
+            merge_rule,
+            pending_checks,
+            failed_checks,
+            ignorable_checks,
+        ) = find_matching_merge_rule(
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -1096,6 +1159,10 @@ class GitHubPR:
                 author=self.get_author(),
                 pending_checks=pending_checks,
                 failed_checks=failed_checks,
+                ignore_current_checks=ignorable_checks.get("IGNORE_CURRENT_CHECK", []),
+                broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
+                flaky_checks=ignorable_checks.get("FLAKY", []),
+                unstable_checks=ignorable_checks.get("UNSTABLE", []),
                 last_commit_sha=self.last_commit().get("oid", ""),
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
@@ -1211,6 +1278,7 @@ def find_matching_merge_rule(
     MergeRule,
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
+    Dict[str, List[Any]],
 ]:
     """
     Returns merge rule matching to this pr together with the list of associated pending
@@ -1324,10 +1392,12 @@ def find_matching_merge_rule(
                 lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
             )
         )
-        pending_checks, failed_checks = categorize_checks(
+        pending_checks, failed_checks, _ = categorize_checks(
             checks,
             required_checks,
-            ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0,
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+            if rule.ignore_flaky_failures
+            else 0,
         )
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
@@ -1362,13 +1432,23 @@ def find_matching_merge_rule(
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
-        # where the list of checks is readily available
-        pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
+        # where the list of checks is readily available. These records will be saved into
+        # Rockset merge records
+        (
+            pending_mandatory_checks,
+            failed_mandatory_checks,
+            ignorable_checks,
+        ) = categorize_checks(
             checks,
             [],
-            ok_failed_checks_threshold=0,
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
         )
-        return (rule, pending_mandatory_checks, failed_mandatory_checks)
+        return (
+            rule,
+            pending_mandatory_checks,
+            failed_mandatory_checks,
+            ignorable_checks,
+        )
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
@@ -1402,6 +1482,10 @@ def save_merge_record(
     author: str,
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]],
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    ignore_current_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    broken_trunk_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    flaky_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    unstable_checks: List[Tuple[str, Optional[str], Optional[int]]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1433,6 +1517,10 @@ def save_merge_record(
                 "author": author,
                 "pending_checks": pending_checks,
                 "failed_checks": failed_checks,
+                "ignore_current_checks": ignore_current_checks,
+                "broken_trunk_checks": broken_trunk_checks,
+                "flaky_checks": flaky_checks,
+                "unstable_checks": unstable_checks,
                 "last_commit_sha": last_commit_sha,
                 "merge_base_sha": merge_base_sha,
                 "merge_commit_sha": merge_commit_sha,
@@ -1522,38 +1610,53 @@ def get_classifications(
     if merge_base is not None:
 
         def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+            d: Dict[str, Dict[str, Dict[str, Any]]],
+            key: str,
+            val: Dict[str, Any],
+            overwrite_failed_run_attempt: bool,
         ) -> None:
             key_no_suffix = remove_job_name_suffix(key)
             if key not in d[key_no_suffix]:
                 d[key_no_suffix][key] = val
                 return
 
-            if d[key_no_suffix][key]["id"] < val["id"]:
+            # When overwrite_failed_run_attempt is set to True, always overwrite
+            # the job with the result from the latest attempt. This option is for
+            # jobs from the pull request head_sha where the latest retry is used
+            # when merging
+            #
+            # When overwrite_failed_run_attempt is False, only overwrite the job
+            # with the result from the latest attempt if the latest retry failed.
+            # This option is for jobs from the merger_base where we want to record
+            # failures for broken trunk
+            if d[key_no_suffix][key]["id"] < val["id"] and (
+                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
+            ):
                 d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
             name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
             if rockset_result["head_sha"] == head_sha:
-                insert(head_sha_jobs, name, rockset_result)
+                insert(
+                    head_sha_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=True,
+                )
             else:
-                insert(merge_base_jobs, name, rockset_result)
+                insert(
+                    merge_base_jobs,
+                    name,
+                    rockset_result,
+                    overwrite_failed_run_attempt=False,
+                )
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
         if check.status == "SUCCESS":
             continue
-        if ignore_current_checks is not None and name in ignore_current_checks:
-            checks_with_classifications[name] = JobCheckState(
-                check.name,
-                check.url,
-                check.status,
-                "IGNORE_CURRENT_CHECK",
-                check.job_id,
-                check.title,
-            )
-            continue
+
         if "unstable" in name:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -1577,10 +1680,24 @@ def get_classifications(
                 check.job_id,
                 check.title,
             )
+            continue
+
         elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
+            continue
+
+        if ignore_current_checks is not None and name in ignore_current_checks:
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "IGNORE_CURRENT_CHECK",
+                check.job_id,
+                check.title,
+            )
+
     return checks_with_classifications
 
 
@@ -1608,10 +1725,8 @@ def validate_revert(
         allowed_reverters.append("CONTRIBUTOR")
     if author_association not in allowed_reverters:
         raise PostCommentError(
-            (
-                f"Will not revert as @{author_login} is not one of "
-                f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
-            )
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
@@ -1708,14 +1823,24 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
-    ok_failed_checks_threshold: int = 3,
+    ok_failed_checks_threshold: Optional[int] = None,
 ) -> Tuple[
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
+    Dict[str, List[Any]],
 ]:
+    """
+    Categories all jobs into the list of pending and failing jobs. All known flaky
+    failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
+    is not set (unlimited)
+    """
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+
+    # ok_failed_checks is used with ok_failed_checks_threshold while ignorable_failed_checks
+    # is used to keep track of all ignorable failures when saving the merge record on Rockset
     ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -1734,17 +1859,22 @@ def categorize_checks(
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
 
-        if status is None:
+        if status is None and classification != "UNSTABLE":
+            # NB: No need to wait if the job classification is unstable as it would be
+            # ignored anyway. This is useful to not need to wait for scarce resources
+            # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
-            if classification == "IGNORE_CURRENT_CHECK":
-                pass
-            elif classification == "UNSTABLE":
-                pass
-            elif classification in ("BROKEN_TRUNK", "FLAKY"):
+            target = (
+                ignorable_failed_checks[classification]
+                if classification
+                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
+                else failed_checks
+            )
+            target.append((checkname, url, job_id))
+
+            if classification in ("BROKEN_TRUNK", "FLAKY", "UNSTABLE"):
                 ok_failed_checks.append((checkname, url, job_id))
-            else:
-                failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
         warn(
@@ -1752,15 +1882,20 @@ def categorize_checks(
             + ", ".join([x[0] for x in ok_failed_checks])
             + (
                 f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
-                if len(ok_failed_checks) > ok_failed_checks_threshold
+                if ok_failed_checks_threshold is not None
+                and len(ok_failed_checks) > ok_failed_checks_threshold
                 else ""
             )
         )
 
-    if len(ok_failed_checks) > ok_failed_checks_threshold:
+    if (
+        ok_failed_checks_threshold is not None
+        and len(ok_failed_checks) > ok_failed_checks_threshold
+    ):
         failed_checks = failed_checks + ok_failed_checks
 
-    return (pending_checks, failed_checks)
+    # The list of ignorable_failed_checks is returned so that it can be saved into the Rockset merge record
+    return (pending_checks, failed_checks, ignorable_failed_checks)
 
 
 def merge(
@@ -1821,7 +1956,11 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        _, failing = categorize_checks(checks, list(checks.keys()))
+        _, failing, _ = categorize_checks(
+            checks,
+            list(checks.keys()),
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+        )
         ignore_current_checks_info = failing
 
     gh_post_pr_comment(
@@ -1831,18 +1970,6 @@ def merge(
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
     )
-
-    if pr.last_pushed_at() is None:
-        print(
-            f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?"
-        )
-    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
-        raise RuntimeError(
-            f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
-            "`@pytorchbot merge -r`\n"
-            "Or just rebase by leaving `@pytorchbot rebase` comment"
-        )
 
     start_time = time.time()
     last_exception = ""
@@ -1886,11 +2013,13 @@ def merge(
                 flaky_rules,
                 ignore_current_checks=ignore_current_checks,
             )
-            pending, failing = categorize_checks(
+            pending, failing, _ = categorize_checks(
                 checks,
                 required_checks
                 + [x for x in checks.keys() if x not in required_checks],
-                ok_failed_checks_threshold=3 if ignore_flaky_failures else 0,
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+                if ignore_flaky_failures
+                else 0,
             )
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(
@@ -2045,6 +2174,10 @@ def main() -> None:
                 author=pr.get_author(),
                 pending_checks=[],
                 failed_checks=[],
+                ignore_current_checks=[],
+                broken_trunk_checks=[],
+                flaky_checks=[],
+                unstable_checks=[],
                 last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,

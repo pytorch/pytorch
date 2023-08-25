@@ -1,4 +1,4 @@
-import math
+import operator
 from functools import partial
 from typing import Dict, Optional
 
@@ -14,19 +14,24 @@ class BoundVars:
     """
     Performs Value Range Analysis on LoopBody's fx graph by calling BoundVars.run()
     It exposes the ranges of the nodes in the `bounds` variable
+
+    Note. A current limitation of this analysis is that it just works on a per-loop basis.
+    We should be able to propagate the bounds between across the whole graph. This may benefit
+    the case a bounded variable is returned by a kernel and fed into another.
     """
 
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v if not free_symbols(v) else math.inf)
+            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
             node
             for node in self.loop_body.get_nodes()
-            if node.target in ["load", "reduction"] or "masked_subblock" in node.target
+            if node.target in ["load", "reduction", operator.getitem]
+            or "masked_subblock" in node.target
         )
         # To access this variable call `get_bounds()`
         self._bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = {}
@@ -38,7 +43,7 @@ class BoundVars:
         # Initialize the environment with the unbounded variables
         for node in self.unbounded_vars:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
-            if (
+            if not isinstance(node.target, str) or (
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
             ):

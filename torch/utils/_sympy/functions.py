@@ -1,5 +1,6 @@
 import sympy
-from sympy.core.logic import fuzzy_and, fuzzy_or
+from sympy import S
+from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = ["FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "LShift", "RShift"]
 
@@ -68,6 +69,8 @@ class FloorDiv(sympy.Function):
             return sympy.floor(base / divisor)
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
+        if isinstance(divisor, sympy.Rational) and divisor.p == 1:
+            return sympy.floor(base * divisor.q)
 
         if isinstance(base, sympy.Add):
             for a in base.args:
@@ -133,6 +136,77 @@ class ModularIndexing(sympy.Function):
 
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
+class Where(sympy.Function):
+    """
+    Good ol' ternary operator
+    """
+
+    nargs = (3,)
+
+    @classmethod
+    def eval(cls, c, p, q):
+        if c == sympy.true:
+            return p
+        elif c == sympy.false:
+            return q
+
+class Mod(sympy.Function):
+    """
+    We maintain this so that we avoid SymPy correctness issues, such as:
+    https://github.com/sympy/sympy/issues/25146
+    """
+
+    nargs = (2,)
+
+    @classmethod
+    def eval(cls, p, q):
+        # This was adapted from: sympy/core/mod.py
+
+        if q.is_zero:
+            raise ZeroDivisionError("Modulo by zero")
+        # If either of them is NaN or infinite.
+        if p is S.NaN or q is S.NaN or p.is_finite is False or q.is_finite is False:
+            return S.NaN
+        # Three cases:
+        #   1. p == 0
+        #   2. p is either q or -q
+        #   3. p is integer and q == 1
+        if p is S.Zero or p in (q, -q) or (p.is_integer and q == 1):
+            return S.Zero
+
+        # Evaluate if they are both literals.
+        if q.is_Number and p.is_Number:
+            return p % q
+
+        # If q == 2, it's a matter of whether p is odd or even.
+        if q.is_Number and q == 2:
+            if p.is_even:
+                return S.Zero
+            if p.is_odd:
+                return S.One
+
+        # If p is a multiple of q.
+        r = p / q
+        if r.is_integer:
+            return S.Zero
+
+        # If p < q and its ratio is positive, then:
+        #   - floor(p / q) = 0
+        #   - p % q = p - floor(p / q) * q = p
+        less = p < q
+        if less.is_Boolean and bool(less) and r.is_positive:
+            return p
+
+    def _eval_is_integer(self):
+        p, q = self.args
+        return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
+
+    def _eval_is_nonnegative(self):
+        return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
+
+    def _eval_is_nonpositive(self):
+        return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
 
 class CleanDiv(FloorDiv):

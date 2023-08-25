@@ -486,7 +486,8 @@ void reflection_pad1d_kernel_impl(const Tensor& output, const Tensor& input, Int
       cpu_padding<scalar_t, ReflectionPad>(output, input, param);
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+        "reflection_pad1d", [&] {
       cpu_padding<scalar_t, ReflectionPad>(output, input, param);
     });
   }
@@ -495,7 +496,8 @@ void reflection_pad1d_kernel_impl(const Tensor& output, const Tensor& input, Int
 void reflection_pad1d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad1d_backward", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+      "reflection_pad1d_backward", [&] {
     cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
   });
 }
@@ -511,13 +513,15 @@ void reflection_pad2d_kernel_impl(const Tensor& output, const Tensor& input, Int
   } else {
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::Contiguous: {
-        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+            "reflection_pad2d", [&] {
           cpu_padding<scalar_t, ReflectionPad>(output, input, param);
         });
         break;
       }
       case at::MemoryFormat::ChannelsLast: {
-        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d_channels_last", [&]{
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+            "reflection_pad2d_channels_last", [&]{
           cpu_padding_channels_last<scalar_t, ReflectionPad>(output, input, param);
         });
         break;
@@ -533,13 +537,15 @@ void reflection_pad2d_backward_kernel_impl(
   PaddingParams param{grad_input, grad_output, padding};
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "reflection_pad2d_backward", [&] {
         cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward_channels_last", [&]{
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "reflection_pad2d_backward_channels_last", [&]{
         cpu_padding_backward_channels_last<scalar_t, ReflectionPad>(grad_input, grad_output, param);
       });
       break;
@@ -553,14 +559,14 @@ void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, Int
   PaddingParams param{input, output, padding};
   switch (padding_memory_format_3d(input)) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input.scalar_type(),
           "reflection_pad3d", [&] {
         cpu_padding<scalar_t, ReflectionPad>(output, input, param);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast3d: {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input.scalar_type(),
           "reflection_pad3d_channels_last", [&]{
         cpu_padding_channels_last<scalar_t, ReflectionPad>(output, input, param);
       });
@@ -597,7 +603,8 @@ void reflection_pad3d_backward_kernel_impl(
 // replication padding
 void replication_pad1d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+      "replication_pad1d", [&] {
     cpu_padding<scalar_t, ReplicationPad>(output, input, param);
   });
 }
@@ -605,39 +612,100 @@ void replication_pad1d_kernel_impl(const Tensor& output, const Tensor& input, In
 void replication_pad1d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad1d_backward", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+      "replication_pad1d_backward", [&] {
     cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
   });
 }
 
 void replication_pad2d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d", [&] {
-    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
-  });
+  switch (input.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+          "replication_pad2d", [&] {
+        cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+          "replication_pad2d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 void replication_pad2d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad2d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
-  });
+  switch (grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "replication_pad2d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "replication_pad2d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d", [&] {
-    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
-  });
+  switch (padding_memory_format_3d(input)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+          "replication_pad3d", [&] {
+        cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, input.scalar_type(),
+          "replication_pad3d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 void replication_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
-  });
+  switch (padding_memory_format_3d(grad_output)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "replication_pad3d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, grad_output.scalar_type(),
+          "replication_pad3d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 } // anonymous namespace
