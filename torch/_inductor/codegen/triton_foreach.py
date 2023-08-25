@@ -86,6 +86,12 @@ class ForeachKernel(Kernel):
         self.x_block_count = 0
         self.y_block_count = 0
 
+    def get_block_size(self):
+        if self.blocking_2d:
+            return self.block_size_2d
+        else:
+            return self.block_size_1d
+
     @staticmethod
     def codegen_pid_offsets(code, block_count, lower_bound, prefix):
         if block_count == 0:
@@ -93,21 +99,12 @@ class ForeachKernel(Kernel):
         else:
             code.splice(f"{prefix}pid_offset = {prefix}pid - {lower_bound}")
 
-    def codegen_pid_range(self, code, num_elems):
-        if self.blocking_2d:
-            y_elems, x_elems, _ = num_elems
-            num_x_blocks = ceildiv(x_elems, self.block_size_2d)
-            num_y_blocks = ceildiv(y_elems, self.block_size_2d)
-            upper_bound_y_pid = self.y_block_count + num_y_blocks
-            lower_bound_y_pid = self.y_block_count
-        else:
-            x_elems, _ = num_elems
-            num_x_blocks = ceildiv(x_elems, self.block_size_1d)
-
+    def codegen_pid_range(self, code, x_elems):
+        num_x_blocks = ceildiv(x_elems, self.get_block_size())
         upper_bound_x_pid = self.x_block_count + num_x_blocks
         lower_bound_x_pid = self.x_block_count
 
-        if self.x_block_count == 0 and self.y_block_count == 0:
+        if self.x_block_count == 0:
             cond = "if"
         else:
             cond = "elif"
@@ -115,25 +112,13 @@ class ForeachKernel(Kernel):
         x_pid_bounds_check = (
             f"xpid >= {lower_bound_x_pid} and xpid < {upper_bound_x_pid}"
         )
-
-        if self.blocking_2d:
-            code.splice(
-                f"{cond} (({x_pid_bounds_check}) and ypid >= {lower_bound_y_pid}) and ypid < {upper_bound_y_pid}:"
-            )
-        else:
-            code.splice(f"{cond} {x_pid_bounds_check}:")
+        code.splice(f"{cond} {x_pid_bounds_check}:")
 
         with code.indent():
             ForeachKernel.codegen_pid_offsets(
                 code, num_x_blocks, lower_bound_x_pid, "x"
             )
             self.x_block_count += num_x_blocks
-
-            if self.blocking_2d:
-                ForeachKernel.codegen_pid_offsets(
-                    code, num_y_blocks, lower_bound_y_pid, "y"
-                )
-                self.y_block_count += num_y_blocks
 
     def create_sub_kernel(self, *groups, index_dtype, mutations, reduction_hint):
         sub_kernel = TritonKernel(
@@ -142,7 +127,7 @@ class ForeachKernel(Kernel):
             mutations=mutations,
             pid_cache={
                 "tl.program_id(0)": "xpid_offset",
-                "tl.program_id(1)": "ypid_offset",
+                "tl.program_id(1)": "ypid",
             },
             reduction_hint=reduction_hint,
         )
@@ -176,7 +161,9 @@ class ForeachKernel(Kernel):
     def grid(self):
         return (
             self.x_block_count,
-            max(self.y_block_count, 1),
+            ceildiv(int(self.sub_kernels[0].numels[0]), self.block_size_2d)
+            if self.blocking_2d
+            else 1,
             1,
         )
 
@@ -208,7 +195,8 @@ class ForeachKernel(Kernel):
             for sub_kernel in self.sub_kernels:
                 assert len(sub_kernel.numels) <= 3
                 # TODO mlazos: support dynamic shapes
-                self.codegen_pid_range(code, tuple(int(x) for x in sub_kernel.numels))
+                numel_ind = 0 if not self.blocking_2d else 1
+                self.codegen_pid_range(code, int(sub_kernel.numels[numel_ind]))
                 with code.indent():
                     if self.blocking_2d:
                         code.splice(f"ynumel = {sub_kernel.numels[0]}")
