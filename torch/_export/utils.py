@@ -65,6 +65,13 @@ def register_dataclass_as_pytree_node(
 
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
+
+    if (to_dumpable_context is None) ^ (from_dumpable_context is None):
+        raise ValueError(
+            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
+            "be None or registered."
+        )
+
     to_dumpable_context = (
         to_dumpable_context
         if to_dumpable_context is not None

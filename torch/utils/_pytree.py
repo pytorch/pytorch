@@ -28,7 +28,7 @@ This pytree implementation is not very performant due to Python overhead
 To improve the performance we can move parts of the implementation to C++.
 """
 
-PROTOCOL_VERSION = 1
+DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 
 Context = Any
 PyTree = Any
@@ -50,20 +50,20 @@ class NodeDef(NamedTuple):
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
 
-SUPPORTED_NODES: Dict[Union[Type[Any], str], NodeDef] = {}
+SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
-# SerializeNodeDef holds two callables:
-# - serialize_fn takes a TreeSpec, and returns a serialized string format of the
+# _SerializeNodeDef holds two callables:
+# - to_dumpable_context takes a TreeSpec, and returns a serialized string format of the
 #   context, and the version number
-# - deserialize_fn takes in a string representation of the context, and the
+# - from_dumpable_context takes in a string representation of the context, and the
 #   version, and returns the deserialized context
-class SerializeNodeDef(NamedTuple):
+class _SerializeNodeDef(NamedTuple):
     typ: Type[Any]
     serialized_type: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
 
-SUPPORTED_SERIALIZED_TYPES: Dict[Union[Type[Any], str], SerializeNodeDef] = {}
+SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 def _register_pytree_node(
@@ -81,8 +81,14 @@ def _register_pytree_node(
     )
     SUPPORTED_NODES[typ] = node_def
 
+    if (to_dumpable_context is None) ^ (from_dumpable_context is None):
+        raise ValueError(
+            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
+            "be None or registered."
+        )
+
     serialized_type = f"{typ.__module__}.{typ.__name__}"
-    serialize_node_def = SerializeNodeDef(
+    serialize_node_def = _SerializeNodeDef(
         typ, serialized_type, to_dumpable_context, from_dumpable_context
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
@@ -401,23 +407,23 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
 
 
 """
-TreeSpecSchema is the schema used to serialize the TreeSpec
+_TreeSpecSchema is the schema used to serialize the TreeSpec
 It contains the following fields:
 - type: A string name of the type. null for the case of a LeafSpec.
 - context: Any format which is json dumpable
 - children_spec: A list of children serialized specs.
 """
 @dataclasses.dataclass
-class TreeSpecSchema:
+class _TreeSpecSchema:
     type: Optional[str]
     context: DumpableContext
-    children_spec: List['TreeSpecSchema']
+    children_spec: List['_TreeSpecSchema']
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
-    def treespec_to_json(spec: TreeSpec) -> TreeSpecSchema:
+    def treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
         if isinstance(spec, LeafSpec):
-            return TreeSpecSchema(None, None, [])
+            return _TreeSpecSchema(None, None, [])
 
         if spec.type not in SUPPORTED_SERIALIZED_TYPES:
             raise NotImplementedError(f"Serializing {spec.type} in pytree is not registered.")
@@ -429,22 +435,21 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
         if serialize_node_def.to_dumpable_context is None:
             try:
                 serialized_context = json.dumps(spec.context)
-            except TypeError:
-                breakpoint()
+            except TypeError as e:
                 raise TypeError(
                     "Unable to serialize context. "
                     "Please make the context json dump-able, or register a "
                     "custom serializer using _register_pytree_node."
-                )
+                ) from e
         else:
             serialized_context = serialize_node_def.to_dumpable_context(spec.context)
 
         child_schemas = [treespec_to_json(child) for child in spec.children_specs]
 
-        return TreeSpecSchema(serialized_type, serialized_context, child_schemas)
+        return _TreeSpecSchema(serialized_type, serialized_context, child_schemas)
 
     if protocol is None:
-        protocol = PROTOCOL_VERSION
+        protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL
 
     json_spec = treespec_to_json(treespec)
     str_spec = json.dumps((protocol, dataclasses.asdict(json_spec)))
@@ -453,8 +458,8 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
 def treespec_loads(data: str) -> TreeSpec:
     protocol, json_schema = json.loads(data)
 
-    if protocol != PROTOCOL_VERSION:
-        raise ValueError(f"Protocol mismatch: {protocol} != {PROTOCOL_VERSION}")
+    if protocol != DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL:
+        raise ValueError(f"Protocol mismatch: {protocol} != {DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL}")
 
     def json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         if (

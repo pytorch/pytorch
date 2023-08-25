@@ -308,7 +308,9 @@ TreeSpec(TupleVariable, None, [*,
         ]),
     ],)
     def test_pytree_serialize(self, spec):
-        self.assertTrue(spec == treespec_loads(treespec_dumps(spec)))
+        serialized_spec = treespec_dumps(spec)
+        self.assertTrue(isinstance(serialized_spec, str))
+        self.assertTrue(spec == treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
@@ -337,6 +339,43 @@ TreeSpec(TupleVariable, None, [*,
         self.assertTrue("moo" in serialized_spec)
         roundtrip_spec = treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
+
+    def test_pytree_serialize_register_bad(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertRaisesRegex(ValueError, "Both to_dumpable_context and from_dumpable_context"):
+            _register_pytree_node(
+                DummyType,
+                lambda dummy: ([dummy.x, dummy.y], None),
+                lambda xs, _: Dummy(*xs),
+                to_dumpable_context=lambda context: "moo",
+            )
+
+    def test_pytree_context_serialize_bad(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        _register_pytree_node(
+            DummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: Dummy(*xs),
+            to_dumpable_context=lambda context: DummyType,
+            from_dumpable_context=lambda dumpable_context: None,
+        )
+
+        spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
+
+        with self.assertRaisesRegex(TypeError, "Object of type type is not JSON serializable"):
+            treespec_dumps(spec)
+
+    def test_pytree_serialize_bad_input(self):
+        with self.assertRaises(AttributeError):
+            treespec_dumps("random_blurb")
 
 
 instantiate_parametrized_tests(TestPytree)

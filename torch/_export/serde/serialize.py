@@ -189,8 +189,8 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 
 def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     return CallSpec(
-        in_spec=treespec_dumps(call_spec.in_spec) if call_spec.in_spec else "",
-        out_spec=treespec_dumps(call_spec.out_spec) if call_spec.out_spec else "",
+        in_spec=treespec_dumps(call_spec.in_spec, SCHEMA_VERSION) if call_spec.in_spec else "",
+        out_spec=treespec_dumps(call_spec.out_spec, SCHEMA_VERSION) if call_spec.out_spec else "",
     )
 
 
@@ -659,8 +659,8 @@ class GraphModuleSerializer:
         return ModuleCallSignature(
             inputs=[serialize_argument(x) for x in module_call_signature.inputs],
             outputs=[serialize_argument(x) for x in module_call_signature.outputs],
-            in_spec=treespec_dumps(module_call_signature.in_spec),
-            out_spec=treespec_dumps(module_call_signature.out_spec),
+            in_spec=treespec_dumps(module_call_signature.in_spec, SCHEMA_VERSION),
+            out_spec=treespec_dumps(module_call_signature.out_spec, SCHEMA_VERSION),
         )
 
     def serialize_module_call_graph(self, module_call_graph: List[ep.ModuleCallEntry]) -> List[ModuleCallEntry]:
