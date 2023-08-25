@@ -383,9 +383,7 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.bfloat16)
-            # skip the test until onednn updates to 3.1 because onednn will get wrong result
-            # for bf16 channels_last_3d on AVX512+ machine
-            # self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16)
         # test fall back to thnn impl
         with torch.backends.mkldnn.flags(enabled=False):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-2)
