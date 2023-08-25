@@ -195,9 +195,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
-                if arg.get_dtype() != dtype:
-                    return to_dtype(arg, dtype)
-                return arg
+                return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
@@ -496,10 +494,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
-        return clone(x)
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -507,10 +504,14 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
+def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    return to_dtype(x, dtype, copy=True)
+
+
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
@@ -531,12 +532,21 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
-@register_lowering(prims.device_put, type_promotion_kind=None)
-def to_device(x: TensorBox, device: torch.device):
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    return to_dtype_bitcast(x, dtype, copy=True)
+
+
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
-        return clone(x)
+        return clone(x) if copy else x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(prims.device_put, type_promotion_kind=None)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -1467,7 +1477,6 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
     if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
