@@ -237,8 +237,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
-            # very small dropout to make sure test passes
-            attn_weight = torch.dropout(attn_weight, 0.00001, True)
+            # Set to False
+            attn_weight = torch.dropout(attn_weight, 0.00000000001, True)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
@@ -295,7 +295,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
             # very low dropout to make test pass
-            attn_weight = torch.dropout(attn_weight, 0.9999, True)
+            attn_weight = torch.dropout(attn_weight, 0.00000000001, True)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
