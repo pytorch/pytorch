@@ -201,7 +201,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()

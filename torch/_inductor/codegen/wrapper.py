@@ -827,8 +827,6 @@ class WrapperCodeGen(CodeGen):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
-            if not layout.maybe_guard_aligned():
-                V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
             self.codegen_deferred_allocation(name, layout)
             return
