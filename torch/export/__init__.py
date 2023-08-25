@@ -558,12 +558,7 @@ class ExportedProgram:
         _assertion_graph = _assertion_graph_res.graph_module
         _assertion_graph(*args)
 
-    def validate(self):
-        """
-        .. warning::
-            Do not use.
-
-        """
+    def _validate(self):
         # TODO(zhxchen17) check for get_attr
         # TODO(zhxchen17) check for funcitonal ops
         for gm in self.graph_module.modules():
