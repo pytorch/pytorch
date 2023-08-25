@@ -69,6 +69,16 @@ except ImportError:
             return wrapped
 
 
+# global python state - whether profiler is currently enabled
+# useful for fast python checks to reduce latency
+_is_profiler_enabled: bool = False
+
+
+def _set_is_profiler_enabled(enable: bool):
+    global _is_profiler_enabled
+    _is_profiler_enabled = enable
+
+
 def _enable_dynamo_cache_lookup_profiler(enable: bool):
     from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
         clear_profiler_hooks,
@@ -93,6 +103,16 @@ def _enable_dynamo_cache_lookup_profiler(enable: bool):
         set_profiler_hooks(_profiler_start, _profiler_end)
     else:
         clear_profiler_hooks()
+
+
+def _run_on_profiler_start():
+    _set_is_profiler_enabled(True)
+    _enable_dynamo_cache_lookup_profiler(True)
+
+
+def _run_on_profiler_stop():
+    _set_is_profiler_enabled(False)
+    _enable_dynamo_cache_lookup_profiler(False)
 
 
 class profile:
@@ -282,7 +302,6 @@ class profile:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
-        _enable_dynamo_cache_lookup_profiler(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -293,15 +312,16 @@ class profile:
 
     def _start_trace(self):
         self.entered = True
+        _run_on_profiler_start()
         _enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        _enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()
+        _run_on_profiler_stop()
         parsed_results = self._parse_kineto_results(self.kineto_results)
         self.function_events = EventList(
             parsed_results,
@@ -723,6 +743,7 @@ class emit_itt:
         if self.entered:
             raise RuntimeError("ITT annotation context manager is not reentrant")
         self.entered = True
+        _run_on_profiler_start()
         _enable_profiler(
             ProfilerConfig(
                 ProfilerState.ITT,
@@ -741,6 +762,7 @@ class emit_itt:
         if not self.enabled:
             return
         _disable_profiler()
+        _run_on_profiler_stop()
         return False
 
 
@@ -841,6 +863,7 @@ class emit_nvtx:
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
+        _run_on_profiler_start()
         _enable_profiler(
             ProfilerConfig(
                 ProfilerState.NVTX,
@@ -860,6 +883,7 @@ class emit_nvtx:
             return
         torch.cuda.synchronize()
         _disable_profiler()
+        _run_on_profiler_stop()
         return False
 
 

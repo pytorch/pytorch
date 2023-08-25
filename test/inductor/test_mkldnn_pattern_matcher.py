@@ -1,15 +1,24 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import itertools
 
 import torch
-from torch._dynamo import config as dynamo_config
+import torch._dynamo as torchdynamo
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
+from torch.testing._internal.common_quantization import (
+    skipIfNoDynamoSupport,
+    skipIfNoONEDNN,
+)
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -35,6 +44,11 @@ non_decomposed_unary_list = [
     torch.nn.Sigmoid,
     torch.nn.Tanh,
 ]
+
+quantization_unary_list = {
+    None: 0,
+    torch.nn.ReLU(): 1,
+}
 
 # The dict value is (match_count, match_nodes, inplace)
 binary_list = {
@@ -73,24 +87,46 @@ class TestPatternMatcherBase(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=False,
+        check_quantization=False,
     ):
         counters.clear()
         maybe_autocast = contextlib.nullcontext()
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
-        with torch.no_grad(), maybe_autocast:
-            clone_inputs = self._clone_inputs(inputs)
-            expected = mod(*inputs)
-            actual = torch.compile(mod)(*clone_inputs)
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_count"], matcher_count
-            )
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_nodes"],
-                matcher_nodes,
-            )
+        if check_quantization:
+            with torch.no_grad():
+                export_model, guards = torchdynamo.export(
+                    mod,
+                    *copy.deepcopy(inputs),
+                    aten_graph=True,
+                )
+                quantizer = X86InductorQuantizer()
+                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+                prepare_model = prepare_pt2e(export_model, quantizer)
+                prepare_model(*inputs)
+                convert_model = convert_pt2e(prepare_model).eval()
+                _ = torch.compile(convert_model)(*inputs)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"], matcher_count
+                )
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    matcher_nodes,
+                )
+        else:
+            with torch.no_grad(), maybe_autocast:
+                clone_inputs = self._clone_inputs(inputs)
+                expected = mod(*inputs)
+                actual = torch.compile(mod)(*clone_inputs)
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"], matcher_count
+                )
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    matcher_nodes,
+                )
 
     def _test_code_common(
         self, mod, inputs, include_ops, exclude_ops, atol=1e-5, rtol=1.3e-6
@@ -354,6 +390,103 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_count = 10
             match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                if (
+                    "auto_insert_channel_last_node" in kwargs
+                    and kwargs["auto_insert_channel_last_node"]
+                ):
+                    self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                else:
+                    self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.unary_fn(x) if self.unary_fn else x
+
+        options = itertools.product(
+            quantization_unary_list.keys(),
+            [True, False],  # auto_insert_channel_last_node
+        )
+
+        for unary_fn, auto_insert_channel_last_node in options:
+            if auto_insert_channel_last_node and unary_fn is not None:
+                # Skip trivial test combinations to reduce test time.
+                continue
+            mod = M(
+                unary_fn, auto_insert_channel_last_node=auto_insert_channel_last_node
+            ).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+
+            # Totally pattern_matcher_count 4,
+            # pattern_matcher_nodes 17 + 1 for optional(unary_post_op)
+            # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            # 4. Quantization fusion in post-grad fusion pass
+            #    [qconv2d_pointwise_default, optional(unary_post_op), div_1, round_2, add_1,
+            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            self._test_common(
+                mod,
+                (v,),
+                4,
+                17 + quantization_unary_list[unary_fn],
+                check_quantization=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_dequant_promotion(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+
+            def forward(self, x):
+                temp = self.conv1(x)
+                temp = self.conv2(temp) + self.conv3(temp)
+                return temp
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        # For now, we have annotated conv_add in x86InductorQuantizer. But we didn't implement the lowering.
+        # TODO <leslie>: Modify the pattern matcher count after we implement the qconv2d_add lowering.
+        # Totally 10 pattern_matcher_count, 43 pattern_matcher_nodes
+        # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
+        #    matched in pointless_convert pass at
+        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. Dequant pattern matcher for dequant promotion * 1
+        #    [convert_element_type_3, sub_1, mul_3]
+        # 3. Dequant-conv pattern matched in quantization weight prepack * 3
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 4. Quantization fusion in post-grad fusion pass * 2
+        #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            10,
+            43,
+            check_quantization=True,
+        )
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
