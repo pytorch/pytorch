@@ -32,6 +32,7 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -138,6 +139,7 @@ class _FSDPState(_State):
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
+        self._free_event_queue: Optional[_FreeEventQueue] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []

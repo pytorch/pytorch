@@ -254,6 +254,11 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+            handle.init_wait_system(
+                root_state._free_event_queue,
+                root_state.limit_all_gathers,
+            )
+
         # TODO: remove this if check after we integrate device_mesh in Composable APIs.
         # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
         if hasattr(root_state, "_device_mesh"):
@@ -321,13 +326,6 @@ def _unshard(
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
-    if state.limit_all_gathers:
-        event = state._free_event_queue.dequeue_if_needed()
-        if event:
-            with torch.profiler.record_function(
-                "FullyShardedDataParallel.rate_limiter"
-            ):
-                event.synchronize()
     with state._device_handle.stream(unshard_stream):
         handle.unshard()
         handle.post_unshard()
@@ -344,13 +342,6 @@ def _reshard(
     free the handle's padded unsharded flat parameter.
     """
     handle.reshard(free_unsharded_flat_param)
-    if state.limit_all_gathers and free_unsharded_flat_param:
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            # We don't run a even queue for freeing under torch compile atm
-            # But maybe we need to? TODO(voz): Look into this
-            free_event = state._device_handle.Event()
-            free_event.record()
-            state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
     # Flat parameter freed or not, we always have to "unshard" the parameter
     # upon next access to get its shape correct.
@@ -1100,6 +1091,11 @@ def _post_backward_final_callback(
             handle._post_forward_index = None
             handle._training_state = HandleTrainingState.IDLE
             handle._prefetched = False
+
+    # If there are all-gather buffers left in the event queue, free them (by
+    # deleting reference)
+    root_state._free_event_queue.clear()
+
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
 

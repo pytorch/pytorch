@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue, EventWithTensor
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
@@ -538,6 +539,16 @@ class FlatParamHandle:
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
+        # Attributes for wait system for rate limiting
+        self._free_event_queue: Optional[_FreeEventQueue] = None
+        self._limit_all_gathers: Optional[bool] = None
+
+    def init_wait_system(self,
+        free_event_queue: _FreeEventQueue,
+        limit_all_gathers: bool,
+    ):
+        self._free_event_queue = free_event_queue
+        self._limit_all_gathers = limit_all_gathers
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
@@ -1273,6 +1284,16 @@ class FlatParamHandle:
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_freed(unsharded_flat_param)
+        if self._limit_all_gathers:
+            # Current stream is unshard stream as we call handle.unshard in
+            # its with-stream context
+            unshard_stream = self._device_handle.current_stream()
+            event_with_tensor = self._free_event_queue.dequeue_if_needed()
+            if event_with_tensor:
+                unshard_stream.wait_event(event_with_tensor.event)
+            # Life of the tensor stashed would end here (since there is no more
+            # reference). Caching allocator would reclaim its storage into the
+            # unshard stream's pool
         _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
@@ -1676,11 +1697,21 @@ class FlatParamHandle:
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
-        # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(
-            unsharded_flat_param, self._device_handle.current_stream()
-        )
-        _free_storage(unsharded_flat_param)
+        if self._limit_all_gathers:
+            # In the new rate limiter, we stash an all-gather buffer to keep it from
+            # being freed by the caching allocator until two all-gathers later. So
+            # that the caching allocator would try to reuse its storage for the next
+            # next all-gather.
+            # We also do not call `record_stream` to hand over the ownership to
+            # the compute stream (i.e. the ownership is still with the unshard
+            # stream)
+            comp_done_event = self._device_handle.Event()
+            comp_done_event.record()
+            event_with_tensor = EventWithTensor(
+                comp_done_event,
+                unsharded_flat_param,
+            )
+            self._free_event_queue.enqueue(event_with_tensor)
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""

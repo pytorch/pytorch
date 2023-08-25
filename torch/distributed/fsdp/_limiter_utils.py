@@ -4,6 +4,16 @@ from typing import Deque, Optional
 import torch
 
 
+class EventWithTensor:
+    def __init__(
+        self,
+        event: torch.cuda.Event,
+        tensor: torch.Tensor,
+    ) -> None:
+        self.event = event
+        self.tensor = tensor
+
+
 class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to inflight all-gathers. The
@@ -12,20 +22,20 @@ class _FreeEventQueue:
     """
 
     def __init__(self) -> None:
-        self._queue: Deque[torch.cuda.Event] = collections.deque()
+        self._queue: Deque[EventWithTensor] = collections.deque()
         self._max_num_inflight_all_gathers = 2  # empirically chosen
 
-    def enqueue(self, free_event: torch.cuda.Event) -> None:
+    def enqueue(self, free_event: EventWithTensor) -> None:
         """Enqueues a free event."""
         self._queue.append(free_event)
 
-    def dequeue_if_needed(self) -> Optional[torch.cuda.Event]:
+    def dequeue_if_needed(self) -> Optional[EventWithTensor]:
         """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
             return self._dequeue()
         return None
 
-    def _dequeue(self) -> Optional[torch.cuda.Event]:
+    def _dequeue(self) -> Optional[EventWithTensor]:
         """Dequeues a free event if possible."""
         if self._queue:
             event = self._queue.popleft()
