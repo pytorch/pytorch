@@ -806,18 +806,19 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
+        # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
+        # but they are different to ONNX. We need to distinguish them.
+        # Constant tensors are inputs of the graph, and buffer/weights are initializers.
+
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
-        # NOTE: We only save real tensors to initializer default data
-        not_fake_tensor = not isinstance(attr_tensor, torch._subclasses.FakeTensor)
         # Parameter/buffer name cannot contain "."
         # Revert from "/" to restore namespace formatting.
         input_ = onnxscript_graph.add_initializer(
             name=node.target.replace("/", "."),
             value=attr_tensor,
-            save_value_to_default=not_fake_tensor,
         )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
