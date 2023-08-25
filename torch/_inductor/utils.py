@@ -1022,3 +1022,11 @@ def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
+
+
+def is_welford_reduction(reduction_type):
+    return reduction_type.startswith("welford")
+
+
+def reduction_num_outputs(reduction_type):
+    return 3 if is_welford_reduction(reduction_type) else 1
