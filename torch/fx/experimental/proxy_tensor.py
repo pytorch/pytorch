@@ -478,7 +478,7 @@ def _pop_proxy_mode_temporarily(dk):
             _push_mode(old, dk)
     else:
         # During normal tracing, pop off of the dedicated proxy mode stack
-        old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
+        old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
         try:
             yield old
         finally:
@@ -564,11 +564,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers = []
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
-        self._mode_key = torch._C.TorchDispatchModeKey.PROXY
+        self._mode_key = torch._C._TorchDispatchModeKey.PROXY
         # Every time we enter a mode, we maintain a stack telling us what the previous
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
-        self.enter_stack: List[Optional[FakeTensorMode]] = []
+        self.enter_stack: List[Optional[ProxyTorchDispatchMode]] = []
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -866,7 +866,7 @@ def get_torch_dispatch_modes():
 
 
 def get_innermost_proxy_mode():
-    return torch._C._get_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 @contextlib.contextmanager
@@ -878,7 +878,7 @@ def disable_proxy_modes_tracing(enable_current=False):
     if not enable_current:
         # Only one proxy_mode can be "active" at a time.
         # So we simply remove our active mode.
-        maybe_old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.PROXY)
+        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     try:
         yield
     finally:

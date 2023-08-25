@@ -833,14 +833,11 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = list(
-            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
-        ) + ["rindex"]
+        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
-            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
+                    names[i], self.numels[i], names[i][0], i, self, pid_cache
                 )
             )
         for tree in self.range_trees:
@@ -1878,6 +1875,7 @@ class TritonKernel(Kernel):
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
+            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
         }
 
         for tree in self.range_trees:
@@ -2002,13 +2000,6 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
-
-        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
-            sizes[0:3] = reversed(sizes[0:3])
-
-        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
-            sizes[0:2] = reversed(sizes[0:2])
-
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):
@@ -2462,6 +2453,11 @@ class TritonScheduling(BaseScheduling):
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
+
+            # DESCRIPTIVE_KRNL_NAME is used for profiling purposes; it shows the full kernel name
+            # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
+            # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
+            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
