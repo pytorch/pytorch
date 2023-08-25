@@ -702,7 +702,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     Storage storage{
         Storage::use_byte_size_t{},
         0,
-        at::DataPtr{},
+        at::DataPtr{nullptr, r.device(7)},
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizeable=*/true};
 
