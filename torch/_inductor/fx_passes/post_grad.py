@@ -601,6 +601,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = node.args[src_index]
             else:
                 src = src_index(node.args)
+            if not isinstance(src, torch.fx.Node):
+                continue
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
             if (
