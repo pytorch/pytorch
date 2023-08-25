@@ -20,6 +20,29 @@ _rnn_impls = {
 }
 
 
+def _prepend_to_docstring(header_docstring: str):
+    r"""Prepends a line to a docstring. The original docstring is indented with four spaces.
+
+    This decorator is useful for creating documentation, since the first line replaces the function
+    signature in the docstring. The decorator adds long, single lines in docstrings without
+    violating a .py file's character limit.
+    """
+
+    def decorator(documented_object):
+        if documented_object.__doc__:
+            # fix indentation of the initial docstring
+            if not documented_object.__doc__.startswith(r"    "):
+                original_docstr = r"    " + documented_object.__doc__
+            else:
+                original_docstr = documented_object.__doc__
+            documented_object.__doc__ = "\n".join([header_docstring, original_docstr])
+        else:
+            documented_object = header_docstring
+        return documented_object
+
+    return decorator
+
+
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
@@ -360,11 +383,11 @@ class RNNBase(Module):
         replica._flat_weights_names = replica._flat_weights_names[:]
         return replica
 
-
+@_prepend_to_docstring("__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,"
+                       "batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)")
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
     input sequence.
-
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -464,19 +487,28 @@ class RNN(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    @overload
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
                  nonlinearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
-                 dropout: float = 0., bidirectional: bool = False, device=None, dtype=None) -> None:
-        self.nonlinearity = nonlinearity
+                 dropout: float = 0., bidirectional: bool = False, device=None,
+                 dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
+    def __init__(self, *args, **kwargs):
+        if 'proj_size' in kwargs:
+            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
+        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
             raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'. Select from 'tanh' or 'relu'.")
-        super().__init__(mode, input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
-                         device=device, dtype=dtype)
+        super().__init__(mode, *args, **kwargs)
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
@@ -582,10 +614,12 @@ class RNN(RNNBase):
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
 # support expressing these two modules generally.
+
+@_prepend_to_docstring("__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,"
+                       "dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)")
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
-
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -744,12 +778,18 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
+    @overload
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
                  batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
                  proj_size: int = 0, device=None, dtype=None) -> None:
-        super().__init__('LSTM', input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
-                         proj_size=proj_size, device=device, dtype=dtype)
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
+    def __init__(self, *args, **kwargs):
+        super().__init__('LSTM', *args, **kwargs)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -875,6 +915,8 @@ class LSTM(RNNBase):
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
+@_prepend_to_docstring("__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,"
+                       "dropout=0.0,bidirectional=False,device=None,dtype=None)")
 class GRU(RNNBase):
     r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
 
@@ -1005,12 +1047,20 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    @overload
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
                  batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
-                 device=None, dtype=None):
-        super().__init__('GRU', input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
-                         device=device, dtype=dtype)
+                 device=None, dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
+    def __init__(self, *args, **kwargs):
+        if 'proj_size' in kwargs:
+            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
+        super().__init__('GRU', *args, **kwargs)
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
