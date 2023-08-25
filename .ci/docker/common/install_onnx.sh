@@ -25,7 +25,7 @@ pip_install \
   transformers==4.31.0
 
 pip_install coloredlogs packaging
-pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230824001
+pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230824005
 
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.
