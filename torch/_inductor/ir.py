@@ -304,6 +304,12 @@ class IRNode:
     def get_read_names(self):
         return {dep.name for dep in self.get_reads()}
 
+    def get_layout(self):
+        raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
+
+    def get_size(self):
+        raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
     def get_numel(self):
         return sympy_product(self.get_size())
 
@@ -1446,6 +1452,9 @@ class BaseView(IRNode):
     def get_dtype(self):
         return self.data.get_dtype()
 
+    def get_layout(self):
+        return self.data.get_layout()
+
     def get_device(self):
         return self.data.get_device()
 
@@ -1846,6 +1855,9 @@ class ReinterpretView(BaseView):
 
     def get_dtype(self):
         return self.layout.dtype
+
+    def get_layout(self):
+        return self.layout
 
     def get_size(self):
         return list(self.layout.size)
@@ -2422,6 +2434,12 @@ class Buffer(IRNode):
     def realize(self):
         pass
 
+    def get_workspace_size(self):
+        """
+        Gets extra global memory size needed by this buffer.
+        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
+        """
+        return 0
 
 class InputBuffer(Buffer):
     pass
@@ -2755,6 +2773,23 @@ class TemplateBuffer(Buffer):
             None,
         )
 
+class TritonTemplateBuffer(TemplateBuffer):
+    pass
+
+class CUDATemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        workspace_size: int = 0,
+    ):
+        super().__init__(layout, inputs, make_kernel_render)
+        # Global memory (in bytes) needed for this template.
+        self.workspace_size = workspace_size
+
+    def get_workspace_size(self):
+        return self.workspace_size if self.workspace_size is not None else 0
 
 @dataclasses.dataclass
 class InputsKernel(Buffer):
@@ -4724,6 +4759,9 @@ class MutableBox(IRNode):
     @property
     def layout(self):
         return self.data.layout
+
+    def get_layout(self):
+        return self.layout
 
     def __str__(self):
         if isinstance(self.data, MutableBox):
