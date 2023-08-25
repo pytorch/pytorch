@@ -19,6 +19,10 @@ from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatc
 from torch._custom_op.functional import register_functional_op
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.multiprocessing.reductions import StorageWeakRef
 
 import logging
 import sys
@@ -2106,6 +2110,63 @@ class TestPythonDispatcher(TestCase):
         r = torch._C._EnablePythonDispatcher()
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
+
+class TestWrapperSubclassAliasing(TestCase):
+
+    # This tests the correctness of `torch.utils._python_dispatch.return_and_correct_aliasing`,
+    # a util for wrapper subclasses to promise correct aliasing behavior.
+    # It's probably overkill to test every OpInfo,
+    # so I picked a sampling of ops with representative schemas.
+    @ops([op for op in op_db if op.name in [
+        'mul',  # out-of-place
+        'cat',  # out-of-place (TensorList input)
+        'index',  # out-of-place (Optional TensorList input)
+        'mul_',  # inplace
+        'view',  # view
+        't_',  # inplace-view
+        'split',  # view (multi-return)
+        'native_batch_norm',  # mutable op (returns outputs and mutates some inputs)
+    ]], allowed_dtypes=(torch.float,))
+    def test_wrapper_subclass_aliasing(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        sample = first_sample(self, samples)
+
+        result_ref = op(sample.input, *sample.args, **sample.kwargs)
+
+        def to_subclass(t: torch.Tensor):
+            return TwoTensor(t, t.clone())
+
+        inp_subclass = pytree.tree_map_only(torch.Tensor, to_subclass, sample.input)
+        args_subclass = pytree.tree_map_only(torch.Tensor, to_subclass, sample.args)
+        kwargs_subclass = pytree.tree_map_only(torch.Tensor, to_subclass, sample.kwargs)
+
+        result_test = op(inp_subclass, *args_subclass, **kwargs_subclass)
+
+        args_ref_flat, _ = pytree.tree_flatten((sample.input, sample.args, sample.kwargs))
+        args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
+
+        args_test_flat, _ = pytree.tree_flatten((inp_subclass, args_subclass, kwargs_subclass))
+        args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
+
+        result_ref_flat, _ = pytree.tree_flatten(result_ref)
+        result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
+
+        result_test_flat, _ = pytree.tree_flatten(result_test)
+        result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
+
+        for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
+            for a_ref, a_test in zip(args_ref_flat_tensors, args_test_flat_tensors):
+                out_is_inpt = o_ref is a_ref
+                if out_is_inpt:
+                    self.assertTrue(o_test is a_test)
+
+                out_aliases_inpt = StorageWeakRef(o_ref.untyped_storage()) == StorageWeakRef(a_ref.untyped_storage())
+                if out_aliases_inpt:
+                    self.assertTrue(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+                else:
+                    self.assertFalse(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+
+instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
 if __name__ == '__main__':
     run_tests()
