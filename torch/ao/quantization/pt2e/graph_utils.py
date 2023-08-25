@@ -23,7 +23,7 @@ _EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.ReLU, torch.nn.functional.relu, torch.nn.functional.relu_},
     {torch.nn.BatchNorm2d, torch.nn.functional.batch_norm},
     {torch.nn.Hardtanh, torch.nn.functional.hardtanh, torch.nn.functional.hardtanh_},
-    {torch.add, operator.add, operator.iadd},
+    {torch.add, operator.add, operator.iadd, "add", "add_"},
     {torch.mul, operator.mul, operator.imul},
 ]
 
