@@ -1,5 +1,4 @@
 import dataclasses
-import inspect
 import io
 import re
 import pathlib
@@ -20,7 +19,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.eval_frame import Constraint
+from torch.export import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -110,13 +109,11 @@ def capture_pre_autograd_graph(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
-    decomp_table: Dict[OpOverload, Callable] = core_aten_decompositions(),
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
     decomposition is run. The produced module will be "non-functional" and
-    composed of aten operators. You can manually specify decomp_table to control
-    decomposition rule. Later this API will be deleted in favor of more general
+    composed of aten operators. Later this API will be deleted in favor of more general
     torch.export API.
 
     Args:
@@ -129,15 +126,38 @@ def capture_pre_autograd_graph(
       constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
-      decomp_table: A optional table of specifying how to decompose certain aten op.
     Returns:
         An nn.Module containing the traced method.
 
     """
 
-    with patch("torch._export.DECOMP_TABLE", decomp_table):
-        ep = export(f, args, kwargs, constraints=constraints)
-    return ep.transform(ReplaceViewOpsWithViewCopyOpsPass()).module()
+    decomp_table = {
+        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
+        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
+        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
+        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
+    }
+
+    if kwargs is None:
+        kwargs = {}
+
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+        m = torch._dynamo.export(
+            f,
+            constraints=constraints,
+            assume_static_by_default=True,
+            tracing_mode="symbolic",
+            decomposition_table=decomp_table,
+            pre_dispatch=True,
+            aten_graph=True,
+        )(
+            *args,
+            **kwargs,
+        )[0]
+
+        for n in m.graph.nodes:
+            n.meta["is_torch_exported"] = True
+        return m
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -216,11 +236,26 @@ def export(
         raise UserError(UserErrorType.INVALID_INPUT,
                         f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}")
 
+    # We convert to nn.Module because __call__ of ExportedProgram
+    # is untracable right now.
+    if isinstance(f, ExportedProgram):
+        if len(constraints) > 0:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "Cannot provide constraints for already exported program."
+            )
+        f = f.module()
+
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_signatures: Dict[str, ModuleCallSignature] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                if len(constraints) > 0:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        "Cannot provide constraints for already exported program."
+                    )
                 gm_torch_level = f
             else:
                 with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
@@ -323,14 +358,20 @@ def export(
         loss_output=graph_signature.backward_signature.loss_output
     ) if graph_signature.backward_signature is not None else None
 
+    def to_str_list(sig_component: List[Any]):
+        return [str(v) for v in sig_component]
+
+    def to_str_dict(sig_component: Dict[Any, Any]):
+        return {str(k): str(v) for k, v in sig_component.items()}
+
     export_graph_signature = ExportGraphSignature(
-        parameters=graph_signature.parameters,
-        buffers=graph_signature.buffers,
-        user_inputs=graph_signature.user_inputs,
-        user_outputs=graph_signature.user_outputs,
-        inputs_to_parameters=graph_signature.inputs_to_parameters,
-        inputs_to_buffers=graph_signature.inputs_to_buffers,
-        buffers_to_mutate=graph_signature.buffers_to_mutate,
+        parameters=to_str_list(graph_signature.parameters),
+        buffers=to_str_list(graph_signature.buffers),
+        user_inputs=to_str_list(graph_signature.user_inputs),
+        user_outputs=to_str_list(graph_signature.user_outputs),
+        inputs_to_parameters=to_str_dict(graph_signature.inputs_to_parameters),
+        inputs_to_buffers=to_str_dict(graph_signature.inputs_to_buffers),
+        buffers_to_mutate=to_str_dict(graph_signature.buffers_to_mutate),
         backward_signature=export_backward_signature
     )
 
@@ -349,8 +390,7 @@ def export(
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
-    for key, val in gm_torch_level.meta.items():
-        gm.meta[key] = val
+    gm.meta.update(gm_torch_level.meta)
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
@@ -394,14 +434,15 @@ def export(
         range_constraints,
         equality_constraints,
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        args,
     )
 
-    exported_program = exported_program.transform(
+    exported_program = exported_program._transform(
         _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
     )
     if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
-    return exported_program.transform(_ReplaceSymSizeOpPass())
+        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
@@ -419,48 +460,6 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
-    """
-    Saves an :class:`ExportedProgram` to a file-like object. It can then be
-    loaded using the Python API :func:`torch._export.load <torch._export.load>`.
-
-    Args:
-        ep (ExportedProgram): The exported program to save.
-
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
-            implement write and flush) or a string containing a file name.
-
-        extra_files (Optional[Dict[str, Any]]): Map from filename to contents
-            which will be stored as part of f.
-
-        opset_version (Optional[Dict[str, int]]): A map of opset names
-            to the version of this opset
-
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import torch._export
-        import io
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        ep = torch._export.export(MyModule(), torch.randn(5))
-
-        # Save to file
-        torch._export.save(ep, 'exported_program.pt2')
-
-        # Save to io.BytesIO buffer
-        buffer = io.BytesIO()
-        torch._export.save(ep, buffer)
-
-        # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
-        torch._export.save(ep, 'exported_program.pt2', extra_files=extra_files)
-    """
     from .serde.serialize import serialize
     from .serde.schema import SCHEMA_VERSION
     serialized_program, serialized_state_dict = serialize(ep, opset_version)
@@ -487,48 +486,6 @@ def load(
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ExportedProgram:
-    """
-    Loads an :class:`ExportedProgram` previously saved with
-    :func:`torch._export.save <torch._export.save>`.
-
-    Args:
-        ep (ExportedProgram): The exported program to save.
-
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
-            implement write and flush) or a string containing a file name.
-
-        extra_files (Optional[Dict[str, Any]]): The extra filenames given in
-            this map would be loaded and their content would be stored in the
-            provided map.
-
-        expected_opset_version (Optional[Dict[str, int]]): A map of opset names
-            to expected opset versions
-
-    Returns:
-        An :class:`ExportedProgram` object
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import torch._export
-        import io
-
-        # Load ExportedProgram from file
-        ep = torch._export.load('exported_program.pt2')
-
-        # Load ExportedProgram from io.BytesIO object
-        with open('exported_program.pt2', 'rb') as f:
-            buffer = io.BytesIO(f.read())
-        buffer.seek(0)
-        ep = torch._export.load(buffer)
-
-        # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch._export.load('exported_program.pt2', extra_files=extra_files)
-        print(extra_files['foo.txt'])
-    """
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
 

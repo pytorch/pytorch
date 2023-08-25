@@ -182,6 +182,9 @@ class CachingAutotuner(KernelInterface):
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
 
+        # Setting device_type="hip" required on ROCm to pass down to triton
+        compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
+
         if warm_cache_only_with_cc:
             triton.compile(
                 self.fn,
@@ -672,10 +675,6 @@ def triton_config(
     override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
-
-    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
-    size_hints = list(reversed(size_hints))
-
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -1009,17 +1008,8 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(*numels):
+def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1:
-        xnumel, ynumel, znumel = numels[0], None, None
-    elif len(numels) == 2:
-        xnumel, ynumel, znumel = numels[1], numels[0], None
-    elif len(numels) == 3:
-        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
-    else:
-        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:
