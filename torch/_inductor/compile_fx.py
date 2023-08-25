@@ -503,7 +503,13 @@ def fx_codegen_and_compile(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
+    # breakpoint()
     V.debug.fx_graph(gm, example_inputs)
+
+    # breakpoint()
+
+    V.debug.fx_graph_diagram(None, gm)
 
     shape_env = _shape_env_from_inputs(example_inputs)
 

@@ -983,6 +983,7 @@ class Scheduler:
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
+        # V.debug.fx_graph_diagram(self.nodes)
         self.debug_draw_graph()
 
         # used during codegen:

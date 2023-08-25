@@ -77,6 +77,8 @@ if HAS_PYDOT:
             }
 
             for node in graph_module.graph.nodes:
+                # print(f"node.name={node.name} node.op={node.op}")
+                # breakpoint()
                 if node.op != "call_module":
                     continue
 

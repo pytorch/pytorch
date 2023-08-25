@@ -86,6 +86,18 @@ def draw_buffers(nodes, print_graph=False, fname=None):
     draw_graph(gm, fname, clear_meta=False)
 
 
+def draw_fx_graph(gm, print_graph=False, fname=None):
+    """
+    Draw a graph in fname.svg.
+    nodes is a list of SchedulerNode objects.
+    """
+    if not has_dot():
+        log.warning("draw_buffers() requires `graphviz` package")
+        return
+
+    draw_graph(gm, fname, clear_meta=False)
+
+
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
@@ -261,9 +273,9 @@ class DebugContext:
             )
             pass
 
-    def fopen(self, filename):
+    def fopen(self, filename, mode="w"):
         assert self._path
-        return open(os.path.join(self._path, filename), "w")
+        return open(os.path.join(self._path, filename), mode)
 
     def filename(self, suffix):
         return os.path.join(self._path, suffix)
@@ -368,6 +380,9 @@ class DebugFormatter:
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
+        with self.fopen("fx_graph_original.pkl", mode="wb") as fd:
+            pickle.dump(gm, fd)
+
     def fx_graph_transformed(
         self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
     ):
@@ -388,6 +403,13 @@ class DebugFormatter:
 
     def graph_diagram(self, nodes: SchedulerNodeList):
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+
+    def fx_graph_diagram(self, nodes: SchedulerNodeList, gm: torch.fx.GraphModule):
+        if gm is None:
+            with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
+                gm = pickle.load(fd)
+
+        draw_graph(gm, fname=self.filename("fx_graph_diagram.svg"), clear_meta=False)
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
@@ -429,6 +451,7 @@ def save_args_for_compile_fx_inner(*args, **kwargs):
 
     fn_name = "compile_fx_inner"
     path = f"{folder}/{fn_name}_{next(save_args_cnt)}.pkl"
+    breakpoint()
     with open(path, "wb") as f:
         pickle.dump((args_to_save, kwargs_to_save), f)
 
