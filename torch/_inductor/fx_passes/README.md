@@ -11,7 +11,7 @@ The invariant about mutation we have is:
 
 For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation at all.
 
-However, we do still have aliasing in the graph. This does not matter most of the time, but it does mean that **our passes are not allowed to cause the input and output to alias if they did not alias in the original graph**.
+However, we do still have aliasing in the graph. This does not matter most of the time, but it does mean that **our passes are not allowed to cause any additional inputs/outputs to alias if they did not alias in the original graph**.
 
 For example
 ```python
