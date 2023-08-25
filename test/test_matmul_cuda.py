@@ -26,8 +26,6 @@ from torch.testing._internal.common_utils import (
 )
 
 # Protects against includes accidentally setting the default dtype
-# NOTE: jit_metaprogramming_utils sets the default dtype to double!
-torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
 
@@ -228,6 +226,14 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8, amax_fp8 = torch._scaled_mm(x, y)
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
+
+    def test_float8_bias_relu_edgecase(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.full((k, l), 0.0, device=device).to(torch.float8_e4m3fn)
+        y = torch.full((m, l), 1.0, device=device, dtype=torch.float8_e4m3fn).t()
+        bias = torch.full((m,), -3.0, device=device, dtype=torch.half)
+        outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
+        self.assertEqual(amaxb_fp8.item(), 3.0)
 
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")

@@ -11,8 +11,6 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-#include <iostream>
-
 namespace at {
 namespace functorch {
 

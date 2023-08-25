@@ -10,9 +10,6 @@ from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
 
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
-
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=[torch.double, torch.cdouble])

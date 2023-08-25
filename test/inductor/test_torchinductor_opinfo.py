@@ -203,7 +203,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f32, f64},
     "cauchy": {f16},
-    "chalf": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "exponential": {f16},
@@ -221,7 +220,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.rrelu": {f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
-    "normal": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
@@ -248,29 +246,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16, f32, f64},
-    "chalf": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "complex": {f16},
     "cumprod": {f16},
     "exponential": {f16, f32, f64},
-    "fft.fft": {f16},
-    "fft.fft2": {f16},
-    "fft.fftn": {f16},
-    "fft.hfft": {f16},
-    "fft.hfft2": {f16},
-    "fft.hfftn": {f16},
-    "fft.ifft": {f16},
-    "fft.ifft2": {f16},
-    "fft.ifftn": {f16},
-    "fft.ihfft": {f16},
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
-    "fft.irfft": {f16},
-    "fft.irfft2": {f16},
-    "fft.irfftn": {f16},
-    "fft.rfft": {f16},
-    "fft.rfft2": {f16},
-    "fft.rfftn": {f16},
     "geometric": {f16, f32, f64, i32, i64},
     "kron": {f16},
     "linalg.eig": {f32, f64},
@@ -293,7 +273,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.softsign": {f16},
     "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
-    "normal": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "outer": {f16},
@@ -304,7 +283,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("round", "decimals_3"): {f16},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
-    "tanh": {f16},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
 }
@@ -330,14 +308,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
-else:
-    # aten.miopen_batch_norm is unsupported for lowering
-    inductor_expected_failures_single_sample["cuda"].update(
-        {
-            "nn.functional.batch_norm": {f16, f32},
-            "nn.functional.instance_norm": {f16, f32},
-        }
-    )
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update(
