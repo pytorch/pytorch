@@ -1,9 +1,9 @@
 # Owner(s): ["module: fx"]
 
-from unittest import TestCase
-
 import copy
 import itertools
+from unittest import TestCase
+
 import torch
 from torch import nn
 
@@ -53,7 +53,9 @@ class TestEfficientConvBNEval(TestCase):
             output = model(input)
             outputs.append(output.clone())
             output.sum().backward()
-            grads.append([x.grad.clone() for x in model.parameters() if x.grad is not None])
+            grads.append(
+                [x.grad.clone() for x in model.parameters() if x.grad is not None]
+            )
             model.zero_grad()
 
         for output_a, output_b in itertools.product(outputs, outputs):
