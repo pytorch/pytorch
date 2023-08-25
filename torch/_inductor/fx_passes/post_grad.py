@@ -222,7 +222,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
     extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
 )
 def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
         mat1, mat2, mat2_mm_shape, mat2_dtype
     )
 
@@ -245,7 +245,7 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
     extra_check=cuda_and_enabled_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
 
 
 @register_graph_pattern(
@@ -506,6 +506,60 @@ def is_valid_splitwithsizes_cat(match):
     extra_check=is_valid_splitwithsizes_cat,
 )
 def splitwithsizes_cat_replace(match, input_):
+    return input_
+
+
+def is_valid_cat_splitwithsizes(match):
+    cat_nodes = filter_nodes(match.nodes, aten.cat)
+    split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
+    if len(split_nodes) != 1 or len(cat_nodes) != 1:
+        return False
+    split_node, cat_node = split_nodes[0], cat_nodes[0]
+
+    # the cat node has other users: can't eliminate
+    if len(cat_node.users) > 1:
+        return False
+
+    # the dim of the cat and split should match
+    dim = get_arg_value(split_node, 2, "dim")
+    if dim != get_arg_value(cat_node, 1, "dim"):
+        return False
+
+    cat_inputs = list(get_arg_value(cat_node, 0))
+    split_sizes = get_arg_value(split_node, 1, "split_sizes")
+    # the number of input tensors in cat and the
+    # length of the split sizes should match
+    if len(cat_inputs) != len(split_sizes):
+        return False
+
+    for cat_input, split_size in zip(cat_inputs, split_sizes):
+        # each cat input tensor's size along dim
+        # should match the corresponding split size
+        if "val" not in cat_input.meta:
+            return False
+        cat_input_size = cat_input.meta["val"].size(dim)
+        if cat_input_size != split_size:
+            return False
+
+    return True
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.split_with_sizes,
+        CallFunction(
+            aten.cat,
+            KeywordArg("input_"),
+            Ignored(),
+            _users=MULTIPLE,
+        ),
+        Ignored(),
+        Ignored(),
+    ),
+    pass_number=2,
+    extra_check=is_valid_cat_splitwithsizes,
+)
+def cat_splitwithsizes_replace(match, input_):
     return input_
 
 

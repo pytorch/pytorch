@@ -1057,9 +1057,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
         #       as nullptr storage is disabled.
-        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
-                   ' are currently unsafe and thus disabled')
-        with self.assertRaisesRegex(RuntimeError, err_msg):
+        with self.assertRaisesRegex(RuntimeError, 'ZeroTensor is not serializable'):
             _save_load_check(t)
 
     def test_serialization_byteorder_mark(self):
