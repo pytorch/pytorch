@@ -571,20 +571,40 @@ class ExportedProgram:
                     assert node.target != torch.ops.higher_order._export_tracepoint
 
 
+@dataclasses.dataclass
 class _ConstraintTarget:
     """
     This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`torch.export.dynamic_dim`.
     """
 
-    def __init__(self, w_tensor: Any, t_id: int, dim: int):
-        self.w_tensor = w_tensor  # weakref to torch.Tensor
-        # TODO: We don't need t_id; we can get it off of w_tensor
-        self.t_id = t_id
-        self.dim = dim
+    w_tensor: Any  # weakref to torch.Tensor
+    # TODO: We don't need t_id; we can get it off of w_tensor
+    t_id: int
+    dim: int
 
 
-class Constraint(_ConstraintTarget):
+class _ConstraintFactory(type):
+    """
+    Metaclass that ensures a private constructor for Constraint
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+            f"Please use torch.export.dynamic_dim() to create one"
+        )
+
+    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None):
+        return super().__call__(w_tensor, t_id, dim, constraint_range, shared)
+
+
+def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None):
+    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared)
+
+
+@dataclasses.dataclass
+class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     .. warning::
@@ -595,34 +615,11 @@ class Constraint(_ConstraintTarget):
 
     """
 
+    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: StrictMinMaxConstraint
-    shared: Optional[_ConstraintTarget]
-
-    def __init__(self):
-        raise NotImplementedError(
-            "Can't directly construct Constraint object. Please use torch.export.dynamic_dim API instead."
-        )
-
-    def __new__(cls):
-        bare_instance = object.__new__(cls)
-        return bare_instance
-
-    @classmethod
-    def _create_constraint(
-        cls,
-        w_tensor: Any,
-        t_id: int,
-        dim: int,
-        constraint_range: StrictMinMaxConstraint,
-        shared: Optional[_ConstraintTarget] = None,
-    ):
-        instance = cls.__new__(cls)
-        instance.w_tensor = w_tensor
-        instance.t_id = t_id
-        instance.dim = dim
-        instance.constraint_range = constraint_range
-        instance.shared = shared
-        return instance
+    # Represent that `constraint_range` is shared with another _ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
+    shared: Optional[_ConstraintTarget] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         from torch.utils._sympy.value_ranges import ValueRanges
@@ -631,7 +628,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint._create_constraint(
+        return _create_constraint(
             self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
         )
 
@@ -675,7 +672,10 @@ class Constraint(_ConstraintTarget):
             "shared": (
                 None
                 if self.shared is None
-                else {"t_id": self.shared.t_id, "dim": self.shared.dim}
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
             ),
         }
 
@@ -689,7 +689,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
-        return Constraint._create_constraint(
+        return _create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,
