@@ -99,7 +99,6 @@ class DispatchKey(Enum):
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
     FuncTorchBatched = auto()
-    BatchedNestedTensor = auto()
     FuncTorchVmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
     Functionalize = auto()
