@@ -115,7 +115,7 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
-        (self_ptr->opt_size(2).value() == other.size(2) || other.size(2) == 1));
+        self_ptr->opt_size(2).value() == other.size(2));
     // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
     bool is_broadcastable_2d = (
         self_ptr->dim() == 2 &&
@@ -136,8 +136,6 @@ Tensor NestedTensor_elementwise_Tensor(
       auto result = wrap_buffer(result_buffer, self_sizes);
       if (op_name == "add") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::ADD);
-      } else if (op_name == "sub") {
-        nested_dense_elementwise_stub(self.device().type(), result, self, -other_, NESTED_DENSE_OP::ADD);
       } else if (op_name == "mul") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::MUL);
       } else {
@@ -145,23 +143,6 @@ Tensor NestedTensor_elementwise_Tensor(
       }
       return result;
     }
-
-    // check for the [B, C, *, *], [C, 1, 1] case
-    bool is_broadcastable_4d_3d = (
-        self_ptr->dim() == 4 &&
-        other.dim() == 3 &&
-        self_ptr->opt_size(1).has_value() &&
-        self_ptr->size(1) == other.size(0) &&
-        other.size(1) == 1 &&
-        other.size(2) == 1);
-    if (is_broadcastable_4d_3d) {
-      std::vector<Tensor> results;
-      for (auto t : self.unbind()) {
-        results.push_back(f(t, other));
-      }
-      return at::_nested_tensor_from_tensor_list(results);
-    }
-
     TORCH_CHECK(
         false,
         "Expected both self and other to be nested, but got a nested self and non-nested other for op: ",

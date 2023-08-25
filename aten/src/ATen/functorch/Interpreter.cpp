@@ -40,7 +40,7 @@ static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
     // NB: Does not include DispatchKey::FuncTorchVmapMode. We may modulate the key when
     // constructing the DynamicLayer, but we don't control it when entering/exiting
     // the DynamicLayer.
-    return DispatchKeySet({DispatchKey::FuncTorchBatched, DispatchKey::BatchedNestedTensor});
+    return DispatchKeySet({DispatchKey::FuncTorchBatched});
   } else if (key == TransformType::Grad || key == TransformType::Jvp) {
     return autograd_dispatch_keyset.add(DispatchKey::ADInplaceOrView);
   } else if (key == TransformType::Functionalize) {

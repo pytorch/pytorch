@@ -48,31 +48,6 @@ __global__ void op_dense_esuhm(
   }
 }
 
-// only for nested [B, *, D], dense [B, 1, 1]
-template <typename T, typename func_t>
-__global__ void op_dense_esuhm_full_broadcast(
-    const T* input,
-    const T* dense,
-    T* output,
-    int64_t embedding_dim,
-    const int64_t* offsets,
-    const func_t& f)
-{
-  // each batch is handled by a block
-  const int64_t batch_idx  = blockIdx.x;
-  const int64_t grain_size = blockDim.x;
-  const int64_t tid = threadIdx.x;
-  const int64_t range = offsets[batch_idx + 1] - offsets[batch_idx];
-  // each thread handles (embedding_dim // grain_size + (embedding_dim % grain_size <= tid)) elems
-  // of the dense embedding
-  for (int64_t idx = tid; idx < embedding_dim; idx += grain_size) {
-    const T dense_elem = dense[batch_idx];
-    for (int64_t nested_idx = idx; nested_idx < range; nested_idx += embedding_dim) {
-      output[offsets[batch_idx] + nested_idx] = f(input[offsets[batch_idx] + nested_idx], dense_elem);
-    }
-  }
-}
-
 template <typename T, typename func_t>
 void nested_op_dense_kernelLauncher(
     const T* input, // [sum(*) x embedding_dim]
@@ -80,7 +55,6 @@ void nested_op_dense_kernelLauncher(
     T* output, // [sum(*) x embedding_dim]
     int64_t batch_size,
     int64_t embedding_dim,
-    int64_t dense_embedding_dim,
     const int64_t* input_offsets,  // [batch_size]
     func_t f)
 {
@@ -88,23 +62,13 @@ void nested_op_dense_kernelLauncher(
   grid.x = batch_size;
   const auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (dense_embedding_dim == 1) {
-    op_dense_esuhm_full_broadcast<<<grid, BLOCK_DIM, 0, stream>>>(
-        input,
-        dense,
-        output,
-        embedding_dim,
-        input_offsets,
-        f);
-  } else {
-    op_dense_esuhm<<<grid, BLOCK_DIM, 0, stream>>>(
-        input,
-        dense,
-        output,
-        embedding_dim,
-        input_offsets,
-        f);
-  }
+  op_dense_esuhm<<<grid, BLOCK_DIM, 0, stream>>>(
+      input,
+      dense,
+      output,
+      embedding_dim,
+      input_offsets,
+      f);
 }
 
 template <typename scalar_t, typename func_t>
@@ -115,8 +79,7 @@ void _nested_op_dense_esuhm_kernel(Tensor& result, const Tensor& self, const Ten
   const auto self_buffer = self_ptr->get_buffer();
   const auto offsets = self_ptr->get_storage_offsets();
   const auto batch_size = other.size(0);
-  const auto embedding_size = self.size(2);
-  const auto dense_embedding_size = other.size(2);  // Should be either embedding_size or 1
+  const auto embedding_size = other.size(2);
 
   auto result_buffer = result_ptr->get_buffer();
   auto result_offsets = at::cat({offsets, at::tensor(self_ptr->numel())});
@@ -133,7 +96,6 @@ void _nested_op_dense_esuhm_kernel(Tensor& result, const Tensor& self, const Ten
     result_data_ptr,
     batch_size,
     embedding_size,
-    dense_embedding_size,
     result_offsets_ptr,
     f);
 }
