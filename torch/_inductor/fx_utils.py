@@ -1,8 +1,9 @@
 from collections import defaultdict
+from typing import Optional, Tuple
 
 import torch
 import torch.fx
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 from .virtualized import V
 
 
@@ -63,7 +64,8 @@ class FakeTensorUpdater:
             self.processed_hashes.add(self.hash_node(node))
 
     def hash_node(self, node: torch.fx.Node):
-        return (node, node.target, node.args, node.kwargs)
+        # todo(chilli): Not a great hash function
+        return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
         processed = set()
@@ -100,11 +102,6 @@ class FakeTensorUpdater:
             if self.hash_node(node) in self.processed_hashes:
                 continue
 
-            def get_fake_tensor(x):
-                if isinstance(x, torch.fx.Node):
-                    return x.meta["val"]
-                return x
-
             def is_aten_node(node):
                 return node.op == "call_function" and isinstance(
                     node.target, torch._ops.OpOverload
@@ -121,9 +118,9 @@ class FakeTensorUpdater:
                 if is_aten_node(updating_node):
                     continue
 
-                args, kwargs = tree_map(
-                    get_fake_tensor, (updating_node.args, updating_node.kwargs)
-                )
+                is_valid, args, kwargs = get_fake_args_kwargs(updating_node)
+                if not is_valid:
+                    continue
                 with V.fake_mode:
                     new_fake_tensor = updating_node.target(*args, **kwargs)
                 if "val" in updating_node.meta and is_fake_tensor_same(
@@ -139,11 +136,11 @@ class FakeTensorUpdater:
                 self.processed_hashes.add(self.hash_node(updating_node))
 
 
-def get_storage(t):
+def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node):
+def get_node_storage(node: torch.Tensor) -> Optional[int]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):
@@ -151,3 +148,21 @@ def get_node_storage(node):
     if not torch._C._has_storage(node.meta["val"]):
         return None
     return get_storage(node.meta["val"])
+
+
+def get_fake(x):
+    if isinstance(x, torch.fx.Node):
+        if "val" not in x.meta:
+            return x
+        return x.meta["val"]
+    return x
+
+
+def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, tuple, dict]:
+    """
+    First value returns a boolean if any of the input nodes don't have a faketensor.
+    """
+    args, kwargs = tree_map(get_fake, (x.args, x.kwargs))
+    if any(isinstance(a, torch.fx.Node) for a in tree_flatten((args, kwargs))[0]):
+        return False, args, kwargs
+    return True, args, kwargs

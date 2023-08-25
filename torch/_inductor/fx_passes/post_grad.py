@@ -10,9 +10,11 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
+from torch._prims_common import is_integer_dtype
+from torch.utils._pytree import tree_map
 
 from .. import config, ir, pattern_matcher
-from ..fx_utils import FakeTensorUpdater, get_node_storage
+from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -31,6 +33,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
+from ..utils import decode_device
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -543,6 +546,26 @@ def constant_pad_nd(x, padding, fill_value=0):
         return True
 
 
+@register_noop_decomp(torch.ops.prims.convert_element_type)
+def convert_element_type_noop(x, dtype: torch.dtype):
+    return x.dtype == dtype
+
+
+@register_noop_decomp(torch.ops.prims.device_put)
+def device_put_noop(x, device):
+    return x.device == decode_device(device)
+
+
+@register_noop_decomp([aten.ceil, aten.floor, aten.round, aten.trunc])
+def int_noop(x):
+    return is_integer_dtype(x.dtype)
+
+
+@register_noop_decomp([aten.pow])
+def pow_noop(a, b):
+    return isinstance(b, int) and b == 1
+
+
 @register_noop_decomp([aten.clone, aten.alias])
 def true_noop(*args, **kwargs):
     return True
@@ -578,7 +601,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 and get_node_storage(src) in input_storages
             ):
                 continue
-            if same_layout(node, src) and cond(*node.args, **node.kwargs):
+            is_valid, args, kwargs = get_fake_args_kwargs(node)
+            if not is_valid:
+                continue
+            if same_layout(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
