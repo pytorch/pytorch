@@ -161,8 +161,8 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
-#          rm -rf "${RUNNER_TEMP/artifacts}"
-#          mkdir "${RUNNER_TEMP/artifacts}"
+          sudo rm -rf "${RUNNER_TEMP/artifacts}"
+          sudo mkdir "${RUNNER_TEMP/artifacts}"
 
       - name: Checkout PyTorch to pytorch dir
         uses: malfet/checkout@silent-checkout
