@@ -587,7 +587,9 @@ class SchedulerNode(BaseSchedulerNode):
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.get_aliases() or self.is_template():
             return False
-        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+        if len(self.read_writes.writes) == 1 and isinstance(
+            read_dep, dependencies.MemoryDep
+        ):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -903,15 +905,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = sum(
+        a_first = all(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = sum(
+        b_first = all(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first > b_first:
+        if a_first and not b_first:
             return -1
-        if b_first > a_first:
+        if b_first and not a_first:
             return 1
 
         # otherwise contiguous
@@ -1077,6 +1079,8 @@ class Scheduler:
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
+                    and isinstance(read_dep, dependencies.MemoryDep)
+                    and isinstance(write_dep, dependencies.MemoryDep)
                     and read_dep.index == write_dep.index
                     and read_dep.size == write_dep.size
                 ):

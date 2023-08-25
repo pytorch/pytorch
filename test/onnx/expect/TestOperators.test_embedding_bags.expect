@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -313,7 +313,7 @@ graph {
             type: INT
           }
         }
-        name: "torch_jit1"
+        name: "sub_graph"
         input {
           name: "21"
           type {
@@ -361,7 +361,7 @@ graph {
       type: GRAPH
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 10
     dims: 8
@@ -429,5 +429,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }
