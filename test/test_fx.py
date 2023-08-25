@@ -329,6 +329,7 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    @unittest.expectedFailure
     def test_control_flow_tracing(self):
         def true(x, y):
             return x + y

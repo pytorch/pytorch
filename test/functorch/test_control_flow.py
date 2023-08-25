@@ -11,7 +11,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch._higher_order_ops.cond import cond_compiled as cond
-
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+)
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
@@ -22,6 +24,8 @@ def _fake_map(f, x, *args):
 
 
 class TestControlFlow(TestCase):
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_cond_no_trace(self):
         def true_fn(x):
             return x.sin()
