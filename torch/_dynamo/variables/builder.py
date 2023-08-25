@@ -698,7 +698,7 @@ class VariableBuilder:
                 False,
                 None,
                 is_tensor=False,
-                example_strong_ref=new_symint,
+                example_strong_ref=new_symbool,
             )
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symbool, self.source, None)
