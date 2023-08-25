@@ -500,6 +500,51 @@ class NoopTests(TestCase):
         inp = T(10)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
+    def test_noop_dtype_conversion(self):
+        def f(a):
+            b = torch.ops.prims.convert_element_type(a, torch.float32)
+            c = unfusible(b)
+            return c
+
+        inp = T(10)
+        self.assertExpectedInline(count_numel(f, inp), """20""")
+
+    def test_noop_device_conversion(self):
+        def f(a):
+            b = torch.ops.prims.device_put(a, "cuda")
+            c = unfusible(b)
+            return c
+
+        inp = T(10)
+        self.assertExpectedInline(count_numel(f, inp), """20""")
+
+    def test_noop_int_ops(self):
+        def f1(a):
+            b = torch.ceil(a)
+            c = unfusible(b)
+            return c
+
+        def f2(a):
+            d = torch.floor(a)
+            e = unfusible(d)
+            return e
+
+        def f3(a):
+            f = torch.round(a)
+            g = unfusible(f)
+            return g
+
+        def f4(a):
+            f = torch.pow(a, 1)
+            g = unfusible(f)
+            return g
+
+        inp = TI(10)
+        self.assertExpectedInline(count_numel(f1, inp), """20""")
+        self.assertExpectedInline(count_numel(f2, inp), """20""")
+        self.assertExpectedInline(count_numel(f3, inp), """20""")
+        self.assertExpectedInline(count_numel(f4, inp), """20""")
+
 
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
