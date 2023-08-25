@@ -41,9 +41,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
 from tools.stats.upload_metrics import emit_metric
+from tools.testing.target_determination.determinator import (
+    get_test_prioritizations,
+    TestPrioritizations,
+)
 from tools.testing.test_selections import (
     calculate_shards,
-    get_reordered_tests,
     get_test_case_configs,
     NUM_PROCS,
     ShardedTest,
@@ -1616,41 +1619,45 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    prioritized_tests = []
-    general_tests = selected_tests
+    test_prioritization: TestPrioritizations = TestPrioritizations(
+        unranked_relevance=selected_tests.copy()
+    )
+    metrics_dict = {}
     if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        (prioritized_tests, general_tests) = get_reordered_tests(general_tests)
+        test_prioritization = get_test_prioritizations(selected_tests)
 
-    metrics_dict = {
-        "prioritized_tests": prioritized_tests,
-        "general_tests": general_tests,
-        "cpp": options.cpp,
-    }
+        metrics_dict = {
+            "highly_relevant_tests": test_prioritization.highly_relevant,
+            "probably_relevant_tests": test_prioritization.probably_relevant,
+            "unranked_relevance_tests": test_prioritization.unranked_relevance,
+            "cpp": options.cpp,
+        }
+
+    class TestBatch:
+        """Defines a set of tests with similar priority that should be run together on the current shard"""
+
+        name: str
+        sharded_tests: List[ShardedTest]
+        failures: List[TestFailure]
+
+        def __init__(self, name: str, raw_tests: List[str], should_sort_shard: bool):
+            self.name = name
+            self.failures = []
+            self.sharded_tests = do_sharding(
+                options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
+            )
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
-    prioritized_tests = do_sharding(
-        options, prioritized_tests, test_times_dict, sort_by_time=False
-    )
-    general_tests = do_sharding(options, general_tests, test_times_dict)
+    test_batches: List[TestBatch] = []
 
-    if options.verbose:
-
-        def print_tests(category, tests):
-            tests_str = "\n ".join(str(x) for x in tests)
-            print_to_stderr(f"{category} tests:\n {tests_str}")
-
-        print_tests(
-            "Prioritized parallel", [x for x in prioritized_tests if not must_serial(x)]
-        )
-        print_tests(
-            "Prioritized serial", [x for x in prioritized_tests if must_serial(x)]
-        )
-        print_tests(
-            "General parallel", [x for x in general_tests if not must_serial(x)]
-        )
-        print_tests("General serial", [x for x in general_tests if must_serial(x)])
+    # Each batch will be run sequentially
+    test_batches = [
+        TestBatch("highly_relevant", test_prioritization.highly_relevant, False),
+        TestBatch("probably_relevant", test_prioritization.probably_relevant, False),
+        TestBatch("unranked_relevance", test_prioritization.unranked_relevance, True),
+    ]
 
     if options.dry_run:
         return
@@ -1665,17 +1672,18 @@ def main():
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    prioritized_failures: List[TestFailure] = []
-    general_failures: List[TestFailure] = []
-    start_time = time.time()
-    # First run the prioritized tests, then the remaining tests.
     try:
-        run_tests(prioritized_tests, test_directory, options, prioritized_failures)
-        metrics_dict["prioritized_failures"] = [x.test for x in prioritized_failures]
-        metrics_dict["general_start_time"] = time.time() - start_time
-        run_tests(general_tests, test_directory, options, general_failures)
-        metrics_dict["general_end_time"] = time.time() - start_time
-        metrics_dict["all_failures"] = [x.test for x in general_failures]
+        # Actually run the tests
+        start_time = time.time()
+        for test_batch in test_batches:
+            print(f"Starting test batch '{test_batch.name}'")
+            metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
+            run_tests(
+                test_batch.sharded_tests, test_directory, options, test_batch.failures
+            )
+            metrics_dict[f"{test_batch.name}_failures"] = [
+                x.test for x in test_batch.failures
+            ]
 
     finally:
         if options.coverage:
@@ -1693,7 +1701,8 @@ def main():
         if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
-    all_failures = prioritized_failures + general_failures
+    all_failures = [failure for batch in test_batches for failure in batch.failures]
+
     if len(all_failures) != 0:
         for _, err in all_failures:
             print_to_stderr(err)
