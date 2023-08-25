@@ -153,8 +153,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
-            if fake_val is not None:
-                assert isinstance(fake_val, torch.Tensor)
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
