@@ -79,6 +79,9 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  if (input.numel() == 0) {
+    return false;
+  }
   auto is_cpu_backend = [&](const TensorList tensors) {
     bool backend_cpu = true;
     for (const auto& t : tensors) {
