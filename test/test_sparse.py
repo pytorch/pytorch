@@ -4540,7 +4540,6 @@ class TestSparseAny(TestCase):
 
         for args, kwargs in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
-                enable_hybrid=layout is torch.sparse_coo,  # TODO: remove after gh-107373 is resolved
                 enable_batch=False,  # TODO: remove after gh-104868 is resolved
                 output_tensor=False):
             values_offset = 1 if layout is torch.sparse_coo else 2
@@ -4566,7 +4565,7 @@ class TestSparseAny(TestCase):
                                     lambda i, v, sz: cnstr(i, v, sz, **kwargs_).to_dense(masked_grad=masked),
                                     args_, masked=masked)
                             else:
-                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and 0:
                                     # TODO: remove this if-block after gh-107370 is resolved
                                     continue
                                 torch.autograd.gradcheck(
