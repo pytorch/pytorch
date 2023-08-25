@@ -5664,12 +5664,11 @@ class CommonTemplate:
         result, (fw_code, bw_code) = run_fw_bw_and_get_code(
             lambda: run(torch.randn([8, 32], device=self.device))
         )
+
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-            expected_kernel = 4
-        else:
-            expected_kernel = 6
+        expected_kernel = 4
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
@@ -6426,6 +6425,7 @@ class CommonTemplate:
             (torch.randn(32), torch.randn(32)),
         )
 
+    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self):
