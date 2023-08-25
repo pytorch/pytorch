@@ -275,9 +275,9 @@ def _reference_quantized_adaptive_avg_pool2d(
     x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
     x_i32 = x_i8.to(torch.int32)
     out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
-    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
-    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
-    out_i8 = out_fp32.to(torch.int8)
+    out_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, out_i32, (x_scale / out_scale)) + out_zero_point
+    out_i32 = torch.clamp(out_i32, out_quant_min, out_quant_max)
+    out_i8 = out_i32.to(torch.int8)
     return out_i8
 
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
