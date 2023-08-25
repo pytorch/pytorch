@@ -27,6 +27,8 @@ ALLOWABLE_OPS = [
     torch.ops.aten.convolution.default,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
+    torch.ops.aten.div.Tensor,
+    torch.ops.aten.div.Scalar,
 ]
 
 
