@@ -25,6 +25,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <numeric>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
