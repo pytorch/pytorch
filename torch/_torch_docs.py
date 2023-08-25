@@ -12437,6 +12437,8 @@ Examples:
     (105, 1, 21, 3)
     >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
     (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).dim_order()
+    (0, 2, 3, 1)
 """.format(
         **factory_common_args
     ),
