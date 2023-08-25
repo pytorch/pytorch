@@ -4540,7 +4540,6 @@ class TestSparseAny(TestCase):
 
         for args, kwargs in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
-                enable_hybrid=layout is torch.sparse_coo,  # TODO: remove after gh-107373 is resolved
                 enable_batch=False,  # TODO: remove after gh-104868 is resolved
                 output_tensor=False):
             values_offset = 1 if layout is torch.sparse_coo else 2
@@ -4566,7 +4565,7 @@ class TestSparseAny(TestCase):
                                     lambda i, v, sz: cnstr(i, v, sz, **kwargs_).to_dense(masked_grad=masked),
                                     args_, masked=masked)
                             else:
-                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                                if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and 0:
                                     # TODO: remove this if-block after gh-107370 is resolved
                                     continue
                                 torch.autograd.gradcheck(
@@ -5086,18 +5085,11 @@ class TestSparseAny(TestCase):
         def identity(x):
             return x
 
-        if layout is torch.sparse_coo:
-            def values_mth(x):
-                # TODO: remove coalesced after gh-107097 is fixed.
-                return x.coalesce().values()
-        else:
-            values_mth = torch.Tensor.values
-
         for func in (torch.Tensor.to_dense,
                      torch.Tensor.sum,
                      identity,
                      torch.Tensor.to_sparse,
-                     values_mth,
+                     torch.Tensor.values,
                      ):
             for x in self.generate_simple_inputs(
                     layout,
@@ -5117,6 +5109,9 @@ class TestSparseAny(TestCase):
                             # per batch
                             or func.__name__ == 'to_sparse'
                         ))):
+                if layout is torch.sparse_coo and func.__name__ == 'values':
+                    x = x.coalesce()
+
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
 
 

@@ -294,7 +294,7 @@ Tensor _to_copy(
         new_plain_indices,
         new_values,
         self.sizes(),
-        self.options().dtype(new_values.scalar_type()));
+        options);
   }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
@@ -1067,7 +1067,7 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, const Tensor& self_
         plain_indices,
         values,
         self.sizes(),
-        self.options().dtype(values.scalar_type()).layout(target_layout));
+        self.options().layout(target_layout));
 }
 
 Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
@@ -1393,7 +1393,7 @@ static Tensor sparse_compressed_to_flipped(
       new_plain_indices,
       new_values,
       self.sizes(),
-      self.options().dtype(new_values.scalar_type()).layout(flipped_layout));
+      self.options().layout(flipped_layout));
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
@@ -1760,7 +1760,7 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
       result_plain_indices,
       result_values,
       self.sizes(),
-      self.options().dtype(result_values.scalar_type()).layout(target_layout));
+      self.options().layout(target_layout));
 }
 
 Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
