@@ -30,7 +30,6 @@ namespace at::functorch {
 // extra copy from stacking the sliced outputs. Because of this, we prefer to
 // write batching rules for operators whenever possible.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
 void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 

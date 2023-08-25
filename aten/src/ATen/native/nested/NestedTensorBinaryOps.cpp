@@ -115,7 +115,7 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
-        (self_ptr->opt_size(2).value() == other.size(2) || other.size(2) == 1));
+        self_ptr->opt_size(2).value() == other.size(2));
     // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
     bool is_broadcastable_2d = (
         self_ptr->dim() == 2 &&
@@ -136,8 +136,6 @@ Tensor NestedTensor_elementwise_Tensor(
       auto result = wrap_buffer(result_buffer, self_sizes);
       if (op_name == "add") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::ADD);
-      } else if (op_name == "sub") {
-        nested_dense_elementwise_stub(self.device().type(), result, self, -other_, NESTED_DENSE_OP::ADD);
       } else if (op_name == "mul") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::MUL);
       } else {
@@ -303,6 +301,22 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.fill_(value);
   return self;
+}
+
+Tensor ge_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "ge", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.ge(b2);
+      });
+}
+
+Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
 }
 
 } // namespace native
