@@ -393,6 +393,36 @@ TreeSpec(TupleVariable, None, [*,
         with self.assertRaisesRegex(ValueError, "Unknown protocol"):
             treespec_loads(bad_protocol_serialized_spec)
 
+    def test_saved_serialized(self):
+        complicated_spec = TreeSpec(OrderedDict, [1, 2, 3], [
+            TreeSpec(
+                tuple,
+                None,
+                [LeafSpec(), LeafSpec()]
+            ),
+            LeafSpec(),
+            TreeSpec(
+                dict,
+                [4, 5, 6],
+                [LeafSpec(), LeafSpec(), LeafSpec()]
+            ),
+        ])
+
+        serialized_spec = treespec_dumps(complicated_spec)
+        saved_spec = (
+            '[1, {"type": "collections.OrderedDict", "context": "[1, 2, 3]", '
+            '"children_spec": [{"type": "builtins.tuple", "context": "null", '
+            '"children_spec": [{"type": null, "context": null, '
+            '"children_spec": []}, {"type": null, "context": null, '
+            '"children_spec": []}]}, {"type": null, "context": null, '
+            '"children_spec": []}, {"type": "builtins.dict", "context": '
+            '"[4, 5, 6]", "children_spec": [{"type": null, "context": null, '
+            '"children_spec": []}, {"type": null, "context": null, "children_spec": '
+            '[]}, {"type": null, "context": null, "children_spec": []}]}]}]'
+        )
+        self.assertEqual(serialized_spec, saved_spec)
+        self.assertEqual(complicated_spec, treespec_loads(saved_spec))
+
 
 instantiate_parametrized_tests(TestPytree)
 
