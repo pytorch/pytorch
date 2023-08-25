@@ -40,7 +40,6 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
-  PyObject_GC_UnTrack(_self);
   auto self = reinterpret_cast<THPGenerator*>(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
@@ -120,8 +119,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 }
 
 uint64_t unpack_uint64(PyObject* pyobj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t unsigned_obj;
+  uint64_t unsigned_obj = 0;
   try {
     // First try to interpret as unsigned long
     unsigned_obj = THPUtils_unpackUInt64(pyobj);
@@ -224,24 +222,9 @@ static PyMethodDef THPGenerator_methods[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
-    {(char*)"_cdata",
-     T_ULONGLONG,
-     offsetof(THPGenerator, cdata),
-     READONLY,
-     nullptr},
+    {"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
     {nullptr}};
 
-static int THPGenerator_traverse(
-    THPGenerator* self,
-    visitproc visit,
-    void* arg) {
-  return 0;
-}
-
-// Even though they can't have cyclic references, we explicitly allow Generator
-// objects to be tracked by the GC. This provides convenient access to all
-// existing Generators instances when we need to re-seed them.
-// See Note [RNG re-seeding in Dataloader workers]
 PyTypeObject THPGeneratorType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
@@ -261,10 +244,9 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
-        Py_TPFLAGS_HAVE_GC, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
-    (traverseproc)THPGenerator_traverse, /* tp_traverse */
+    nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */

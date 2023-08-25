@@ -16,6 +16,7 @@ _GUARD_SOURCE_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {
@@ -139,6 +140,18 @@ class GlobalSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
 
 
 @dataclasses.dataclass(frozen=True)
