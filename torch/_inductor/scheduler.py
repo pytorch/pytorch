@@ -172,14 +172,10 @@ class BaseSchedulerNode:
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
 
-    def used_or_aliased_buffer_names(self, include_write=True) -> Set[str]:
+    def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
-        if include_write:
-            deps = itertools.chain(self.read_writes.reads, self.read_writes.writes)
-        else:
-            deps = self.read_writes.reads
 
-        for dep in deps:
+        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
             used_names.add(dep.name)
             if V.graph.name_to_buffer.get(dep.name):
                 layout = V.graph.name_to_buffer[dep.name].get_layout()
@@ -914,15 +910,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = sum(
+        a_first = all(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = sum(
+        b_first = all(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first > b_first:
+        if a_first and not b_first:
             return -1
-        if b_first > a_first:
+        if b_first and not a_first:
             return 1
 
         # otherwise contiguous
@@ -988,8 +984,6 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        # do this before creating foreach nodes or fusion
-        self.compute_buffer_users()
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.fuse_nodes()
@@ -1059,25 +1053,6 @@ class Scheduler:
         mutation properly.
         """
         name_to_users = collections.defaultdict(list)
-
-        # handle aliasing by using python aliasing in name_to_users
-        # if foo aliases bar then we will make name_to_users["foo"] point
-        # to the same python list as name_to_users["bar"]
-        for node1 in self.nodes:
-            node1_name = node1.get_name()
-            for node2_name in node1.get_aliases():
-                if node1_name in name_to_users and node2_name in name_to_users:
-                    # merge the two
-                    list1 = name_to_users[node1_name]
-                    list2 = name_to_users[node2_name]
-                    combined = list1 + list2
-                    for key in name_to_users.keys():
-                        if name_to_users[key] is list1 or name_to_users[key] is list2:
-                            name_to_users[key] = combined
-                elif node1_name in name_to_users:
-                    name_to_users[node2_name] = name_to_users[node1_name]
-                else:
-                    name_to_users[node1_name] = name_to_users[node2_name]
 
         def rename(n):
             if n in self.mutation_renames:
@@ -1497,23 +1472,6 @@ class Scheduler:
         node1, node2 = nodes
         return self.score_fusion(node1, node2)
 
-    def compute_buffer_users(self):
-        """
-        Track the user nodes for each buffer.
-        """
-        self.buffer_users = collections.defaultdict(set)
-        for node in self.nodes:
-            assert not isinstance(
-                node, FusedSchedulerNode
-            ), "This method should be called before fusion"
-            for used in node.used_or_aliased_buffer_names(include_write=False):
-                self.buffer_users[used].add(node.node_idx)
-
-        # set user for graph output buffers
-        for node_name in V.graph.get_output_names():
-            # -1 mark a buffer is needed for output
-            self.buffer_users[node_name].add(-1)
-
     def compute_last_usage(self):
         """
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
@@ -1551,15 +1509,15 @@ class Scheduler:
         same kernel can be removed.
         """
 
-        fused_node_ids = {
-            node.node_idx
+        fused_node_names = {
+            node.get_name()
             for node in V.kernel.node_schedule
             if isinstance(node, BaseSchedulerNode)
         }
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
-            users = self.buffer_users[out_buf]
-            if users.issubset(fused_node_ids):
+            users = {user.get_name() for user in self.name_to_node[out_buf].users}
+            if users.issubset(fused_node_names):
                 names_to_remove.append(out_buf)
 
         def remove_filter(n):

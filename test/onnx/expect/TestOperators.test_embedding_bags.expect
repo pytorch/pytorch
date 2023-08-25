@@ -313,7 +313,7 @@ graph {
             type: INT
           }
         }
-        name: "torch_jit1"
+        name: "sub_graph"
         input {
           name: "21"
           type {
@@ -361,7 +361,7 @@ graph {
       type: GRAPH
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 10
     dims: 8
