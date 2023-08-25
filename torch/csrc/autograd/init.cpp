@@ -960,7 +960,7 @@ static PyObject* push_on_torch_dispatch_stack(
           std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
           mode_key.value());
     } else {
-      c10::impl::TorchDispatchModeTLS::push_onto_stack(
+      c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
           std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
     }
     Py_INCREF(arg);

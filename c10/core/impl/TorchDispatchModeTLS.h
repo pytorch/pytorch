@@ -7,16 +7,19 @@ namespace c10 {
 namespace impl {
 
 enum class TorchDispatchModeKey : int8_t {
-  PROXY = 0,
-  FAKE = 1,
-  NUM_MODE_KEYS = 2
+  FAKE,
+  PROXY,
+  FUNCTIONAL,
+  NUM_MODE_KEYS
 };
 
 struct C10_API TorchDispatchModeTLS {
   // This API is NOT invariant safe.
+  // It must not take in an infra mode that uses TorchDispatchModeKey
   // If you're pushing an infra mode onto the stack, we expect
   // you to use set_mode
-  static void push_onto_stack(std::shared_ptr<SafePyObject> mode);
+  static void push_non_infra_mode_onto_stack(
+      std::shared_ptr<SafePyObject> mode);
   // Pops the top mode of the stack,
   // giving precedence to user modes before attempting to pop
   // any infra modes
@@ -46,7 +49,7 @@ struct C10_API TorchDispatchModeTLS {
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
   // Users are allowed to push multiple ProxyTorchDispatchMode objects onto the
   // stack
-  // However, we only allow asingle FakeTensorMode onto the stack at a time
+  // However, we only allow a single FakeTensorMode onto the stack at a time
   // (Pushing additional FakeTensorModes onto the stack is a no-op)
   std::array<
       c10::optional<std::shared_ptr<c10::SafePyObject>>,

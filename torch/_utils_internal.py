@@ -68,6 +68,29 @@ def log_compilation_event(metrics):
     log.info("%s", metrics)
 
 
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        maybe_functional_mode = torch._C._get_dispatch_mode(
+            torch._C.TorchDispatchModeKey.FUNCTIONAL
+        )
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        if maybe_functional_mode is not None:
+            try:
+                maybe_functional_mode.is_active = False
+                torch._functionalize_sync(t.elem)
+            finally:
+                maybe_functional_mode.is_active = True
+        else:
+            torch._functionalize_sync(t.elem)
+    else:
+        torch._functionalize_sync(t)
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
