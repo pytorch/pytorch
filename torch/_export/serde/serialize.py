@@ -931,7 +931,6 @@ class GraphModuleDeserializer:
                     output.value.name,
                     name=output.value.name,
                 )
-                node.meta = {"val": ""}
                 return node
             return self.serialized_name_to_node[output.value.name]
         elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
