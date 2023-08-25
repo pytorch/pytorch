@@ -600,9 +600,9 @@ class MetaConverter:
                                 dynamic_dims=dynamic_dims,
                                 constraint_dims=constraint_dims,
                             )
-                        return torch._to_functional_tensor(
-                            fake_t, mirror_autograd_meta=True
-                        )
+                        out = torch._to_functional_tensor(fake_t)
+                        torch._mirror_autograd_meta(fake_t, out)
+                        return out
                     else:
                         # torch.func.functionalize
                         reapply_views = torch._C._functionalization_reapply_views_tls()

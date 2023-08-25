@@ -130,7 +130,8 @@ class FunctionalTensor(torch.Tensor):
         # - requires_grad (so autograd runs)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
-        x_functional = torch._to_functional_tensor(x, mirror_autograd_meta=True)
+        x_functional = torch._to_functional_tensor(x)
+        torch._mirror_autograd_meta(x, x_functional)
 
         torch._functionalize_enable_reapply_views(True)
         if x.requires_grad and not x.is_leaf:

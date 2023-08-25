@@ -314,7 +314,8 @@ class GraphModule(torch.nn.Module):
         check_count_and_graph(2, 2, 2, expected_graph)
 
         try:
-            x = torch._to_functional_tensor(t_clone2, mirror_autograd_meta=True)
+            x = torch._to_functional_tensor(t_clone2)
+            torch._mirror_autograd_meta(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
             aot_f_out = f(x)
         finally:
