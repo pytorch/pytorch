@@ -32,10 +32,7 @@ pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/O
 # - Inliner to workaround ORT segfault.
 pip_install -i https://test.pypi.org/simple/ onnx==1.14.1rc2
 
-# TODO: change this when onnx-script is on testPypi
-# pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
-# NOTE: temp change for CI to run on unpublished onnxscript PR.
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@f69be19ebd3f2e0d7efe64b0c7be3329cbab3822" --no-deps
+pip_install onnxscript-preview==0.1.0.dev20230825 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
