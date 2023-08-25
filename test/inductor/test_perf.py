@@ -545,6 +545,21 @@ class NoopTests(TestCase):
         self.assertExpectedInline(count_numel(f3, inp), """20""")
         self.assertExpectedInline(count_numel(f4, inp), """20""")
 
+    def test_noop_cat(self):
+        def f1(a):
+            b = torch.cat([a])
+            return unfusible(b)
+
+        inp = T(10)
+        self.assertExpectedInline(count_numel(f1, inp), """20""")
+
+        def f2(a):
+            b = torch.cat([a])
+            c = torch.cat([b])
+            return c
+
+        self.assertExpectedInline(count_numel(f2, inp), """20""")
+
 
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):

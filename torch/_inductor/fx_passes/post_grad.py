@@ -11,7 +11,6 @@ import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
 from torch._prims_common import is_integer_dtype
-from torch.utils._pytree import tree_map
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -511,10 +510,10 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
 noop_registry: Dict[Any, Any] = {}
 
 
-def register_noop_decomp(targets, arg_num=0):
+def register_noop_decomp(targets, nop_arg=0):
     def register_fun(cond):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
-            (cond, arg_num)
+            (cond, nop_arg)
         )
 
     return register_fun
@@ -566,6 +565,11 @@ def pow_noop(a, b):
     return isinstance(b, int) and b == 1
 
 
+@register_noop_decomp([aten.cat], lambda args: args[0][0])
+def cat_noop(inputs, dim=0):
+    return len(inputs) == 1
+
+
 @register_noop_decomp([aten.clone, aten.alias])
 def true_noop(*args, **kwargs):
     return True
@@ -593,7 +597,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
-            src = node.args[src_index]
+            if isinstance(src_index, int):
+                src = node.args[src_index]
+            else:
+                src = src_index(node.args)
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
             if (
