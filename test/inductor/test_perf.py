@@ -5,18 +5,22 @@ from unittest.mock import patch
 import functorch
 
 import torch
-import torch._inductor.compile_fx
 import torch._inductor.config as config
 from torch._inductor import metrics
+from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
 
 
+def count_bytes_inductor(gm, example_inputs):
+    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+
+
 if not IS_WINDOWS:
 
-    @torch._dynamo.optimize("count_bytes_inductor")
+    @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
         return torch.cat([x, x.cos()])
 
@@ -31,7 +35,7 @@ def count_numel(f, *args):
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
+    torch._dynamo.optimize(count_bytes_inductor)(f)(*args)
     print(metrics.nodes_num_elem)
     return str(metrics.num_bytes_accessed // 4)
 
@@ -42,7 +46,7 @@ def count_numel_train(f, *args):
     """
     metrics.reset()
 
-    f = torch._dynamo.optimize("count_bytes_inductor")(f)
+    f = torch._dynamo.optimize(count_bytes_inductor)(f)
     out = f(*args)
     res = 0
     for o in out:
@@ -465,7 +469,11 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
-unfusible = lambda x: aten.special_bessel_j0(x)
+
+def unfusible(x):
+    return aten.special_bessel_j0(x)
+
+
 class NoopTests(TestCase):
     def test_noop_clones(self):
         def f(a):
@@ -480,6 +488,7 @@ class NoopTests(TestCase):
             b = a.clone()
             c = unfusible(b)
             return b, c
+
         self.assertExpectedInline(count_numel(f, inp), """40""")
 
     def test_noop_slice_scatter(self):
@@ -487,6 +496,7 @@ class NoopTests(TestCase):
             b = aten.slice_scatter(a, a)
             c = unfusible(b)
             return c
+
         inp = T(10)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 

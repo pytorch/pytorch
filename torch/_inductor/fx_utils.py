@@ -34,6 +34,7 @@ def matches_module_function_pattern(pattern, node, modules):
         return False
     return True
 
+
 class FakeTensorUpdater:
     """
     The main idea here is that it's difficult to maintain accurate fake
@@ -62,13 +63,13 @@ class FakeTensorUpdater:
             self.processed_hashes.add(self.hash_node(node))
 
     def hash_node(self, node: torch.fx.Node):
-        return (node, node.target, id(node.args), id(node.kwargs))
+        return (node, node.target, node.args, node.kwargs)
 
     def incremental_update(self):
         processed = set()
-        existing_tensors = defaultdict(int)
+        existing_storages = defaultdict(int)
         for node in self.graph.nodes:
-            existing_tensors[get_node_storage(node)] += 1
+            existing_storages[get_node_storage(node)] += 1
 
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
@@ -80,14 +81,17 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
             assert isinstance(new, torch.Tensor)
-            if new.shape != old.shape or new.stride() != old.stride():
+            if new.shape != old.shape or new.layout != old.layout:
+                return False
+            if new.layout == torch.strided and new.stride() != old.stride():
                 return False
             if get_storage(new) == get_storage(old):
                 return True
 
+            # This is the case where it returns a completely fresh storage that's used nowhere else.
             if (
-                existing_tensors[get_storage(old)] == 1
-                and get_storage(new) not in existing_tensors
+                existing_storages[get_storage(old)] == 1
+                and get_storage(new) not in existing_storages
             ):
                 return True
             return False
@@ -127,11 +131,12 @@ class FakeTensorUpdater:
                 ):
                     continue
                 updating_node.meta["val"] = new_fake_tensor
+                existing_storages.add(get_node_storage(new_fake_tensor))
                 processed.add(updating_node)
                 for user in updating_node.users:
                     processing.append(user)
 
-            self.processed_hashes.add(self.hash_node(updating_node))
+                self.processed_hashes.add(self.hash_node(updating_node))
 
 
 def get_storage(t):
