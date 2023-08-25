@@ -14,6 +14,7 @@ register_artifact(
     "This prints the guards for every compiled Dynamo frame. It does not tell you where the guards come from.",
     visible=True,
 )
+register_artifact("verbose_guards", "", off_by_default=True)
 register_artifact(
     "bytecode",
     "Prints the original and modified bytecode from Dynamo. Mostly useful if you're debugging our bytecode generation in Dynamo.",

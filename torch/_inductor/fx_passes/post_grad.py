@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import defaultdict, namedtuple
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Expr
 
@@ -230,7 +230,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
     extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
 )
 def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
         mat1, mat2, mat2_mm_shape, mat2_dtype
     )
 
@@ -253,7 +253,7 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
     extra_check=cuda_and_enabled_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
 
 
 @register_graph_pattern(
@@ -500,15 +500,22 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         val1 is not None
         and val2 is not None
         and val1.size() == val2.size()
-        and val1.stride() == val2.stride()
+        and val1.layout == val2.layout
+        and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
 
-count = defaultdict(int)
-noop_registry = {}
+
+noop_registry: Dict[Any, Any] = {}
+
+
 def register_noop_decomp(targets, arg_num=0):
     def register_fun(cond):
-        register_decomposition(targets, registry=noop_registry, unsafe=True)((cond, arg_num))
+        register_decomposition(targets, registry=noop_registry, unsafe=True)(
+            (cond, arg_num)
+        )
+
     return register_fun
+
 
 @register_noop_decomp(aten.slice)
 def slice_noop(self, dim=0, start=None, end=None, step=1):
@@ -517,6 +524,7 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start == 0 and end >= 2**63 - 1 and step == 1:
         return True
     return False
+
 
 @register_noop_decomp(aten.slice_scatter, 1)
 def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
@@ -528,17 +536,17 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         return True
     return False
 
+
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
     if all(p == 0 for p in padding):
         return True
 
 
-
-
 @register_noop_decomp([aten.clone, aten.alias])
 def true_noop(*args, **kwargs):
     return True
+
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
@@ -601,7 +609,7 @@ def reinplace_scatters(graph):
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     }
     for node in graph.nodes:
-        if inplaceable_op := inplaceable_ops.get(node.target, False):
+        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if get_node_storage(mutated_arg) is None:
                 continue
@@ -655,6 +663,60 @@ def reinplace_scatters(graph):
     extra_check=is_valid_splitwithsizes_cat,
 )
 def splitwithsizes_cat_replace(match, input_):
+    return input_
+
+
+def is_valid_cat_splitwithsizes(match):
+    cat_nodes = filter_nodes(match.nodes, aten.cat)
+    split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
+    if len(split_nodes) != 1 or len(cat_nodes) != 1:
+        return False
+    split_node, cat_node = split_nodes[0], cat_nodes[0]
+
+    # the cat node has other users: can't eliminate
+    if len(cat_node.users) > 1:
+        return False
+
+    # the dim of the cat and split should match
+    dim = get_arg_value(split_node, 2, "dim")
+    if dim != get_arg_value(cat_node, 1, "dim"):
+        return False
+
+    cat_inputs = list(get_arg_value(cat_node, 0))
+    split_sizes = get_arg_value(split_node, 1, "split_sizes")
+    # the number of input tensors in cat and the
+    # length of the split sizes should match
+    if len(cat_inputs) != len(split_sizes):
+        return False
+
+    for cat_input, split_size in zip(cat_inputs, split_sizes):
+        # each cat input tensor's size along dim
+        # should match the corresponding split size
+        if "val" not in cat_input.meta:
+            return False
+        cat_input_size = cat_input.meta["val"].size(dim)
+        if cat_input_size != split_size:
+            return False
+
+    return True
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.split_with_sizes,
+        CallFunction(
+            aten.cat,
+            KeywordArg("input_"),
+            Ignored(),
+            _users=MULTIPLE,
+        ),
+        Ignored(),
+        Ignored(),
+    ),
+    pass_number=2,
+    extra_check=is_valid_cat_splitwithsizes,
+)
+def cat_splitwithsizes_replace(match, input_):
     return input_
 
 

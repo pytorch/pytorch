@@ -218,16 +218,8 @@ def mean(
 ):
     dtype = _atleast_float(dtype, a.dtype)
 
-    is_half = dtype == torch.float16
-    if is_half:
-        # XXX revisit when the pytorch version has pytorch/pytorch#95166
-        dtype = torch.float32
-
     axis_kw = {} if axis is None else {"dim": axis}
     result = a.mean(dtype=dtype, **axis_kw)
-
-    if is_half:
-        result = result.to(torch.float16)
 
     return result
 
