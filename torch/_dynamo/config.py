@@ -251,6 +251,12 @@ translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
 
+# Checks whether replaying ShapeEnv events on a freshly constructed one yields
+# the a ShapeEnv with the same state. This should be used only in testing.
+check_shape_env_recorded_events = (
+    os.environ.get("TORCHDYNAMO_CHECK_SHAPE_ENV_RECORDED_EVENTS", "0") == "1"
+)
+
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
