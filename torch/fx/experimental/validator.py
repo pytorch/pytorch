@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch
-from torch._dynamo.exc import TorchDynamoException
 import torch.fx
 import torch.fx.traceback as fx_traceback
 
+from torch._dynamo.exc import TorchDynamoException
 from torch.fx.node import Argument, Target
 from torch.utils._sympy.interp import sympy_interp
 
@@ -564,13 +564,35 @@ class ValidationException(TorchDynamoException):
         target_exprs_str = joinlines(map(z3str, target_exprs))
         failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
 
-        super().__init__(
-            "translation validation failed.\n\n"
-            "Model:\n" + model_str + "\n\n"
-            "Assertions:\n" + assertions_str + "\n\n"
-            "Target Expressions:\n" + target_exprs_str + "\n\n"
-            "Failed Source Expressions:\n" + failed_source_exprs_str
-        )
+        self.msg = "translation validation failed."
+        self.details = f"""\
+Model:
+{model_str}
+
+Assertions:
+{assertions_str}
+
+Target Expressions:
+{target_exprs_str}
+
+Failed Source Expressions:
+{failed_source_exprs_str}"""
+
+    def __str__(self):
+        return f"{self.msg}\n\n{self.details}"
+
+
+class BisectValidationException(TorchDynamoException):
+    def __init__(self, validation_exc, expr, failed_action, traced_node):
+        self.msg = f"translation validation failed when {failed_action}: {expr}"
+        self.details = f"""\
+Failure ocurred while running node:
+    {traced_node.format_node()}
+
+{validation_exc.details}"""
+
+    def __str__(self):
+        return f"{self.msg}\n\n{self.details}"
 
 # Checks when this module is loaded.
 assert_z3_installed_if_tv_set()

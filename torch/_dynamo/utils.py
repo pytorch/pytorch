@@ -19,6 +19,7 @@ import os
 import pstats
 import sys
 import textwrap
+import threading
 import time
 import types
 import typing
@@ -27,23 +28,32 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch._logging
 import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
+from torch._logging import LazyString
 from . import config
 
 
 # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+if np:
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-NP_TO_TNP_MODULE = {
-    np: tnp,
-    np.fft: tnp.fft,
-    np.linalg: tnp.linalg,
-    np.random: tnp.random,
-}
+    NP_TO_TNP_MODULE = {
+        np: tnp,
+        np.fft: tnp.fft,
+        np.linalg: tnp.linalg,
+        np.random: tnp.random,
+    }
+else:
+    NP_SUPPORTED_MODULES = {}
+
+    NP_TO_TNP_MODULE = {}
 
 import importlib
 
@@ -405,6 +415,9 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -421,6 +434,9 @@ def is_numpy_int_type(value):
 
 
 def is_numpy_float_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -432,6 +448,9 @@ def is_numpy_float_type(value):
 
 
 def is_numpy_ndarray(value):
+    if not np:
+        return False
+
     return istype(value, np.ndarray)
 
 
@@ -1345,10 +1364,35 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            unimplemented("guard on data-dependent symbolic int/float")
+            raise UserError(
+                UserErrorType.CONSTRAIN_VIOLATION,
+                "Tried to use data-dependent value in the subsequent computation. "
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "You will need to explicitly give hint to the compiler. Please take a look at "
+                "constrain_as_value OR constrain_as_size APIs",
+                case_name="constrain_as_size_example",
+            )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+
+_current_node = threading.local()
+_current_node.value = None
+
+
+def get_current_node():
+    return _current_node.value
+
+
+@contextmanager
+def set_current_node(node):
+    old = _current_node.value
+    _current_node.value = node
+    try:
+        yield
+    finally:
+        _current_node.value = old
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
@@ -1366,23 +1410,24 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     Nodes that are not call_function, call_method, call_module, or get_attr will
     raise an AssertionError.
     """
-    op = node.op
-    try:
-        if op == "call_function":
-            return node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        elif op == "get_attr":
-            return tracer.get_submodule(node.target)
-        elif op == "placeholder":
-            assert "example_value" in node.meta
-            return node.meta["example_value"]
-    except Exception as e:
-        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+    with set_current_node(node):
+        op = node.op
+        try:
+            if op == "call_function":
+                return node.target(*args, **kwargs)
+            elif op == "call_method":
+                return getattr(args[0], node.target)(*args[1:], **kwargs)
+            elif op == "call_module":
+                assert nnmodule is not None
+                return nnmodule(*args, **kwargs)
+            elif op == "get_attr":
+                return tracer.get_submodule(node.target)
+            elif op == "placeholder":
+                assert "example_value" in node.meta
+                return node.meta["example_value"]
+        except Exception as e:
+            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
 
     raise AssertionError(op)
 
@@ -1527,16 +1572,6 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
-
-
-class LazyString:
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
 
 
 def lazy_format_graph_code(name, gm, maybe_id=None):
@@ -1709,6 +1744,26 @@ class numpy_method_wrapper:
             obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+class numpy_operator_wrapper:
+    """Implements dunder methods for tnp.ndarray via functions from the operator library"""
+
+    def __init__(self, op: str):
+        self.op = op
+        self.__name__ = f"wrapped_{op.__name__}"
+
+    def __repr__(self):
+        return f"<Wrapped operator <original {self.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        assert not kwargs
+
+        args = (
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        out = self.op(*args)
         return numpy_to_tensor(out)
 
 

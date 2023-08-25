@@ -268,17 +268,20 @@ Failed Source Expressions:
         suppress_errors=False,
     )
     def test_trigger_bisect_on_error(self):
-        from torch.fx.experimental.validator import ValidationException
+        from torch.fx.experimental.validator import BisectValidationException
 
         @torch.compile
         def fn(x, shape):
             return x.split(shape)
 
         self.assertExpectedInlineMunged(
-            ValidationException,
+            BisectValidationException,
             lambda: fn(torch.randn(20), (5, 10, 5)),
             """\
-translation validation failed.
+translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
+
+Failure ocurred while running node:
+    %split : [num_users=1] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
   ==> s3: -9223372036854775807

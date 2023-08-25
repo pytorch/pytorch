@@ -5,6 +5,8 @@ import copy
 import dataclasses
 import dis
 import enum
+import itertools
+import functools
 import logging
 import math
 import operator
@@ -31,7 +33,7 @@ from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.source import GetItemSource, LocalSource
+from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
@@ -47,7 +49,12 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    expect_true,
+    replay_shape_env_events,
+    ShapeEnv,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -55,10 +62,25 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
+from torch.testing._internal.common_methods_invocations import sample_inputs_gather
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+
+
+# Specializes a test to run only if translation validation is either set to flag.
+def onlyIfTranslationValidationSetAs(flag: bool) -> typing.Callable:
+    def decorator(fn: typing.Callable) -> typing.Callable:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if torch._dynamo.config.translation_validation == flag:
+                return fn(*args, **kwargs)
+            raise unittest.SkipTest(f"only works when TV is {flag}")
+
+        return wrapper
+
+    return decorator
 
 
 class MyPickledModule(torch.nn.Module):
@@ -162,6 +184,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(AssertionError, lambda: opt_fn(a, b, c, AssertionError))
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
+
+    def test_module_not_callable(self):
+        def fn(x):
+            return torch.fft(x)
+
+        counter = CompileCounter()
+        a = torch.randn(10, 10)
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertRaisesRegex(
+            TypeError, "'module' object is not callable", lambda: opt_fn(a)
+        )
 
     def test_inplace(self):
         def inplace1(a, b):
@@ -1264,6 +1297,60 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_numpy_take_along_axis(self):
+        def fn(x, a, i):
+            return np.take_along_axis(x, i, a)
+
+        def sample_to_args(s):
+            args = (s.input, *sample.args)
+            return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
+
+        samples = list(
+            sample_inputs_gather(
+                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+            )
+        )
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        i = 1
+        for sample in samples:
+            args = sample_to_args(sample)
+            self.assertEqual(fn(*args), opt_fn(*args))
+            self.assertEqual(cnts.frame_count, i)
+            i += 1
+
+    def test_numpy_torch_operators(self):
+        def fn(op, t1, t2):
+            return op(t1, t2)
+
+        from torch._dynamo.variables.builtin import BuiltinVariable
+
+        operators = BuiltinVariable._fx_graph_functions()
+
+        for op, t1_np, t2_np in itertools.product(
+            operators, (True, False), (True, False)
+        ):
+            if op is operator.getitem:
+                # skip
+                # Did you know that tensor[ndarray_of_floats] works?
+                continue
+            t1 = torch.rand(5)
+            if t1_np:
+                t1 = t1.numpy()
+            t2 = torch.rand(5)
+            if t2_np:
+                t2 = t2.numpy()
+            try:
+                # TODO try a bit harder
+                result = op(t1, t2)
+            except (RuntimeError, TypeError, IndexError):
+                continue
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
+            self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
+            torch._dynamo.reset()
 
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
@@ -6620,6 +6707,339 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
+
+    def test_yield_from(self):
+        def yield_from_fn(t_list, k):
+            def yield_from_gen(l):
+                l2 = [t * k for t in l]
+                yield from l2
+
+            return [t * k for t in yield_from_gen(t_list)]
+
+        t_list = [torch.randn([2, 3])] * 3
+        multiplier = torch.tensor([10])
+        eager = yield_from_fn(t_list, 2)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_gen_and_from(self):
+        def populate_and_multiply_sequence(n, multiplier):
+            # Inline generator
+            def tensor_generator():
+                for i in range(n):
+                    yield torch.tensor([i])
+
+            # Use 'yield from' to iterate over tensors and multiply
+            t_list = [tensor * multiplier for tensor in tensor_generator()]
+
+            def yield_from_gen():
+                yield from t_list
+
+            return [t for t in yield_from_gen()]
+
+        multiplier = torch.tensor([10])
+        eager = populate_and_multiply_sequence(5, multiplier)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(populate_and_multiply_sequence)(
+            5, multiplier
+        )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_send_to_subgenerator_graph_break(self):
+        def subgenerator(tensor):
+            multiplier = yield
+            yield tensor * multiplier
+
+        def main_generator(t_list):
+            for tensor in t_list:
+                subgen = subgenerator(tensor)
+                next(subgen)
+                yield from subgen.send(torch.tensor([10]))
+
+        t_list = [torch.tensor([i]) for i in range(5)]
+        eager = list(main_generator(t_list))
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(main_generator)
+        compiled = list(compiled_fn(t_list))
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
+
+    def _replay_and_check(self, shape_env: ShapeEnv):
+        replayed = replay_shape_env_events(shape_env.events)
+        shape_env.check_equal(replayed)
+
+    def test_shape_env_equal_empty(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.check_equal(other)
+        self._replay_and_check(main)
+
+    def test_shape_env_equal_constructor(self):
+        main, other = ShapeEnv(allow_scalar_outputs=False), ShapeEnv()
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> allow_scalar_outputs: values don't match.
+  >  Self: False
+  > Other: True""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_create_symbolic_sizes_strides_storage_offset(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> val_to_var: values don't match.
+  >  Self: {0: 0, 1: 1, 2: s1, 3: s0}
+  > Other: {0: 0, 1: 1}
+==> var_to_range: values don't match.
+  >  Self: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Other: {}
+==> var_to_sources: values don't match.
+  >  Self: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
+  > Other: {}
+==> var_to_val: values don't match.
+  >  Self: {s0: 3, s1: 2}
+  > Other: {}""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_unbacked(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.create_unbacked_symint()
+        main.create_unbacked_symfloat()
+        main.create_unbacked_symbool()
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> unbacked_symfloat_counter: values don't match.
+  >  Self: 1
+  > Other: 0
+==> unbacked_symint_counter: values don't match.
+  >  Self: 2
+  > Other: 0
+==> var_to_range: values don't match.
+  >  Self: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), i0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), i1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  > Other: {}""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_evaluate_expr_divisible(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] % 3 == 0 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 divisible entry
+        size = r[0]
+        bool(size[0] % 3 == 0)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> divisible: values don't match.
+  >  Self: {Mod(s0, 3)}
+  > Other: {}
+==> guards: values don't match.
+  >  Self: [Eq(Mod(s0, 3), 0)]
+  > Other: []""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_evaluate_expr_replacement(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] == 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 replacement entry
+        size = r[0]
+        bool(size[0] == 3)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> guards: values don't match.
+  >  Self: [Eq(s0, 3)]
+  > Other: []
+==> replacements: values don't match.
+  >  Self: {s0: 3}
+  > Other: {}""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_evaluate_expr_refinement(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] >= 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 var_to_guard entry
+        #   - Change: var_to_range
+        size = r[0]
+        bool(size[0] >= 3)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> guards: values don't match.
+  >  Self: [s0 >= 3]
+  > Other: []
+==> var_to_guards: values don't match.
+  >  Self: {s0: (s0 >= 3, None)}
+  > Other: {}
+==> var_to_range: values don't match.
+  >  Self: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Other: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(True)
+    def test_shape_env_equal_evaluate_expr_replacement_TV(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] == 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 replacement entry
+        size = r[0]
+        bool(size[0] == 3)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> guards: values don't match.
+  >  Self: [Eq(s0, 3)]
+  > Other: []
+==> name_to_node: values don't match.
+  >  Self: {_assert, eq, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Other: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> replacements: values don't match.
+  >  Self: {s0: 3}
+  > Other: {}""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(False)
+    def test_shape_env_equal_runtime_assert(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_unbacked_symint on both of them.
+        r = main.create_unbacked_symint()
+        other.create_unbacked_symint()
+
+        # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
+        #   - +1 defferred_runtime_asserts entry
+        #   - Change: num_defferred_runtime_asserts
+        expect_true(r % 3 == 0)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> deferred_runtime_asserts: values don't match.
+  >  Self: {i0: [Eq(Mod(i0, 3), 0)]}
+  > Other: {}
+==> num_deferred_runtime_asserts: values don't match.
+  >  Self: 1
+  > Other: 0""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidationSetAs(True)
+    def test_shape_env_equal_runtime_assert_TV(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_unbacked_symint on both of them.
+        r = main.create_unbacked_symint()
+        other.create_unbacked_symint()
+
+        # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
+        #   - +1 defferred_runtime_asserts entry
+        #   - Change: num_defferred_runtime_asserts
+        expect_true(r % 3 == 0)
+
+        self.assertExpectedRaisesInline(
+            ShapeEnv.NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: fields do not match:
+
+==> deferred_runtime_asserts: values don't match.
+  >  Self: {i0: [Eq(Mod(i0, 3), 0)]}
+  > Other: {}
+==> name_to_node: values don't match.
+  >  Self: {_assert, eq, i0, mod}
+  > Other: {i0}
+==> num_deferred_runtime_asserts: values don't match.
+  >  Self: 1
+  > Other: 0""",
+        )
+        self._replay_and_check(main)
 
 
 class TestTracer(JitTestCase):
