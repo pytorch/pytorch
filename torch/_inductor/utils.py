@@ -32,7 +32,6 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -225,29 +224,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
-
-
-def freeze_inputs(f):
-    """
-    Useful for wrapping lists in tuples for caching purposes
-    """
-
-    def freeze_value(x):
-        if isinstance(x, (immutable_dict, immutable_list)):
-            return x
-        if isinstance(x, list):
-            return immutable_list(x)
-        if isinstance(x, dict):
-            return immutable_dict(x)
-        return x
-
-    @functools.wraps(f)
-    def wrapped(*args):
-        args = [freeze_value(x) for x in args]
-        return f(*args)
-
-    wrapped.cache_info = f.cache_info  # type: ignore[attr-defined]
-    return wrapped
 
 
 def precompute_method(obj: Any, method: str):
