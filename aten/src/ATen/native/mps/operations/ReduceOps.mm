@@ -504,7 +504,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     for (const auto i : c10::irange(num_input_dims)) {
       bool found = false;
       for (const auto j : c10::irange(num_reduce_dims)) {
-        if (i == dim_value[j]) {
+        if (i == maybe_wrap_dim(dim_value[j], num_input_dims)) {
           found = true;
           break;
         }

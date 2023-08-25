@@ -3,6 +3,7 @@ import dataclasses
 from collections import defaultdict
 from enum import auto, Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
+import warnings
 
 import sympy
 
@@ -119,8 +120,9 @@ class ModuleCallEntry:
     signature: Optional[ModuleCallSignature] = None
 
 
-def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
+def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
     count = 0
+    buffer_name_to_node = {}
     # Step 1: make lifted params as get_attr
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -133,9 +135,32 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                     metadata = node.meta
                     gm.graph.erase_node(node)
                     getattr_node.meta = metadata
-            count += 1
+                    buffer_name_to_node[inp_pos_to_param_buffer_name[count]] = getattr_node
 
-    # Step 2: Fix the input/output of the graph now that we deleted
+            count += 1
+        # Step 2: Find the all the buffers that were mutated and update them
+        if node.op == "output":
+            user_output_nodes = []
+            for return_node in node.all_input_nodes:
+                return_node_name = return_node.name
+                # we found a param/buffer mutation
+                if return_node_name in buffers_to_mutate:
+                    buffer_node_name = buffers_to_mutate[return_node_name]
+                    assert buffer_node_name in buffer_name_to_node
+                    buffer_node = buffer_name_to_node[buffer_node_name]
+                    with gm.graph.inserting_before(node):
+                        buffer_update_node = gm.graph.call_function(
+                            torch.ops.aten.copy_.default, (buffer_node, return_node)
+                        )
+                else:
+                    user_output_nodes.append(return_node)
+            with gm.graph.inserting_before(node):
+                # Only return user outputs
+                new_output = gm.graph.output(tuple(user_output_nodes))
+                node.replace_all_uses_with(new_output)
+                gm.graph.erase_node(node)
+
+    # Step 3: Fix the input/output of the graph now that we deleted
     # some args.
     gm.graph.lint()
     names = [f"arg_{i}" for i in range(len(in_spec.children_specs))]
@@ -148,7 +173,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
     )
     gm.recompile()
 
-    # Step 3: Find state references in HigherOrderOps and recursively
+    # Step 4: Find state references in HigherOrderOps and recursively
     # fix them.
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.ops.cond:
@@ -174,6 +199,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
             _unlift(
                 false_gm,
@@ -181,6 +208,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
                 in_spec,
                 None,
                 state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
         if node.op == "call_function" and node.target.__name__ == "map_impl":
             body_graph, num_mapped, *operands = node.args
@@ -198,7 +227,13 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict):
             _, in_spec = pytree.tree_flatten(real_operands)
 
             _unlift(
-                body_gm, inp_pos_to_buffer_name_for_submod, in_spec, None, state_dict
+                body_gm,
+                inp_pos_to_buffer_name_for_submod,
+                in_spec,
+                None,
+                state_dict,
+                buffers_to_mutate,
+                user_outputs,
             )
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
@@ -254,8 +289,32 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
+        ep.graph_signature.buffers_to_mutate,
+        ep.graph_signature.user_outputs,
     )
+    new_gm.meta.update(ep.graph_module.meta)
     return new_gm
+
+
+def _create_graph_module_for_export(root, graph):
+    try:
+        gm = torch.fx.GraphModule(root, graph)
+    except SyntaxError:
+        # If custom objects stored in memory are being used in the graph,
+        # the generated python code will result in a syntax error on the custom
+        # object, since it is unable to parse the in-memory object. However
+        # we can still run the graph eagerly through torch.fx.Interpreter,
+        # so we will bypass this error.
+        warnings.warn(
+            "Unable to execute the generated python source code from "
+            "the graph. The graph module will no longer be directly callable, "
+            "but you can still run the ExportedProgram, and if needed, you can "
+            "run the graph module eagerly using torch.fx.Interpreter."
+        )
+        gm = torch.fx.GraphModule(root, torch.fx.Graph())
+        gm._graph = graph
+
+    return gm
 
 
 class ExportedProgram:
@@ -272,7 +331,9 @@ class ExportedProgram:
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
-        self._graph_module = torch.fx.GraphModule(root, graph)
+        self._graph_module = _create_graph_module_for_export(root, graph)
+        if isinstance(root, torch.fx.GraphModule):
+            self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._call_spec: CallSpec = call_spec
@@ -427,10 +488,91 @@ class ExportedProgram:
             }
             return range_constraints
 
+        def get_output_node_names(gm):
+            output_node = list(gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+
+            return [str(arg) for arg in output_node.args[0]]
+
+        def get_input_node_names(gm):
+            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+
+        def _generate_new_graph_signature(old_ep, new_gm):
+            """
+            Update graph_signature according to graph after transformation.
+            Transformations can lead to node name changes, which are used in
+            graph_signature to identify inputs and outputs. Therefore, after each
+            transformation, we need to update the graph_signature according to
+            new node names.
+
+            WARNING: This implementation makes a few assumptions
+                - The transformation doesn't change number of inputs/outputs
+                - Each input/output still has the same meaning.
+                    - For inputs, that means that the inputs in transformed
+                        graph map to the same lifted parameter/buffer or user
+                        input as the input of the same position in the graph
+                        before transformation.
+                    - Similarly for outputs, each output should correspond to the
+                        same mutated buffer or user output as the output value of
+                        the same position  in the graph before transformation.
+
+            It is difficult to programatically validate these assumptions, but they
+            should hold true most of the time as inputs/outputs of the graph rarely
+            need to be changed.
+            """
+            old_signature = old_ep.graph_signature
+            old_gm = old_ep.graph_module
+
+            old_graph_input_node_names = get_input_node_names(old_gm)
+            new_graph_input_node_names = get_input_node_names(new_gm)
+            assert len(old_graph_input_node_names) == len(new_graph_input_node_names), f"""
+                Number of input nodes changed from {len(old_graph_input_node_names)}
+                to {len(new_graph_input_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            old_graph_output_node_names = get_output_node_names(old_gm)
+            new_graph_output_node_names = get_output_node_names(new_gm)
+            assert len(old_graph_output_node_names) == len(new_graph_output_node_names), f"""
+                Number of output values changed from {len(old_graph_output_node_names)}
+                to {len(new_graph_output_node_names)} after transformation. This
+                transformation is currently not supported.
+                """
+
+            node_names_mapping = dict(zip(
+                old_graph_input_node_names + old_graph_output_node_names,
+                new_graph_input_node_names + new_graph_output_node_names
+            ))
+
+            new_signature = copy.deepcopy(old_signature)
+            new_signature.user_inputs = [
+                node_names_mapping[old_user_input]
+                for old_user_input in old_signature.user_inputs
+            ]
+            new_signature.user_outputs = [
+                node_names_mapping[old_user_output]
+                for old_user_output in old_signature.user_outputs
+            ]
+            new_signature.inputs_to_parameters = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[old_input_name]
+                for old_input_name in old_signature.inputs_to_parameters.keys()
+            }
+            new_signature.inputs_to_buffers = {
+                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[old_input_name]
+                for old_input_name in old_signature.inputs_to_buffers.keys()
+            }
+            new_signature.buffers_to_mutate = {
+                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[old_output_name]
+                for old_output_name in old_signature.buffers_to_mutate.keys()
+            }
+            return new_signature
+
+        new_graph_signature = _generate_new_graph_signature(self, transformed_gm)
+
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            copy.deepcopy(self.graph_signature),
+            new_graph_signature,
             copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),

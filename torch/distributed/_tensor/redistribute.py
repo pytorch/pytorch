@@ -72,12 +72,17 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
     return output
 
 
-# Intentionally expose this API to trace ops on local tensors
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
 ) -> torch.Tensor:
+    """
+    This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
+    the target DTensorSpec, which involves the necessary collective calls to transform
+    the local shard of the DTensor from its current spec to the target spec.
+    """
+
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
@@ -157,7 +162,10 @@ def redistribute_local_tensor(
                 # For replicate -> partial, we zero out all other ranks of the current mesh dim
                 # and leave only 1 rank have the data, to perform a "zero cost" reshard.
                 if my_coordinate[i] != 0:
-                    new_local_tensor = local_tensor.zero_()
+                    # This can cause an input mutation if local_tensor is a graph input.
+                    # This blows up in AOTAutograd, but we should revisit why
+                    # new_local_tensor = local_tensor.zero_()
+                    new_local_tensor = torch.zeros_like(local_tensor)
                 else:
                     new_local_tensor = local_tensor
             else:
