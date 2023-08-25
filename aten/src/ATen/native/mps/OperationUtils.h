@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
+#include <exception>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,15 +23,11 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 using namespace at::mps;
 
-namespace at {
-namespace native {
-namespace mps {
+namespace at::native::mps {
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
@@ -223,7 +220,7 @@ struct MPSGraphCache
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
     __block MPSCachedGraph* cachedGraph = nil;
-    __block std::optional<c10::TypeError> type_err;
+    __block std::optional<std::exception_ptr> block_exception;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
@@ -241,12 +238,12 @@ struct MPSGraphCache
           cache_.emplace(hash, entry);
           profileCachedGraph(entry);
         }
-      } catch (const c10::TypeError &err) {
-        type_err = err;
+      } catch (...) {
+        block_exception = std::current_exception();
       }
     });
-    if (type_err) {
-        throw *type_err;
+    if (block_exception) {
+            std::rethrow_exception(*block_exception);
     }
     return cachedGraph;
   }
@@ -333,6 +330,4 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
-} // namespace mps
-} // namespace native
-} // namespace at
+} // namespace at::native::mps
