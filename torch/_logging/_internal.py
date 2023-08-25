@@ -121,7 +121,7 @@ log_state = LogState()
 # sample usage: torch._logging.set_logs(**torch._logging.DEFAULT_LOGGING)
 DEFAULT_LOGGING = {
     "graph_code": True,
-    "aot": True,
+    "aot": logging.INFO,
     "graph_breaks": True,
     "recompiles": True,
     "dynamic": logging.INFO,
