@@ -19,7 +19,7 @@ import torch
 import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_map_only
+from torch.utils._pytree import treespec_dumps, treespec_loads, tree_map_only
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,

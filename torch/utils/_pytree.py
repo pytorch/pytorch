@@ -35,8 +35,8 @@ PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
 UnflattenFunc = Callable[[List, Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
-GetStateFn = Callable[[Context], DumpableContext]
-SetStateFn = Callable[[DumpableContext], Context]
+ToDumpableContextFn = Callable[[Context], DumpableContext]
+FromDumpableContextFn = Callable[[DumpableContext], Context]
 
 # A NodeDef holds two callables:
 # - flatten_fn should take the collection and return a flat list of values.
@@ -60,28 +60,19 @@ SUPPORTED_NODES: Dict[Union[Type[Any], str], NodeDef] = {}
 class SerializeNodeDef(NamedTuple):
     typ: Type[Any]
     serialized_type: str
-    getstate: Optional[GetStateFn]
-    setstate: Optional[SetStateFn]
+    to_dumpable_context: Optional[ToDumpableContextFn]
+    from_dumpable_context: Optional[FromDumpableContextFn]
 
 SUPPORTED_SERIALIZED_TYPES: Dict[Union[Type[Any], str], SerializeNodeDef] = {}
-
-def _register_treespec_serializer(
-    typ: Type[Any],
-    *,
-    getstate: Optional[GetStateFn] = None,
-    setstate: Optional[SetStateFn] = None,
-) -> None:
-    serialized_type = f"{typ.__module__}.{typ.__name__}"
-    serialize_node_def = SerializeNodeDef(
-        typ, serialized_type, getstate, setstate
-    )
-    SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
-    SUPPORTED_SERIALIZED_TYPES[serialized_type] = serialize_node_def
+SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
+    *,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
     node_def = NodeDef(
         typ,
@@ -89,7 +80,13 @@ def _register_pytree_node(
         unflatten_fn,
     )
     SUPPORTED_NODES[typ] = node_def
-    _register_treespec_serializer(typ)
+
+    serialized_type = f"{typ.__module__}.{typ.__name__}"
+    serialize_node_def = SerializeNodeDef(
+        typ, serialized_type, to_dumpable_context, from_dumpable_context
+    )
+    SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
+    SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type] = typ
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -139,13 +136,14 @@ def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, A
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 _register_pytree_node(list, _list_flatten, _list_unflatten)
 _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
-_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
-_register_treespec_serializer(
-    namedtuple,  # type: ignore[arg-type]
-    getstate=_namedtuple_serialize,
-    setstate=_namedtuple_deserialize,
+_register_pytree_node(
+    namedtuple,
+    _namedtuple_flatten,
+    _namedtuple_unflatten,
+    to_dumpable_context=_namedtuple_serialize,
+    from_dumpable_context=_namedtuple_deserialize,
 )
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
@@ -428,17 +426,18 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
 
         serialized_type = serialize_node_def.serialized_type
 
-        if serialize_node_def.getstate is None:
+        if serialize_node_def.to_dumpable_context is None:
             try:
                 serialized_context = json.dumps(spec.context)
             except TypeError:
+                breakpoint()
                 raise TypeError(
                     "Unable to serialize context. "
                     "Please make the context json dump-able, or register a "
-                    "custom serializer using _register_treespec_serializer."
+                    "custom serializer using _register_pytree_node."
                 )
         else:
-            serialized_context = serialize_node_def.getstate(spec.context)
+            serialized_context = serialize_node_def.to_dumpable_context(spec.context)
 
         child_schemas = [treespec_to_json(child) for child in spec.children_specs]
 
@@ -465,24 +464,23 @@ def treespec_loads(data: str) -> TreeSpec:
         ):
             return LeafSpec()
 
-        if json_schema["type"] not in SUPPORTED_SERIALIZED_TYPES:
+        if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
             raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree is not registered.')
 
-        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[json_schema["type"]]
+        typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]
+        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[typ]
 
-        typ = serialize_node_def.typ
-
-        if serialize_node_def.setstate is None:
+        if serialize_node_def.from_dumpable_context is None:
             try:
                 context = json.loads(json_schema["context"])
             except TypeError:
                 raise TypeError(
                     "Unable to deserialize context. "
                     "Please make the context json load-able, or register a "
-                    "custom serializer using _register_treespec_serializer."
+                    "custom serializer using _register_pytree_node."
                 )
         else:
-            context = serialize_node_def.setstate(json_schema["context"])
+            context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
         children_spec = []
         for child_string in json_schema["children_spec"]:

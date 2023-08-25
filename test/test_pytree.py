@@ -11,7 +11,6 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
     _register_pytree_node,
-    _register_treespec_serializer,
 )
 import unittest
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
@@ -330,11 +329,8 @@ TreeSpec(TupleVariable, None, [*,
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: Dummy(*xs),
-        )
-        _register_treespec_serializer(
-            DummyType,
-            getstate=lambda context: "moo",
-            setstate=lambda dumpable_context: None,
+            to_dumpable_context=lambda context: "moo",
+            from_dumpable_context=lambda dumpable_context: None,
         )
         spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
         serialized_spec = treespec_dumps(spec)
