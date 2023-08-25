@@ -1746,6 +1746,9 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
+        if torch.cuda.get_device_properties('cuda').total_memory < 80 * 2**30:
+            unittest.skip("This test requires substatnial GPU memory.")
+            return
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 1, 32, 64
         seq_len_q, seq_len_kv = 8192, 8192
