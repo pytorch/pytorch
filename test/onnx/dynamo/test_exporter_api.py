@@ -128,7 +128,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
     def test_save_raises_when_model_greater_than_2gb_and_destination_is_not_str(self):
         with self.assertRaisesRegex(
             ValueError,
-            "'destination' must be a string when saving model larger than 2GB.",
+            "'destination' should be provided as a path-like string when saving a model larger than 2GB. ",
         ):
             dynamo_export(_LargeModel(), torch.randn(1)).save(io.BytesIO())
 

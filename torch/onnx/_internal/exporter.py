@@ -563,11 +563,11 @@ class LargeProtobufExportOutputSerializer:
         import onnx
 
         try:
-            onnx.save_model(export_output.model_proto, self._destination_path)
+            onnx.save_model(export_output.model_proto, self._destination_path)  # type: ignore[attr-defined]
         except ValueError:
             # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
             # Fallback to serializing the model with external data.
-            onnx.save_model(
+            onnx.save_model(  # type: ignore[attr-defined]
                 export_output.model_proto,
                 self._destination_path,
                 save_as_external_data=True,
@@ -816,7 +816,8 @@ class ExportOutput:
                     serializer.serialize(self, destination)
                 except ValueError:
                     raise ValueError(
-                        "'destination' must be a string when saving model larger than 2GB."
+                        "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
+                        "External tensor data will be saved alongside the model on disk."
                     )
 
     @_beartype.beartype
