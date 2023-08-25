@@ -25,7 +25,6 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <numeric>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -214,6 +213,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     }
   });
 
+  // handle equal the NaN's
   bool last_element_isnan = _isnan<scalar_t>(input_sorted_data[numel - 1]);
   if (input.is_floating_point() && equal_nan && last_element_isnan) {
     int64_t firstnan_index = numel;
@@ -228,6 +228,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     }
   }
 
+  // calculate unique count from each thread
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     for (const auto i : c10::irange(begin, end)) {
@@ -237,8 +238,13 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     }
   });
 
+  // calculate total count of unique and thread offset in output
   int64_t unique_count = std::accumulate(unique_count_thread.begin(), unique_count_thread.end(), 0);
-  std::exclusive_scan(unique_count_thread.begin(), unique_count_thread.end(), offset_thread.begin(), 0);
+  int64_t sum = 0;
+  for (const auto t : c10::irange(num_threads)) {
+    offset_thread[t] = sum;
+    sum += unique_count_thread[t];
+  }
 
   output.resize_({unique_count});
   scalar_t* output_data = output.data_ptr<scalar_t>();
