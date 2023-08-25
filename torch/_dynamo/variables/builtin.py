@@ -31,6 +31,7 @@ from ..utils import (
     guard_if_dyn,
     is_utils_checkpoint,
     istype,
+    numpy_operator_wrapper,
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
@@ -512,6 +513,21 @@ class BuiltinVariable(VariableTracker):
                         args[1],
                     ]
 
+                # Interaction between ndarray and tensors:
+                #   We prefer the tensor op whenever there are tensors involved
+                if check_numpy_ndarray_args(args, kwargs) and not any(
+                    type(arg) == variables.TensorVariable for arg in args
+                ):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        numpy_operator_wrapper(self.fn),
+                        *proxy_args_kwargs(args, kwargs),
+                    )
+
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable, tx, proxy, **options
+                    )
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -551,11 +567,7 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    if check_numpy_ndarray_args(args, kwargs):
-                        cls = variables.NumpyNdarrayVariable
-                    else:
-                        cls = variables.TensorVariable
-                    return wrap_fx_proxy_cls(cls, tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
@@ -1164,19 +1176,22 @@ class BuiltinVariable(VariableTracker):
 
                 getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
 
-                # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
-                existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-                existing_fake_attr = variables.builder.wrap_to_fake_tensor_and_record(
-                    existing_attr, tx, source=getattr_var.source, is_tensor=True
-                )
+                if isinstance(getattr_var, variables.TensorVariable):
+                    # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                    existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                    existing_fake_attr = (
+                        variables.builder.wrap_to_fake_tensor_and_record(
+                            existing_attr, tx, source=getattr_var.source, is_tensor=True
+                        )
+                    )
 
-                # same tensor identiy, setattr is a no-op
-                mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                if (
-                    existing_fake_attr is assigning_fake_val
-                    and mod_setattr is torch.nn.Module.__setattr__
-                ):
-                    return getattr_var
+                    # same tensor identiy, setattr is a no-op
+                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    if (
+                        existing_fake_attr is assigning_fake_val
+                        and mod_setattr is torch.nn.Module.__setattr__
+                    ):
+                        return getattr_var
 
             obj.convert_to_unspecialized(tx)
 
