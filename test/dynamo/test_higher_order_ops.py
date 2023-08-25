@@ -2918,6 +2918,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

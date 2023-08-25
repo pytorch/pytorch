@@ -6,12 +6,8 @@ import torch
 import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._C._functorch import (
-    peek_interpreter_stack,
-    pop_dynamic_layer_stack,
-    push_dynamic_layer_stack,
-)
 from torch._dynamo.exc import CondOpArgsMismatchError
+
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
     _wrap_all_tensors_to_functional,
@@ -31,13 +27,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
-)
-
-from torch._dynamo.testing import (
-    CompileCounter,
-    CompileCounterWithBackend,
-    EagerAndRecordGraphs,
-    normalize_gm,
 )
 
 
@@ -68,8 +57,6 @@ def _set_compilation_env():
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
-backend = EagerAndRecordGraphs()
-cnt = CompileCounterWithBackend(backend)
 
 def cond_compiled(pred, true_fn, false_fn, args):
     if torch._dynamo.is_compiling():
@@ -79,7 +66,9 @@ def cond_compiled(pred, true_fn, false_fn, args):
         return cond(pred, true_fn, false_fn, args)
 
     with _set_compilation_env():
-        return torch.compile(wrapper, backend=cnt, fullgraph=True)(pred, true_fn, false_fn, args)
+        return torch.compile(wrapper, backend="eager", fullgraph=True)(
+            pred, true_fn, false_fn, args
+        )
 
 
 """
@@ -366,8 +355,8 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
-cond.fallthrough(DispatchKey.PythonDispatcher)
-cond.fallthrough(DispatchKey.PythonTLSSnapshot)
+cond.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
+cond.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
-cond.fallthrough(DispatchKey.AutocastCPU)
+cond.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]

@@ -1219,7 +1219,6 @@ class TestControlFlowTraced(TestCase):
     def _check_closure_correcly_lifted(self, f, *, args, exp_res, exp_arg_num):
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)
-        from torch._higher_order_ops.cond import cnt, backend
         gm = make_fx(f)(*args)
         self.assertEqual(gm(*args), exp_res)
 

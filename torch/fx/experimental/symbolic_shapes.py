@@ -2494,7 +2494,6 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
-        force_no_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
@@ -2515,7 +2514,7 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if not force_no_specialize_zero_one and ((val in (0, 1) and self.specialize_zero_one)):
+        if val in (0, 1) and self.specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol

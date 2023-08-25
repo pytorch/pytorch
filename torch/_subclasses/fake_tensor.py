@@ -168,8 +168,8 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
-def is_fake(x, exp_fake_mode=None):
-    if isinstance(x, FakeTensor) and (exp_fake_mode is None or x.fake_mode == exp_fake_mode):
+def is_fake(x):
+    if isinstance(x, FakeTensor):
         return True
     elif is_traceable_wrapper_subclass(x):
         flattened_tensors, _ = type(x).__tensor_flatten__(x)
