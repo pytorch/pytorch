@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
+#include <iostream>
 #include <typeindex>
 #include <vector>
 
@@ -346,6 +347,9 @@ class CompiledNodeArgs {
     TORCH_CHECK(
         fn->retains_grad_hooks().empty(),
         "retains_grad_hooks not implemented for compiled autograd");
+    TORCH_CHECK(
+        fn->tensor_post_acc_grad_hooks() == nullptr,
+        "tensor_post_acc_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
     }
