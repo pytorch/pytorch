@@ -426,6 +426,45 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=True,
             )
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_dequant_promotion(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+
+            def forward(self, x):
+                temp = self.conv1(x)
+                temp = self.conv2(temp) + self.conv3(temp)
+                return temp
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        # For now, we have annotated conv_add in x86InductorQuantizer. But we didn't implement the lowering.
+        # TODO <leslie>: Modify the pattern matcher count after we implement the qconv2d_add lowering.
+        # Totally 10 pattern_matcher_count, 43 pattern_matcher_nodes
+        # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
+        #    matched in pointless_convert pass at
+        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. Dequant pattern matcher for dequant promotion * 1
+        #    [convert_element_type_3, sub_1, mul_3]
+        # 3. Dequant-conv pattern matched in quantization weight prepack * 3
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 4. Quantization fusion in post-grad fusion pass * 2
+        #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            10,
+            43,
+            check_quantization=True,
+        )
+
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
         class Model(torch.nn.Module):
