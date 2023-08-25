@@ -312,14 +312,14 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def expr_cond_pair(a, b):
         # This handles a pair (expr, cond), where expr is a SymPy expression,
-        # cond is a boolean expression. The value range of it is just a's range
+        # cond represents when it's. The output range is just expr's range.
         a = ValueRanges.wrap(a)
         return ValueRanges(a.lower, a.upper)
 
     @staticmethod
     def piecewise(*ranges):
-        # Given a list of ranges, where each range represents an independent range possibility.
-        # The output should therefore be unioning all the ranges.
+        # Given a list of independent ranges, the output range
+        # is the union of all the ranges.
         init = ranges[0]
         for r in ranges[1:]:
             init = init | r
