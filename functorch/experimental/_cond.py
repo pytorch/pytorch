@@ -116,6 +116,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
     # a FakeTensorMode error :
     # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
+    # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
+    # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
     out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
