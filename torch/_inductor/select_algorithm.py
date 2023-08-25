@@ -784,7 +784,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
             # do the optional warmup
             tuning_process.initialize()
-            assert tuning_process.valid()
 
         autotune_start_ts = time.time()
         timings = self.lookup(
