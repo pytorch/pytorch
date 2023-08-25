@@ -161,9 +161,11 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
-          ls -la "${RUNNER_TEMP}/artifacts"
-          rm -rf "${RUNNER_TEMP}/artifacts"
-          mkdir "${RUNNER_TEMP}/artifacts"
+
+          if [[ inputs.build_environment == 'linux-aarch64-binary-manywheel' ]]; then
+            rm -rf "${RUNNER_TEMP}/artifacts"
+            mkdir "${RUNNER_TEMP}/artifacts"
+          fi
 
       - name: Checkout PyTorch to pytorch dir
         uses: malfet/checkout@silent-checkout
