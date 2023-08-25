@@ -77,6 +77,7 @@ def mps_ops_grad_modifier(ops):
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
+        'polar': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -502,7 +503,6 @@ def mps_ops_modifier(ops):
         'ormqr': None,
         'pca_lowrank': None,
         'pinverse': None,
-        'polar': None,
         'polygamma': None,
         'polygammapolygamma_n_0': None,
         'polygammapolygamma_n_1': None,
@@ -567,7 +567,6 @@ def mps_ops_modifier(ops):
         'to_sparse': None,
         'unique': None,
         'vdot': None,
-        'view_as_complex': None,
         'segment_reduce_': None,
         '_upsample_bilinear2d_aa': None,
         'geometric' : None,
@@ -784,7 +783,6 @@ def mps_ops_error_inputs_modifier(ops):
 
         # unsupported complex dtypes
         'masked_fill',
-        'gradient',
         'fft.hfft',
         'fft.irfft',
 
@@ -10759,7 +10757,7 @@ class TestConsistency(TestCaseMPS):
             if len(diff_cpu_out) == 0:
                 continue
             # rand_like does not work with certain dtypes, so cast to double and cast back
-            cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
+            cpu_grad_outputs = tuple(torch.rand_like(t, dtype=torch.double).to(dtype=t.dtype) for t in diff_cpu_out)
             mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
             # Compare computed gradients with cpu given random grad_output vector

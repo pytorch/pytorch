@@ -20,6 +20,7 @@ import sysconfig
 import tempfile
 import threading
 import types
+import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -467,6 +468,13 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
+@functools.lru_cache(None)
+def is_apple_clang():
+    cxx = cpp_compiler()
+    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
+    return "Apple" in version_string.splitlines()[0]
+
+
 class VecISA:
     _bit_width: int
     _macro: str
@@ -697,6 +705,36 @@ def use_standard_sys_dir_headers():
         return ""
 
 
+@functools.lru_cache(None)
+def is_conda_llvm_openmp_installed():
+    try:
+        command = "conda list llvm-openmp --json"
+        output = subprocess.check_output(command.split()).decode("utf8")
+        return len(json.loads(output)) > 0
+    except subprocess.SubprocessError:
+        return False
+
+
+@functools.lru_cache(None)
+def homebrew_libomp():
+    try:
+        # check if `brew` is installed
+        subprocess.check_output(["which", "brew"])
+        # get the location of `libomp` if it is installed
+        # this is the location that `libomp` **would** be installed
+        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
+        libomp_path = (
+            subprocess.check_output(["brew", "--prefix", "libomp"])
+            .decode("utf8")
+            .strip()
+        )
+        # check if `libomp` is installed
+        omp_available = os.path.exists(libomp_path)
+        return omp_available, libomp_path
+    except subprocess.SubprocessError:
+        return False, ""
+
+
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
@@ -765,25 +803,44 @@ def get_include_and_linking_paths(
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
         if sys.platform == "darwin":
-            # GNU OpenMP generally is not available on MacOS
-            # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
-            libs = ["omp"]
-            if os.getenv("OMP_PREFIX") is not None:
-                # Support OpenMP on MacOS
-                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+            # only Apple builtin compilers (Apple Clang++) require openmp
+            omp_available = not is_apple_clang()
 
-            if os.getenv("CONDA_PREFIX") is not None:
-                # On MacOS OpenMP is not available via the system install
-                # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
-                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
-                lpaths.append(conda_lib_path)
-                # Prefer Intel OpenMP on x86 machine
-                if os.uname().machine == "x86_64" and os.path.exists(
-                    os.path.join(conda_lib_path, "libiomp5.dylib")
-                ):
-                    libs = ["iomp5"]
+            # check the `OMP_PREFIX` environment first
+            if os.getenv("OMP_PREFIX") is not None:
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                valid_env = os.path.exists(header_path)
+                if valid_env:
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                else:
+                    warnings.warn("environment variable `OMP_PREFIX` is invalid.", stacklevel=2)
+                omp_available = omp_available or valid_env
+
+            libs = [] if omp_available else ["omp"]
+
+            # prefer to use openmp from `conda install llvm-openmp`
+            if not omp_available and os.getenv("CONDA_PREFIX") is not None:
+                omp_available = is_conda_llvm_openmp_installed()
+                if omp_available:
+                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
+                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    lpaths.append(conda_lib_path)
+                    # Prefer Intel OpenMP on x86 machine
+                    if os.uname().machine == "x86_64" and os.path.exists(
+                        os.path.join(conda_lib_path, "libiomp5.dylib")
+                    ):
+                        libs = ["iomp5"]
+
+            # next, try to use openmp from `brew install libomp`
+            if not omp_available:
+                omp_available, libomp_path = homebrew_libomp()
+                if omp_available:
+                    ipaths.append(os.path.join(libomp_path, "include"))
+                    lpaths.append(os.path.join(libomp_path, "lib"))
+
+            # if openmp is still not available, we let the compiler to have a try,
+            # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
@@ -989,11 +1046,18 @@ def compile_file(input_path, output_path, cmd) -> None:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
-        if "'omp.h' file not found" in output and sys.platform == "darwin":
-            output = (
-                output
-                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+        if openmp_problem and sys.platform == "darwin":
+            instruction = (
+                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                "that has builtin OpenMP support;\n"
+                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                "(3) install libomp via brew: `brew install libomp`;\n"
+                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                " with `include/omp.h` under it."
             )
+            output += instruction
         raise exc.CppCompileError(cmd, output) from e
 
 

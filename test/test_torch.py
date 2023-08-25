@@ -7736,6 +7736,26 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
         test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
 
+    def test_dim_order(self):
+        shape = (2, 3, 5, 7)
+
+        t = torch.empty(shape)
+        self.assertSequenceEqual(t.dim_order(), (0, 1, 2, 3), seq_type=tuple)
+        # transpose doesn't really change the underlying physical memory
+        # so expecting dim_order change to reflect that (like strides)
+        self.assertSequenceEqual(t.transpose(0, 1).dim_order(), (1, 0, 2, 3))
+
+        t = torch.empty(shape, memory_format=torch.channels_last)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 1))
+
+        t = torch.empty((2, 3, 5, 7, 8), memory_format=torch.channels_last_3d)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 4, 1))
+
+        for dim_order in itertools.permutations(range(4)):
+            self.assertSequenceEqual(
+                dim_order, torch.empty_permuted(shape, dim_order).dim_order()
+            )
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):

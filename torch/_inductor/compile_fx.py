@@ -771,7 +771,7 @@ def cudagraphify_impl(
 
     # record
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream):
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
