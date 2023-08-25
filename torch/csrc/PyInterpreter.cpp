@@ -543,6 +543,17 @@ c10::Device ConcretePyInterpreterVTable::device(
   return toDevice(out.ptr());
 }
 
+static void set_tensor_attr_with_capsule(
+    c10::TensorImpl* tensor,
+    py::capsule& capsule,
+    const char* attr_name) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  py::handle(mb_obj.value()).attr(attr_name) = capsule;
+}
+
 c10::IntArrayRef ConcretePyInterpreterVTable::strides(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
@@ -565,37 +576,21 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
         "Cannot call strides on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::optional<PyObject*> mb_obj =
-      self->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "strides must be a list or a tuple");
 
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "stride");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
-}
-
-static void set_tensor_attr_with_capsule(
-    c10::TensorImpl* tensor,
-    py::capsule& capsule,
-    const char* attr_name) {
-  c10::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  py::handle(mb_obj.value()).attr(attr_name) = capsule;
+  int64_t len = py::len(out);
+  int64_t* ptr = new int64_t[len];
+  auto capsule =
+      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<int64_t>(*it);
+  }
+  set_tensor_attr_with_capsule(
+      const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
+  return c10::IntArrayRef(ptr, len);
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
