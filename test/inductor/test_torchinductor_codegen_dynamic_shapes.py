@@ -111,6 +111,10 @@ def check_codegen(
 # xfail by default, set is_skip=True to skip
 test_failures = {
     #
+    # Failed to find dynamic for loop variable (no kernels generated)
+    #
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    #
     # Failed to find dynamic for loop variable:
     #
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
