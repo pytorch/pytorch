@@ -189,13 +189,6 @@ include_patterns = [
     'torch/_dynamo/debug_utils.py',
     'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/**/*.py',
-    'torch/_inductor/autotune_process.py',
-    'torch/_inductor/graph.py',
-    'torch/_inductor/codegen/wrapper.py',
-    'torch/_inductor/cudagraph_trees.py',
-    'torch/_inductor/lowering.py',
-    'torch/_inductor/metrics.py',
-    'torch/_inductor/fx_passes/pad_mm.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
@@ -226,7 +219,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/binary_folding.py',
     'torch/_inductor/fx_passes/replace_random.py',
     'torch/_inductor/fx_passes/joint_graph.py',
-    'torch/_inductor/fx_passes/pad_mm.py',
     'torch/_inductor/fx_passes/__init__.py',
     'torch/_inductor/fx_passes/group_batch_fusion.py',
     'torch/_inductor/fx_passes/pre_grad.py',
