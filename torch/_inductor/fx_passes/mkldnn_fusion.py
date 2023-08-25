@@ -20,7 +20,7 @@ from ..pattern_matcher import (
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-
+from .quantization import _register_quantization_weight_pack_pass
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -1073,3 +1073,4 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
+            _register_quantization_weight_pack_pass()
