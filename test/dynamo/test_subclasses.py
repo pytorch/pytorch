@@ -340,8 +340,7 @@ class GraphModule(torch.nn.Module):
         cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
         f_cond = torch.compile(f, backend=cnt, fullgraph=True)
 
-        def test_recompilation(f, x, sizes, exp_graphs, exp_frame_count):
-            shape_env = ShapeEnv()
+        def test_recompilation(f, shape_env, x, sizes, exp_graphs, exp_frame_count):
             with torch._subclasses.fake_tensor.FakeTensorMode(
                 shape_env=shape_env
             ) as fake_mode:
@@ -374,11 +373,20 @@ class GraphModule(torch.nn.Module):
 """
         test_recompilation(
             f_cond,
+            ShapeEnv(),
             torch.randn([3, 4]),
             [3, 3],
-            [true_graph, true_graph, false_graph, false_graph],
-            # Expect to compile twice once for true and once for false branch
+            [true_graph, true_graph],
             [1, 1],
+        )
+
+        test_recompilation(
+            f_cond,
+            ShapeEnv(),
+            torch.randn([3, 4]),
+            [4, 5],
+            [false_graph, false_graph],
+            [2, 2],
         )
 
 
