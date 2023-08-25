@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import logging
 import queue
 import time
 import warnings
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 
 from .utils import do_bench, do_bench_using_profiling
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 DEBUG = False
 EXIT_HANDLER_REGISTERED = False
@@ -282,7 +285,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.DLL: Optional[DLLWrapper] = None
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = CUDACodeCache.write_source_code(
+        self.hash_key, self.source_file = CUDACodeCache.write(
             self.source_code, "so"
         )
 

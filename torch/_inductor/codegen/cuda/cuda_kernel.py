@@ -23,6 +23,7 @@ class CUDAKernel(Kernel):
     """
     Kernels defined by the CUDA language.
     """
+
     overrides = OpOverrides
 
 

@@ -1,14 +1,17 @@
 import functools
 import itertools
+import logging
+
 from copy import copy
 from typing import List
 from unittest.mock import patch
 
-import sympy
-import torch
-
 # import cutlass libs
 import scripts as cutlass_lib
+
+import sympy
+
+import torch
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, IRNode, Layout
@@ -26,8 +29,11 @@ class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
 
     def __init__(
-        self, name: str, input_nodes: List[IRNode], layout: Layout,
-        input_reorder: List[int]=None,
+        self,
+        name: str,
+        input_nodes: List[IRNode],
+        layout: Layout,
+        input_reorder: List[int] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
@@ -44,10 +50,18 @@ class CUDATemplate(KernelTemplate):
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
             log.debug(f"Generated Code:\n{code}")
-            log.debug(f"Args: {kernel.args.cpp_argdefs()}, {kernel.args.python_argdefs()}")
+            log.debug(
+                f"Args: {kernel.args.cpp_argdefs()}, {kernel.args.python_argdefs()}"
+            )
 
-        input_reorder = self.input_reorder if self.input_reorder is not None else list(range(len(self.input_nodes)))
-        expected_args = list(unique(self.input_nodes[idx].get_name() for idx in input_reorder))
+        input_reorder = (
+            self.input_reorder
+            if self.input_reorder is not None
+            else list(range(len(self.input_nodes)))
+        )
+        expected_args = list(
+            unique(self.input_nodes[idx].get_name() for idx in input_reorder)
+        )
         expected_args.extend([self.output_node.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
