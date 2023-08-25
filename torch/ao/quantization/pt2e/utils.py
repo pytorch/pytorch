@@ -47,6 +47,9 @@ def fold_bn_weights_into_conv_node(
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
     transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
+    if conv_node.target == torch.ops.aten.convolution.default:
+        assert type(conv_node.args[6]) is bool
+        transpose = conv_node.args[6]
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -69,7 +72,7 @@ def fold_bn_weights_into_conv_node(
     # update the weight and bias for conv
     conv_args = list(conv_node.args)
     # filling in the default bias argument
-    if len(conv_args) == 2:
+    if len(conv_args) == 2 and (conv_node.target == torch.ops.aten.conv2d.default):
         conv_args.append(None)
 
     # calling data since the fused_weight and fused_bias are nn.Parameter
@@ -113,7 +116,10 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
+        if n.op != "call_function" or (
+            n.target != torch.ops.aten.conv2d.default
+            and n.target != torch.ops.aten.convolution.default
+        ):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
