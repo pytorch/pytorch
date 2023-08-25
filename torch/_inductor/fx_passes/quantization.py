@@ -1,3 +1,4 @@
+import copy
 import functools
 
 import torch
@@ -187,6 +188,62 @@ def _register_quantization_lowerings():
         False,  # fp32_output
         UnaryAttr("none", [], ""),  # unary_attr
     )
+
+
+def _is_valid_dequant_promotion_pattern(match):
+    mul_node = match.output_node()
+    sub_node = mul_node.args[0]
+    to_fp32_node = sub_node.args[0]
+    if (
+        mul_node.target is aten.mul.Tensor
+        and sub_node.target is aten.sub.Tensor
+        and to_fp32_node.target is prims.convert_element_type.default
+        and len(list(mul_node.users)) > 1
+    ):
+        # dequant pattern has more than 1 users to be promoted
+        return True
+    return False
+
+
+def _register_dequant_promotion_pass(pattern, pass_number):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_dequant_promotion_pattern,
+        pass_number=pass_number,
+    )
+    def dequant_promotion(match: Match, *args, **kwargs):
+        # If dequant pattern used by multiply nodes,
+        # we will do dequant promotion. So each user node has a seperate dequant pattern connected.
+        def clone_to_new_node(graph, source_node, user_node):
+            assert (
+                source_node.op == "call_function"
+            ), "clone_to_new_node only support node.op call_function"
+            with graph.inserting_before(user_node):
+                new_node = graph.call_function(
+                    source_node.target,
+                    args=source_node.args,
+                    kwargs=source_node.kwargs,
+                )
+                new_node.meta = copy.copy(source_node.meta)
+                user_node.replace_input_with(source_node, new_node)
+            return new_node
+
+        mul_node = match.output_node()
+        sub_node = mul_node.args[0]
+        to_fp32_node = sub_node.args[0]
+        assert mul_node.target is aten.mul.Tensor
+        assert sub_node.target is aten.sub.Tensor
+        assert to_fp32_node.target is prims.convert_element_type.default
+
+        graph = match.graph
+        user_node_list = list(mul_node.users)
+        for user_node in user_node_list:
+            # Step1: Duplicate the mul node
+            new_mul_node = clone_to_new_node(graph, mul_node, user_node)
+            # Step2: Duplicate the sub node
+            new_sub_node = clone_to_new_node(graph, sub_node, new_mul_node)
+            # Step3: Duplicate the to_fp32 node
+            _ = clone_to_new_node(graph, to_fp32_node, new_sub_node)
 
 
 def _is_valid_dequant_conv2d_pattern(match):
@@ -380,6 +437,9 @@ def _generate_qconv_weight_prepack_patterns():
 
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
+    _register_dequant_promotion_pass(
+        dequantize_per_tensor_activation_pattern, pass_number=0
+    )  # pass_number=0 to run before weight prepack
     weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
     for weight_prepack_pattern in weight_prepack_patterns:
         # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
