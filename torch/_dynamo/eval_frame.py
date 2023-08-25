@@ -922,10 +922,12 @@ def rewrite_signature(
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
     def produce_matching(sources, candidates):
-        source_types = " or ".join([
-            desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
-            for desc, args in sources.items()
-        ])
+        source_types = " or ".join(
+            [
+                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                for desc, args in sources.items()
+            ]
+        )
         source_args = [arg for args in sources.values() for arg in args]
         matched_elements_positions = []
         dict_of_source_args = dict()
@@ -964,7 +966,10 @@ def rewrite_signature(
 
     assert graph_captured_output is not None
     matched_output_elements_positions = produce_matching(
-        sources={"graph-captured outputs": list(graph_captured_output), "original args": flat_args},
+        sources={
+            "graph-captured outputs": list(graph_captured_output),
+            "original args": flat_args,
+        },
         candidates={"traced result": flat_results_traced},
     )
 
