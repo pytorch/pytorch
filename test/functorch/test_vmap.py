@@ -57,7 +57,6 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
-from torch.utils._pytree import tree_map, tree_flatten
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1195,7 +1194,7 @@ def slice_inputs(inputs, bdims, i):
     return tuple(result)
 
 
-def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
+def reference_vmap(op, inputs, in_dims=0, out_dims=0):
     if isinstance(in_dims, int):
         in_dims = (in_dims,) * len(inputs)
     bdim_sizes = [inp.size(dim) for inp, dim in zip(inputs, in_dims) if dim is not None]
@@ -1209,22 +1208,15 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
         assert all(isinstance(result, torch.Tensor) for result in results)
         if isinstance(out_dims, int):
             out_dims = (out_dims,) * 1
-        if return_nt:
-            return torch.nested.nested_tensor(list(results))
-        else:
-            return torch.stack(results, dim=out_dims[0])
+        return torch.stack(results, dim=out_dims[0])
 
     assert all(isinstance(result, tuple) for result in results)
     num_returns = len(results[0])
     assert all(len(result) == num_returns for result in results)
     if isinstance(out_dims, int):
         out_dims = (out_dims,) * num_returns
-    if return_nt:
-        return tuple(torch.nested.nested_tensor(list(result_shards))
-                     for result_shards in zip(*results))
-    else:
-        return tuple(torch.stack(result_shards, out_dim)
-                     for result_shards, out_dim in zip(zip(*results), out_dims))
+    return tuple(torch.stack(result_shards, out_dim)
+                 for result_shards, out_dim in zip(zip(*results), out_dims))
 
 
 class TensorFactory:
@@ -1250,8 +1242,7 @@ class TensorFactory:
 def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                check_view=False, check_propagates_grad=True):
     result = vmap(op, in_dims, out_dims)(*inputs)
-    are_nested, _ = tree_flatten(tree_map(lambda t: t.is_nested, result))
-    reference_result = reference_vmap(op, inputs, in_dims, out_dims, return_nt=any(are_nested))
+    reference_result = reference_vmap(op, inputs, in_dims, out_dims)
     self.assertEqual(result, reference_result)
     op_has_single_return = not isinstance(result, tuple)
 
@@ -5161,162 +5152,6 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
         check_vmap_fallback(self, test, torch._test_check_tensor)
 
-class TestVmapNestedTensor(Namespace.TestVmapBase):
-    def _vmap_test(self, *args, **kwargs):
-        return _vmap_test(self, *args, **kwargs)
-
-    # dims should be something like [5, None, 10], with None indicating that a
-    # random ragged structure should be used
-    def _create_nt(self, dims, device):
-        sizes = [
-            [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
-            for d in range(dims[0])
-        ]
-        return torch.nested.nested_tensor([
-            torch.randn(*size) for size in sizes
-        ], device=device)
-
-    # Creates an NT matching another NT's number of components and
-    # shape / ragged structure for all dims specified to be -1.
-    def _nt_from_similar(self, other, dims):
-        assert len(dims) == other.dim()
-        assert dims[0] == -1 or dims[0] == other.size(0)
-
-        ret_sizes = []
-        for t in other.unbind():
-            other_size = t.shape
-            ret_size = []
-            for i, d in enumerate(dims[1:]):
-                if d == -1:
-                    ret_size.append(other_size[i])
-                else:
-                    ret_size.append(d)
-            ret_sizes.append(ret_size)
-
-        return torch.nested.nested_tensor([
-            torch.randn(*size) for size in ret_sizes
-        ], device=other.device)
-
-    @allowVmapFallbackUsage
-    def test_fallback_unary(self, device):
-        def f(x):
-            return x.sin() * 5. + 4.
-
-        nt = self._create_nt([4, None, 3], device=device)
-        self._vmap_test(f, (nt,))
-
-    @allowVmapFallbackUsage
-    def test_fallback_binary(self, device):
-        def f(x, y):
-            return x @ y
-
-        x = self._create_nt([5, None, 3], device=device)
-        y = self._create_nt([5, 3, None], device=device)
-        self._vmap_test(f, (x, y))
-
-    @allowVmapFallbackUsage
-    def test_fallback_binary_nt_and_unbatched_dense(self, device):
-        def f(x, y):
-            return x @ y
-
-        x = self._create_nt([5, None, 3], device=device)
-        y = torch.randn(3, 4, device=device)
-        self._vmap_test(f, (x, y), in_dims=(0, None))
-
-    @allowVmapFallbackUsage
-    def test_fallback_binary_nt_and_batched_dense(self, device):
-        def f(x, y):
-            return x @ y
-
-        x = self._create_nt([5, None, 3], device=device)
-        y = torch.randn(5, 3, 4, device=device)
-        self._vmap_test(f, (x, y))
-
-    def test_nt_acts_as_dense_in_vmap(self, device):
-        def f(x):
-            assert not x.is_nested
-            return x
-
-        x = self._create_nt([5, None, 3], device=device)
-        self._vmap_test(f, (x,))
-
-    def test_cat_batching_rule(self, device):
-        def f(x, y, dim):
-            return torch.cat([x, y], dim=dim)
-
-        # Different nested structure, same other dims
-        x = self._create_nt([3, None, 2], device=device)
-        y = self._create_nt([3, None, 2], device=device)
-        self._vmap_test(functools.partial(f, dim=0), (x, y))
-
-        x = self._create_nt([3, 2, None], device=device)
-        y = self._create_nt([3, 2, None], device=device)
-        self._vmap_test(functools.partial(f, dim=1), (x, y))
-
-        # Same nested structure, different other dims
-        x = self._create_nt([3, 2, None], device=device)
-        y = self._nt_from_similar(x, [-1, 4, -1])
-        self._vmap_test(functools.partial(f, dim=0), (x, y))
-
-        x = self._create_nt([3, None, 2], device=device)
-        y = self._nt_from_similar(x, [-1, -1, 4])
-        self._vmap_test(functools.partial(f, dim=1), (x, y))
-
-    # .shape calls don't work on NTs
-    # TODO: Fix this somehow?
-    @unittest.expectedFailure
-    def test_shape_call(self, device):
-        def f(x):
-            x.shape[0]
-            return x
-
-        x = self._create_nt([3, None, 2])
-        self._vmap_test(f, (x,))
-
-    def test_nt_with_nonzero_in_dim_raises(self, device):
-        def f(x):
-            return x
-
-        x = self._create_nt([3, None, 2], device=device)
-        with self.assertRaisesRegex(
-                RuntimeError, "Nested tensors can only be vmapped over dim=0"):
-            vmap(f, in_dims=2)(x)
-
-    def test_nt_with_nonzero_out_dim_raises(self, device):
-        def f(x):
-            return x
-
-        x = self._create_nt([3, None, 2], device=device)
-        with self.assertRaisesRegex(
-                RuntimeError, "Nested tensors can only be vmapped over dim=0"):
-            vmap(f, out_dims=2)(x)
-
-    @allowVmapFallbackUsage
-    def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_raises(self, device):
-        def f(x, y):
-            return x @ y
-
-        x = self._create_nt([5, None, 3], device=device)
-        y = torch.randn(3, 5, 4, device=device)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Fallback not supported for mixed nested / non-nested arguments without bdim=0"
-        ):
-            vmap(f, in_dims=(0, 1))(x, y)
-
-    def test_multilevel_vmap_raises(self, device):
-        def f(x):
-            return x.sin() * 4. + 3.
-
-        x = self._create_nt([2, 2, 2, None], device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "Only one level of vmap is supported"):
-            vmap(vmap(f))(x)
-
-        with self.assertRaisesRegex(RuntimeError, "Only one level of vmap is supported"):
-            vmap(vmap(vmap(f)))(x)
-
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
@@ -5328,7 +5163,6 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
