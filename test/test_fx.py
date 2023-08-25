@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
 from fx.named_tup import MyNamedTup
 
@@ -329,6 +330,7 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    @skipIfNoDynamoSupport
     @unittest.expectedFailure
     def test_control_flow_tracing(self):
         def true(x, y):

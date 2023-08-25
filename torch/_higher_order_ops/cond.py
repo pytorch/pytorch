@@ -36,7 +36,6 @@ def _set_compilation_env():
     _old_capture_dyn_ops = torch._dynamo.config.capture_dynamic_output_shape_ops
     _old_capture_scalar = torch._dynamo.config.capture_scalar_outputs
     _old_size_limit = torch._dynamo.config.cache_size_limit
-    _old_acc_size_limit = torch._dynamo.config.accumulated_cache_size_limit
 
     try:
         # We need to turn off the is_fx_tracing_flag temporarily
@@ -47,14 +46,12 @@ def _set_compilation_env():
         # We need to enlarge the dynamo cache size limit because
         # cond's frame is expected to be hitted with different inputs frequently
         torch._dynamo.config.cache_size_limit = 256
-        torch._dynamo.config.accumulated_cache_size_limit = 256
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
         torch._dynamo.config.capture_dynamic_output_shape_ops = _old_capture_dyn_ops
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar
         torch._dynamo.config.cache_size_limit = _old_size_limit
-        torch._dynamo.config.accumulated_cache_size_limit = _old_acc_size_limit
 
 
 @dataclass
