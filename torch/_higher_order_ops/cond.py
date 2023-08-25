@@ -90,9 +90,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
+    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(true_fn)(*operands)
-        false_graph = make_fx(false_fn)(*operands)
+        true_graph = make_fx(true_fn, pre_dispatch=pre_dispatch)(*operands)
+        false_graph = make_fx(false_fn, pre_dispatch=pre_dispatch)(*operands)
 
     true_outs = []
     false_outs = []
@@ -157,6 +158,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
     # a FakeTensorMode error :
     # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
+    # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
+    # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
     out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -177,6 +180,20 @@ cond.py_impl(DispatchKey.Autograd)(autograd_not_implemented(cond, deferred_error
 
 @cond.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
+    # TODO Move this to proper utility function
+    from torch._ops import mode_stack_per_key, temporarily_pop_mode
+
+    # torch.cond expects ProxyTorchDispatchMode to **still** be on the stack
+    # at the time that its proxy implementation is called.
+    # However, the mode can live in one of two places, depending on
+    # whether we're doing pre_dispatch tracing or normal tracing.
+    pre_dispatch_modes = mode_stack_per_key().get(DispatchKey.PreDispatch, [])  # type: ignore[attr-defined]
+    if len(pre_dispatch_modes) > 0:
+        with temporarily_pop_mode(pre_dispatch_modes) as mode:
+            if mode.enable_tracing:
+                return trace_cond(mode, cond, pred, true_fn, false_fn, operands)
+            else:
+                return cond(pred, true_fn, false_fn, operands)
     mode = _get_current_dispatch_mode()
     assert mode is not None, "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
