@@ -134,7 +134,18 @@ bool check_fast_path_restrictions(
         return false;
       }
       if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
-        return false;
+        for (auto it1 = tensorLists[0][j].sizes().begin(),
+                  it2 = tensorLists[0][j].strides().begin(),
+                  it3 = tensor_list[j].strides().begin();
+             it1 != tensorLists[0][j].sizes().end() &&
+             it2 != tensorLists[0][j].strides().end() &&
+             it3 != tensor_list[j].strides().end();
+             ++it1, ++it2, ++it3) {
+          // if dim is of size 1, the stride doesn't matter
+          if (*it1 != 1 && *it2 != *it3) {
+            return false;
+          }
+        }
       }
     }
   }
