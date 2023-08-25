@@ -132,6 +132,8 @@ class BaseListVariable(VariableTracker):
                     result = BuiltinVariable(operator.or_).call_function(
                         tx, [check, result], {}
                     )
+            if result is None:
+                result = ConstantVariable(None)
             return result
 
         return super().call_method(tx, name, args, kwargs)
