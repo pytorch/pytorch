@@ -744,7 +744,8 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
         x = LoggingTensor(torch.ones(1))
-        self.assertRaises(RuntimeError, lambda: x.storage())
+        storage = x.untyped_storage()
+        self.assertRaises(RuntimeError, lambda: storage.data_ptr())
 
     def test_make_wrapper_subclass_noalloc(self) -> None:
         # This is ludicrously big (8TB) and this should pass because wrapper
@@ -1862,6 +1863,40 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
     def test_standard_is_not_subclass(self):
         # https://github.com/pytorch/pytorch/issues/79079
         self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
+
+    def test_sym_sizes_strides_slow_path(self):
+        class TestTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, (0,), dispatch_sizes_strides_policy="sizes")
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func in (
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.sym_stride.default
+                ):
+                    from torch._dynamo.source import ConstantSource
+                    from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+                    shape_env = ShapeEnv()
+                    si = shape_env.create_symintnode(
+                        shape_env.create_symbol(
+                            123,
+                            source=ConstantSource("abc"),
+                            dynamic_dim=DimDynamic.DUCK,
+                            constraint_dim=None,
+                        ),
+                        hint=123
+                    )
+                    return (si,)
+
+        t = TestTensor()
+        si = t.size()[0]
+        self.assertIsInstance(si, torch.SymInt)
+        si = t.stride()[0]
+        self.assertIsInstance(si, torch.SymInt)
 
     def test_strides_slow_path(self):
         for use_wrapper_subclass in [True, False]:

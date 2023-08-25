@@ -506,9 +506,8 @@ class parametrize(_TestParametrizer):
 
                 values = list(values) if len(self.arg_names) > 1 else [values]
                 if len(values) != len(self.arg_names):
-                    raise RuntimeError('Expected # values == # arg names, but got: {} '
-                                       'values and {} names for test "{}"'.format(
-                                           len(values), len(self.arg_names), test.__name__))
+                    raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
+                                       f'values and {len(self.arg_names)} names for test "{test.__name__}"')
 
                 param_kwargs = dict(zip(self.arg_names, values))
 
@@ -1267,14 +1266,20 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
-def skipIfRocm(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_WITH_ROCM:
-            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
+def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def runOnRocm(fn):
     @wraps(fn)
@@ -1643,6 +1648,15 @@ def set_default_dtype(dtype):
     finally:
         torch.set_default_dtype(saved_dtype)
 
+@contextlib.contextmanager
+def set_default_tensor_type(tensor_type):
+    saved_tensor_type = torch.tensor([]).type()
+    torch.set_default_tensor_type(tensor_type)
+    try:
+        yield
+    finally:
+        torch.set_default_tensor_type(saved_tensor_type)
+
 def iter_indices(tensor):
     if tensor.dim() == 0:
         return range(0)
@@ -1920,59 +1934,65 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 
 def check_if_enable(test: unittest.TestCase):
-    test_suite = str(test.__class__).split('\'')[1]
-    raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if raw_test_name in slow_tests_dict:
+    classname = str(test.__class__).split("'")[1].split(".")[-1]
+    sanitized_testname = remove_device_and_dtype_suffixes(test._testMethodName)
+
+    def matches_test(target: str):
+        target_test_parts = target.split()
+        if len(target_test_parts) < 2:
+            # poorly formed target test name
+            return False
+        target_testname = target_test_parts[0]
+        target_classname = target_test_parts[1][1:-1].split(".")[-1]
+        # if test method name or its sanitized version exactly matches the disabled
+        # test method name AND allow non-parametrized suite names to disable
+        # parametrized ones (TestSuite disables TestSuiteCPU)
+        return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
+
+    if any(matches_test(x) for x in slow_tests_dict.keys()):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
+
     if not IS_SANDCASTLE:
         should_skip = False
         skip_msg = ""
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
-            disable_test_parts = disabled_test.split()
-            if len(disable_test_parts) > 1:
-                disabled_test_name = disable_test_parts[0]
-                disabled_test_suite = disable_test_parts[1][1:-1]
-                # if test method name or its sanitized version exactly matches the disabled test method name
-                # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU)
-                if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
-                   and disabled_test_suite in test_suite:
-                    platform_to_conditional: Dict = {
-                        "mac": IS_MACOS,
-                        "macos": IS_MACOS,
-                        "win": IS_WINDOWS,
-                        "windows": IS_WINDOWS,
-                        "linux": IS_LINUX,
-                        "rocm": TEST_WITH_ROCM,
-                        "asan": TEST_WITH_ASAN,
-                        "dynamo": TEST_WITH_TORCHDYNAMO,
-                        "inductor": TEST_WITH_TORCHINDUCTOR,
-                        "slow": TEST_WITH_SLOW,
-                    }
+            if matches_test(disabled_test):
+                platform_to_conditional: Dict = {
+                    "mac": IS_MACOS,
+                    "macos": IS_MACOS,
+                    "win": IS_WINDOWS,
+                    "windows": IS_WINDOWS,
+                    "linux": IS_LINUX,
+                    "rocm": TEST_WITH_ROCM,
+                    "asan": TEST_WITH_ASAN,
+                    "dynamo": TEST_WITH_TORCHDYNAMO,
+                    "inductor": TEST_WITH_TORCHINDUCTOR,
+                    "slow": TEST_WITH_SLOW,
+                }
 
-                    invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
-                    if len(invalid_platforms) > 0:
-                        invalid_plats_str = ", ".join(invalid_platforms)
-                        valid_plats = ", ".join(platform_to_conditional.keys())
+                invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
+                if len(invalid_platforms) > 0:
+                    invalid_plats_str = ", ".join(invalid_platforms)
+                    valid_plats = ", ".join(platform_to_conditional.keys())
 
-                        print(f"Test {disabled_test} is disabled for some unrecognized ",
-                              f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                              "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
-                              f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
+                    print(f"Test {disabled_test} is disabled for some unrecognized ",
+                          f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
+                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
-                        # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
-                        platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
+                    # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
+                    platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
-                        should_skip = True
-                        skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
-                            f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
-                            "If you're seeing this on your local machine and would like to enable this test, " \
-                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
-                        break
+                if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
+                    should_skip = True
+                    skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                        f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                        "If you're seeing this on your local machine and would like to enable this test, " \
+                        "please make sure CI is not set and you are not using the flag --import-disabled-tests."
+                    break
 
         if should_skip and not RERUN_DISABLED_TESTS:
             # Skip the disabled test when not running under --rerun-disabled-tests verification mode
@@ -2224,6 +2244,8 @@ class TestCase(expecttest.TestCase):
     # rtol values when comparing tensors. Used by @toleranceOverride, for example.
     _precision: float = 0
     _rel_tol: float = 0
+
+    _avoid_default_dtype_check: bool = False
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -2541,6 +2563,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # decorator to disable the invariant checks.
         torch.sparse.check_sparse_tensor_invariants.enable()
 
+        if not self._avoid_default_dtype_check:
+            assert torch.get_default_dtype() == torch.float
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2551,6 +2576,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 torch.sparse.check_sparse_tensor_invariants.enable()
             else:
                 torch.sparse.check_sparse_tensor_invariants.disable()
+
+        if not self._avoid_default_dtype_check:
+            assert torch.get_default_dtype() == torch.float
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -3455,9 +3483,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}{}:\n\n{}\n\n"
-                     "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
+                      f"I got this output for {munged_id}{subname_output}:\n\n{s}\n\n"
+                      "No expect file exists; to accept the current output, run:\n"
+                      f"python {__main__.__file__} {munged_id} --accept") from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -4060,10 +4088,9 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
-        "is not defined in the running script \"{}\", but in \"{}\". Did you " \
-        "accidentally import a unittest.TestCase from another file?".format(
-            test_case.id(), running_script_path, test_case_class_file)
+    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
+        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+        "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
     set_running_script_path()
