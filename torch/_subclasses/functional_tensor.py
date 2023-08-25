@@ -40,7 +40,6 @@ class FunctionalTensor(torch.Tensor):
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
-        #out = torch.Tensor._make_wrapper_subclass(cls, **kwargs)
         out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
