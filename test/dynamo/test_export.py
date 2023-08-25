@@ -2156,6 +2156,35 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
+    def test_dataclass_input(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Tensors:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        def f(t):
+            return t.x + t.y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
+        ):
+            torch._dynamo.export(
+                f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
+            )
+
+    def test_none_out(self):
+        def f(x, y):
+            _ = x + y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2173,6 +2202,54 @@ def forward(self, x):
         out_graph = exported[0]
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
+
+    def test_constraint_violation_error_messages(self):
+        def foo(x):
+            if x.shape[0] == x.shape[1] * 2:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([8, 4])
+        constraints = [
+            dynamic_dim(t, 0) >= 3,
+            dynamic_dim(t, 0) <= 10,
+            dynamic_dim(t, 1),
+        ]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*valid.*inferred to be equal to.*\n.*need to be specialized.*too complex to specify",
+        ):
+            torch._export.export(foo, (t,), constraints=constraints)
+
+        def bar(x):
+            if x.shape[0] == 5:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([5])
+        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*valid.*inferred to be a constant",
+        ):
+            torch._export.export(bar, (t,), constraints=constraints)
+
+        def qux(x):
+            if x.shape[0] > 5 and x.shape[0] < 10:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([7])
+        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*satisfy the generated guard",
+        ):
+            torch._export.export(qux, (t,), constraints=constraints)
 
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2263,6 +2340,23 @@ def forward(self, x):
             torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
         constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+
+    def test_remove_redundant_dynamic_dim_in_error_message(self):
+        def foo(x, y):
+            if x.shape[0] == y["k"].shape[0]:
+                return x + 1
+            else:
+                return x - 1
+
+        a = torch.randn(3)
+        b = torch.randn(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
+        ):
+            torch._export.export(
+                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+            )
 
     @config.patch(
         capture_dynamic_output_shape_ops=True,
