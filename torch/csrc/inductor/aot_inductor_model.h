@@ -76,6 +76,14 @@ class AOTInductorModelBase {
     return outputs_info_.at(idx).name;
   }
 
+  const char* get_input_dtype(int64_t idx) const {
+    return inputs_info_.at(idx).dtype;
+  }
+
+  const char* get_output_dtype(int64_t idx) const {
+    return outputs_info_.at(idx).dtype;
+  }
+
   std::vector<int64_t> max_input_shape(int64_t idx) const {
     return max_shape(inputs_info_, idx);
   }
@@ -137,6 +145,7 @@ class AOTInductorModelBase {
 
   struct ParamInfo {
     const char* name = nullptr;
+    const char* dtype = nullptr;
     std::vector<DimInfo> shape;
   };
 

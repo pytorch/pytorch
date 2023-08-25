@@ -307,7 +307,7 @@ class VariableBuilder:
             ),
         ]
 
-        if np:
+        if config.trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
@@ -673,41 +673,35 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, torch.SymBool):
+        elif isinstance(value, torch.SymInt):
             val = value.node.require_hint()
 
-            # Create a SymInt in dynamo's shape_env.
-            # The idea is to track the SymBool as if it was a SymInt in dymao
-            # so we could re-use the infra we have for SymInt.
-            new_sym = self.tx.output.shape_env.create_symbol(
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
                 val,
-                source=self.source,
-            )
-            new_symint = self.tx.output.shape_env.create_symintnode(
-                new_sym, hint=val, source=self.source
+                self.source,
+                dynamic_dim=DimDynamic.DYNAMIC,
             )
 
-            # Convert the fake SymInt back to SymBool
-            new_symbool = new_symint == 1
+            new_symint = new_symint == 1
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(new_symbool),
+                type(new_symint),
                 source=self.source,
             )
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
                 self.source,
-                new_symbool,
+                new_symint,
                 False,
                 None,
                 is_tensor=False,
-                example_strong_ref=new_symbool,
+                example_strong_ref=new_symint,
             )
             self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symbool, self.source, None)
+                TrackedFake(new_symint, self.source, None)
             )
             return SymNodeVariable(
                 sym_node_proxy,
-                new_symbool,
+                new_symint,
                 source=self.source,
             )
         else:
@@ -1284,10 +1278,23 @@ def wrap_fx_proxy_cls(
 
     initial_example_value = example_value
 
+    def _is_functional_tensor_fakified_by_dynamo(x):
+        if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+            reapply_views = torch._C._functionalization_reapply_views_tls()
+            unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+            return (
+                isinstance(unwrapped, FakeTensor)
+                and unwrapped.fake_mode == tx.fake_mode
+            )
+        return False
+
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not (
+                isinstance(value, FakeTensor)
+                or _is_functional_tensor_fakified_by_dynamo(value)
+            ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -1301,7 +1308,7 @@ def wrap_fx_proxy_cls(
         elif (
             isinstance(example_value, FakeTensor)
             and example_value.fake_mode is tx.fake_mode
-        ):
+        ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
         elif isinstance(example_value, torch.Tensor):

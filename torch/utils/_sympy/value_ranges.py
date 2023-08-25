@@ -6,7 +6,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -190,7 +190,7 @@ class SymPyValueRangeAnalysis:
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
-        if math.isnan(value):
+        if isinstance(value, SupportsFloat) and math.isnan(value):
             return ValueRanges.unknown()
 
         if is_python:
@@ -308,6 +308,22 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
+
+    @staticmethod
+    def expr_cond_pair(a, b):
+        # This handles a pair (expr, cond), where expr is a SymPy expression,
+        # cond is a boolean expression. The value range of it is just a's range
+        a = ValueRanges.wrap(a)
+        return ValueRanges(a.lower, a.upper)
+
+    @staticmethod
+    def piecewise(*ranges):
+        # Given a list of ranges, where each range represents an independent range possibility.
+        # The output should therefore be unioning all the ranges.
+        init = ranges[0]
+        for r in ranges[1:]:
+            init = init | r
+        return init
 
     @staticmethod
     def mod(x, y):

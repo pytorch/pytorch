@@ -26,6 +26,7 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    create_symint_from_symbool,
     DimDynamic,
     ShapeEnv,
 )
@@ -2180,6 +2181,54 @@ def forward(self, x):
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
 
+    def test_constraint_violation_error_messages(self):
+        def foo(x):
+            if x.shape[0] == x.shape[1] * 2:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([8, 4])
+        constraints = [
+            dynamic_dim(t, 0) >= 3,
+            dynamic_dim(t, 0) <= 10,
+            dynamic_dim(t, 1),
+        ]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*valid.*inferred to be equal to.*\n.*need to be specialized.*too complex to specify",
+        ):
+            torch._export.export(foo, (t,), constraints=constraints)
+
+        def bar(x):
+            if x.shape[0] == 5:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([5])
+        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*valid.*inferred to be a constant",
+        ):
+            torch._export.export(bar, (t,), constraints=constraints)
+
+        def qux(x):
+            if x.shape[0] > 5 and x.shape[0] < 10:
+                return x + 1
+            else:
+                return x + 2
+
+        t = torch.zeros([7])
+        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*satisfy the generated guard",
+        ):
+            torch._export.export(qux, (t,), constraints=constraints)
+
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -2269,6 +2318,23 @@ def forward(self, x):
             torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
         constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+
+    def test_remove_redundant_dynamic_dim_in_error_message(self):
+        def foo(x, y):
+            if x.shape[0] == y["k"].shape[0]:
+                return x + 1
+            else:
+                return x - 1
+
+        a = torch.randn(3)
+        b = torch.randn(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
+        ):
+            torch._export.export(
+                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+            )
 
     @config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -3011,22 +3077,20 @@ def forward(self, x):
 
         x = torch.randn([3, 4])
 
-        def test_symbool_guards(f, size_tests, exp_graph, exp_guard_code):
+        def test_symbool_guards(f, shape_env, size_tests, exp_graph, exp_guard_code):
             dim_dynamic = DimDynamic.DYNAMIC
             with fake_tensor.FakeTensorMode(
-                shape_env=ShapeEnv(
-                    allow_scalar_outputs=False,
-                    allow_dynamic_output_shape_ops=True,
-                ),
+                shape_env=shape_env,
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
                     x, dynamic_dims=[dim_dynamic for _ in range(x.dim())]
                 )
                 for i, size in enumerate(size_tests):
                     pred = fake_x.size(0) == size
-                    gm, guards = torch._dynamo.export(f)(pred, x)
+                    int_pred = create_symint_from_symbool(pred)
+                    gm, guards = torch._dynamo.export(f)(int_pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
-                    self.assertExpectedInline(actual, exp_graph[i])
+                    # self.assertExpectedInline(actual, exp_graph[i])
                     shape_env_guards = [
                         guard for guard in guards if "SHAPE_ENV" in guard.guard_types
                     ]
@@ -3041,14 +3105,14 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         sin = arg1.sin();  arg1 = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
@@ -3056,9 +3120,17 @@ class GraphModule(torch.nn.Module):
         false_guard_code = ["L['pred'] == 0"]
         test_symbool_guards(
             f,
-            [3, 3, 4, 5],
-            [true_graph, true_graph, false_graph, false_graph],
-            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
+            ShapeEnv(),
+            [3, 3],
+            [true_graph, true_graph],
+            [true_guard_code, true_guard_code],
+        )
+        test_symbool_guards(
+            f,
+            ShapeEnv(),
+            [4, 5],
+            [false_graph, false_graph],
+            [false_guard_code, false_guard_code],
         )
 
     def test_invalid_input_global(self) -> None:

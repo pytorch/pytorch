@@ -544,6 +544,36 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
+class LargeProtobufExportOutputSerializer:
+    """Serializes ONNX graph as Protobuf.
+
+    Fallback to serializing as Protobuf with external data for models larger than 2GB.
+    """
+
+    _destination_path: Final[str]
+
+    def __init__(self, destination_path: str):
+        self._destination_path = destination_path
+
+    @_beartype.beartype
+    def serialize(
+        self, export_output: ExportOutput, destination: io.BufferedIOBase
+    ) -> None:
+        """`destination` is ignored. The model is saved to `self._destination_path` instead."""
+        import onnx
+
+        try:
+            onnx.save_model(export_output.model_proto, self._destination_path)  # type: ignore[attr-defined]
+        except ValueError:
+            # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
+            # Fallback to serializing the model with external data.
+            onnx.save_model(  # type: ignore[attr-defined]
+                export_output.model_proto,
+                self._destination_path,
+                save_as_external_data=True,
+            )
+
+
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
@@ -724,7 +754,10 @@ class ExportOutput:
         """
 
         if serializer is None:
-            serializer = ProtobufExportOutputSerializer()
+            if isinstance(destination, str):
+                serializer = LargeProtobufExportOutputSerializer(destination)
+            else:
+                serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
         _model_state_dict_files: List[Union[str, io.BytesIO]] = []
@@ -779,7 +812,13 @@ class ExportOutput:
                 with open(destination, "wb") as f:
                     serializer.serialize(self, f)
             else:
-                serializer.serialize(self, destination)
+                try:
+                    serializer.serialize(self, destination)
+                except ValueError:
+                    raise ValueError(
+                        "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
+                        "External tensor data will be saved alongside the model on disk."
+                    )
 
     @_beartype.beartype
     def save_diagnostics(self, destination: str) -> None:
@@ -878,7 +917,14 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        self._assert_fake_tensor_mode()
+        # TODO:Retire FXSymbolicTracer
+        # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
+        from torch.onnx._internal.fx import fx_symbolic_graph_extractor
+
+        if not isinstance(
+            self.options.fx_tracer, fx_symbolic_graph_extractor.FXSymbolicTracer
+        ):
+            self._assert_fake_tensor_mode()
 
     def export(self) -> ExportOutput:
         with self.options.diagnostic_context:
@@ -938,7 +984,7 @@ class Exporter:
         if (
             has_any_fake_tensor or has_any_fake_param_or_buffer
         ) and not self.options.fake_context:
-            return RuntimeError(
+            raise RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         has_any_non_fake_tensors = pytree.tree_any(

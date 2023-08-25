@@ -195,13 +195,17 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
-        self.assertTrue(isinstance(x.size()[1], int))  # due to guard above
+        # Should be simplifiable to an integer.
+        # Ref: https://github.com/pytorch/pytorch/pull/107492
+        self.assertTrue(isinstance(x.size()[1], SymInt))
+        self.assertTrue(isinstance(x.size()[1].node.maybe_as_int(), int))  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
-        self.assertTrue(isinstance(x.size(2), int))
+        self.assertTrue(isinstance(x.size(2), SymInt))
+        self.assertTrue(isinstance(x.size(2).node.maybe_as_int(), int))
 
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
@@ -1825,6 +1829,7 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
+        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(dim_constraints._static_results, {
             "L['c'].size()[0] == 8",
             "L['d'].size()[0] == 8",
@@ -1839,7 +1844,6 @@ class TestDimConstraints(TestCase):
         })
         self.assertEqual(dim_constraints._dynamic_results, {
             "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-            "2 <= dynamic_dim(L['c'], 1)",
             "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
         })
 
@@ -1873,9 +1877,6 @@ def specializations(a, b, c, d, e, f):
         expected_dynamic = '''
 def specify_constraints(a, b, c, d, e, f):
     return [
-        # c:
-        dynamic_dim(c, 1),
-
         # d:
         dynamic_dim(d, 1) == dynamic_dim(c, 1),
 
