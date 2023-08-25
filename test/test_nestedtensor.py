@@ -879,6 +879,20 @@ class TestNestedTensorDeviceType(TestCase):
             "NestedTensor must be contiguous to get buffer.",
             lambda: func(nt_noncontiguous))
 
+    @parametrize("func", [subtest(torch.ge, name='ge'),
+                          subtest(torch.eq, name='eq')])
+    def test_binary_ops_with_scalar(self, device, func):
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair(
+            (2, 3, 6, 7), device=device, dtype=torch.float32)
+        scalar = 0.0
+
+        # should work regardless of contiguity
+        for nt in (nt_contiguous, nt_noncontiguous):
+            nested_result = func(nt, scalar)
+            self.assertTrue(nested_result.is_nested)
+            for t, t_res in zip(nt.unbind(), nested_result.unbind()):
+                self.assertEqual(func(t, scalar), t_res)
+
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
         # Transformer use case

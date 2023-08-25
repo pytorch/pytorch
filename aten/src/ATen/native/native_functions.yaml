@@ -8507,6 +8507,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: eq_scalar_nested
   tags: [core, pointwise]
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8543,6 +8544,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ge_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: ge_scalar_nested
   tags: [core, pointwise]
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
