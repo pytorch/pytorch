@@ -5301,7 +5301,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
-  tags: core
 
 - func: split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
