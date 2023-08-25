@@ -169,7 +169,7 @@ static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
 // Points to the extra scratch space on the code object
-static size_t extra_index = -1;
+static Py_ssize_t extra_index = -1;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -673,7 +673,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
-      PyObject *type, *value, *traceback;
+      PyObject *type = NULL, *value = NULL, *traceback = NULL;
       PyErr_Fetch(&type, &value, &traceback);
       PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
       if (r == NULL) {
@@ -714,23 +714,12 @@ inline static PyObject* eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     int throw_flag) {
-  Py_ssize_t ncells = 0;
-  Py_ssize_t nfrees = 0;
-  Py_ssize_t nlocals_new = code->co_nlocals;
-  Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
-
-  ncells = PyCode_GetNCellvars(code);
-  nfrees = PyCode_GetNFreevars(code);
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
-  DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   #if IS_PYTHON_3_11_PLUS
-
-  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
-  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
@@ -804,6 +793,12 @@ inline static PyObject* eval_custom_code(
   Py_DECREF(name_to_idx);
 
   #else
+  Py_ssize_t nlocals_new = code->co_nlocals;
+  Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
+  DEBUG_CHECK(nlocals_new >= nlocals_old);
+
+  auto ncells = PyCode_GetNCellvars(code);
+  auto nfrees = PyCode_GetNFreevars(code);
 
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
