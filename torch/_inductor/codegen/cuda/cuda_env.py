@@ -14,7 +14,7 @@ def get_cuda_arch() -> str:
             # Get Compute Capability of the first Visible device
             major, minor = torch.cuda.get_device_capability(0)
             cuda_arch = major * 10 + minor
-        return cuda_arch
+        return str(cuda_arch)
     except Exception as e:
         logging.error(f"Error getting cuda arch: {e=}")
         return None
