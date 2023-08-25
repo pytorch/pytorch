@@ -14,6 +14,8 @@ from enum import auto, Enum
 from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch
+
+import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
@@ -154,6 +156,11 @@ class CachingAutotuner(KernelInterface):
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
 
+        # pre-create the profiler context manager to reduce latency
+        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
+            self.meta.get("kernel_name", "triton kernel")
+        )
+
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
             if self.launchers:
@@ -174,6 +181,9 @@ class CachingAutotuner(KernelInterface):
         compile_meta["debug"] = (
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
+
+        # Setting device_type="hip" required on ROCm to pass down to triton
+        compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
             triton.compile(
@@ -399,11 +409,25 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
-        return launcher(
-            *args,
-            grid=grid,
-            stream=stream,
-        )
+
+        # guard the record_function_ctx and only call it if profiling is currently
+        # in progress, to reduce latency when profiler is not turned on. Note that
+        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        # it is faster than entering and exiting a context manager, even if the context
+        # manager is a nullcontext.
+        if autograd_profiler._is_profiler_enabled:
+            with self.record_function_ctx:
+                return launcher(
+                    *args,
+                    grid=grid,
+                    stream=stream,
+                )
+        else:
+            return launcher(
+                *args,
+                grid=grid,
+                stream=stream,
+            )
 
 
 def _find_names(obj):
@@ -651,10 +675,6 @@ def triton_config(
     override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
-
-    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
-    size_hints = list(reversed(size_hints))
-
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -988,17 +1008,8 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(*numels):
+def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1:
-        xnumel, ynumel, znumel = numels[0], None, None
-    elif len(numels) == 2:
-        xnumel, ynumel, znumel = numels[1], numels[0], None
-    elif len(numels) == 3:
-        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
-    else:
-        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:
