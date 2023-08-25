@@ -25,7 +25,8 @@ bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   return false;
 }
 
-void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
+void TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
+    std::shared_ptr<SafePyObject> mode) {
   if (!any_modes_set()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
@@ -40,10 +41,12 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
     out = torchDispatchModeState.stack_.back();
     torchDispatchModeState.stack_.pop_back();
   } else {
-    for (const auto i : c10::irange(
-             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+    for (int64_t i =
+             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
+         i >= 0;
+         --i) {
       if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
-        out = torchDispatchModeState.infra_modes_[i].value();
+        out = std::move(torchDispatchModeState.infra_modes_[i].value());
         torchDispatchModeState.infra_modes_[i] = c10::nullopt;
         break;
       }
@@ -59,8 +62,9 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
 }
 const std::tuple<std::shared_ptr<SafePyObject>, TorchDispatchModeKey>
 TorchDispatchModeTLS::pop_highest_infra_mode() {
-  for (const auto i :
-       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
+  for (int64_t i = static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
+       i >= 0;
+       --i) {
     if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
       auto out_mode = torchDispatchModeState.infra_modes_[i].value();
       torchDispatchModeState.infra_modes_[i] = c10::nullopt;
@@ -88,9 +92,8 @@ const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
   // idx == 0 means the "bottom" of the stack, which starts with any infra
   // modes (iterating from lowest-priority to highest-priority).
   auto curr_idx = idx;
-  for (int64_t i = static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
-       i >= 0;
-       --i) {
+  for (const auto i :
+       c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
     if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
       if (curr_idx == 0) {
         return torchDispatchModeState.infra_modes_[i].value();

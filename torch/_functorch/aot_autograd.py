@@ -159,14 +159,14 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_seq_nr(seq_nr, bwd=True)
+            fx_traceback.set_grad_fn_seq_nr(seq_nr)
 
         return prehook
 
     def get_posthook(special_stack_, seq_nr):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
-            fx_traceback.set_seq_nr(-1, bwd=True)
+            fx_traceback.reset_grad_fn_seq_nr()
 
         return posthook
 
@@ -676,7 +676,9 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
 
 def to_fun(t):
     if isinstance(t, Tensor):
-        return torch._to_functional_tensor(t, mirror_autograd_meta=True)
+        out = torch._to_functional_tensor(t)
+        torch._mirror_autograd_meta(t, out)
+        return out
     else:
         return t
 
@@ -727,7 +729,8 @@ def run_functionalized_fw_and_collect_metadata(
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            r = torch._to_functional_tensor(t)
+            torch._mirror_autograd_meta(t, r)
             memo[t] = r
             return r
         else:
