@@ -948,11 +948,11 @@ class TestExport(TestCase):
         tensor_inp = torch.ones(7, 5)
         exported = torch._export.export(f, (tensor_inp, 5), constraints=[dynamic_dim(tensor_inp, 0) > 5])
         self.assertTrue(torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5)))
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch._export.export(f, (tensor_inp, 5.0), constraints=[dynamic_dim(tensor_inp, 0) > 5])
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized at 5.0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"):
             _ = exported(torch.ones(7, 5), 6.0)
 
     def test_runtime_assert_for_prm_str(self):
@@ -962,8 +962,9 @@ class TestExport(TestCase):
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized at trunc"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
+        self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
 
 if __name__ == '__main__':

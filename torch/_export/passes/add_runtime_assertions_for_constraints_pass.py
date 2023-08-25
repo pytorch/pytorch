@@ -178,7 +178,7 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
             if (
                 "val" not in node.meta or node.meta["val"] is None
             ):
-              continue
+                continue
 
             if not isinstance(node.meta["val"], FakeTensor):
                 # it has to be a prim value
@@ -230,7 +230,10 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
             _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
 
     def _insert_prim_assert_inplace(self, graph, node: torch.fx.Node, value: Any):
-        assert_msg = f"Input {node.name} is specialized at {value}"
+        assert_msg = (
+            f"Input {node.name} is specialized to be {value} at tracing time,"
+            f"it is not supported to pass in a different value at run time."
+        )
         with graph.inserting_after(node):
             eq_node = graph.call_function(operator.eq, (node, value))
         with graph.inserting_after(eq_node):
