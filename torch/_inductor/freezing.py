@@ -3,16 +3,16 @@ import itertools
 import logging
 
 import weakref
-from typing import Callable, List, Dict, Counter, Optional, Tuple, Any
+from typing import Any, Callable, Counter, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
-
-from torch.fx import Node
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
+
+from torch.fx import Node
 
 from . import config
 
