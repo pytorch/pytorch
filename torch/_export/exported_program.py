@@ -585,6 +585,7 @@ class ExportedProgram:
 
     def _check_input_constraints(self, *args):
         # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        # TODO(tmanlaibaatar) Enforce this at retracing time.
         _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
         for p in self.graph.nodes:
             if p.op != "placeholder":

@@ -940,6 +940,31 @@ class TestExport(TestCase):
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
 
+    def test_runtime_assert_for_prim(self):
+
+        def f(x, y):
+            return x + y
+
+        tensor_inp = torch.ones(7, 5)
+        exported = torch._export.export(f, (tensor_inp, 5), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        self.assertTrue(torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5)))
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized at 5"):
+            _ = exported(torch.ones(8, 5), 6)
+
+        exported = torch._export.export(f, (tensor_inp, 5.0), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized at 5.0"):
+            _ = exported(torch.ones(7, 5), 6.0)
+
+    def test_runtime_assert_for_prm_str(self):
+
+        def g(a, b, mode):
+            return torch.div(a, b, rounding_mode=mode)
+
+        inps = (torch.randn(4, 4), torch.randn(4), "trunc")
+        exported = torch._export.export(g, inps)
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized at trunc"):
+            _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
+
 
 if __name__ == '__main__':
     run_tests()
