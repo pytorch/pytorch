@@ -290,8 +290,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         # one for output for the add
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                     }
@@ -344,8 +344,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         # one for output for the relu
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                     }
