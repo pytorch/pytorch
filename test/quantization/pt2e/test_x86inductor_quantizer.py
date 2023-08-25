@@ -419,7 +419,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_linear_with_quantizer_api(self):
+    def test_linear(self):
         """
         Test pattern of single linear with X86InductorQuantizer.
         """
@@ -453,7 +453,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_linear_unary_with_quantizer_api(self):
+    def test_linear_unary(self):
         """
         Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
         """
