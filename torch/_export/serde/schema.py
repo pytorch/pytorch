@@ -1,7 +1,7 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
@@ -140,7 +140,7 @@ class GraphArgument:
 
 @dataclass
 class CustomObjArgument:
-    blob: str
+    blob: bytes
 
 
 # This is actually a union type
@@ -198,6 +198,7 @@ class Graph:
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
     is_single_tensor_return: bool = False
+    constants: Dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -250,7 +251,6 @@ class GraphModule:
     # TODO(zhxchen17) Merge call_spec into call graph.
     call_spec: CallSpec
     module_call_graph: List[ModuleCallEntry]
-    constants: str
 
 
 @dataclass
