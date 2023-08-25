@@ -18,6 +18,7 @@ from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .lists import ListVariable, TupleVariable
+from .nn_module import NNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def validate_args_and_maybe_create_graph_inputs(
                 new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
+                    tx=tx, proxy=new_proxy, example_value=example_value, source=a.source
                 )
             else:
                 new_arg = a
@@ -328,10 +329,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         tx.output.guards.update(args[0].guards)
 
         # operands
-        if type(args[3]) is not ListVariable:
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Expected a list but got {args[3].python_type()}",
+                f"Expected a list/tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
@@ -351,13 +352,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         assert isinstance(
-            args[1], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[1],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
-            args[2], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[2],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[2])
         )  # false_fn

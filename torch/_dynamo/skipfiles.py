@@ -162,6 +162,8 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_functorch/deprecated.py",
 }
 
+FILENAME_ALLOWLIST |= {_module_dir(torch) + "_higher_order_ops/cond.py"}
+
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
     _module_dir(torch) + "distributed/tensor/parallel/style.py",

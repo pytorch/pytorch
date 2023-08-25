@@ -1038,12 +1038,17 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
 
+        ref = torch.tensor(72.0)
         actual = mod_for_compile(torch.ones(6, 4))
-        ref = mod_for_eager(torch.ones(6, 4))
-        self.assertEqual(actual, ref)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Can't inplace modify module params/buffers inside HigherOrderOp",
+        ):
+            mod_for_eager(torch.ones(6, 4))
 
         actual = mod_for_compile(torch.ones(3, 4))
-        ref = mod_for_eager(torch.ones(3, 4))
+        ref = torch.tensor(0.0)
         self.assertEqual(actual, ref)
 
         self.assertExpectedInline(
@@ -1131,12 +1136,18 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             Foo(), backend=cnt, dynamic=True, fullgraph=False
         )
         mod_for_eager = Foo()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Mutating a variable not in the current scope",
+        ):
+            mod_for_eager(torch.tensor(True), torch.tensor(5))
 
+        ref = torch.tensor(10)
         res = mod_for_compile(torch.tensor(True), torch.tensor(5))
         res = mod_for_compile(torch.tensor(True), torch.tensor(5))
 
         self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
+        self.assertEqual(res, ref)
 
     def test_cond_with_constant_pred(self):
         def test(pred, x):
@@ -2906,7 +2917,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
