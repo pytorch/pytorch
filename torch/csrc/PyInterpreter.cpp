@@ -589,7 +589,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
     ptr[idx] = py::cast<int64_t>(*it);
   }
   set_tensor_attr_with_capsule(
-      const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
+      const_cast<c10::TensorImpl*>(self), capsule, "_strides_capsule");
   return c10::IntArrayRef(ptr, len);
 }
 
