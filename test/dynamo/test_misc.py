@@ -2186,6 +2186,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_torch_size_numel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn():
+            return torch.Size([10, 8]).numel()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        num = torch.Size([10, 8]).numel()
+        self.assertEqual(opt_fn(), num)
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
