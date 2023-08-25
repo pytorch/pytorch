@@ -46,7 +46,8 @@ def efficient_conv_bn_eval_forward(
         bias_on_the_fly - bn.running_mean
     )
 
-    bias_on_the_fly = bias_on_the_fly.to(dtype=weight_on_the_fly.dtype)
+    bias_on_the_fly = bias_on_the_fly.to(dtype=x.dtype)
+    weight_on_the_fly = weight_on_the_fly.to(dtype=x.dtype)
     return conv._conv_forward(x, weight_on_the_fly, bias_on_the_fly)
 
 
