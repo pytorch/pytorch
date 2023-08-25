@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <torch/csrc/onnx/back_compat.h>
 #include <torch/version.h>
 #include <atomic>
 
@@ -432,9 +433,9 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
     case at::kFloat8_e4m3fn:
-      return onnx::TensorProto_DataType_FLOAT8E4M3FN;
+      return onnx_torch::TensorProto_DataType_FLOAT8E4M3FN;
     case at::kFloat8_e5m2:
-      return onnx::TensorProto_DataType_FLOAT8E5M2;
+      return onnx_torch::TensorProto_DataType_FLOAT8E5M2;
     default:
       TORCH_CHECK(
           false,
