@@ -477,7 +477,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                self.value,
+                torch.ops.higher_order.cond,
                 args=tuple(p_args),
                 kwargs=p_kwargs,
             ),

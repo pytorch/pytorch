@@ -2872,8 +2872,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.ArgsMismatchError,
-            "missing a required argument\\: 'args'",
+            torch._dynamo.exc.UserError,
+            "Expected 4 arguments but got 3",
         ):
             torch._dynamo.export(f, aten_graph=True)(*example_inputs)
 

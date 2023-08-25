@@ -388,10 +388,10 @@ LoweringException: AssertionError:
             msg = record.getMessage()
             if "return x * 2" in msg:
                 found_x2 = True
-                self.assertIn("inline depth: 3", msg)
+                self.assertIn("inline depth: 2", msg)
             if "return x * 3" in msg:
                 found_x3 = True
-                self.assertIn("inline depth: 3", msg)
+                self.assertIn("inline depth: 2", msg)
 
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)

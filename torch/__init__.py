@@ -1725,16 +1725,16 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
-def cond(pred, true_fn, false_fn, args):
+def cond(pred, true_branch, false_branch, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
     if torch._dynamo.is_compiling():
-        return torch.ops.higher_order.cond(pred, true_fn, false_fn, args)
+        return torch.ops.higher_order.cond(pred, true_branch, false_branch, operands)
 
     with torch._higher_order_ops.cond._set_compilation_env():
         return torch.compile(torch.ops.higher_order.cond, backend="eager", fullgraph=True)(
-            pred, true_fn, false_fn, args
+            pred, true_branch, false_branch, operands
         )
 
 def _register_device_module(device_type, module):
