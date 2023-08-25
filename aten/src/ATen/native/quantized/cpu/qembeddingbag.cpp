@@ -957,6 +957,45 @@ Tensor embedding_bag_2bit_rowwise_offsets(
   return output;
 }
 
+Tensor embedding_bag_byte_rowwise_offsets_meta(
+    const Tensor& weight,
+    const Tensor& indices,
+    const c10::optional<Tensor>& offsets_in,
+    const bool /* scale_grad_by_freq */,
+    const int64_t /* mode */,
+    bool /* pruned_weights */,
+    const c10::optional<Tensor>& /* per_sample_weights_ */,
+    const c10::optional<Tensor>& /* compressed_indices_mapping */,
+    bool include_last_offset) {
+  TORCH_CHECK(
+      indices.dim() == 1 || indices.dim() == 2,
+      "quantized::embedding_bag_byte_rowwise_offsets_meta operator supports 1 or 2d indices, got ",
+      indices.dim());
+
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "Currently quantized::embedding_bag_byte_rowwise_offsets_meta only supports having offsets.");
+  c10::MaybeOwned<at::Tensor> offsets =
+      c10::MaybeOwned<at::Tensor>::borrowed(offsets_in.value());
+
+  TORCH_CHECK(
+      indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
+      "Expect 32 or 64 bit indices, but found ",
+      indices.scalar_type(),
+      " instead.");
+  TORCH_CHECK(
+      offsets->scalar_type() == at::kInt || offsets->scalar_type() == at::kLong,
+      "Expect 32 or 64 bit offsets, but found ",
+      offsets->scalar_type(),
+      " instead.");
+
+  const auto D = weight.sym_size(1) - 8; // NB: -8 to account for scale and bias
+  const auto M = offsets->sym_size(0);
+  const auto output_size = include_last_offset ? M - 1 : M;
+
+  return at::empty_symint({output_size, D}, weight.options().dtype(at::kFloat));
+}
+
 template <int bit_rate>
 class QEmbeddingBag final {
  public:
@@ -1060,6 +1099,13 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_2bit_rowwise_offsets"),
       embedding_bag_2bit_rowwise_offsets);
 }
+
+TORCH_LIBRARY_IMPL(quantized, Meta, m) {
+  m.impl(
+      "quantized::embedding_bag_byte_rowwise_offsets",
+      embedding_bag_byte_rowwise_offsets_meta);
+}
+
 } // namespace
 } // namespace native
 } // namespace at
