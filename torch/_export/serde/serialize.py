@@ -789,9 +789,6 @@ class ExportedProgramSerializer:
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
-        serialized_original_arguments = base64.b64encode(
-            serialize_torch_artifact(exported_program.original_traced_arguments)
-        ).decode('utf-8')
 
         return (
             ExportedProgram(
@@ -800,7 +797,7 @@ class ExportedProgramSerializer:
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
-                original_traced_arguments=serialized_original_arguments,
+                example_inputs=None,
             ),
             serialize_torch_artifact(exported_program.state_dict),
         )
@@ -1311,9 +1308,6 @@ class ExportedProgramDeserializer:
 
         state_dict = deserialize_torch_artifact(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
-        original_traced_arguments = deserialize_torch_artifact(
-            base64.b64decode(serialized_exported_program.original_traced_arguments)
-        )
 
         exported_program = ep.ExportedProgram(
             graph_module,
@@ -1324,7 +1318,7 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
             module_call_graph,
-            original_traced_arguments,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
         )
         return upgrader.upgrade(exported_program)
 

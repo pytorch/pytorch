@@ -207,13 +207,6 @@ class TestDeserialize(TestCase):
             else:
                 self.assertEqual(orig, loaded)
 
-        self.assertEqual(len(ep.original_traced_arguments), len(deserialized_ep.original_traced_arguments))
-        for arg1, arg2 in zip(ep.original_traced_arguments, deserialized_ep.original_traced_arguments):
-            if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
-                self.assertTrue(torch.allclose(arg1, arg2))
-            else:
-                self.assertEqual(type(arg1), type(arg2))
-
         def _check_graph_nodes(gm1, gm2, _check_meta=True):
             # TODO: The _check_meta flag bypasses checking for
             # source_fn/nn_module_stack as there is an issue with
