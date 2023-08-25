@@ -1725,6 +1725,17 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
+def cond(pred, true_fn, false_fn, args):
+    if not torch._dynamo.is_dynamo_supported():
+        raise RuntimeError("torch.cond requires dynamo support.")
+
+    if torch._dynamo.is_compiling():
+        return torch.ops.higher_order.cond(pred, true_fn, false_fn, args)
+
+    with torch._higher_order_ops.cond._set_compilation_env():
+        return torch.compile(torch.ops.higher_order.cond, backend="eager", fullgraph=True)(
+            pred, true_fn, false_fn, args
+        )
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

@@ -240,6 +240,10 @@ class TorchVariable(VariableTracker):
                 source=self.source,
             ).call_function(tx, args, kwargs)
             return op
+        elif self.value is torch.cond:
+            return TorchHigherOrderOperatorVariable.make(
+                self.value, source=self.source
+            ).call_function(tx, args, kwargs)
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold

@@ -59,22 +59,6 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
-def cond_compiled(pred, true_fn, false_fn, args):
-    if torch._dynamo.is_compiling():
-        return cond(pred, true_fn, false_fn, args)
-
-    if not torch._dynamo.is_dynamo_supported():
-        raise RuntimeError("torch.cond can only work when dynamo is supported.")
-
-    def cond_wrapper(pred, true_fn, false_fn, args):
-        return cond(pred, true_fn, false_fn, args)
-
-    with _set_compilation_env():
-        return torch.compile(cond_wrapper, backend="eager", fullgraph=True)(
-            pred, true_fn, false_fn, args
-        )
-
-
 """
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
