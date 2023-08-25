@@ -584,8 +584,7 @@ test_libtorch() {
       test_libtorch_api
     fi
 
-    # still disable rocm
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* && (-z "${SHARD}" || "${SHARD}" == "2") ]]; then
+    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
       test_libtorch_jit
     fi
 
