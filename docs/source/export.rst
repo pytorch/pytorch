@@ -8,6 +8,10 @@ torch.export
 
 .. automodule:: torch.export
 .. autofunction:: export
+.. autofunction:: dynamic_dim
+.. autofunction:: constrain_as_size
+.. autofunction:: constrain_as_value
+.. autoclass:: Constraint
 
 .. toctree::
    :glob:
