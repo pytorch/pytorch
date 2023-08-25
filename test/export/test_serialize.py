@@ -27,11 +27,15 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
     TemporaryFileName,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    find_library_location,
 )
 
 
 def get_filtered_export_db_tests():
-    unsupported_tags = {"torch.cond", "torch.map"}
     unsupported_test_names = {
         "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
         "dictionary",  # Graph output must be a tuple()
@@ -44,7 +48,6 @@ def get_filtered_export_db_tests():
         for name, case in all_examples().items()
         if (
             case.support_level == SupportLevel.SUPPORTED and
-            not (unsupported_tags & case.tags) and
             name not in unsupported_test_names
         )
     ]
@@ -180,7 +183,7 @@ class TestSerialize(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
-    def check_graph(self, fn, inputs, constraints=None) -> None:
+    def check_graph(self, fn, inputs, constraints=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
@@ -204,7 +207,13 @@ class TestDeserialize(TestCase):
             else:
                 self.assertEqual(orig, loaded)
 
-        def _check_graph_nodes(gm1, gm2):
+        def _check_graph_nodes(gm1, gm2, _check_meta=True):
+            # TODO: The _check_meta flag bypasses checking for
+            # source_fn/nn_module_stack as there is an issue with
+            # roundtripping the source_fn value on torch.ops.map nodes
+            # original source_fn: <functorch.experimental._map.MapWrapper object at 0x7f80a0549930>
+            # deserialized source_fn: 'functorch.experimental._map.map'
+
             self.assertEqual(len(gm1.graph.nodes), len(gm2.graph.nodes))
 
             for node1, node2 in zip(gm1.graph.nodes, gm2.graph.nodes):
@@ -249,8 +258,15 @@ class TestDeserialize(TestCase):
                         false_graph1 = getattr(gm1, node1.args[2].target)
                         false_graph2 = getattr(gm2, node2.args[2].target)
                         _check_graph_nodes(false_graph1, false_graph2)
+                    elif node1.target == torch.ops.map_impl:
+                        map_graph1 = getattr(gm1, node1.args[0].target)
+                        map_graph2 = getattr(gm2, node2.args[0].target)
+                        _check_graph_nodes(map_graph1, map_graph2, False)
 
-                if node1.op not in ("get_attr", "placeholder", "output"):
+                if (
+                    _check_meta and
+                    node1.op not in ("get_attr", "placeholder", "output")
+                ):
                     # Check "nn_module_stack" metadata
                     self.assertEqual(
                         node1.meta.get("nn_module_stack", None),
@@ -262,7 +278,7 @@ class TestDeserialize(TestCase):
                         node2.meta.get("source_fn", None),
                     )
 
-        _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module)
+        _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module, _check_meta)
 
     def test_multi_return(self) -> None:
         """
@@ -375,6 +391,18 @@ class TestDeserialize(TestCase):
 
         self.check_graph(M(), inputs)
 
+    def test_map(self):
+        from functorch.experimental import control_flow
+
+        def f(x, y):
+            return x + y
+
+        def g(xs, y):
+            return control_flow.map(f, xs, y)
+
+        inputs = (torch.ones(3, 2, 2), torch.ones(2))
+        self.check_graph(g, inputs, _check_meta=False)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -383,7 +411,8 @@ class TestDeserialize(TestCase):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         inputs = normalize_inputs(case.example_inputs)
-        self.check_graph(model, inputs.args)
+        _check_meta = "map" not in name
+        self.check_graph(model, inputs.args, _check_meta=_check_meta)
 
     def test_constraints(self):
         def f(x, y):
@@ -440,6 +469,10 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_pytree_flatten
+)
+# getattr node in the graph from a torch.tensor call
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_cond_branch_nonlocal_variables
 )
 
 
@@ -528,6 +561,51 @@ class TestSaveLoad(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
                 loaded_ep = load(f)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSerializeCustomClass(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        if IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
+        torch.ops.load_library(str(lib_file_path))
+
+    def test_custom_class(self):
+        custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        def f(x):
+            return x + x
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                with ep.graph.inserting_before(node):
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_an_instance.default,
+                        (custom_obj,),
+                    )
+                    custom_node.meta["val"] = torch.ones(4, 4)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
+
+        serialized_vals = serialize(ep)
+        deserialized_ep = deserialize(*serialized_vals)
+
+        for node in deserialized_ep.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.target == torch.ops._TorchScriptTesting.take_an_instance.default
+            ):
+                arg = node.args[0]
+                self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
+                self.assertEqual(arg.top(), 7)
 
 
 if __name__ == '__main__':
