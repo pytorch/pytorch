@@ -250,6 +250,7 @@ class GraphModule:
     # TODO(zhxchen17) Merge call_spec into call graph.
     call_spec: CallSpec
     module_call_graph: List[ModuleCallEntry]
+    constants: str
 
 
 @dataclass
