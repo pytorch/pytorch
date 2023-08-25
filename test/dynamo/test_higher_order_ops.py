@@ -1614,7 +1614,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # support all transforms, so manually patch it to `True`` for
         # testing on release branch.
         with config.patch(capture_func_transforms=True):
-            super(type(self), self).run(result)
+            super().run(result)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
