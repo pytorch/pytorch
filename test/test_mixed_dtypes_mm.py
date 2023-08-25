@@ -9,8 +9,12 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 
+_IS_SM8X = False
+if torch.cuda.is_available():
+    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 class TestMixedDtypesMM(TestCase):
+    @unittest.skipIf(not _IS_SM8X, "mixed datatypes MM not supported on this library version")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     def test_fp16_int8_mm(self, device):
         def run_test(m, n, k, device):

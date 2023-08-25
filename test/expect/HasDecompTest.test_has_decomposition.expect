@@ -323,6 +323,7 @@ aten::_foreach_trunc_
 aten::_foreach_zero
 aten::_foreach_zero.out
 aten::_foreach_zero_
+aten::_fp16_uint8_mm
 aten::_functional_assert_async.msg
 aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size

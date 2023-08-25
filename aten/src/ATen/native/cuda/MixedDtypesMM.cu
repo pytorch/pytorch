@@ -32,6 +32,13 @@ Tensor
 _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
               const Tensor& bias) {
 #ifndef USE_ROCM
+    // For now, only CC 8.x devices are supported.
+    const auto dprops = at::cuda::getCurrentDeviceProperties();
+    const auto is_sm8x = dprops->major == 8;
+    TORCH_CHECK(is_sm8x,
+                "_fp16_uint8_mm: Supported only on GPUs with compute "
+                "capability 8.x");
+
   // Check arguments dimensions.
   TORCH_CHECK(self.dim() == 2,
               "_fp16_uint8_mm: Expected self argument to be 2D tensor, got ",
@@ -149,17 +156,17 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
   status = gemm_op.can_implement(arguments);
   CUTLASS_STATUS_CHECK(status);
 
-  // Allocate workspace for CUTLASS sparse GEMM kernel.
+  // Allocate workspace for CUTLASS mixed datatypes GEMM kernel.
   const auto workspace_size = Gemm::get_workspace_size(arguments);
   auto workspace = self.new_empty({(int64_t)workspace_size},
                                   at::TensorOptions().dtype(at::kByte));
 
-  // Initialize CUTLASS sparse GEMM object.
+  // Initialize CUTLASS mixed datatypes GEMM object.
   status = gemm_op.initialize(arguments, workspace.data_ptr(),
                               at::cuda::getCurrentCUDAStream());
   CUTLASS_STATUS_CHECK(status);
 
-  // Perform sparse GEMM operation.
+  // Perform mixed datatypes GEMM operation.
   status = gemm_op.run(at::cuda::getCurrentCUDAStream());
   CUTLASS_STATUS_CHECK(status);
 
