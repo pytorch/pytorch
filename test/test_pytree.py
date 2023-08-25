@@ -8,9 +8,10 @@ from torch.utils._pytree import (
     tree_unflatten,
     TreeSpec,
     LeafSpec,
-    pytree_to_str,
-    str_to_pytree,
+    treespec_dumps,
+    treespec_loads,
     _register_pytree_node,
+    _register_treespec_serializer,
 )
 import unittest
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
@@ -308,13 +309,13 @@ TreeSpec(TupleVariable, None, [*,
         ]),
     ],)
     def test_pytree_serialize(self, spec):
-        self.assertTrue(spec == str_to_pytree(pytree_to_str(spec)))
+        self.assertTrue(spec == treespec_loads(treespec_dumps(spec)))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
         spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
 
-        roundtrip_spec = str_to_pytree(pytree_to_str(spec))
+        roundtrip_spec = treespec_loads(treespec_dumps(spec))
         # The context in the namedtuple is different now because we recreated
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
@@ -329,12 +330,16 @@ TreeSpec(TupleVariable, None, [*,
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: Dummy(*xs),
-            "DummyType",
-            lambda spec: (None, "1"),
-            lambda context, version: None,
+        )
+        _register_treespec_serializer(
+            DummyType,
+            getstate=lambda context: "moo",
+            setstate=lambda dumpable_context: None,
         )
         spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
-        roundtrip_spec = str_to_pytree(pytree_to_str(spec))
+        serialized_spec = treespec_dumps(spec)
+        self.assertTrue("moo" in serialized_spec)
+        roundtrip_spec = treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
 
 

@@ -9,9 +9,7 @@ from torch._export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
-    DeserializeFn,
     FlattenFunc,
-    SerializeFn,
     UnflattenFunc,
 )
 
@@ -20,9 +18,6 @@ def register_dataclass_as_pytree_node(
     typ: Any,
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
-    serialized_type_name: Optional[str] = None,
-    serialize_fn: Optional[SerializeFn] = None,
-    deserialize_fn: Optional[DeserializeFn] = None,
     *,
     return_none_fields: bool = False,
 ) -> None:
@@ -50,14 +45,7 @@ def register_dataclass_as_pytree_node(
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
 
-    _register_pytree_node(
-        typ,
-        flatten_fn,
-        unflatten_fn,
-        serialized_type_name,
-        serialize_fn,
-        deserialize_fn,
-    )
+    _register_pytree_node(typ, flatten_fn, unflatten_fn)
 
 
 def is_param(program: ExportedProgram, node: torch.fx.Node) -> bool:

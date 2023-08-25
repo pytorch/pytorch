@@ -494,8 +494,6 @@ def _register_dynamo_dict_to_tree_spec():
         ConstDictVariable,
         _dictvariable_flatten,
         _dictvariable_unflatten,
-        pytree._dict_serialize,
-        pytree._dict_deserialize,
     )
 
     fx_pytree.register_pytree_flatten_spec(

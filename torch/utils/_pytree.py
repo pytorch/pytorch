@@ -3,6 +3,7 @@ import functools
 from collections import namedtuple, OrderedDict
 import dataclasses
 import json
+import warnings
 
 
 T = TypeVar('T')
@@ -27,22 +28,15 @@ This pytree implementation is not very performant due to Python overhead
 To improve the performance we can move parts of the implementation to C++.
 """
 
-"""
-TreeSpecSchema is the schema used to serialize the TreeSpec
-It contains the following fields:
-- type: A string name of the type. null for the case of a LeafSpec.
-- context: A string format of the context, optional.
-- children_spec: A list of children serialized specs.
-"""
+PROTOCOL_VERSION = 1
 
-@dataclasses.dataclass
-class TreeSpecSchema:
-    type: Optional[str]
-    context: Optional[str]
-    children_spec: List['TreeSpecSchema']
-    version: str
-
-PYTREE_VERSION = "1"
+Context = Any
+PyTree = Any
+FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
+UnflattenFunc = Callable[[List, Context], PyTree]
+DumpableContext = Any  # Any json dumpable text
+GetStateFn = Callable[[Context], DumpableContext]
+SetStateFn = Callable[[DumpableContext], Context]
 
 # A NodeDef holds two callables:
 # - flatten_fn should take the collection and return a flat list of values.
@@ -51,94 +45,52 @@ PYTREE_VERSION = "1"
 # - unflatten_fn should take a flat list of values and some context
 #   (returned by flatten_fn). It returns the collection by reconstructing
 #   it from the list and the context.
-# - serialize_fn takes a TreeSpec, and returns a serialized string format of the
-#   context, and the version number
-# - deserialize_fn takes in a string representation of the context, and the
-#   version, and returns the deserialized context
-Context = Any
-PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[List, Context], PyTree]
-SerializeFn = Callable[["TreeSpec"], Tuple[Optional[str], str]]
-DeserializeFn = Callable[[Optional[str], str], Optional[Tuple[Any, Context]]]
-
 class NodeDef(NamedTuple):
     type: Type[Any]
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
-    serialized_type_name: str
-    serialize_fn: SerializeFn
-    deserialize_fn: DeserializeFn
 
 SUPPORTED_NODES: Dict[Union[Type[Any], str], NodeDef] = {}
 
-def _default_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    try:
-        serialized_context = json.dumps(spec.context)
-    except Exception as e:
-        raise RuntimeError(
-            f"Unable to serialize spec {spec} as the context is not json "
-            "dump-able. Please implement and register your own "
-            "serializer/deserializer, or make your context json dump-able."
-        ) from e
+# SerializeNodeDef holds two callables:
+# - serialize_fn takes a TreeSpec, and returns a serialized string format of the
+#   context, and the version number
+# - deserialize_fn takes in a string representation of the context, and the
+#   version, and returns the deserialized context
+class SerializeNodeDef(NamedTuple):
+    typ: Type[Any]
+    serialized_type: str
+    getstate: Optional[GetStateFn]
+    setstate: Optional[SetStateFn]
 
-    return serialized_context, PYTREE_VERSION
+SUPPORTED_SERIALIZED_TYPES: Dict[Union[Type[Any], str], SerializeNodeDef] = {}
 
-def _default_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Tuple[Any, Context]]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-
-    try:
-        if context_str is None:
-            context = None
-        else:
-            context = json.loads(context_str)
-    except Exception as e:
-        raise RuntimeError(
-            f"Unable to deserialize the context {context_str} as the context "
-            "is not json load-able. Please implement and register your own "
-            "serializer/deserializer, or make your serialized context json load-able."
-        ) from e
-
-    return context
+def _register_treespec_serializer(
+    typ: Type[Any],
+    *,
+    getstate: Optional[GetStateFn] = None,
+    setstate: Optional[SetStateFn] = None,
+) -> None:
+    serialized_type = f"{typ.__module__}.{typ.__name__}"
+    serialize_node_def = SerializeNodeDef(
+        typ, serialized_type, getstate, setstate
+    )
+    SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
+    SUPPORTED_SERIALIZED_TYPES[serialized_type] = serialize_node_def
 
 def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    serialized_type_name: Optional[str] = None,
-    serialize_fn: Optional[SerializeFn] = None,
-    deserialize_fn: Optional[DeserializeFn] = None,
 ) -> None:
-    if serialized_type_name is None:
-        serialized_type_name = f"{typ.__module__}.{typ.__name__}"
-
-    if serialize_fn is None and deserialize_fn is None:
-        serialize_fn = _default_serialize
-        deserialize_fn = _default_deserialize
-    assert serialize_fn is not None and deserialize_fn is not None, (
-        f"Both serialize_fn and deserialize_fn for {typ} must be None or registered."
-    )
-
     node_def = NodeDef(
         typ,
         flatten_fn,
         unflatten_fn,
-        serialized_type_name,
-        serialize_fn,
-        deserialize_fn
     )
     SUPPORTED_NODES[typ] = node_def
+    _register_treespec_serializer(typ)
 
-    assert serialized_type_name not in SUPPORTED_NODES, (
-        f"A node type with name {serialized_type_name} is already registered "
-        f"with {node_def}. Please pass in a different name to _register_pytree_node."
-    )
-    SUPPORTED_NODES[serialized_type_name] = node_def
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
@@ -146,43 +98,11 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
     return dict(zip(context, values))
 
-def _dict_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    assert spec.type == dict
-    assert isinstance(spec.context, list)
-    serialized_context = json.dumps(spec.context)
-    return serialized_context, PYTREE_VERSION
-
-def _dict_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Context]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-
-    assert context_str is not None
-    context = json.loads(context_str)
-    return context
-
 def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
 
 def _list_unflatten(values: List[Any], context: Context) -> List[Any]:
     return list(values)
-
-def _list_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    assert spec.type == list
-    return None, PYTREE_VERSION
-
-def _list_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Context]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-    assert context_str is None
-    return None
 
 def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
     return list(d), None
@@ -190,48 +110,23 @@ def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
 def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
-def _tuple_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    assert spec.type == tuple
-    return None, PYTREE_VERSION
-
-def _tuple_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Context]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-    assert context_str is None
-    return None
-
 def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
     return list(d), type(d)
 
 def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
-def _namedtuple_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    assert spec.type == namedtuple
-
+def _namedtuple_serialize(context: Context) -> DumpableContext:
     json_namedtuple = {
-        "class_name": spec.context.__name__,
-        "fields": spec.context._fields,
+        "class_name": context.__name__,
+        "fields": context._fields,
     }
-    serialized_context = json.dumps(json_namedtuple)
-    return serialized_context, PYTREE_VERSION
+    return json_namedtuple
 
-def _namedtuple_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Context]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-    assert context_str is not None
-    json_context = json.loads(context_str)
-    class_name = json_context["class_name"]
+def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
+    class_name = dumpable_context["class_name"]
     assert isinstance(class_name, str)
-    context = namedtuple(class_name, json_context["fields"])  # type: ignore[misc]
+    context = namedtuple(class_name, dumpable_context["fields"])  # type: ignore[misc]
     return context
 
 def _odict_flatten(d: 'OrderedDict[Any, Any]') -> Tuple[List[Any], Context]:
@@ -240,64 +135,16 @@ def _odict_flatten(d: 'OrderedDict[Any, Any]') -> Tuple[List[Any], Context]:
 def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, Any]':
     return OrderedDict((key, value) for key, value in zip(context, values))
 
-def _odict_serialize(spec: "TreeSpec") -> Tuple[Optional[str], str]:
-    assert spec.type == OrderedDict
-    assert isinstance(spec.context, list)
-    serialized_context = json.dumps(spec.context)
-    return serialized_context, PYTREE_VERSION
 
-def _odict_deserialize(
-    context_str: Optional[str], version: str,
-) -> Optional[Context]:
-    if version != PYTREE_VERSION:
-        raise RuntimeError(
-            f"Unable to serialize spec with schema {version}"
-        )
-    if context_str is None:
-        return None
-    context = json.loads(context_str)
-    return context
-
-
-_register_pytree_node(
-    dict,
-    _dict_flatten,
-    _dict_unflatten,
-    "dict",
-    _dict_serialize,
-    _dict_deserialize
-)
-_register_pytree_node(
-    list,
-    _list_flatten,
-    _list_unflatten,
-    "list",
-    _list_serialize,
-    _list_deserialize
-)
-_register_pytree_node(
-    tuple,
-    _tuple_flatten,
-    _tuple_unflatten,
-    "tuple",
-    _tuple_serialize,
-    _tuple_deserialize
-)
-_register_pytree_node(
-    namedtuple,
-    _namedtuple_flatten,
-    _namedtuple_unflatten,
-    "named_tuple",
-    _namedtuple_serialize,
-    _namedtuple_deserialize
-)
-_register_pytree_node(
-    OrderedDict,
-    _odict_flatten,
-    _odict_unflatten,
-    "odict",
-    _odict_serialize,
-    _odict_deserialize
+_register_pytree_node(dict, _dict_flatten, _dict_unflatten)
+_register_pytree_node(list, _list_flatten, _list_unflatten)
+_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
+_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
+_register_treespec_serializer(
+    namedtuple,  # type: ignore[arg-type]
+    getstate=_namedtuple_serialize,
+    setstate=_namedtuple_deserialize,
 )
 
 
@@ -555,43 +402,102 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     return result
 
 
-def pytree_to_str(spec: TreeSpec) -> str:
-    def pytree_to_json(spec: TreeSpec) -> TreeSpecSchema:
+"""
+TreeSpecSchema is the schema used to serialize the TreeSpec
+It contains the following fields:
+- type: A string name of the type. null for the case of a LeafSpec.
+- context: Any format which is json dumpable
+- children_spec: A list of children serialized specs.
+"""
+@dataclasses.dataclass
+class TreeSpecSchema:
+    type: Optional[str]
+    context: DumpableContext
+    children_spec: List['TreeSpecSchema']
+
+
+def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
+    def treespec_to_json(spec: TreeSpec) -> TreeSpecSchema:
         if isinstance(spec, LeafSpec):
-            return TreeSpecSchema(None, None, [], PYTREE_VERSION)
-        elif spec.type in SUPPORTED_NODES:
-            child_schemas = [pytree_to_json(child) for child in spec.children_specs]
-            serialize_fn = SUPPORTED_NODES[spec.type].serialize_fn
-            serialized_type = SUPPORTED_NODES[spec.type].serialized_type_name
-            serialized_context, version = serialize_fn(spec)
-            return TreeSpecSchema(serialized_type, serialized_context, child_schemas, version)
-        else:
+            return TreeSpecSchema(None, None, [])
+
+        if spec.type not in SUPPORTED_SERIALIZED_TYPES:
             raise NotImplementedError(f"Serializing {spec.type} in pytree is not registered.")
 
-    json_spec = pytree_to_json(spec)
-    str_spec = json.dumps(dataclasses.asdict(json_spec))
+        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[spec.type]
+
+        serialized_type = serialize_node_def.serialized_type
+
+        if serialize_node_def.getstate is None:
+            try:
+                serialized_context = json.dumps(spec.context)
+            except TypeError:
+                raise TypeError(
+                    "Unable to serialize context. "
+                    "Please make the context json dump-able, or register a "
+                    "custom serializer using _register_treespec_serializer."
+                )
+        else:
+            serialized_context = serialize_node_def.getstate(spec.context)
+
+        child_schemas = [treespec_to_json(child) for child in spec.children_specs]
+
+        return TreeSpecSchema(serialized_type, serialized_context, child_schemas)
+
+    if protocol is None:
+        protocol = PROTOCOL_VERSION
+
+    json_spec = treespec_to_json(treespec)
+    str_spec = json.dumps((protocol, dataclasses.asdict(json_spec)))
     return str_spec
 
-def str_to_pytree(str_json_spec: str) -> TreeSpec:
-    json_schema = json.loads(str_json_spec)
+def treespec_loads(data: str) -> TreeSpec:
+    protocol, json_schema = json.loads(data)
 
-    def json_to_pytree(json_schema) -> TreeSpec:  # type: ignore[no-untyped-def]
+    if protocol != PROTOCOL_VERSION:
+        raise ValueError(f"Protocol mismatch: {protocol} != {PROTOCOL_VERSION}")
+
+    def json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         if (
             json_schema["type"] is None and
             json_schema["context"] is None and
             len(json_schema["children_spec"]) == 0
         ):
             return LeafSpec()
-        elif json_schema["type"] in SUPPORTED_NODES:
-            deserialize_fn = SUPPORTED_NODES[json_schema["type"]].deserialize_fn
-            context = deserialize_fn(json_schema["context"], json_schema["version"])
-            type_ = SUPPORTED_NODES[json_schema["type"]].type
 
-            children_spec = []
-            for child_string in json_schema["children_spec"]:
-                children_spec.append(json_to_pytree(child_string))
-            return TreeSpec(type_, context, children_spec)
+        if json_schema["type"] not in SUPPORTED_SERIALIZED_TYPES:
+            raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree is not registered.')
+
+        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[json_schema["type"]]
+
+        typ = serialize_node_def.typ
+
+        if serialize_node_def.setstate is None:
+            try:
+                context = json.loads(json_schema["context"])
+            except TypeError:
+                raise TypeError(
+                    "Unable to deserialize context. "
+                    "Please make the context json load-able, or register a "
+                    "custom serializer using _register_treespec_serializer."
+                )
         else:
-            raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree not registered.')
+            context = serialize_node_def.setstate(json_schema["context"])
 
-    return json_to_pytree(json_schema)
+        children_spec = []
+        for child_string in json_schema["children_spec"]:
+            children_spec.append(json_to_treespec(child_string))
+
+        return TreeSpec(typ, context, children_spec)
+
+    return json_to_treespec(json_schema)
+
+# TODO(angelayi): remove this function after OSS/internal stabilize
+def pytree_to_str(spec: TreeSpec) -> str:
+    warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")
+    return treespec_dumps(spec)
+
+# TODO(angelayi): remove this function after OSS/internal stabilize
+def str_to_pytree(json: str) -> TreeSpec:
+    warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
+    return treespec_loads(json)
