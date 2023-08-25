@@ -1,6 +1,5 @@
 import torch
 from torch.fx import (
-    Graph,
     GraphModule,
     Node,
 )
@@ -173,26 +172,6 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
         if n.target in _MAP:
             n.target = _MAP[n.target]
 
-def _is_dropout_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
-    original_graph: Graph,
-    pattern_graph: Graph,
-) -> bool:
-    """
-    Match filter for the subgraph rewriter that returns True if the matched
-    graph includes all the ops used in the aten dropout pattern.
-    """
-    ops_to_match = {
-        torch.ops.aten.empty_like.default,
-        torch.ops.aten.bernoulli_.float,
-        torch.ops.aten.div_.Scalar,
-        torch.ops.aten.mul.Tensor,
-    }
-    for n in match.nodes_map.values():
-        if n.target in ops_to_match:
-            ops_to_match.remove(n.target)
-    return len(ops_to_match) == 0
-
 def _replace_dropout_for_eval(m: GraphModule):
     """
     Replace the aten training dropout pattern with a noop, intended for eval.
@@ -215,27 +194,11 @@ def _replace_dropout_for_eval(m: GraphModule):
     match_pattern = get_aten_graph_module(dropout_train, example_inputs)
     replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
-    # Note: The match pattern looks like:
-    #
-    #   empty_like_default = torch.ops.aten.empty_like.default(x)
-    #   bernoulli__float = torch.ops.aten.bernoulli_.float(empty_like_default)
-    #   div__scalar = torch.ops.aten.div_.Scalar(bernoulli__float, 0.5)
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, div__scalar)
-    #
-    # We need to use `ignore_literals=True` here to handle arbitrary dropout
-    # probability (not just 0.5). However, without a match filter, this would
-    # also match any mul op, since `div__scalar` is also a literal, e.g.:
-    #
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, 0.8)
-    #
-    # Therefore, we need both `ignore_literals=True` and `_is_dropout_filter`
-    # to make sure we are in fact replacing the dropout pattern.
-
     replace_pattern_with_filters(
         m,
         match_pattern,
         replacement_pattern,
-        match_filters=[_is_dropout_filter],
+        match_filters=[],
         ignore_literals=True,
     )
     m.recompile()

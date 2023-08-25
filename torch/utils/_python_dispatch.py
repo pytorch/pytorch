@@ -1,5 +1,5 @@
 import contextlib
-from typing import Optional
+from typing import Optional, Union
 
 import warnings
 import torch
@@ -56,7 +56,12 @@ class TorchDispatchMode:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _pop_mode(self.__dict__.get("_dispatch_key", None), self.__dict__.get("_mode_key", None))
+        mb_dk_or_mode_key = self.__dict__.get("_dispatch_key", None)
+        if mb_dk_or_mode_key is None:
+            # Today, mode keys are not used at all in the per-dispatch-key-mode logic (for pre-dispatch)
+            # We should probably revisit this.
+            mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
+        _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -90,19 +95,19 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         _push_on_torch_dispatch_stack(mode)
 
 
-def _pop_mode(k: Optional[DispatchKey] = None, mode_key: Optional[torch._C.TorchDispatchModeKey] = None):
-    if k is not None:
+def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+    if type(k) == DispatchKey:
         from torch._ops import pop_mode_for_key
         # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
         # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
         # that we push onto these per-dispatch-key-mode-stacks.
         return pop_mode_for_key(k)
     else:
-        return _pop_torch_dispatch_stack(mode_key)
+        return _pop_torch_dispatch_stack(k)
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None, mode_key: Optional[torch._C.TorchDispatchModeKey] = None):
+def _pop_mode_temporarily(k: Optional[DispatchKey] = None, mode_key: Optional[torch._C._TorchDispatchModeKey] = None):
     old = _pop_mode(k, mode_key)
     try:
         yield old
