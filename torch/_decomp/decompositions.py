@@ -21,6 +21,7 @@ from torch._prims_common.wrappers import (
 )
 from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
 from torch.utils._pytree import tree_flatten, tree_map
+from torch._higher_order_ops.out_dtype import out_dtype
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -3835,6 +3836,12 @@ def multilabel_margin_loss_forward(
     # result
     is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
+
+
+@register_decomposition(out_dtype)
+def out_dtype_decomp(*args, **kwargs):
+    from torch._higher_order_ops.out_dtype import out_dtype_dense
+    return out_dtype_dense(*args, **kwargs)
 
 
 def register_inplace(aten_op, outplace_op):
