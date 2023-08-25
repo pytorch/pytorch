@@ -219,11 +219,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
-        def example(inp, split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
-                output_split_sizes=split_sizes_tensor,
-                input_split_sizes=split_sizes_tensor,
+                output_split_sizes=split_sizes,
+                input_split_sizes=split_sizes,
                 tag=tag,
                 ranks=ranks,
                 group_size=group_size,
@@ -241,8 +241,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
-            split_sizes_tensor = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
-            inputs = (torch.ones(int(row), 5, device="cuda") * (self.rank + 1), split_sizes_tensor)
+            split_sizes = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
+            inputs = (torch.ones(int(row), 5, device="cuda") * (self.rank + 1), split_sizes)
             trs = self.get_world_trs()
 
             eager_out = example(*inputs, **trs)
@@ -255,11 +255,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_output_split_sizes_none(self):
-        def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, input_split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes=None,
-                input_split_sizes=input_split_sizes_tensor,
+                input_split_sizes=input_split_sizes,
                 tag=tag,
                 ranks=ranks,
                 group_size=group_size,
@@ -269,8 +269,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return out
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            input_split_sizes_tensor = [1] * self.world_size
-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes_tensor)
+            input_split_sizes = [1] * self.world_size
+            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes)
             trs = self.get_world_trs()
 
             eager_out = example(*inputs, **trs)
@@ -283,10 +283,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
-        def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, output_split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
-                output_split_sizes=output_split_sizes_tensor,
+                output_split_sizes=output_split_sizes,
                 input_split_sizes=None,
                 tag=tag,
                 ranks=ranks,
@@ -304,8 +304,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 capture_scalar_outputs=True,
             )
         ):
-            output_split_sizes_tensor = [1] * self.world_size
-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes_tensor)
+            output_split_sizes = [1] * self.world_size
+            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes)
             trs = self.get_world_trs()
 
             eager_out = example(*inputs, **trs)
