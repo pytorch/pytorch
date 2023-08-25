@@ -37,13 +37,13 @@ class Args:
         self.disable_full_archs_compilation = False
 
     def _normalize_cuda_arch(self) -> None:
-        if self.architectures >= 90:
+        if int(self.architectures) >= 90:
             self.architectures = "90"
-        elif self.architectures >= 80:
+        elif int(self.architectures) >= 80:
             self.architectures = "80"
-        elif self.architectures >= 75:
+        elif int(self.architectures) >= 75:
             self.architectures = "75"
-        elif self.architectures >= 70:
+        elif int(self.architectures) >= 70:
             self.architectures = "70"
         else:
             raise NotImplementedError(f"Unsupported cuda arch: {self.architectures}")
@@ -83,7 +83,7 @@ def torch_dtype_match(torch_dtype0: torch.dtype, torch_dtype1: torch.dtype) -> b
 
     if torch_dtype0 == torch_dtype1:
         return True
-    for matched_dtypes in _MATHED_DTYPES:
+    for matched_dtypes in _MATCHED_DTYPES:
         if torch_dtype0 in matched_dtypes and torch_dtype1 in matched_dtypes:
             return True
     return False
