@@ -83,7 +83,10 @@ def efficient_conv_bn_eval_graph_transform(fx_model):
         found_pair = False
         for conv_class, bn_class in patterns:
             if isinstance(target_module, bn_class):
-                source_module = modules[node.args[0].target]
+                target = node.args[0].target
+                if target not in modules:
+                    continue
+                source_module = modules[target]
                 if isinstance(source_module, conv_class):
                     found_pair = True
         # Not a conv-BN pattern or output of conv is used by other nodes
