@@ -1,5 +1,7 @@
 import copy
 import dataclasses
+import io
+import pathlib
 import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -30,6 +32,8 @@ __all__ = [
     "constrain_as_value",
     "dynamic_dim",
     "export",
+    "load",
+    "save",
 ]
 
 
@@ -235,6 +239,7 @@ class ExportedProgram:
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
+        original_traced_arguments: Tuple[Any, ...] = (),
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -259,6 +264,7 @@ class ExportedProgram:
             Tuple[InputDim, InputDim]
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._original_traced_arguments = original_traced_arguments
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -299,6 +305,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def original_traced_arguments(self):
+        return self._original_traced_arguments
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -380,15 +391,6 @@ class ExportedProgram:
         from torch._export.exported_program import unlift_exported_program_lifted_states
 
         return unlift_exported_program_lifted_states(self)
-
-    # TODO(ycao): Remove this after migration.
-    def transform(self, *passes: PassType) -> "ExportedProgram":
-        """
-        .. warning::
-            Do not use.
-
-        """
-        return self._transform(*passes)
 
     def _transform(self, *passes: PassType) -> "ExportedProgram":
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
@@ -529,6 +531,7 @@ class ExportedProgram:
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
+            self.original_traced_arguments,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -555,12 +558,7 @@ class ExportedProgram:
         _assertion_graph = _assertion_graph_res.graph_module
         _assertion_graph(*args)
 
-    def validate(self):
-        """
-        .. warning::
-            Do not use.
-
-        """
+    def _validate(self):
         # TODO(zhxchen17) check for get_attr
         # TODO(zhxchen17) check for funcitonal ops
         for gm in self.graph_module.modules():
@@ -933,7 +931,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
-) -> "torch._export.exported_program.ExportedProgram":  # type: ignore[name-defined]
+) -> ExportedProgram:
     """
     `export()` is a one-shot process for capturing a computation graph from
     a PyTorch program Ahead-of-Time (AOT).
@@ -1126,3 +1124,118 @@ def export(
     from torch._export import export
 
     return export(f, args, kwargs, constraints)
+
+
+def save(
+    ep: ExportedProgram,
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    opset_version: Optional[Dict[str, int]] = None,
+) -> None:
+    """
+
+    .. warning::
+        Under active development, saved files may not be usable in newer versions
+        of PyTorch.
+
+    Saves an :class:`ExportedProgram` to a file-like object. It can then be
+    loaded using the Python API :func:`torch.export.load <torch.export.load>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+         implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): Map from filename to contents
+         which will be stored as part of f.
+
+        opset_version (Optional[Dict[str, int]]): A map of opset names
+         to the version of this opset
+
+
+    Example::
+
+        import torch
+        import io
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        ep = torch.export.export(MyModule(), torch.randn(5))
+
+        # Save to file
+        torch.export.save(ep, 'exported_program.pt2')
+
+        # Save to io.BytesIO buffer
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+
+        # Save with extra files
+        extra_files = {'foo.txt': b'bar'}
+        torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+
+    """
+    from torch._export import save
+
+    save(ep, f, extra_files=extra_files, opset_version=opset_version)
+
+
+def load(
+    f: Union[str, pathlib.Path, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    expected_opset_version: Optional[Dict[str, int]] = None,
+) -> ExportedProgram:
+    """
+
+    .. warning::
+        Under active development, saved files may not be usable in newer versions
+        of PyTorch.
+
+    Loads an :class:`ExportedProgram` previously saved with
+    :func:`torch.export.save <torch.export.save>`.
+
+    Args:
+        ep (ExportedProgram): The exported program to save.
+
+        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+         implement write and flush) or a string containing a file name.
+
+        extra_files (Optional[Dict[str, Any]]): The extra filenames given in
+         this map would be loaded and their content would be stored in the
+         provided map.
+
+        expected_opset_version (Optional[Dict[str, int]]): A map of opset names
+         to expected opset versions
+
+    Returns:
+        An :class:`ExportedProgram` object
+
+    Example::
+
+        import torch
+        import io
+
+        # Load ExportedProgram from file
+        ep = torch.export.load('exported_program.pt2')
+
+        # Load ExportedProgram from io.BytesIO object
+        with open('exported_program.pt2', 'rb') as f:
+            buffer = io.BytesIO(f.read())
+        buffer.seek(0)
+        ep = torch.export.load(buffer)
+
+        # Load with extra files.
+        extra_files = {'foo.txt': ''}  # values will be replaced with data
+        ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
+        print(extra_files['foo.txt'])
+
+    """
+    from torch._export import load
+
+    return load(
+        f, extra_files=extra_files, expected_opset_version=expected_opset_version
+    )

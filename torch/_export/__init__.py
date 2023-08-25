@@ -109,13 +109,11 @@ def capture_pre_autograd_graph(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
-    decomp_table: Dict[OpOverload, Callable] = core_aten_decompositions(),
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
     decomposition is run. The produced module will be "non-functional" and
-    composed of aten operators. You can manually specify decomp_table to control
-    decomposition rule. Later this API will be deleted in favor of more general
+    composed of aten operators. Later this API will be deleted in favor of more general
     torch.export API.
 
     Args:
@@ -128,15 +126,38 @@ def capture_pre_autograd_graph(
       constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
-      decomp_table: A optional table of specifying how to decompose certain aten op.
     Returns:
         An nn.Module containing the traced method.
 
     """
 
-    with patch("torch._export.DECOMP_TABLE", decomp_table):
-        ep = export(f, args, kwargs, constraints=constraints)
-    return ep.transform(ReplaceViewOpsWithViewCopyOpsPass()).module()
+    decomp_table = {
+        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
+        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
+        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
+        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
+    }
+
+    if kwargs is None:
+        kwargs = {}
+
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+        m = torch._dynamo.export(
+            f,
+            constraints=constraints,
+            assume_static_by_default=True,
+            tracing_mode="symbolic",
+            decomposition_table=decomp_table,
+            pre_dispatch=True,
+            aten_graph=True,
+        )(
+            *args,
+            **kwargs,
+        )[0]
+
+        for n in m.graph.nodes:
+            n.meta["is_torch_exported"] = True
+        return m
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -413,14 +434,15 @@ def export(
         range_constraints,
         equality_constraints,
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        args,
     )
 
-    exported_program = exported_program.transform(
+    exported_program = exported_program._transform(
         _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
     )
     if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
-    return exported_program.transform(_ReplaceSymSizeOpPass())
+        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
