@@ -205,7 +205,7 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
-class TorchDispatchModeKey(Enum):
+class _TorchDispatchModeKey(Enum):
     FAKE = auto()
     PROXY = auto()
 
