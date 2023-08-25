@@ -293,10 +293,9 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
     dst.resize_as_(src);
   }
 
-  TORCH_CHECK(dst.dim() >= src.dim());
   if (dst.dim() > src.dim()) {
     needs_broadcasting = true;
-  } else {
+  } else if (dst.dim() == src.dim()) {
     const IntArrayRef src_sizes = src.sizes();
     const IntArrayRef dst_sizes = dst.sizes();
     for (const auto j : c10::irange(src.dim())) {
@@ -305,6 +304,9 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
         break;
       }
     }
+  } else {
+    // dst.dim() can be smaller than src.dim() when scalars are copied
+    TORCH_CHECK(dst.numel() == 1, "Destination has ", dst.dim(), " dims, which is fewer than src ", src.dim());
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
