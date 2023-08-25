@@ -206,9 +206,9 @@ class DispatchKey(Enum):
 
 
 class TorchDispatchModeKey(Enum):
-    FUNCTIONAL = auto()
-    PROXY = auto()
     FAKE = auto()
+    PROXY = auto()
+    FUNCTIONAL = auto()
 
 
 def codegen_per_backend_entries() -> str:

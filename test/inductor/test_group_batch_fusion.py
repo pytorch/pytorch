@@ -173,6 +173,31 @@ class MyModule4(torch.nn.Module):
         return torch.sigmoid(x6)
 
 
+class MyModule5(torch.nn.Module):
+    def __init__(self, device, has_bias=True):
+        super().__init__()
+        self.device = device
+
+        self.weights = torch.nn.ParameterList(
+            [torch.nn.Parameter(torch.randn(50, 100)).to(self.device) for _ in range(5)]
+        )
+
+        self.biases = (
+            ([torch.nn.Parameter(torch.randn(50)).to(self.device) for _ in range(5)])
+            if has_bias
+            else [None for _ in range(5)]
+        )
+
+    def forward(self, x):
+        l1_out = torch.split(x.to(self.device), 100, dim=1)
+        l1_linear = [
+            torch.nn.functional.linear(l1_out[i], self.weights[i], self.biases[i])
+            for i in range(len(l1_out))
+        ]
+        l1_out = torch.cat(l1_linear, dim=1)
+        return torch.sin(l1_out)
+
+
 @requires_cuda()
 @torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
 class TestGroupBatchFusion(TestCase):
@@ -314,6 +339,31 @@ class TestGroupBatchFusion(TestCase):
             self.assertEqual(
                 counters["inductor"]["scmerge_cat_removed"],
                 1,
+            )
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            counters.clear()
+
+    def test_batch_linear_pre_grad_fusion(self):
+        for has_bias in [True, False]:
+            counters.clear()
+            module = MyModule5("cuda", has_bias)
+            input = [torch.randn(50, 500, device="cuda")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_fusion"], 1)
+            self.assertEqual(counters["inductor"]["group_fusion"], 0)
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_removed"],
+                2,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_removed"],
+                2,
             )
             ref.sum().backward()
             res.sum().backward()
