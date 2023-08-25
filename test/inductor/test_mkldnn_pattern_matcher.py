@@ -45,6 +45,11 @@ non_decomposed_unary_list = [
     torch.nn.Tanh,
 ]
 
+quantization_unary_list = {
+    None: 0,
+    torch.nn.ReLU(): 1,
+}
+
 # The dict value is (match_count, match_nodes, inplace)
 binary_list = {
     lambda x, y: torch.add(x, y): (1, 2, False),  # call_function
@@ -392,24 +397,41 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(
                 self,
-                auto_insert_channel_last_node=False,
+                unary_fn,
+                **kwargs,
             ):
                 super().__init__()
-                if auto_insert_channel_last_node:
+                if (
+                    "auto_insert_channel_last_node" in kwargs
+                    and kwargs["auto_insert_channel_last_node"]
+                ):
                     self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 else:
                     self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.unary_fn = unary_fn
 
             def forward(self, x):
-                return self.conv(x)
+                x = self.conv(x)
+                return self.unary_fn(x) if self.unary_fn else x
 
-        for auto_insert_channel_last_node in [True, False]:
-            mod = M(auto_insert_channel_last_node).eval()
+        options = itertools.product(
+            quantization_unary_list.keys(),
+            [True, False],  # auto_insert_channel_last_node
+        )
+
+        for unary_fn, auto_insert_channel_last_node in options:
+            if auto_insert_channel_last_node and unary_fn is not None:
+                # Skip trivial test combinations to reduce test time.
+                continue
+            mod = M(
+                unary_fn, auto_insert_channel_last_node=auto_insert_channel_last_node
+            ).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
 
-            # Totally 4 pattern_matcher_count, 17 pattern_matcher_nodes
+            # Totally pattern_matcher_count 4,
+            # pattern_matcher_nodes 17 + 1 for optional(unary_post_op)
             # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
             # 2. dequant-conv pattern matched in quantization weight prepack
@@ -417,12 +439,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
             # 4. Quantization fusion in post-grad fusion pass
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+            #    [qconv2d_pointwise_default, optional(unary_post_op), div_1, round_2, add_1,
+            #     clamp_min_1, clamp_max_1, convert_element_type_2]
             self._test_common(
                 mod,
                 (v,),
                 4,
-                17,
+                17 + quantization_unary_list[unary_fn],
                 check_quantization=True,
             )
 
