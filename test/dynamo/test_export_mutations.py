@@ -31,7 +31,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
 
         self.check_failure_on_export(Foo(), torch.Tensor(3, 2))
 
-    def test_module_attribute_mutation_violation_positive_2(self):
+    def test_module_attribute_mutation_violation_now_negative_2(self):
         # Mutating attribute with a scalar type
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -42,7 +42,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
                 self.a = self.a * 3
                 return x.sum() + self.a
 
-        self.check_failure_on_export(Foo(), torch.Tensor(3, 2))
+        self.check_same_with_export(Foo(), torch.Tensor(3, 2))
 
     def test_module_attribute_mutation_violation_positive_3(self):
         # Setting a new attribute inside forward()
@@ -57,7 +57,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
 
         self.check_failure_on_export(Foo(), torch.Tensor(3, 2))
 
-    def test_module_attribute_mutation_violation_positive_4(self):
+    def test_module_attribute_mutation_violation_now_negative_4(self):
         # Mutating attribute with an inline function
         class Foo(torch.nn.Module):
             def add(self, a, b):
@@ -67,7 +67,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
                 self.a = self.add(1, 2) * self.add(3, 4)
                 return x.sum() + self.a
 
-        self.check_failure_on_export(Foo(), torch.Tensor(3, 2))
+        self.check_same_with_export(Foo(), torch.Tensor(3, 2))
 
     def test_module_attribute_mutation_violation_negative_1(self):
         # Mutating attribute with a Tensor type inside __init__ but

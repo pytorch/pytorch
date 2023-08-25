@@ -3627,7 +3627,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
     def test_inplace_buffer_update(self):
         class UpdateBufferModel(torch.nn.Module):
             def __init__(self):
-                super(UpdateBufferModel, self).__init__()
+                super().__init__()
                 self.register_buffer("x", torch.zeros(4, 8, 64))
 
             def forward(self, incr):
