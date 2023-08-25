@@ -308,18 +308,15 @@ def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op,
 
 def _all_to_all_single(
     input: torch.Tensor,
-    output_split_sizes: Optional[torch.Tensor],
-    input_split_sizes: Optional[torch.Tensor],
+    output_split_sizes: Optional[List[int]],
+    input_split_sizes: Optional[List[int]],
     tag: str,
     ranks: List[int],
     group_size: int,
 ):
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
 
-    if isinstance(input_split_sizes, torch.Tensor):
-        input_split_sizes = input_split_sizes.tolist()  # type: ignore[assignment]
-    if isinstance(output_split_sizes, torch.Tensor):
-        output_split_sizes = output_split_sizes.tolist()  # type: ignore[assignment]
+    if output_split_sizes is not None:
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         out_tensor = input.new_empty(out_size)

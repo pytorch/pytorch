@@ -241,11 +241,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
-            split_sizes_tensor = torch.tensor(
-                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
-                dtype=torch.int64,
-                device="cuda",
-            )
+            split_sizes_tensor = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
             inputs = (torch.ones(int(row), 5, device="cuda") * (self.rank + 1), split_sizes_tensor)
             trs = self.get_world_trs()
 
@@ -273,11 +269,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return out
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            input_split_sizes_tensor = torch.tensor(
-                [1] * self.world_size,
-                dtype=torch.int64,
-                device="cuda",
-            )
+            input_split_sizes_tensor = [1] * self.world_size
             inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes_tensor)
             trs = self.get_world_trs()
 
@@ -312,11 +304,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 capture_scalar_outputs=True,
             )
         ):
-            output_split_sizes_tensor = torch.tensor(
-                [1] * self.world_size,
-                dtype=torch.int64,
-                device="cuda",
-            )
+            output_split_sizes_tensor = [1] * self.world_size
             inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes_tensor)
             trs = self.get_world_trs()
 

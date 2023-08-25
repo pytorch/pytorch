@@ -466,16 +466,12 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
 
         row = self.world_size * (rank + 1) * (self.world_size + 1) / 2
         x = torch.ones(int(row), 5, device=device) * (rank + 1)
-        split_sizes = torch.tensor(
-            [(i + 1) * (rank + 1) for i in range(self.world_size)],
-            dtype=torch.int64,
-            device=device
-        )
+        split_sizes = [(i + 1) * (rank + 1) for i in range(self.world_size)]
         y = ft_c.all_to_all_single(
             x, output_split_sizes=split_sizes, input_split_sizes=split_sizes, group=mesh
         )
         expected = []
-        for idx, tensor in enumerate(torch.split(x, split_sizes.tolist())):
+        for idx, tensor in enumerate(torch.split(x, split_sizes)):
             expected.append(torch.full_like(tensor, (idx + 1)))
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
@@ -486,7 +482,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
 
-        input_split_sizes = torch.tensor([1] * self.world_size, dtype=torch.int64, device=device)
+        input_split_sizes = [1] * self.world_size
         x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
         y = ft_c.all_to_all_single(
             x, output_split_sizes=None, input_split_sizes=input_split_sizes, group=mesh
@@ -503,7 +499,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
 
-        output_split_sizes = torch.tensor([1] * self.world_size, dtype=torch.int64, device=device)
+        output_split_sizes = [1] * self.world_size
         x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
         y = ft_c.all_to_all_single(
             x, output_split_sizes=output_split_sizes, input_split_sizes=None, group=mesh
