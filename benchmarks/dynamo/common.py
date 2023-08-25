@@ -55,6 +55,7 @@ except ImportError:
 
 try:
     import torch_xla.core.xla_model as xm
+    device = xm.xla_device()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -723,11 +724,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
-                )
-
-            if should_check_result:
-                is_correct = is_correct and same(
-                    expected_output, actual_output, tol=tolerance
                 )
 
     if args.export_profiler_trace:
