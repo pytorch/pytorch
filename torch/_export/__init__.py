@@ -437,12 +437,12 @@ def export(
         args,
     )
 
-    exported_program = exported_program.transform(
+    exported_program = exported_program._transform(
         _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
     )
     if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
-    return exported_program.transform(_ReplaceSymSizeOpPass())
+        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
