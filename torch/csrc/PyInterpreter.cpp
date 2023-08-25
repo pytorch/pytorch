@@ -543,6 +543,17 @@ c10::Device ConcretePyInterpreterVTable::device(
   return toDevice(out.ptr());
 }
 
+static void set_tensor_attr_with_capsule(
+    c10::TensorImpl* tensor,
+    py::capsule& capsule,
+    const char* attr_name) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  py::handle(mb_obj.value()).attr(attr_name) = capsule;
+}
+
 c10::IntArrayRef ConcretePyInterpreterVTable::strides(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
@@ -565,50 +576,28 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
         "Cannot call strides on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::optional<PyObject*> mb_obj =
-      self->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "strides must be a list or a tuple");
 
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "stride");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
-}
-
-static std::vector<int64_t> values_from_buffer(
-    const c10::TensorImpl* self,
-    py::handle values) {
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj =
-      ptr->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  return result;
+  int64_t len = py::len(out);
+  int64_t* ptr = new int64_t[len];
+  auto capsule =
+      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<int64_t>(*it);
+  }
+  set_tensor_attr_with_capsule(
+      const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
+  return c10::IntArrayRef(ptr, len);
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
+  HANDLE_TH_ERRORS
   auto out = torchDispatchFromTensorImpl(
       self,
       "size",
@@ -619,20 +608,27 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .attr("default")
           .ptr(),
       "torch.ops.aten");
-
   if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-  auto result = values_from_buffer(self, values);
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "sizes must be a list or a tuple");
+  int64_t len = py::len(out);
+  int64_t* ptr = new int64_t[len];
+  auto capsule =
+      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<int64_t>(*it);
+  }
+  set_tensor_attr_with_capsule(
+      const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
+  return c10::IntArrayRef(ptr, len);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
@@ -654,24 +650,20 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   if (out.is_none()) {
     return self->sym_sizes_default();
   }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_sizes()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
+      "sym_size must be a list or a tuple");
+  int64_t len = py::len(out);
+  c10::SymInt* ptr = new c10::SymInt[len];
+  auto capsule = py::capsule(
+      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  set_tensor_attr_with_capsule(
+      const_cast<c10::TensorImpl*>(self), capsule, "_sym_sizes_capsule");
+  return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -769,24 +761,20 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   // since it's a format `sym_strides()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
-                                    : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.as_int_unchecked());
+      "sym_strides must be a list or a tuple");
+  int64_t len = py::len(out);
+  c10::SymInt* ptr = new c10::SymInt[len];
+  auto capsule = py::capsule(
+      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
+  int64_t idx = 0;
+  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+    ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  set_tensor_attr_with_capsule(
+      const_cast<c10::TensorImpl*>(self), capsule, "_sym_strides_capsule");
+  return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
-
-PyInterpreterHolder self_interpreter;
 
 void ConcretePyInterpreterVTable::reset_backward_hooks(
     const c10::TensorImpl* self) const {
@@ -801,6 +789,8 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
 }
+
+PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 

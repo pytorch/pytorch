@@ -24,7 +24,8 @@ struct StashTorchDispatchModeGuard {
       c10::impl::TorchDispatchModeTLS::set_mode(
           std::move(saved_mode_), saved_mode_key_.value());
     } else {
-      c10::impl::TorchDispatchModeTLS::push_onto_stack(std::move(saved_mode_));
+      c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
+          std::move(saved_mode_));
     }
   }
 

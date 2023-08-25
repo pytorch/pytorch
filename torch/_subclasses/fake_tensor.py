@@ -111,6 +111,14 @@ _device_not_kwarg_ops = (
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
 
+# This function indicates if the backend device
+# supports non-contiguous tensors
+def is_noncontiguous_supported(device):
+    if device.type == "hpu":
+        return False
+    return True
+
+
 def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
     return type.isSubtypeOf(tensor_type) or any(
@@ -150,7 +158,7 @@ _like_tensor_constructors = (
 
 @contextlib.contextmanager
 def unset_fake_temporarily():
-    old = torch._C._unset_dispatch_mode(torch._C.TorchDispatchModeKey.FAKE)
+    old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
     finally:
@@ -181,6 +189,10 @@ def is_fake(x):
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return is_fake(unwrapped)
     return False
 
 
@@ -563,7 +575,8 @@ def nonzero(fake_mode, func, arg):
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
             if arg.numel() >= 2:
-                maxval = arg.numel()
+                maxval = int(arg.numel())
+
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
@@ -594,6 +607,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
+        if not is_noncontiguous_supported(out_device):
+            out = out.new_empty(out.shape)
 
     if out is new_kwargs["input"]:
         return out  # copy_
@@ -845,15 +860,17 @@ def make_fast_binary_impl(slow_ref):
         is_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
-        for op in operands:
-            if not isinstance(op, torch.Tensor):
-                continue
-            is_contiguous = is_contiguous and op.is_contiguous(
-                memory_format=torch.contiguous_format
-            )
-            is_channels_last = is_channels_last and op.is_contiguous(
-                memory_format=torch.channels_last
-            )
+
+        if is_noncontiguous_supported(common_device):
+            for op in operands:
+                if not isinstance(op, torch.Tensor):
+                    continue
+                is_contiguous = is_contiguous and op.is_contiguous(
+                    memory_format=torch.contiguous_format
+                )
+                is_channels_last = is_channels_last and op.is_contiguous(
+                    memory_format=torch.channels_last
+                )
         if is_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
@@ -965,7 +982,7 @@ class FakeTensor(torch.Tensor):
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
-    _mode_key = torch._C.TorchDispatchModeKey.FAKE
+    _mode_key = torch._C._TorchDispatchModeKey.FAKE
 
     @property
     def nonzero_memo(self):
@@ -1108,7 +1125,7 @@ class FakeTensor(torch.Tensor):
         # NotImplemented lets us keep chaining until we find the actual
         # subclass
         maybe_cur_fake_mode = torch._C._get_dispatch_mode(
-            torch._C.TorchDispatchModeKey.FAKE
+            torch._C._TorchDispatchModeKey.FAKE
         )
         if maybe_cur_fake_mode:
             not_implemented_log.debug(
@@ -1241,7 +1258,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
-        self._mode_key = torch._C.TorchDispatchModeKey.FAKE
+        self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
@@ -1262,7 +1279,7 @@ class FakeTensorMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # FakeTensorMode should not be set when we're inside of it.
         assert (
-            torch._C._get_dispatch_mode(torch._C.TorchDispatchModeKey.FAKE) is None
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None
         ), func
         try:
             return self.dispatch(func, types, args, kwargs)
