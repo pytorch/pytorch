@@ -19,7 +19,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
 )
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 # The dict value is match_nodes(computation_op+unary_op)
@@ -399,6 +399,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfRocm
     def test_qconv2d_binary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -455,6 +456,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfRocm
     def test_qconv2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -513,6 +515,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfRocm
     def test_dequant_promotion(self):
         class M(torch.nn.Module):
             def __init__(
@@ -553,6 +556,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
 
     @skipIfNoDynamoSupport
+    @skipIfRocm
     def test_qmaxpool2d(self):
         class M(torch.nn.Module):
             def __init__(
