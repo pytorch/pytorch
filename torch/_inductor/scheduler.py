@@ -905,15 +905,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = sum(
+        a_first = all(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = sum(
+        b_first = all(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first > b_first:
+        if a_first and not b_first:
             return -1
-        if b_first > a_first:
+        if b_first and not a_first:
             return 1
 
         # otherwise contiguous
