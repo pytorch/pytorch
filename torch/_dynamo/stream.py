@@ -45,7 +45,7 @@ class StreamMethodContainer:
         return ret_method
 
 
-    def __register_stream_method(self, container: str, device: str, method):
+    def register_stream_method(self, container: str, device: str, method):
         getattr(self, container)[device] = method
 
 
@@ -59,7 +59,7 @@ class StreamMethodContainer:
 
 
     def get_method_by_device(self, container: str, device: str):
-        return self.__get(container, device)
+        return self.__get(container + '_method', device)
 
 
 # the global instance to contain the stream methods
@@ -70,7 +70,7 @@ StreamMethodObject = StreamMethodContainer()
 # align with the specific semantics.
 def register_stream_method(device: str, method_args_dict: dict):
     for key in method_args_dict.keys():
-        StreamMethodObject.__register_stream_method(key + '_method', device, method_args_dict[key])
+        StreamMethodObject.register_stream_method(key + '_method', device, method_args_dict[key])
 
 
 # A dict with specific semantics and associated method is required for register.

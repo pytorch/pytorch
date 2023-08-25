@@ -363,7 +363,7 @@ class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
-        current_stream_method = StreamMethodContainer().get_method_by_device('current_stream_method', target_value.device)
+        current_stream_method = StreamMethodContainer().get_method_by_device('current_stream', target_value.device)
         current_stream = wrap_fx_proxy_cls(
             StreamVariable,
             tx,
@@ -386,7 +386,7 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_func = StreamMethodContainer().get_method_by_device('set_stream_method', self.device)
+        self.set_stream_func = StreamMethodContainer().get_method_by_device('set_stream', self.device)
 
     def enter(self, tx):
         # stream generated inside of traced function
@@ -402,11 +402,11 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamMethodContainer().get_method_by_device('set_stream_by_id_method', self.device),
+                StreamMethodContainer().get_method_by_device('set_stream_by_id', self.device),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamMethodContainer().get_method_by_device('set_stream_method', self.device)(self.target_values[0].value)
+        StreamMethodContainer().get_method_by_device('set_stream', self.device)(self.target_values[0].value)
 
     def exit(self, tx, *args):
         tx.output.create_proxy(

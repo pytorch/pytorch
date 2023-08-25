@@ -335,7 +335,7 @@ class TorchVariable(VariableTracker):
              StreamMethodContainer().get_all_methods('create_stream_context')]
         ):
             log.warning(
-                str(StreamMethodContainer().get_method_by_device('create_stream_context_method', args[0].device)) +
+                str(StreamMethodContainer().get_method_by_device('create_stream_context', args[0].device)) +
                 "not fully supported, streams may be ignored"
             )
             assert len(args) == 1
@@ -345,8 +345,8 @@ class TorchVariable(VariableTracker):
              StreamMethodContainer().get_all_methods('stream_class')]
         ):
             match_device = None
-            for device, method in StreamMethodContainer().stream_class.items():
-                if self.value is method[0]:
+            for device, method in StreamMethodContainer().stream_class_method.items():
+                if self.value is method:
                     match_device = device
             return wrap_fx_proxy_cls(
                 StreamVariable,
