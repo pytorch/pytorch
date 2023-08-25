@@ -229,11 +229,9 @@ static PyObject* THPModule_crashIfDebugAssertsFail(
       "crash_if_debug_asserts_fail expects an int, "
       "but got %s",
       THPUtils_typename(arg));
-  int32_t x = THPUtils_unpackInt(arg);
-
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      x != 424242, "Expect anything but 424242 as an input for debug builds");
-
+      THPUtils_unpackInt(arg) != 424242,
+      "Expect anything but 424242 as an input for debug builds");
   return THPUtils_packInt32(0);
 }
 
@@ -365,7 +363,7 @@ PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   auto size1 = THPUtils_unpackLongs(arg1);
   auto size2 = THPUtils_unpackLongs(arg2);
   auto sizes = at::infer_size(size1, size2);
-  return THPSize_NewFromSizes(sizes.size(), sizes.data());
+  return THPSize_NewFromSizes(static_cast<int64_t>(sizes.size()), sizes.data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -484,8 +482,8 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
 
 PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  size_t frames_to_skip;
-  size_t maximum_number_of_frames;
+  size_t frames_to_skip = 0;
+  size_t maximum_number_of_frames = 0;
   if (!PyArg_ParseTuple(
           args, "LL", &frames_to_skip, &maximum_number_of_frames)) {
     return nullptr;
@@ -837,23 +835,25 @@ PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
       "but got %s",
       THPUtils_typename(arg));
   HANDLE_TH_ERRORS
-  auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
+  auto qengine = THPUtils_unpackLong(arg);
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_qEngine(PyObject* _unused, PyObject* noargs) {
-  return THPUtils_packInt64(static_cast<int>(at::globalContext().qEngine()));
+  return THPUtils_packInt64(
+      static_cast<int64_t>(at::globalContext().qEngine()));
 }
 
 PyObject* THPModule_supportedQEngines(PyObject* _unused, PyObject* noargs) {
   auto qengines = at::globalContext().supportedQEngines();
-  auto list = THPObjectPtr(PyList_New(qengines.size()));
+  auto list =
+      THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(qengines.size())));
   if (!list)
     return nullptr;
   for (const auto i : c10::irange(qengines.size())) {
-    PyObject* i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
+    PyObject* i64 = THPUtils_packInt64(static_cast<int64_t>(qengines[i]));
     if (!i64)
       return nullptr;
     PyList_SET_ITEM(list.get(), i, i64);
@@ -902,7 +902,7 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
-  torch::autograd::Node* node;
+  torch::autograd::Node* node = nullptr;
   std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
     node_sp = ((THPFunction*)arg)->cdata.lock();
@@ -939,9 +939,9 @@ PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
   std::vector<torch::autograd::Node*> nodes =
       torch::autograd::get_current_graph_task_execution_order();
   TORCH_CHECK(
-      nodes.size(),
+      !nodes.empty(),
       "_current_graph_task_execution_order should only be called during the backward pass");
-  auto list = THPObjectPtr(PyList_New(nodes.size()));
+  auto list = THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(nodes.size())));
   if (!list)
     return nullptr;
   for (const auto i : c10::irange(nodes.size())) {
@@ -1027,8 +1027,7 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1236,7 +1235,7 @@ static PyMethodDef TorchMethods[] = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     (PyCFunction)(void (*)(void))THPModule_has_torch_function_variadic,
+     (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
@@ -1333,7 +1332,8 @@ PyObject* initModule() {
 
   static struct PyModuleDef torchmodule = {
       PyModuleDef_HEAD_INIT, "torch._C", nullptr, -1, methods.data()};
-  ASSERT_TRUE(module = PyModule_Create(&torchmodule));
+  module = PyModule_Create(&torchmodule);
+  ASSERT_TRUE(module);
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
@@ -1436,7 +1436,7 @@ PyObject* initModule() {
       "set_vital",
       [](const std::string& vital,
          const std::string& attr,
-         const std::string value) {
+         const std::string& value) {
         return at::vitals::VitalsAPI.setVital(vital, attr, value);
       });
   py_module.def(
@@ -1614,23 +1614,25 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::Storage(
             c10::Storage::use_byte_size_t(),
             size_bytes,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
-  py_module.def("_stash_obj_in_tls", [](std::string key, py::handle arg) {
-    at::impl::ThreadLocalPythonObjects::get_state().set(
-        key,
-        std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));
-  });
+  py_module.def(
+      "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
+        at::impl::ThreadLocalPythonObjects::get_state().set(
+            key,
+            std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));
+      });
 
-  py_module.def("_get_obj_in_tls", [](std::string key) -> py::handle {
+  py_module.def("_get_obj_in_tls", [](const std::string& key) -> py::handle {
     auto safe_pyobject =
         at::impl::ThreadLocalPythonObjects::get_state().get(key);
     auto obj = safe_pyobject->ptr(getPyInterpreter());
     return py::handle(obj);
   });
 
-  py_module.def("_is_key_in_tls", [](std::string key) -> bool {
+  py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
   });
 
