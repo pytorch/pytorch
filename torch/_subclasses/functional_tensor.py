@@ -36,21 +36,28 @@ class FunctionalTensor(torch.Tensor):
     elem: torch.Tensor
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
-    _mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
+    _mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
-        shape = elem.shape
-        kwargs = {}
-        kwargs["size"] = elem.shape
-        kwargs["strides"] = elem.stride()
-        kwargs["storage_offset"] = elem.storage_offset()
-        kwargs["device"] = elem.device
-        kwargs["layout"] = elem.layout
-        kwargs["requires_grad"] = elem.requires_grad
-        kwargs["dtype"] = elem.dtype
-        kwargs["dispatch_sizes_strides_policy"] = "sizes"
-        out = torch.Tensor._make_wrapper_subclass(cls, **kwargs)
+        #out = torch.Tensor._make_wrapper_subclass(cls, **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(
+            # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+            # Calling the overload that has kwargs causes us to go down the first overload path,
+            # which will **always** specialize sizes.
+            # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+            cls,
+            elem.shape,  # sizes
+            elem.stride(),  # strides
+            elem.storage_offset(),  # storage_offset
+            None,  # memory_format
+            elem.dtype,  # dtype
+            elem.layout,  # layout
+            elem.device,  # device
+            False,  # pin_memory
+            elem.requires_grad,  # requires_grad
+            "sizes",  # dispatch_sizes_strides_policy
+        )
         out.elem = elem
         return out
 
@@ -60,6 +67,18 @@ class FunctionalTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        unrecognized_types = [
+            t
+            for t in types
+            if not issubclass(t, torch._subclasses.FakeTensor)
+            and t not in [torch.Tensor, FunctionalTensor]
+        ]
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
+            )
+            return NotImplemented
+
         if kwargs is None:
             kwargs = {}
 
@@ -135,12 +154,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
-        self._mode_key = torch._C.TorchDispatchModeKey.FUNCTIONAL
+        self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         if (
-            torch._C._get_dispatch_mode(torch._C.TorchDispatchModeKey.FUNCTIONAL)
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
             is None
         ):
             self.enter_stack.append(True)
@@ -159,7 +178,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             kwargs = {}
 
         unrecognized_types = [
-            t for t in types if not issubclass(t, torch._subclasses.FakeTensor) and t not in [torch.Tensor, FunctionalTensor]
+            t
+            for t in types
+            if not issubclass(t, torch._subclasses.FakeTensor)
+            and t not in [torch.Tensor, FunctionalTensor]
         ]
         if unrecognized_types:
             not_implemented_log.debug(
@@ -230,7 +252,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 @contextlib.contextmanager
 def maybe_disable_functional_mode():
     maybe_func_mode = torch._C._unset_dispatch_mode(
-        torch._C.TorchDispatchModeKey.FUNCTIONAL
+        torch._C._TorchDispatchModeKey.FUNCTIONAL
     )
     try:
         yield

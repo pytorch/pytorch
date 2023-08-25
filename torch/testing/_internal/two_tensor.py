@@ -1,4 +1,5 @@
 import torch
+import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
@@ -15,6 +16,8 @@ class TwoTensor(torch.Tensor):
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = a.shape
         kwargs = {}
+        kwargs["strides"] = a.stride()
+        kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
@@ -32,6 +35,7 @@ class TwoTensor(torch.Tensor):
             or out.storage_offset() != a.storage_offset()
         ):
             with torch.utils._mode_utils.no_dispatch():
+                import pdb; pdb.set_trace()
                 out.as_strided_(a.shape, a.stride(), a.storage_offset())
         return out
 
@@ -57,22 +61,18 @@ class TwoTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if kwargs is None:
             kwargs = {}
-        assert any(isinstance(x, TwoTensor) for x in args)
-        assert any(isinstance(x, TwoTensor) for x in args)
-        args_a = [x.a if isinstance(x, TwoTensor) else x for x in args]
-        args_b = [x.b if isinstance(x, TwoTensor) else x for x in args]
+        args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
+        args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
         out_a = func(*args_a, **kwargs)
         out_b = func(*args_b, **kwargs)
         assert type(out_a) == type(out_b)
-        # TODO: figure out the right way to propagate requires_grad-ness
-        any_requires_grad = any(
-            isinstance(x, torch.Tensor) and x.requires_grad for x in args
-        )
-        if isinstance(out_a, torch.Tensor):
-            out = TwoTensor(out_a, out_b)
-            # Use this helper API to ensure that storage aliasing is correct. Needed for torch.compile correctness
-            return return_and_correct_aliasing(func, args, kwargs, out)
+        out_a_flat, spec = pytree.tree_flatten(out_a)
+        out_b_flat, _ = pytree.tree_flatten(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
-        assert out_a == out_b
-        return out_a
+        out_flat = [
+            TwoTensor(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            for o_a, o_b in zip(out_a_flat, out_b_flat)
+        ]
+        out = pytree.tree_unflatten(out_flat, spec)
+        return return_and_correct_aliasing(func, args, kwargs, out)

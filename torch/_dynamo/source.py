@@ -142,6 +142,18 @@ class GlobalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
+
+
+@dataclasses.dataclass(frozen=True)
 class GlobalWeakRefSource(Source):
     global_name: str
 
