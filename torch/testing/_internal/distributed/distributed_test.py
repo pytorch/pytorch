@@ -8306,7 +8306,7 @@ class DistributedTest:
             )
             # Ensure errors are raised upon incorrect arguments.
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
