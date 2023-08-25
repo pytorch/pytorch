@@ -83,7 +83,7 @@ def validate_args_and_maybe_create_graph_inputs(
                 new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value, source=a.source
+                    tx=tx, proxy=new_proxy, example_value=example_value
                 )
             else:
                 new_arg = a

@@ -38,13 +38,13 @@ def _set_compilation_env():
     _old_size_limit = torch._dynamo.config.cache_size_limit
 
     try:
-        # We need to turn off the is_fx_tracing_flag temporarily
-        # Remove it once we are confident fx tracing works with dynamo
+        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
+        # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         torch._dynamo.config.capture_dynamic_output_shape_ops = True
         torch._dynamo.config.capture_scalar_outputs = True
         # We need to enlarge the dynamo cache size limit because
-        # cond's frame is expected to be hitted with different inputs frequently
+        # cond_wrapper's frame is expected to be hitted with different inputs frequently
         torch._dynamo.config.cache_size_limit = 256
         yield
     finally:
@@ -60,14 +60,17 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 
 def cond_compiled(pred, true_fn, false_fn, args):
-    if torch._dynamo.is_compiling() or not torch._dynamo.is_dynamo_supported():
+    if torch._dynamo.is_compiling():
         return cond(pred, true_fn, false_fn, args)
 
-    def wrapper(pred, true_fn, false_fn, args):
+    if not torch._dynamo.is_dynamo_supported():
+        raise RuntimeError("torch.cond can only work when dynamo is supported.")
+
+    def cond_wrapper(pred, true_fn, false_fn, args):
         return cond(pred, true_fn, false_fn, args)
 
     with _set_compilation_env():
-        return torch.compile(wrapper, backend="eager", fullgraph=True)(
+        return torch.compile(cond_wrapper, backend="eager", fullgraph=True)(
             pred, true_fn, false_fn, args
         )
 
@@ -378,3 +381,4 @@ cond.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
 cond.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+cond.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
