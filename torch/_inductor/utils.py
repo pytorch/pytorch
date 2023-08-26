@@ -40,6 +40,9 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+import torch.distributed as dist
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
