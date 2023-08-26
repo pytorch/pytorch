@@ -128,7 +128,7 @@ class TuningProcess:
 
 @dataclasses.dataclass
 class TuningProcessPool:
-    processes: Optional[Queue[TuningProcess]] = None
+    processes: Optional[Queue["TuningProcess"]] = None
     executor: Optional[ThreadPoolExecutor] = None
 
     def initialize(self) -> None:
