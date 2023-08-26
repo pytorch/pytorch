@@ -949,11 +949,38 @@ class TestMemoryLeak(TestCaseMPS):
             leak_gpu0()
 
 
-# These tests were taken from test/test_nn.py
 class TestPixelShuffle(TestCaseMPS):
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
-                                                 upscale_factor=None):
+                                                 upscale_factor=None, is_contiguous=True):
+
+            def generate_input():
+                # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
+                channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
+                height = random.randint(5, 10)
+                width = random.randint(5, 10)
+
+                if num_input_dims == 1:
+                    input = torch.rand(channels, requires_grad=True, device='mps')
+                    assert is_contiguous
+                elif num_input_dims == 2:
+                    input = torch.rand(width, height, requires_grad=True, device='mps').T
+                    if is_contiguous:
+                        input = input.contiguous()
+                else:
+                    batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                    input = torch.rand(*batch_sizes, channels, width, height, requires_grad=True, device='mps')
+                    input = input.transpose(-1, -2)
+                    if is_contiguous:
+                        input = input.contiguous()
+
+                if not is_contiguous and len(input.reshape(-1)) > 0:
+                    assert not input.is_contiguous()
+
+                input = input.detach().clone()
+                input.requires_grad = True
+                return input
+
             # Function to imperatively ensure pixels are shuffled to the correct locations.
             # Used to validate the batch operations in pixel_shuffle.
             def _verify_pixel_shuffle(input, output, upscale_factor):
@@ -967,18 +994,7 @@ class TestPixelShuffle(TestCaseMPS):
                             self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
             upscale_factor = random.randint(2, 5) if upscale_factor is None else upscale_factor
-            # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
-            channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
-            height = random.randint(5, 10)
-            width = random.randint(5, 10)
-
-            if num_input_dims == 1:
-                input = torch.rand(channels, requires_grad=True, device='mps')
-            elif num_input_dims == 2:
-                input = torch.rand(height, width, requires_grad=True, device='mps')
-            else:
-                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
-                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True, device='mps')
+            input = generate_input()
 
             ps = nn.PixelShuffle(upscale_factor)
             pus = nn.PixelUnshuffle(downscale_factor=upscale_factor)
@@ -1018,14 +1034,22 @@ class TestPixelShuffle(TestCaseMPS):
         def _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims):
             # For 1D - 2D, this is an error case.
             # For 3D - 5D, this is a success case for pixel_shuffle + pixel_unshuffle.
-            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims)
+            is_contiguous_check = [True, False] if num_input_dims > 1 else [True]
+            for is_contiguous in is_contiguous_check:
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, valid_channels_dim=False, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, upscale_factor=0, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, upscale_factor=-2, is_contiguous=is_contiguous
+                )
 
-            # Error cases for pixel_shuffle.
-            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, valid_channels_dim=False)
-            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=0)
-            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=-2)
-
-            # Error cases for pixel_unshuffle.
+                # Error cases for pixel_unshuffle.
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_height_dim=False)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_width_dim=False)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)

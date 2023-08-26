@@ -21,7 +21,6 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
     check_pixel_unshuffle_shapes(self, factor);
   }
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   MPSStream* stream = getCurrentMPSStream();
 
   const int64_t c = self.size(-3);
@@ -47,43 +46,32 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
   @autoreleasepool {
     string key = (upscale ? "pixel_shuffle_" : "pixel_unshuffle_") + getTensorsStringKey({self}) + "_factor_" +
         std::to_string(factor);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+    CachedGraph* cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      const auto ndims = self.ndimension();
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      MPSGraphTensor* outputTensor = nullptr;
+      if (upscale) {
+        outputTensor = [mpsGraph depthToSpace2DTensor:inputTensor
+                                            widthAxis:ndims - 1
+                                           heightAxis:ndims - 2
+                                            depthAxis:ndims - 3
+                                            blockSize:factor
+                                 usePixelShuffleOrder:YES
+                                                 name:nil];
+      } else {
+        outputTensor = [mpsGraph spaceToDepth2DTensor:inputTensor
+                                            widthAxis:ndims - 1
+                                           heightAxis:ndims - 2
+                                            depthAxis:ndims - 3
+                                            blockSize:factor
+                                 usePixelShuffleOrder:YES
+                                                 name:nil];
+      }
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          const auto ndims = self.ndimension();
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          MPSGraphTensor* outputTensor;
-          if (upscale) {
-            outputTensor = [mpsGraph depthToSpace2DTensor:inputTensor
-                                                widthAxis:ndims - 1
-                                               heightAxis:ndims - 2
-                                                depthAxis:ndims - 3
-                                                blockSize:factor
-                                     usePixelShuffleOrder:YES
-                                                     name:nil];
-          } else {
-            outputTensor = [mpsGraph spaceToDepth2DTensor:inputTensor
-                                                widthAxis:ndims - 1
-                                               heightAxis:ndims - 2
-                                                depthAxis:ndims - 3
-                                                blockSize:factor
-                                     usePixelShuffleOrder:YES
-                                                     name:nil];
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      return newCachedGraph;
+    });
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
