@@ -55,7 +55,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export',
+    'export', 'cond',
 ]
 
 ################################################################################
@@ -1726,6 +1726,72 @@ def compile(model: Optional[Callable] = None, *,
 from torch import export as export
 
 def cond(pred, true_branch, false_branch, operands):
+    r"""
+    `cond` can logically be seen as implemented as follows::
+
+    def cond(pred, true_branch, false_branch, operands):
+        if pred:
+            return true_branch(*operands)
+        else:
+            return false_branch(*operands)
+
+    Like a normal if statement in Python, users can use it to selectively execute a branch based on
+    the truth value of predicate in eager-mode or torch.compile. What make 'cond' unique is that
+    'cond' is exportable, lowerable: users can use it to capture a data-dependent control flow precisely,
+    preserve it accross the Pytorch stack and compile it in an environemnt without Python.
+
+    Args:
+        - `pred (Union[bool, torch.Tensor])`: A boolean expression or a tensor with one element,
+          indicating which branch function to apply.
+
+        - `true_branch (Callable)`: A callable function (a -> b) that is within the
+          scope that is being traced.
+
+        - `false_branch (Callable)`: A callable function (a -> b) that is within the
+          scope that is being traced. The true branch and false branch must have
+          consistent input and outputs, meaning the inputs have to be the same, and
+          the outputs have to be the same type and shape.
+
+        - `operands (Tuple[torch.Tensor])`: A tuple of inputs to the true/false
+          branches.
+
+    Example:
+
+        def true_fn(x: torch.Tensor):
+            return x.cos()
+        def false_fn(x: torch.Tensor):
+            return x.sin()
+        return torch.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
+
+    Restrictions:
+        - The conditional statement (aka `pred`) must meet one of the following constraints:
+
+          - It's a `torch.Tensor` with only one element, e.g. `torch.tensor(10)` or
+            `torch.tensor([[10]])`, etc.
+
+          - It's a boolean expression, e.g. `x.shape[0] > 10` or `x.dim() > 1 and x.shape[1] > 10`
+
+        - The branch function (aka `true_branch`/`false_branch`) must meet all of the following constraints:
+
+          - The function signature must match with operands.
+
+          - The function must return a tensor with the same metadata, e.g. shape,
+            dtype, etc.
+
+          - The function cannot have in-place mutations on inputs or global variables. (Note: in-place tensor
+            operations such as `add_` for intermediate results are allowed in a branch)
+
+    .. warning::
+
+    Temporal Limitations:
+
+        - `cond` only supports **inference** right now. Autograd will be supported in the future.
+
+        - The **operands** must be a **tuple of tensors**. Pytree of tensors will be supported in the future.
+
+        - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
+
+    """
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
