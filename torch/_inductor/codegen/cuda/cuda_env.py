@@ -1,13 +1,14 @@
 import functools
 import logging
 from subprocess import PIPE, Popen
+from typing import Optional
 
 import torch
 
 from ... import config
 
 
-def get_cuda_arch() -> str:
+def get_cuda_arch() -> Optional[str]:
     try:
         cuda_arch = config.cuda.arch
         if cuda_arch is None:
@@ -20,7 +21,7 @@ def get_cuda_arch() -> str:
         return None
 
 
-def get_cuda_version() -> str:
+def get_cuda_version() -> Optional[str]:
     try:
         cuda_version = config.cuda.version
         if cuda_version is None:
