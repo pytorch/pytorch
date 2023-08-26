@@ -220,7 +220,6 @@ Tensor& max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
                                       IntArrayRef output_size,
                                       Tensor& grad_input) {
 
-
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   TORCH_CHECK(indices_.scalar_type() == at::ScalarType::Long,
                   "elements in indices should be type int64 but got type: ", indices_.scalar_type());
