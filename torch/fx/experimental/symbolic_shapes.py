@@ -3168,14 +3168,6 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        # Check if we get to the same ShapeEnv state by replaying the recorded events.
-        # This will create a new ShapeEnv instance, and call all recorded function
-        # calls on this new instance. Finally, it will check whether this new instance
-        # has equal state.
-        if self.check_recorded_events:
-            shape_env = replay_shape_env_events(self.events)
-            self.check_equal(shape_env)
-
         from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
 
         # Actual codegen must be delayed as we don't necessarily know what
@@ -3503,6 +3495,15 @@ class ShapeEnv:
                 PopulateValidator(self.graph, self.validator).run()
 
         self._check_translation_validate()
+
+        # Check if we get to the same ShapeEnv state by replaying the recorded events.
+        # This will create a new ShapeEnv instance, and call all recorded function
+        # calls on this new instance. Finally, it will check whether this new instance
+        # has equal state.
+        if self.check_recorded_events:
+            shape_env = replay_shape_env_events(self.events)
+            self.check_equal(shape_env)
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
