@@ -239,7 +239,7 @@ class ExportedProgram:
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
-        original_traced_arguments: Tuple[Any, ...] = (),
+        example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -264,7 +264,7 @@ class ExportedProgram:
             Tuple[InputDim, InputDim]
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
-        self._original_traced_arguments = original_traced_arguments
+        self._example_inputs = example_inputs
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -308,8 +308,8 @@ class ExportedProgram:
 
     @property
     @compatibility(is_backward_compatible=False)
-    def original_traced_arguments(self):
-        return self._original_traced_arguments
+    def example_inputs(self):
+        return self._example_inputs
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -531,7 +531,7 @@ class ExportedProgram:
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
-            self.original_traced_arguments,
+            self.example_inputs,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
