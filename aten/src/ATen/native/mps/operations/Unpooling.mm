@@ -1,24 +1,31 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/ExpandUtils.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
+#include <ATen/native/mps/operations/Unpooling.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_unpool2d_native.h>
+#endif
+
 
 namespace at::native {
 namespace mps {
 static const char* UNPOOL_OPS_TEMPLATE = R"METAL(
 
 kernel void max_unpooling2d_forward(constant int64_t& numInputElements [[buffer(0)]],
-                                            device {0} *input [[buffer(1)]],
-                                            device int64_t* indices [[buffer(2)]],
-                                            constant int64_t& numChannels [[buffer(3)]],
-                                            constant int64_t& inputHeight [[buffer(4)]],
-                                            constant int64_t& inputWidth [[buffer(5)]],
-                                            constant int64_t& outputHeight [[buffer(6)]],
-                                            constant int64_t& outputWidth [[buffer(7)]],
-                                            device {1} *output [[buffer(8)]],
-                                            uint id [[thread_position_in_grid]]) {{
+                                    device {0} *input [[buffer(1)]],
+                                    device int64_t* indices [[buffer(2)]],
+                                    constant int64_t& numChannels [[buffer(3)]],
+                                    constant int64_t& inputHeight [[buffer(4)]],
+                                    constant int64_t& inputWidth [[buffer(5)]],
+                                    constant int64_t& outputHeight [[buffer(6)]],
+                                    constant int64_t& outputWidth [[buffer(7)]],
+                                    device {1} *output [[buffer(8)]],
+                                    uint id [[thread_position_in_grid]]) {{
   int64_t outputImageSize = outputHeight * outputWidth;
   if (id < numInputElements) {{
     int c = (id / inputWidth / inputHeight) % numChannels;
@@ -32,15 +39,15 @@ kernel void max_unpooling2d_forward(constant int64_t& numInputElements [[buffer(
 }}
 
 kernel void max_unpooling2d_backward(constant int64_t& numInputElements [[buffer(0)]],
-                                            device {0} *input [[buffer(1)]],
-                                            device int64_t* indices [[buffer(2)]],
-                                            constant int64_t& numChannels [[buffer(3)]],
-                                            constant int64_t& inputHeight [[buffer(4)]],
-                                            constant int64_t& inputWidth [[buffer(5)]],
-                                            constant int64_t& outputHeight [[buffer(6)]],
-                                            constant int64_t& outputWidth [[buffer(7)]],
-                                            device {1} *output [[buffer(8)]],
-                                            uint id [[thread_position_in_grid]]) {{
+                                    device {0} *input [[buffer(1)]],
+                                    device int64_t* indices [[buffer(2)]],
+                                    constant int64_t& numChannels [[buffer(3)]],
+                                    constant int64_t& inputHeight [[buffer(4)]],
+                                    constant int64_t& inputWidth [[buffer(5)]],
+                                    constant int64_t& outputHeight [[buffer(6)]],
+                                    constant int64_t& outputWidth [[buffer(7)]],
+                                    device {1} *output [[buffer(8)]],
+                                    uint id [[thread_position_in_grid]]) {{
   if (id < numInputElements) {{
     int c = (id / inputWidth / inputHeight) % numChannels;
     int n = id / inputWidth / inputHeight / numChannels;
@@ -52,8 +59,6 @@ kernel void max_unpooling2d_backward(constant int64_t& numInputElements [[buffer
 
 
 )METAL";
-
-void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length);
 
 static id<MTLLibrary> compileUnpoolOpsLibrary(id<MTLDevice> device,
                                                const std::string& t1,
@@ -97,9 +102,18 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
+static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
+                          id<MTLComputePipelineState> cplState,
+                          uint32_t length) {
+  uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
 } // namespace mps
 
-void max_unpooling2d_forward_out_mps(const Tensor& self_,
+Tensor& max_unpooling2d_forward_out_mps(const Tensor& self_,
                                   const Tensor& indices_,
                                   IntArrayRef output_size,
                                   Tensor& output) {
@@ -189,6 +203,7 @@ void max_unpooling2d_forward_out_mps(const Tensor& self_,
   if (self.ndimension() == 3) {
     output.resize_({numChannels, outputHeight, outputWidth});
   }
+  return output;
 }
 
 Tensor max_unpooling2d_forward_mps(const Tensor& self,
@@ -199,7 +214,7 @@ Tensor max_unpooling2d_forward_mps(const Tensor& self,
   return output;
 }
 
-void max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
+Tensor& max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
                                       const Tensor& self_,
                                       const Tensor& indices_,
                                       IntArrayRef output_size,
@@ -260,7 +275,7 @@ void max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
   grad_input.zero_();
 
   if (numInputElements == 0) {
-    return;
+    return grad_input;
   }
 
   using namespace at::mps;
@@ -296,7 +311,7 @@ void max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
 
     getMPSProfiler().endProfileKernel(cplState);
   });
-
+  return grad_input;
 }
 
 Tensor max_unpooling2d_backward_mps(const Tensor& grad_output,
