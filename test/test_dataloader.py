@@ -1337,7 +1337,7 @@ except RuntimeError as e:
         # [no auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(itertools.chain.from_iterable(range(s) for s in sizes_for_all_workers))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1396,7 +1396,7 @@ except RuntimeError as e:
         # [auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(itertools.chain.from_iterable(range(s) for s in sizes_for_all_workers))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1432,7 +1432,7 @@ except RuntimeError as e:
         # [auto-batching & drop_last] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(itertools.chain.from_iterable(range(s) for s in sizes_for_all_workers))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
