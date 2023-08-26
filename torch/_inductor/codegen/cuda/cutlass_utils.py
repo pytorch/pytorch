@@ -14,6 +14,8 @@ import torch
 from ...ir import Layout
 from .cuda_env import get_cuda_arch, get_cuda_version
 
+log = logging.getLogger(__name__)
+
 
 class Args:
     """
