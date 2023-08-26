@@ -265,6 +265,14 @@ class BaseSchedulerNode:
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
         """
+        if not self.node.should_allocate():
+            return
+
+        if isinstance(self, (SchedulerNode,)) and (
+            self.node.get_alias_names() or self.node.get_mutation_names()
+        ):
+            return
+
         if (
             (
                 isinstance(self, (SchedulerNode,))
@@ -708,9 +716,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
-    def is_foreach(self):
-        return False
-
     def get_device(self):
         return self.group[0]
 
@@ -1072,6 +1077,25 @@ class Scheduler:
         mutation properly.
         """
         name_to_users = collections.defaultdict(list)
+
+        # handle aliasing by using python aliasing in name_to_users
+        # if foo aliases bar then we will make name_to_users["foo"] point
+        # to the same python list as name_to_users["bar"]
+        for node1 in self.nodes:
+            node1_name = node1.get_name()
+            for node2_name in node1.get_aliases():
+                if node1_name in name_to_users and node2_name in name_to_users:
+                    # merge the two
+                    list1 = name_to_users[node1_name]
+                    list2 = name_to_users[node2_name]
+                    combined = list1 + list2
+                    for key in name_to_users.keys():
+                        if name_to_users[key] is list1 or name_to_users[key] is list2:
+                            name_to_users[key] = combined
+                elif node1_name in name_to_users:
+                    name_to_users[node2_name] = name_to_users[node1_name]
+                else:
+                    name_to_users[node1_name] = name_to_users[node2_name]
 
         def rename(n):
             if n in self.mutation_renames:
@@ -1675,8 +1699,8 @@ class Scheduler:
         self.flush()
 
     def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs:
-            # all graph inputs are assumed to be aligned
+        if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
+            # all graph inputs or constants are assumed to be aligned
             return False
         node = self.name_to_node[buf_name]
         layout = node.node.get_layout()

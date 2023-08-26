@@ -2553,15 +2553,24 @@ class TritonScheduling(BaseScheduling):
                     mutations,
                     index_dtype,
                 ) = self.get_kernel_args(node_schedule, numel, rnumel)
+
+                subkernel = kernel.create_sub_kernel(
+                    *tiled_groups,
+                    reduction_hint=reduction_hint_val,
+                    mutations=mutations,
+                    index_dtype=index_dtype,
+                )
+
                 self.codegen_node_schedule_with_kernel(
                     node_schedule,
-                    kernel.create_sub_kernel(
-                        *tiled_groups,
-                        reduction_hint=reduction_hint_val,
-                        mutations=mutations,
-                        index_dtype=index_dtype,
-                    ),
+                    subkernel,
                 )
+
+                with V.set_kernel_handler(subkernel):
+                    for node in node_schedule:
+                        if node not in (EnableReduction, DisableReduction):
+                            node.mark_run()
+                V.graph.removed_buffers |= subkernel.removed_buffers
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])

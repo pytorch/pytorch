@@ -39,7 +39,7 @@ def config_of(args):
 
     def is_aligned(x):
         if isinstance(x, TensorArg):
-            return V.graph.scheduler.is_unaligned_buffer(x.buffer)
+            return not V.graph.scheduler.is_unaligned_buffer(x.buffer)
         if isinstance(x, SizeArg):
             # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
             # _maybe_evaluate_static...
