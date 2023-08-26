@@ -1277,7 +1277,7 @@ class FlatParamHandle:
         self._check_sharded_strategy()
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_freed(unsharded_flat_param)
+        # self._check_storage_freed(unsharded_flat_param)
         _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 

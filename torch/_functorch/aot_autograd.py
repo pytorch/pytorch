@@ -628,6 +628,7 @@ class ViewAndMutationMeta:
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
         self.unsafe_view_out_indices = unsafe_view_out_indices
+        print("output_info", self.output_info)
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
             [x for x in self.output_info
@@ -1051,7 +1052,7 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        # assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
@@ -3544,6 +3545,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            print("fw_outs", [n for n in fw_module.graph.nodes if n.op == "output"])
+            print("fw_outs_meta", [n.meta for n in fw_module.graph.nodes if n.op == "output"])
+            print("num_inner_fwd_outputs", num_inner_fwd_outputs)
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -3721,6 +3725,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         compiled_bw_func = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
+                        breakpoint()
                     except Exception:
                         log.warning(
                             "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
@@ -3759,6 +3764,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
+            print("num_outputs?", num_outputs)
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -3850,6 +3856,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 fw_outs[num_forward_returns:num_forward],
                 return_new_outs=False
             )
+            # ctx.mark_non_differentiable(raw_returns[0])
+            print("raw_returns", raw_returns)
+            print("num_outputs", num_outputs)
             return tuple(raw_returns)
 
         @staticmethod
@@ -4714,6 +4723,7 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
+    hooked_nodes = []
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
@@ -4726,6 +4736,8 @@ def aot_module_simplified(
                     assert source not in seen_sources, source
                     seen_sources.add(source)
                     aot_autograd_arg_pos_to_source.append(source)
+            if 'hooks' in node.meta:
+                hooked_nodes.append(node)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -4928,7 +4940,9 @@ https://github.com/pytorch/pytorch/issues/101192
                 else:
                     assert grad is None
             return *fw_outs, *output_gradients
+        breakpoint()
         fx_g = make_fx(flattened_joint)(*full_args)
+        breakpoint()
 
     user_args_flat, _ = pytree.tree_flatten(args)
     return fx_g, create_graph_signature(

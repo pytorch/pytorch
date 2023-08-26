@@ -9,7 +9,6 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
-from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed

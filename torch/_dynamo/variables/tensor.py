@@ -729,6 +729,7 @@ class TensorVariable(VariableTracker):
                 fn = fn_var.fn
                 name = fn_var.fn.__name__
 
+
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
                 **options,

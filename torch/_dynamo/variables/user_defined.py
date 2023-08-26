@@ -19,7 +19,7 @@ from ..allowed_functions import is_allowed
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, ODictGetItemSource, RandomValueSource, GetItemSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -439,6 +439,36 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif (
+            istype(self.value, functools.partial)
+        ):
+            from .builder import VariableBuilder
+
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            args_source = AttrSource(self.source, "args")
+            partial_args = []
+            for i, arg in enumerate(self.value.args): 
+                args_item_source = GetItemSource(args_source, i)
+                arg_vt = VariableBuilder(tx, args_item_source)(arg)
+                print("Potential obj?", arg_vt)
+                partial_args.append(arg_vt)
+            partial_args.extend(args)
+
+            kwargs_source = AttrSource(self.source, "keywords")
+            partial_kwargs = {}
+            for k, kwarg in enumerate(self.value.keywords.items()): 
+                kwargs_item_source = GetItemSource(kwargs_source, k)
+                kwarg_vt = VariableBuilder(tx, kwargs_item_source)(kwarg)
+                print("Potential kw obj?", k, kwarg_vt)
+                partial_kwargs[k] = kwarg_vt
+            
+            partial_kwargs.update(kwargs)
+
+            # unimplemented(f"Special partial? {self.source} {self.value.func} {[type(t) for t in self.value.args]} {args} {kwargs}")
+            return variables.UserFunctionVariable(self.value.func, **options).call_function(
+                tx, partial_args, partial_kwargs
+            )
+            
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)

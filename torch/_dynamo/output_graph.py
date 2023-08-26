@@ -1071,9 +1071,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
-        gpu_id = int(os.environ["LOCAL_RANK"])
-        if gpu_id == 0:
-            gm.graph.print_tabular()
+        breakpoint()
+        # gpu_id = int(os.environ["LOCAL_RANK"])
+        # if gpu_id == 0:
+            # gm.graph.print_tabular()
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
