@@ -23,7 +23,7 @@ import types
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from ctypes import cdll, c_void_p, CDLL
+from ctypes import c_void_p, cdll, CDLL
 from dataclasses import field
 from functools import partial
 from importlib import abc
@@ -1188,14 +1188,19 @@ class TritonCodeCache:
 
 
 def _cuda_compiler() -> str:
+    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
+        return config.cuda.cuda_cxx
+    if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
+        return os.getenv("CUDACXX")
+    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
+        return os.path.join(os.getenv("CUDA_HOME"), "bin/nvcc")
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     from torch.utils import cpp_extension
-    cutlass_path = os.path.join(
-        cpp_extension._TORCH_PATH, "../third_party/cutlass"
-    )
+
+    cutlass_path = os.path.join(cpp_extension._TORCH_PATH, "../third_party/cutlass")
     return [
         os.path.join(cutlass_path, "include"),
         os.path.join(cutlass_path, "tools/library/include"),
@@ -1206,18 +1211,22 @@ def _cutlass_include_paths() -> List[str]:
 
 def _cuda_lib_options() -> List[str]:
     from torch.utils import cpp_extension
+
     extra_ldflags: List[str] = []
     if is_linux():
         extra_lib_dir = "lib64"
-        if (not os.path.exists(cpp_extension._join_cuda_home(extra_lib_dir)) and
-                os.path.exists(cpp_extension._join_cuda_home("lib"))):
+        if not os.path.exists(
+            cpp_extension._join_cuda_home(extra_lib_dir)
+        ) and os.path.exists(cpp_extension._join_cuda_home("lib")):
             # 64-bit CUDA may be installed in "lib"
             # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
             extra_lib_dir = "lib"
-        extra_ldflags.append(f'-L{cpp_extension._join_cuda_home(extra_lib_dir)}')
-        extra_ldflags.append(f'-L{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}')
-        extra_ldflags.append('-lcuda')
-        extra_ldflags.append('-lcudart')
+        extra_ldflags.append(f"-L{cpp_extension._join_cuda_home(extra_lib_dir)}")
+        extra_ldflags.append(
+            f'-L{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}'
+        )
+        extra_ldflags.append("-lcuda")
+        extra_ldflags.append("-lcudart")
     else:
         raise NotImplementedError(f"Unsupported env, failed to find cuda libs!")
     return extra_ldflags
@@ -1303,7 +1312,7 @@ def cuda_compile_command(
 
 
 class DLLWrapper:
-    """ A wrapper for a dynamic library. """
+    """A wrapper for a dynamic library."""
 
     def __init__(
         self,
@@ -1402,9 +1411,7 @@ class CUDACodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = (
-                    input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
-                )
+                output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext
@@ -1431,7 +1438,9 @@ class CUDACodeCache:
                 f"Only support loading a .so file for now. "
                 f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
             )
-        dst_file_path, hash_key, source_code_path = cls.compile(source_code, dst_file_ext)
+        dst_file_path, hash_key, source_code_path = cls.compile(
+            source_code, dst_file_ext
+        )
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
@@ -1583,7 +1592,7 @@ class AsyncCompile:
 
     def cuda(self, source_code, dst_file_ext):
         def task():
-            return CUDACodeCache.load(dst_file_ext, source_code)[0]
+            return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 

@@ -427,6 +427,14 @@ class cuda:
     # Whether to use fast math.
     use_fast_math = False
 
+    # Path to CUDA NVCC.
+    # NVCC search priority:
+    # 1) cuda_cxx set in this config
+    # 2）CUDACXX env
+    # 3）CUDA_HOME env
+    # 4) default system search PATH.
+    cuda_cxx = None
+
 
 # create a directory containing lots of debug information
 class trace:
