@@ -55,7 +55,7 @@ group_fusion = False
 batch_fusion = True
 
 # enable reordering pass
-reordering = True
+reorder_for_locality = True
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -73,6 +73,10 @@ force_mixed_mm = False
 # If a relative path is specified, it will be used as a subdirectory under the default caching path;
 # If not specified, a temp directory will be created under the default caching path
 aot_inductor_output_path = ""
+
+# Maximize overlap between compute and communication
+# If in inference, recommend setting `reorder_for_locality=False` to get max performance
+maximize_compute_comm_overlap = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"

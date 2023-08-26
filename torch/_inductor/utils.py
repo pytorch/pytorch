@@ -32,6 +32,7 @@ from unittest import mock
 import sympy
 
 import torch
+import torch.distributed as dist
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -1030,3 +1031,15 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+def is_local():
+    return dist.get_rank() == 0
+
+def printd(*args):
+    if is_local():
+        print(*args)
+
+def breakpointd():
+    if is_local():
+        breakpoint()
+    dist.barrier()

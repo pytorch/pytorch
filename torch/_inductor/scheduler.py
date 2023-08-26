@@ -13,7 +13,7 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from . import config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer
@@ -83,6 +83,7 @@ class BaseSchedulerNode:
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
+        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.recursive_predecessors: Optional[Set[str]] = None
         self.min_order: Optional[int] = None
@@ -138,6 +139,10 @@ class BaseSchedulerNode:
             else:
                 result[id(use.node)] = use
         self.users = list(result.values())
+
+    @property
+    def args(self):
+        return self.inverse_users
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -620,6 +625,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.node = None  # type: ignore[assignment]
         self.users = None
         self.inverse_users = []
+        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.recursive_predecessors = set.union(
             *[x.recursive_predecessors for x in snodes]
@@ -993,11 +999,19 @@ class Scheduler:
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
+
+        comms.decide_global_ordering_comms(self.nodes)
+
+        self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.fuse_nodes()
+        # Refresh node_users and inverse_users to reflect fused nodes
+        self.compute_node_users()
+        if config.maximize_compute_comm_overlap:
+            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -1174,6 +1188,39 @@ class Scheduler:
         for node in self.nodes:
             for user in node.users:
                 user.node.inverse_users.append(node)
+
+    def compute_node_users(self):
+        # set up buffer name to (fused)snode mapping
+        buf_to_snode = {}
+        for node in self.nodes:
+            if isinstance(node, FusedSchedulerNode):
+                for x in node.snodes:
+                    buf_to_snode[x.get_name()] = node
+            buf_to_snode[node.get_name()] = node
+
+        for node in self.nodes:
+            node.users = []
+            node.inverse_users = []
+
+        # compute inverse_users
+        for node in self.nodes:
+            inverse_users = []
+            for dep in node.unmet_dependencies:
+                assert dep.name in buf_to_snode
+                dep_node = buf_to_snode[dep.name]
+                inverse_users.append(dep_node)
+            node.inverse_users = inverse_users
+
+        # compute node_users
+        # TODO: ideally, we should deduplicate .users and .node_users,
+        # but currently .users contains extra information that's difficult to
+        # extract into a standalone container.
+        node_to_users = {}
+        for node in self.nodes:
+            for inverse_user in node.inverse_users:
+                node_to_users.setdefault(inverse_user, []).append(node)
+        for node, users in node_to_users.items():
+            node.node_users = users
 
     def dead_node_elimination(self):
         """
