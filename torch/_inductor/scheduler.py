@@ -983,8 +983,8 @@ class Scheduler:
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
-        V.debug.graph_diagram(self.nodes)
-        breakpoint()
+        # V.debug.graph_diagram(self.nodes)
+        # breakpoint()
         V.debug.fx_graph_diagram(self.nodes, gm)
         self.debug_draw_graph()
 

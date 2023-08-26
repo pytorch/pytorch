@@ -405,11 +405,38 @@ class DebugFormatter:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
     def fx_graph_diagram(self, nodes: SchedulerNodeList, gm: torch.fx.GraphModule):
-        if gm is None:
-            with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
-                gm = pickle.load(fd)
+        # if gm is None:
+        #     with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
+        #         gm = pickle.load(fd)
 
-        draw_graph(gm, fname=self.filename("fx_graph_diagram.svg"), clear_meta=False)
+        node_name_to_buff_name = self._get_fx_node_name_to_buffer(nodes)
+
+        # breakpoint()
+
+
+
+        draw_graph(gm, fname=self.filename("fx_graph_diagram.svg"), clear_meta=False, node_name_to_group=node_name_to_buff_name)
+    
+    def _get_fx_node_name_to_buffer(self, nodes: SchedulerNodeList):
+        node_name_to_buff_name = {}
+        for node in nodes:
+            ir_node = node.node
+            if ir_node is None:
+                continue
+            buff_name = ir_node.name
+            if ir_node.origins is None:
+                continue
+            for origin in ir_node.origins:
+                if origin.stack_trace is None:
+                    continue
+                node_name = origin.name
+                assert node_name not in node_name_to_buff_name, f"node_name={node_name} should not be in {node_name_to_buff_name}"
+                node_name_to_buff_name[node_name] = buff_name
+                # parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
+                # fname = self._shorten_file_name(parsed_stack_trace.file)
+                # label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
+        return node_name_to_buff_name
+        
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))

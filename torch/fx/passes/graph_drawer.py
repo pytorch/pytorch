@@ -67,12 +67,13 @@ if HAS_PYDOT:
             ignore_getattr: bool = False,
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
+            node_name_to_group=None,
         ):
             # breakpoint()
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
-                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args
+                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args, node_name_to_group
                 )
             }
 
@@ -94,6 +95,7 @@ if HAS_PYDOT:
                     ignore_getattr,
                     ignore_parameters_and_buffers,
                     skip_node_names_in_args,
+                    node_name_to_group,
                 )
 
         def get_dot_graph(self, submod_name=None) -> pydot.Dot:
@@ -190,6 +192,7 @@ if HAS_PYDOT:
             module: torch.fx.GraphModule,
             node: torch.fx.Node,
             skip_node_names_in_args: bool,
+            node_name_to_group=None,
         ) -> str:
             def _get_str_for_args_kwargs(arg):
                 if isinstance(arg, tuple):
@@ -243,6 +246,11 @@ if HAS_PYDOT:
                     parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
                     fname = self._shorten_file_name(parsed_stack_trace.file)
                     label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
+            
+            if node_name_to_group is not None:
+                # breakpoint()
+                if node.name in node_name_to_group:
+                    label += f"|buff={node_name_to_group.get(node.name)}"
 
             return label + "}"
 
@@ -310,6 +318,7 @@ if HAS_PYDOT:
             ignore_getattr: bool,
             ignore_parameters_and_buffers: bool,
             skip_node_names_in_args: bool,
+            node_name_to_group=None
         ) -> pydot.Dot:
             """
             Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph.
@@ -319,6 +328,13 @@ if HAS_PYDOT:
 
             dot_graph = pydot.Dot(name, rankdir="TB")
 
+            
+            group_to_subgraph = {}
+            if node_name_to_group is not None:
+                for node_name, group in node_name_to_group.items():
+                    if group not in group_to_subgraph:
+                        group_to_subgraph[group] = pydot.Cluster(group)
+
             for node in graph_module.graph.nodes:
                 # breakpoint()
                 if ignore_getattr and node.op == "get_attr":
@@ -326,9 +342,18 @@ if HAS_PYDOT:
 
                 style = self._get_node_style(node)
                 dot_node = pydot.Node(
-                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args), **style
+                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args, node_name_to_group=node_name_to_group), **style
                 )
-                dot_graph.add_node(dot_node)
+                if node_name_to_group is None:
+                    dot_graph.add_node(dot_node)
+                else:
+                    group = node_name_to_group.get(node.name, None)
+                    if group is None:
+                        dot_graph.add_node(dot_node)
+                    else:
+                        assert group in group_to_subgraph, "group in group_to_subgraph"
+                        subgraph = group_to_subgraph[group]
+                        subgraph.add_node(dot_node)
 
                 def get_module_params_or_buffers():
                     for pname, ptensor in chain(
@@ -353,6 +378,9 @@ if HAS_PYDOT:
 
                     if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
+            
+            for subgraph in group_to_subgraph.values():
+                dot_graph.add_subgraph(subgraph)
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":

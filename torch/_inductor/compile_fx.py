@@ -507,7 +507,6 @@ def fx_codegen_and_compile(
     # breakpoint()
     V.debug.fx_graph(gm, example_inputs)
 
-    breakpoint()
 
     # V.debug.fx_graph_diagram(None, gm)
 

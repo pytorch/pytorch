@@ -883,7 +883,7 @@ def min_cut_rematerialization_partition(
     return fw_module, bw_module
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
+def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True, node_name_to_group=None):
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
@@ -893,8 +893,9 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     if not ext:
         ext = ".svg"
     print(f"Writing FX graph to file: {base}{ext}")
-    g = graph_drawer.FxGraphDrawer(traced, figname)
+    g = graph_drawer.FxGraphDrawer(traced, figname, node_name_to_group=node_name_to_group)
     x = g.get_main_dot_graph()
+    # breakpoint()
     getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
 
 
