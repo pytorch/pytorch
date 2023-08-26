@@ -26,6 +26,8 @@ from torch.testing._internal.common_utils import (
 )
 
 # Protects against includes accidentally setting the default dtype
+# NOTE: jit_metaprogramming_utils sets the default dtype to double!
+torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
 
