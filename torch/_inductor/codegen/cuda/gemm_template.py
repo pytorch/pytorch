@@ -341,21 +341,21 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def gen_ops(self) -> List[cutlass_gemm_op.GemmOperation]:
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res = set()
+        res = dict()
         num_3x_ops = 0
         num_2x_ops = 0
         for key, op_list in ops.items():
             for op in op_list:
                 filter_res = self.filter_op(op)
-                if filter_res is not None:
-                    res.add(filter_res)
-        for op in res:
+                if filter_res is not None and res.get(filter_res.configuration_name(), None) is None:
+                    res[filter_res.configuration_name()] = filter_res
+        for op in res.values():
             if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
                 num_3x_ops += 1
             else:
                 num_2x_ops += 1
         log.debug(f"Got cutlass configs: {len(res)=}, {num_3x_ops=}, {num_2x_ops=}")
-        return list(res)
+        return list(res.values())
 
     def gemm_mode(self) -> str:
         sizes = self.output_node.get_size()
