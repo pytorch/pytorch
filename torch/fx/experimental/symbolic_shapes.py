@@ -4266,10 +4266,6 @@ def bisect(shape_env: ShapeEnv, tracked_fakes: List[Any]):
 
     events = shape_env.events
 
-    # Mapping used for finding the corresponding FX node of the fresh ShapeEnv
-    # instances. Here, we assume the order of the FX nodes will remain the same.
-    node_to_index = {node: i for i, node in enumerate(shape_env.graph.nodes)}
-
     # Retrieves the ShapeEnvEvent associated with node.
     def get_node_event(node: torch.fx.Node) -> ShapeEnvEvent:
         assert "event" in node.meta
