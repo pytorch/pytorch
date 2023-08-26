@@ -8,6 +8,7 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map
 from torch import Tensor
+from torch.export import Constraint
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
@@ -844,6 +845,32 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
+    def test_runtime_assert_for_prim(self):
+
+        def f(x, y):
+            return x + y
+
+        tensor_inp = torch.ones(7, 5)
+        exported = torch._export.export(f, (tensor_inp, 5), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        self.assertTrue(torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5)))
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"):
+            _ = exported(torch.ones(8, 5), 6)
+
+        exported = torch._export.export(f, (tensor_inp, 5.0), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"):
+            _ = exported(torch.ones(7, 5), 6.0)
+
+    def test_runtime_assert_for_prm_str(self):
+
+        def g(a, b, mode):
+            return torch.div(a, b, rounding_mode=mode)
+
+        inps = (torch.randn(4, 4), torch.randn(4), "trunc")
+        exported = torch._export.export(g, inps)
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
+            _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
+        self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
+
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
@@ -972,6 +999,13 @@ class TestExport(TestCase):
             "Tried to use data-dependent value in the subsequent computation"
         ):
             _ = export(f, (torch.tensor(6),))
+
+    def test_constraint_directly_construct(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+        ):
+            _ = Constraint()
 
 
 if __name__ == '__main__':

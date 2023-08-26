@@ -478,9 +478,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
-                    hijacked_callback = convert_frame.convert_frame(
+                    assert hasattr(
+                        callback, "_clone_with_backend"
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    hijacked_callback = callback._clone_with_backend(
                         ddp_optimizer.compile_fn,
-                        hooks=hooks,
                     )
                     return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
@@ -1364,11 +1366,6 @@ class TorchPatcher:
             torch.optim.LBFGS,
         }
         for opt in optimizer_classes:
-            # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
-            # through the optimizer init without failing. See #107789
-            opt.register_load_state_dict_pre_hook = disable(
-                opt.register_load_state_dict_pre_hook
-            )
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
