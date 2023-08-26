@@ -2338,6 +2338,7 @@ class TritonScheduling(BaseScheduling):
         return "tl.int64"
 
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
@@ -2361,7 +2362,7 @@ class TritonScheduling(BaseScheduling):
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        return reduction_hint_val, mutations, index_dtype
+        return tiled_groups, reduction_hint_val, mutations, index_dtype
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -2370,8 +2371,7 @@ class TritonScheduling(BaseScheduling):
             wrapper.writeline(origins)
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
-        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+        tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
         )
 
@@ -2507,13 +2507,19 @@ class TritonScheduling(BaseScheduling):
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
 
-        for partitions_with_metadata in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes(), self
+        for node_group in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes()
         ):
+            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ForeachKernel()
-            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
+
+            for nodes in fused_node_lists:
+                _, (numel, rnumel) = max(
+                    nodes, key=lambda x: int(x.is_reduction())
+                ).group
                 node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
                 (
+                    tiled_groups,
                     reduction_hint_val,
                     mutations,
                     index_dtype,
