@@ -150,7 +150,6 @@ class TestForeach(TestCase):
             kwargs = sample.kwargs
             disable_fastpath = kwargs.pop("disable_fastpath")
             expect_fastpath = not (noncontiguous or disable_fastpath)
-            # TODO(crcrpar): push this processing to sample func.
             if op in foreach_pointwise_op_db:
                 values = kwargs.pop("values", None)
                 if values is not None:
