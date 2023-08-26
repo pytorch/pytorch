@@ -2191,6 +2191,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         def fn():
             return torch.Size([10, 8]).numel()
+
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         num = torch.Size([10, 8]).numel()
         self.assertEqual(opt_fn(), num)
