@@ -1912,7 +1912,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for i in itertools.count():
             if name not in self.output.global_scope:
                 src = GlobalSource(name)
-                self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                # self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
                 self.output.install_global(name, value)
                 break
             name = f"{base}_{i}"

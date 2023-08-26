@@ -392,6 +392,7 @@ class SideEffects:
         del self.tensor_hooks[idx]
 
     def codegen_hooks(self, cg):
+        breakpoint()
         for (
             tensor,
             hook,
@@ -457,6 +458,7 @@ class SideEffects:
             else:
                 # register_hook stored w/o a variable name assigned to the handle
                 cg.extend_output([create_instruction("POP_TOP")])
+
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
