@@ -930,7 +930,11 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
     ):
         return False, _BOOL_SUB_ERR_MSG
     if op.name == "_foreach_norm" and (not is_inplace):
-        return False, "Trying to set a forward gradient that has a different size than"
+        return (
+            False,
+            "Trying to set a forward gradient that has a different size than that of the original Tensor, "
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1]."
+        )
     rhs_arg_has_complex_number = sample.args and ((
         isinstance(sample.args[0], list)
         and any(isinstance(a, complex) for a in sample.args[0])
