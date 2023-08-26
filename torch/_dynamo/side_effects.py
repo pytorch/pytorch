@@ -392,7 +392,6 @@ class SideEffects:
         del self.tensor_hooks[idx]
 
     def codegen_hooks(self, cg):
-        breakpoint()
         for (
             tensor,
             hook,
