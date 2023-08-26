@@ -190,6 +190,7 @@ class TestControlFlow(TestCase):
         self.assertEqual(true_outs, fake_outs)
 
 
+@skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
         def true_fn(x):
