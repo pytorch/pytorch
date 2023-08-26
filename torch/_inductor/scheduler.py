@@ -1054,6 +1054,25 @@ class Scheduler:
         """
         name_to_users = collections.defaultdict(list)
 
+        # handle aliasing by using python aliasing in name_to_users
+        # if foo aliases bar then we will make name_to_users["foo"] point
+        # to the same python list as name_to_users["bar"]
+        for node1 in self.nodes:
+            node1_name = node1.get_name()
+            for node2_name in node1.get_aliases():
+                if node1_name in name_to_users and node2_name in name_to_users:
+                    # merge the two
+                    list1 = name_to_users[node1_name]
+                    list2 = name_to_users[node2_name]
+                    combined = list1 + list2
+                    for key in name_to_users.keys():
+                        if name_to_users[key] is list1 or name_to_users[key] is list2:
+                            name_to_users[key] = combined
+                elif node1_name in name_to_users:
+                    name_to_users[node2_name] = name_to_users[node1_name]
+                else:
+                    name_to_users[node1_name] = name_to_users[node2_name]
+
         def rename(n):
             if n in self.mutation_renames:
                 return rename(self.mutation_renames[n])
