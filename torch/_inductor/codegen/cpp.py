@@ -294,6 +294,12 @@ class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
 
+    def _print_Where(self, expr):
+        c = self.paren(self.doprint(expr.args[0]))
+        p = self.paren(self.doprint(expr.args[1]))
+        q = self.paren(self.doprint(expr.args[2]))
+        return f"{c} ? {p} : {q}"
+
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
@@ -777,10 +783,11 @@ class CppVecOverrides(OpOverrides):
     def masked(mask, body, other):
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
-        code.writeline(f"auto {var} = [&]")
-        with V.kernel.swap_buffers(code), code.indent():
-            result = body()
-            code.writeline(f"return {result};")
+        with V.kernel.masked(mask) as new_mask:
+            code.writeline(f"auto {var} = [&]")
+            with V.kernel.swap_buffers(code), code.indent():
+                result = body()
+                code.writeline(f"return {result};")
         code.writeline(";")
         V.kernel.compute.splice(code)
 
@@ -799,7 +806,7 @@ class CppVecOverrides(OpOverrides):
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
         type = f"decltype({var}())"
-        float_mask = f"to_float_mask({mask})"
+        float_mask = f"to_float_mask({new_mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
 
     @staticmethod
@@ -1179,6 +1186,20 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self._load_mask = None
+
+    @contextlib.contextmanager
+    def masked(self, mask):
+        """Context manager to add an additional mask to loads and stores."""
+        prior = self._load_mask
+        if prior:
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+
+        self._load_mask = mask
+        try:
+            yield mask
+        finally:
+            self._load_mask = prior
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1445,6 +1466,7 @@ class CppVecKernel(CppKernel):
         tiling_var = self.itervars[self.tiling_idx]
         is_broadcast = not index.has(tiling_var)
         is_mask = dtype in [torch.bool, torch.uint8]
+        load_mask = f"to_float_mask({self._load_mask})" if self._load_mask else None
         non_contiguous = (
             not is_broadcast
             and stride_at(tiling_var, index) != 1
@@ -1465,14 +1487,28 @@ class CppVecKernel(CppKernel):
             else:
                 line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+            )
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in DTYPE_LOWP_FP:
-            line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
-            line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            )
+
         if non_contiguous:
+            # TODO: support masked_load for non_contiguous path?
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             tmpbufsize = f"{self.tiling_factor}"
             if dtype in DTYPE_LOWP_FP:
@@ -1833,6 +1869,7 @@ class CppVecKernelChecker(CppVecKernel):
         self._orig_wrapper_code = None
 
         self.simd_vec = True
+
         self.fast_vec_list = []
         for k, v in CppVecOverrides.__dict__.items():
             if isinstance(v, staticmethod):
@@ -2649,14 +2686,19 @@ class CppKernelProxy(CppKernel):
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
-                with CppVecKernelChecker(
-                    deepcopy(self.kernel_group.args),
-                    parallel_num_threads(),
-                    tiling_factor,
-                    tiling_indices[-1],
-                ) as vec_checker:
-                    run(vec_checker)
-                if vec_checker.simd_vec:
+                could_vec = True
+                for tiling_indice in tiling_indices:
+                    with CppVecKernelChecker(
+                        deepcopy(self.kernel_group.args),
+                        parallel_num_threads(),
+                        tiling_factor,
+                        tiling_indice,
+                    ) as vec_checker:
+                        run(vec_checker)
+                        could_vec = could_vec and vec_checker.simd_vec
+                        if not could_vec:
+                            break
+                if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2:

@@ -250,7 +250,9 @@ class DTensorTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.randn(8, 8, requires_grad=True, device=self.device_type)
         my_dtensor = distribute_tensor(local_tensor, device_mesh, [Shard(0)])
-        new_strided_dtensor = my_dtensor.new_empty_strided((8, 8), (8, 1), requires_grad=True)
+        new_strided_dtensor = my_dtensor.new_empty_strided(
+            (8, 8), (8, 1), requires_grad=True
+        )
         # test the op produces new dtensor and autograd works
         self.assertEqual(new_strided_dtensor.shape, my_dtensor.shape)
         new_strided_dtensor.sum().backward()
