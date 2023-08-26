@@ -15,7 +15,6 @@ import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple, Generator
 
 import torch
-torch.cuda.init()
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
@@ -2160,7 +2159,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
                            "torch._inductor.triton_helpers",  # depends on triton
-                           "torch._inductor.cudegen.cuda",  # depends on cutlass
+                           "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
