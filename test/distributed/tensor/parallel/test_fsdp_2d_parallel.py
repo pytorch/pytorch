@@ -96,7 +96,7 @@ def init_model(
     # 2-D mesh is [dp, tp]
     twod_mesh = DeviceMesh(
         device_type="cuda",
-        mesh=torch.arange(0, world_size).view(model_parallel_size, -1),
+        mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
     )
 
     fsdp_pg = twod_mesh.get_dim_groups()[0]
