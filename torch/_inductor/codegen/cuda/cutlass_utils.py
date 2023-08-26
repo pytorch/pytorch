@@ -3,9 +3,9 @@ import logging
 from typing import Any, List
 
 # Import cutlass python scripts.
-import generator as cutlass_generator
-import library as cutlass_lib
-import manifest as cutlass_manifest
+import generator as cutlass_generator  # type: ignore
+import library as cutlass_lib  # type: ignore
+import manifest as cutlass_manifest  # type: ignore
 
 import sympy
 
@@ -61,9 +61,11 @@ def gen_ops() -> List[Any]:
     version = get_cuda_version()
     if arch is None or version is None:
         log.error(
-            f"Cannot find cuda arch {arch} or cuda version {version}. "
+            "Cannot find cuda arch %s or cuda version %s. "
             "Will discard all cutlass ops. "
-            "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs."
+            "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
+            arch,
+            version,
         )
         return list()
     args = Args(arch, version)
@@ -157,7 +159,7 @@ def get_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, int) or isinstance(number, sympy.Integer)
+        return isinstance(number, (int, sympy.Integer))
 
     if is_static_int(size[-1]) and is_static_int(offset):
         alignments = get_alignments(dtype)
