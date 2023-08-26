@@ -114,6 +114,7 @@ test_failures = {
     # Failed to find dynamic for loop variable (no kernels generated)
     #
     "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shape": TestFailure(("cpu", "cuda")),
     #
     # Failed to find dynamic for loop variable:
     #
