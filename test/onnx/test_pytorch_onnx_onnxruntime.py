@@ -1881,11 +1881,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        with common_utils.set_default_dtype(torch.float):
-            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
+        prev_default = torch.get_default_dtype()
 
-        with common_utils.set_default_dtype(torch.double):
-            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
+        torch.set_default_dtype(torch.float)
+        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
+
+        torch.set_default_dtype(torch.double)
+        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
+
+        torch.set_default_dtype(prev_default)
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
@@ -1901,20 +1905,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
+        prev_default = torch.get_default_dtype()
+
         # 1. x,y are int, and output is float.
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
-        with common_utils.set_default_dtype(torch.float):
-            self.run_test(torch.jit.script(DivModule()), (x, y))
+        torch.set_default_dtype(torch.float)
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
-        with common_utils.set_default_dtype(torch.double):
-            self.run_test(torch.jit.script(DivModule()), (x, y))
+        torch.set_default_dtype(torch.double)
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
+        torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
@@ -7830,6 +7837,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+        int_x = torch.tensor([9920, 1036, -1500, 35], dtype=torch.int32)
+        self.run_test(Round(), int_x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_round_with_decimals(self):
+        class Round(torch.nn.Module):
+            def __init__(self, decimals):
+                super().__init__()
+                self.decimals = decimals
+
+            def forward(self, x):
+                return torch.round(x, decimals=self.decimals)
+
+        x = torch.tensor([0.9920, -1234.0362, -1.58960, 3.5000])
+        for decimals in (0, -2, 3):
+            self.run_test(Round(decimals), x)
 
     @skipIfUnsupportedMinOpsetVersion(17)
     def test_stft_default(self):

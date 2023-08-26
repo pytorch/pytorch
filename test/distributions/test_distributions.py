@@ -38,10 +38,14 @@ from packaging import version
 
 import torch
 
+# TODO: remove this global setting
+# Distributions tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, load_tests,
-     gradcheck, skipIfTorchDynamo, set_default_dtype)
+     gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 import torch.autograd.forward_ad as fwAD
@@ -99,697 +103,694 @@ def is_all_nan(tensor):
     return (tensor != tensor).all()
 
 
-Example = namedtuple('Example', ['Dist', 'params'])
-
 # Register all distributions for generic tests.
-def _get_examples():
-    return [
-        Example(Bernoulli, [
-            {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([0.3], requires_grad=True)},
-            {'probs': 0.3},
-            {'logits': torch.tensor([0.], requires_grad=True)},
-        ]),
-        Example(Geometric, [
-            {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([0.3], requires_grad=True)},
-            {'probs': 0.3},
-        ]),
-        Example(Beta, [
-            {
-                'concentration1': torch.randn(2, 3).exp().requires_grad_(),
-                'concentration0': torch.randn(2, 3).exp().requires_grad_(),
-            },
-            {
-                'concentration1': torch.randn(4).exp().requires_grad_(),
-                'concentration0': torch.randn(4).exp().requires_grad_(),
-            },
-        ]),
-        Example(Categorical, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
-            {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
-        ]),
-        Example(Binomial, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10])},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-             'total_count': torch.tensor([[10., 8.], [5., 3.]])},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-             'total_count': torch.tensor(0.)},
-        ]),
-        Example(NegativeBinomial, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
-            {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': 10},
-            {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10])},
-            {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
-            {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
-             'total_count': torch.tensor([[10., 8.], [5., 3.]])},
-            {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
-             'total_count': torch.tensor(0.)},
-        ]),
-        Example(Multinomial, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
-        ]),
-        Example(Cauchy, [
-            {'loc': 0.0, 'scale': 1.0},
-            {'loc': torch.tensor([0.0]), 'scale': 1.0},
-            {'loc': torch.tensor([[0.0], [0.0]]),
-             'scale': torch.tensor([[1.0], [1.0]])}
-        ]),
-        Example(Chi2, [
-            {'df': torch.randn(2, 3).exp().requires_grad_()},
-            {'df': torch.randn(1).exp().requires_grad_()},
-        ]),
-        Example(StudentT, [
-            {'df': torch.randn(2, 3).exp().requires_grad_()},
-            {'df': torch.randn(1).exp().requires_grad_()},
-        ]),
-        Example(Dirichlet, [
-            {'concentration': torch.randn(2, 3).exp().requires_grad_()},
-            {'concentration': torch.randn(4).exp().requires_grad_()},
-        ]),
-        Example(Exponential, [
-            {'rate': torch.randn(5, 5).abs().requires_grad_()},
-            {'rate': torch.randn(1).abs().requires_grad_()},
-        ]),
-        Example(FisherSnedecor, [
-            {
-                'df1': torch.randn(5, 5).abs().requires_grad_(),
-                'df2': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'df1': torch.randn(1).abs().requires_grad_(),
-                'df2': torch.randn(1).abs().requires_grad_(),
-            },
-            {
-                'df1': torch.tensor([1.0]),
-                'df2': 1.0,
-            }
-        ]),
-        Example(Gamma, [
-            {
-                'concentration': torch.randn(2, 3).exp().requires_grad_(),
-                'rate': torch.randn(2, 3).exp().requires_grad_(),
-            },
-            {
-                'concentration': torch.randn(1).exp().requires_grad_(),
-                'rate': torch.randn(1).exp().requires_grad_(),
-            },
-        ]),
-        Example(Gumbel, [
-            {
-                'loc': torch.randn(5, 5, requires_grad=True),
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.randn(1, requires_grad=True),
-                'scale': torch.randn(1).abs().requires_grad_(),
-            },
-        ]),
-        Example(HalfCauchy, [
-            {'scale': 1.0},
-            {'scale': torch.tensor([[1.0], [1.0]])}
-        ]),
-        Example(HalfNormal, [
-            {'scale': torch.randn(5, 5).abs().requires_grad_()},
-            {'scale': torch.randn(1).abs().requires_grad_()},
-            {'scale': torch.tensor([1e-5, 1e-5], requires_grad=True)}
-        ]),
-        Example(Independent, [
-            {
-                'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                            torch.randn(2, 3).abs().requires_grad_()),
-                'reinterpreted_batch_ndims': 0,
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                            torch.randn(2, 3).abs().requires_grad_()),
-                'reinterpreted_batch_ndims': 1,
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                            torch.randn(2, 3).abs().requires_grad_()),
-                'reinterpreted_batch_ndims': 2,
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                            torch.randn(2, 3, 5).abs().requires_grad_()),
-                'reinterpreted_batch_ndims': 2,
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                            torch.randn(2, 3, 5).abs().requires_grad_()),
-                'reinterpreted_batch_ndims': 3,
-            },
-        ]),
-        Example(Kumaraswamy, [
-            {
-                'concentration1': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
-                'concentration0': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
-            },
-            {
-                'concentration1': torch.rand(4).uniform_(1, 2).requires_grad_(),
-                'concentration0': torch.rand(4).uniform_(1, 2).requires_grad_(),
-            },
-        ]),
-        Example(LKJCholesky, [
-            {
-                'dim': 2,
-                'concentration': 0.5
-            },
-            {
-                'dim': 3,
-                'concentration': torch.tensor([0.5, 1., 2.]),
-            },
-            {
-                'dim': 100,
-                'concentration': 4.
-            },
-        ]),
-        Example(Laplace, [
-            {
-                'loc': torch.randn(5, 5, requires_grad=True),
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.randn(1, requires_grad=True),
-                'scale': torch.randn(1).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.tensor([1.0, 0.0], requires_grad=True),
-                'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
-            },
-        ]),
-        Example(LogNormal, [
-            {
-                'loc': torch.randn(5, 5, requires_grad=True),
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.randn(1, requires_grad=True),
-                'scale': torch.randn(1).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.tensor([1.0, 0.0], requires_grad=True),
-                'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
-            },
-        ]),
-        Example(LogisticNormal, [
-            {
-                'loc': torch.randn(5, 5).requires_grad_(),
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.randn(1).requires_grad_(),
-                'scale': torch.randn(1).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.tensor([1.0, 0.0], requires_grad=True),
-                'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
-            },
-        ]),
-        Example(LowRankMultivariateNormal, [
-            {
-                'loc': torch.randn(5, 2, requires_grad=True),
-                'cov_factor': torch.randn(5, 2, 1, requires_grad=True),
-                'cov_diag': torch.tensor([2.0, 0.25], requires_grad=True),
-            },
-            {
-                'loc': torch.randn(4, 3, requires_grad=True),
-                'cov_factor': torch.randn(3, 2, requires_grad=True),
-                'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
-            }
-        ]),
-        Example(MultivariateNormal, [
-            {
-                'loc': torch.randn(5, 2, requires_grad=True),
-                'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
-            },
-            {
-                'loc': torch.randn(2, 3, requires_grad=True),
-                'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
-                                                  [0.1, 0.25, 0.0],
-                                                  [0.0, 0.0, 0.3]], requires_grad=True),
-            },
-            {
-                'loc': torch.randn(5, 3, 2, requires_grad=True),
-                'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
-                                            [[2.0, 0.0], [0.3, 0.25]],
-                                            [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1.0, -1.0]),
-                'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            },
-        ]),
-        Example(Normal, [
-            {
-                'loc': torch.randn(5, 5, requires_grad=True),
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.randn(1, requires_grad=True),
-                'scale': torch.randn(1).abs().requires_grad_(),
-            },
-            {
-                'loc': torch.tensor([1.0, 0.0], requires_grad=True),
-                'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
-            },
-        ]),
-        Example(OneHotCategorical, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
-            {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
-        ]),
-        Example(OneHotCategoricalStraightThrough, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
-            {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
-        ]),
-        Example(Pareto, [
-            {
-                'scale': 1.0,
-                'alpha': 1.0
-            },
-            {
-                'scale': (torch.randn(5, 5).abs() + 0.1).requires_grad_(),
-                'alpha': (torch.randn(5, 5).abs() + 0.1).requires_grad_()
-            },
-            {
-                'scale': torch.tensor([1.0]),
-                'alpha': 1.0
-            }
-        ]),
-        Example(Poisson, [
-            {
-                'rate': torch.randn(5, 5).abs().requires_grad_(),
-            },
-            {
-                'rate': torch.randn(3).abs().requires_grad_(),
-            },
-            {
-                'rate': 0.2,
-            },
-            {
-                'rate': torch.tensor([0.0], requires_grad=True),
-            },
-            {
-                'rate': 0.0,
-            }
-        ]),
-        Example(RelaxedBernoulli, [
-            {
-                'temperature': torch.tensor([0.5], requires_grad=True),
-                'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True),
-            },
-            {
-                'temperature': torch.tensor([2.0]),
-                'probs': torch.tensor([0.3]),
-            },
-            {
-                'temperature': torch.tensor([7.2]),
-                'logits': torch.tensor([-2.0, 2.0, 1.0, 5.0])
-            }
-        ]),
-        Example(RelaxedOneHotCategorical, [
-            {
-                'temperature': torch.tensor([0.5], requires_grad=True),
-                'probs': torch.tensor([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
-            },
-            {
-                'temperature': torch.tensor([2.0]),
-                'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]])
-            },
-            {
-                'temperature': torch.tensor([7.2]),
-                'logits': torch.tensor([[-2.0, 2.0], [1.0, 5.0]])
-            }
-        ]),
-        Example(TransformedDistribution, [
-            {
-                'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                            torch.randn(2, 3).abs().requires_grad_()),
-                'transforms': [],
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                            torch.randn(2, 3).abs().requires_grad_()),
-                'transforms': ExpTransform(),
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                            torch.randn(2, 3, 5).abs().requires_grad_()),
-                'transforms': [AffineTransform(torch.randn(3, 5), torch.randn(3, 5)),
-                               ExpTransform()],
-            },
-            {
-                'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                            torch.randn(2, 3, 5).abs().requires_grad_()),
-                'transforms': AffineTransform(1, 2),
-            },
-            {
-                'base_distribution': Uniform(torch.tensor(1e8).log(), torch.tensor(1e10).log()),
-                'transforms': ExpTransform(),
-            },
-        ]),
-        Example(Uniform, [
-            {
-                'low': torch.zeros(5, 5, requires_grad=True),
-                'high': torch.ones(5, 5, requires_grad=True),
-            },
-            {
-                'low': torch.zeros(1, requires_grad=True),
-                'high': torch.ones(1, requires_grad=True),
-            },
-            {
-                'low': torch.tensor([1.0, 1.0], requires_grad=True),
-                'high': torch.tensor([2.0, 3.0], requires_grad=True),
-            },
-        ]),
-        Example(Weibull, [
-            {
-                'scale': torch.randn(5, 5).abs().requires_grad_(),
-                'concentration': torch.randn(1).abs().requires_grad_()
-            }
-        ]),
-        Example(Wishart, [
-            {
-                'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
-                'df': torch.tensor([3.], requires_grad=True),
-            },
-            {
-                'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
-                                                  [0.1, 0.25, 0.0],
-                                                  [0.0, 0.0, 0.3]], requires_grad=True),
-                'df': torch.tensor([5., 4], requires_grad=True),
-            },
-            {
-                'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
-                                            [[2.0, 0.0], [0.3, 0.25]],
-                                            [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
-                'df': torch.tensor([5., 3.5, 3], requires_grad=True),
-            },
-            {
-                'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-                'df': torch.tensor([3.0]),
-            },
-            {
-                'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-                'df': 3.0,
-            },
-        ]),
-        Example(MixtureSameFamily, [
-            {
-                'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-                'component_distribution': Normal(torch.randn(5, requires_grad=True),
-                                                 torch.rand(5, requires_grad=True)),
-            },
-            {
-                'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-                'component_distribution': MultivariateNormal(
-                    loc=torch.randn(5, 2, requires_grad=True),
-                    covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
-            },
-        ]),
-        Example(VonMises, [
-            {
-                'loc': torch.tensor(1.0, requires_grad=True),
-                'concentration': torch.tensor(10.0, requires_grad=True)
-            },
-            {
-                'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
-                'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
-            },
-        ]),
-        Example(ContinuousBernoulli, [
-            {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([0.3], requires_grad=True)},
-            {'probs': 0.3},
-            {'logits': torch.tensor([0.], requires_grad=True)},
-        ])
-    ]
+Example = namedtuple('Example', ['Dist', 'params'])
+EXAMPLES = [
+    Example(Bernoulli, [
+        {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([0.3], requires_grad=True)},
+        {'probs': 0.3},
+        {'logits': torch.tensor([0.], requires_grad=True)},
+    ]),
+    Example(Geometric, [
+        {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([0.3], requires_grad=True)},
+        {'probs': 0.3},
+    ]),
+    Example(Beta, [
+        {
+            'concentration1': torch.randn(2, 3).exp().requires_grad_(),
+            'concentration0': torch.randn(2, 3).exp().requires_grad_(),
+        },
+        {
+            'concentration1': torch.randn(4).exp().requires_grad_(),
+            'concentration0': torch.randn(4).exp().requires_grad_(),
+        },
+    ]),
+    Example(Categorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(Binomial, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor([[10., 8.], [5., 3.]])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor(0.)},
+    ]),
+    Example(NegativeBinomial, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
+         'total_count': torch.tensor([[10., 8.], [5., 3.]])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
+         'total_count': torch.tensor(0.)},
+    ]),
+    Example(Multinomial, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
+    ]),
+    Example(Cauchy, [
+        {'loc': 0.0, 'scale': 1.0},
+        {'loc': torch.tensor([0.0]), 'scale': 1.0},
+        {'loc': torch.tensor([[0.0], [0.0]]),
+         'scale': torch.tensor([[1.0], [1.0]])}
+    ]),
+    Example(Chi2, [
+        {'df': torch.randn(2, 3).exp().requires_grad_()},
+        {'df': torch.randn(1).exp().requires_grad_()},
+    ]),
+    Example(StudentT, [
+        {'df': torch.randn(2, 3).exp().requires_grad_()},
+        {'df': torch.randn(1).exp().requires_grad_()},
+    ]),
+    Example(Dirichlet, [
+        {'concentration': torch.randn(2, 3).exp().requires_grad_()},
+        {'concentration': torch.randn(4).exp().requires_grad_()},
+    ]),
+    Example(Exponential, [
+        {'rate': torch.randn(5, 5).abs().requires_grad_()},
+        {'rate': torch.randn(1).abs().requires_grad_()},
+    ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': torch.randn(5, 5).abs().requires_grad_(),
+            'df2': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'df1': torch.randn(1).abs().requires_grad_(),
+            'df2': torch.randn(1).abs().requires_grad_(),
+        },
+        {
+            'df1': torch.tensor([1.0]),
+            'df2': 1.0,
+        }
+    ]),
+    Example(Gamma, [
+        {
+            'concentration': torch.randn(2, 3).exp().requires_grad_(),
+            'rate': torch.randn(2, 3).exp().requires_grad_(),
+        },
+        {
+            'concentration': torch.randn(1).exp().requires_grad_(),
+            'rate': torch.randn(1).exp().requires_grad_(),
+        },
+    ]),
+    Example(Gumbel, [
+        {
+            'loc': torch.randn(5, 5, requires_grad=True),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
+    ]),
+    Example(HalfCauchy, [
+        {'scale': 1.0},
+        {'scale': torch.tensor([[1.0], [1.0]])}
+    ]),
+    Example(HalfNormal, [
+        {'scale': torch.randn(5, 5).abs().requires_grad_()},
+        {'scale': torch.randn(1).abs().requires_grad_()},
+        {'scale': torch.tensor([1e-5, 1e-5], requires_grad=True)}
+    ]),
+    Example(Independent, [
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        torch.randn(2, 3).abs().requires_grad_()),
+            'reinterpreted_batch_ndims': 0,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        torch.randn(2, 3).abs().requires_grad_()),
+            'reinterpreted_batch_ndims': 1,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        torch.randn(2, 3).abs().requires_grad_()),
+            'reinterpreted_batch_ndims': 2,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
+            'reinterpreted_batch_ndims': 2,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
+            'reinterpreted_batch_ndims': 3,
+        },
+    ]),
+    Example(Kumaraswamy, [
+        {
+            'concentration1': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
+            'concentration0': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
+        },
+        {
+            'concentration1': torch.rand(4).uniform_(1, 2).requires_grad_(),
+            'concentration0': torch.rand(4).uniform_(1, 2).requires_grad_(),
+        },
+    ]),
+    Example(LKJCholesky, [
+        {
+            'dim': 2,
+            'concentration': 0.5
+        },
+        {
+            'dim': 3,
+            'concentration': torch.tensor([0.5, 1., 2.]),
+        },
+        {
+            'dim': 100,
+            'concentration': 4.
+        },
+    ]),
+    Example(Laplace, [
+        {
+            'loc': torch.randn(5, 5, requires_grad=True),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.tensor([1.0, 0.0], requires_grad=True),
+            'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
+        },
+    ]),
+    Example(LogNormal, [
+        {
+            'loc': torch.randn(5, 5, requires_grad=True),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.tensor([1.0, 0.0], requires_grad=True),
+            'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
+        },
+    ]),
+    Example(LogisticNormal, [
+        {
+            'loc': torch.randn(5, 5).requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1).requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.tensor([1.0, 0.0], requires_grad=True),
+            'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
+        },
+    ]),
+    Example(LowRankMultivariateNormal, [
+        {
+            'loc': torch.randn(5, 2, requires_grad=True),
+            'cov_factor': torch.randn(5, 2, 1, requires_grad=True),
+            'cov_diag': torch.tensor([2.0, 0.25], requires_grad=True),
+        },
+        {
+            'loc': torch.randn(4, 3, requires_grad=True),
+            'cov_factor': torch.randn(3, 2, requires_grad=True),
+            'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
+        }
+    ]),
+    Example(MultivariateNormal, [
+        {
+            'loc': torch.randn(5, 2, requires_grad=True),
+            'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
+        },
+        {
+            'loc': torch.randn(2, 3, requires_grad=True),
+            'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
+                                              [0.1, 0.25, 0.0],
+                                              [0.0, 0.0, 0.3]], requires_grad=True),
+        },
+        {
+            'loc': torch.randn(5, 3, 2, requires_grad=True),
+            'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                        [[2.0, 0.0], [0.3, 0.25]],
+                                        [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1.0, -1.0]),
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+        },
+    ]),
+    Example(Normal, [
+        {
+            'loc': torch.randn(5, 5, requires_grad=True),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.tensor([1.0, 0.0], requires_grad=True),
+            'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
+        },
+    ]),
+    Example(OneHotCategorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(OneHotCategoricalStraightThrough, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(Pareto, [
+        {
+            'scale': 1.0,
+            'alpha': 1.0
+        },
+        {
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+            'alpha': torch.randn(5, 5).abs().requires_grad_()
+        },
+        {
+            'scale': torch.tensor([1.0]),
+            'alpha': 1.0
+        }
+    ]),
+    Example(Poisson, [
+        {
+            'rate': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'rate': torch.randn(3).abs().requires_grad_(),
+        },
+        {
+            'rate': 0.2,
+        },
+        {
+            'rate': torch.tensor([0.0], requires_grad=True),
+        },
+        {
+            'rate': 0.0,
+        }
+    ]),
+    Example(RelaxedBernoulli, [
+        {
+            'temperature': torch.tensor([0.5], requires_grad=True),
+            'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True),
+        },
+        {
+            'temperature': torch.tensor([2.0]),
+            'probs': torch.tensor([0.3]),
+        },
+        {
+            'temperature': torch.tensor([7.2]),
+            'logits': torch.tensor([-2.0, 2.0, 1.0, 5.0])
+        }
+    ]),
+    Example(RelaxedOneHotCategorical, [
+        {
+            'temperature': torch.tensor([0.5], requires_grad=True),
+            'probs': torch.tensor([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
+        },
+        {
+            'temperature': torch.tensor([2.0]),
+            'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        },
+        {
+            'temperature': torch.tensor([7.2]),
+            'logits': torch.tensor([[-2.0, 2.0], [1.0, 5.0]])
+        }
+    ]),
+    Example(TransformedDistribution, [
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        torch.randn(2, 3).abs().requires_grad_()),
+            'transforms': [],
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        torch.randn(2, 3).abs().requires_grad_()),
+            'transforms': ExpTransform(),
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
+            'transforms': [AffineTransform(torch.randn(3, 5), torch.randn(3, 5)),
+                           ExpTransform()],
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
+            'transforms': AffineTransform(1, 2),
+        },
+        {
+            'base_distribution': Uniform(torch.tensor(1e8).log(), torch.tensor(1e10).log()),
+            'transforms': ExpTransform(),
+        },
+    ]),
+    Example(Uniform, [
+        {
+            'low': torch.zeros(5, 5, requires_grad=True),
+            'high': torch.ones(5, 5, requires_grad=True),
+        },
+        {
+            'low': torch.zeros(1, requires_grad=True),
+            'high': torch.ones(1, requires_grad=True),
+        },
+        {
+            'low': torch.tensor([1.0, 1.0], requires_grad=True),
+            'high': torch.tensor([2.0, 3.0], requires_grad=True),
+        },
+    ]),
+    Example(Weibull, [
+        {
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+            'concentration': torch.randn(1).abs().requires_grad_()
+        }
+    ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
+        },
+        {
+            'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
+                                              [0.1, 0.25, 0.0],
+                                              [0.0, 0.0, 0.3]], requires_grad=True),
+            'df': torch.tensor([5., 4], requires_grad=True),
+        },
+        {
+            'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                        [[2.0, 0.0], [0.3, 0.25]],
+                                        [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
+            'df': torch.tensor([5., 3.5, 3], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+            'df': torch.tensor([3.0]),
+        },
+        {
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+            'df': 3.0,
+        },
+    ]),
+    Example(MixtureSameFamily, [
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': Normal(torch.randn(5, requires_grad=True),
+                                             torch.rand(5, requires_grad=True)),
+        },
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': MultivariateNormal(
+                loc=torch.randn(5, 2, requires_grad=True),
+                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
+        },
+    ]),
+    Example(VonMises, [
+        {
+            'loc': torch.tensor(1.0, requires_grad=True),
+            'concentration': torch.tensor(10.0, requires_grad=True)
+        },
+        {
+            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
+            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
+        },
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([0.3], requires_grad=True)},
+        {'probs': 0.3},
+        {'logits': torch.tensor([0.], requires_grad=True)},
+    ])
+]
 
-def _get_bad_examples():
-    return [
-        Example(Bernoulli, [
-            {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([-0.5], requires_grad=True)},
-            {'probs': 1.00001},
-        ]),
-        Example(Beta, [
-            {
-                'concentration1': torch.tensor([0.0], requires_grad=True),
-                'concentration0': torch.tensor([0.0], requires_grad=True),
-            },
-            {
-                'concentration1': torch.tensor([-1.0], requires_grad=True),
-                'concentration0': torch.tensor([-2.0], requires_grad=True),
-            },
-        ]),
-        Example(Geometric, [
-            {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([-0.3], requires_grad=True)},
-            {'probs': 1.00000001},
-        ]),
-        Example(Categorical, [
-            {'probs': torch.tensor([[-0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[-1.0, 10.0], [0.0, -1.0]], requires_grad=True)},
-        ]),
-        Example(Binomial, [
-            {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
-             'total_count': 10},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
-             'total_count': 10},
-        ]),
-        Example(NegativeBinomial, [
-            {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
-             'total_count': 10},
-            {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
-             'total_count': 10},
-        ]),
-        Example(Cauchy, [
-            {'loc': 0.0, 'scale': -1.0},
-            {'loc': torch.tensor([0.0]), 'scale': 0.0},
-            {'loc': torch.tensor([[0.0], [-2.0]]),
-             'scale': torch.tensor([[-0.000001], [1.0]])}
-        ]),
-        Example(Chi2, [
-            {'df': torch.tensor([0.], requires_grad=True)},
-            {'df': torch.tensor([-2.], requires_grad=True)},
-        ]),
-        Example(StudentT, [
-            {'df': torch.tensor([0.], requires_grad=True)},
-            {'df': torch.tensor([-2.], requires_grad=True)},
-        ]),
-        Example(Dirichlet, [
-            {'concentration': torch.tensor([0.], requires_grad=True)},
-            {'concentration': torch.tensor([-2.], requires_grad=True)}
-        ]),
-        Example(Exponential, [
-            {'rate': torch.tensor([0., 0.], requires_grad=True)},
-            {'rate': torch.tensor([-2.], requires_grad=True)}
-        ]),
-        Example(FisherSnedecor, [
-            {
-                'df1': torch.tensor([0., 0.], requires_grad=True),
-                'df2': torch.tensor([-1., -100.], requires_grad=True),
-            },
-            {
-                'df1': torch.tensor([1., 1.], requires_grad=True),
-                'df2': torch.tensor([0., 0.], requires_grad=True),
-            }
-        ]),
-        Example(Gamma, [
-            {
-                'concentration': torch.tensor([0., 0.], requires_grad=True),
-                'rate': torch.tensor([-1., -100.], requires_grad=True),
-            },
-            {
-                'concentration': torch.tensor([1., 1.], requires_grad=True),
-                'rate': torch.tensor([0., 0.], requires_grad=True),
-            }
-        ]),
-        Example(Gumbel, [
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([0., 1.], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([1., -1.], requires_grad=True),
-            },
-        ]),
-        Example(HalfCauchy, [
-            {'scale': -1.0},
-            {'scale': 0.0},
-            {'scale': torch.tensor([[-0.000001], [1.0]])}
-        ]),
-        Example(HalfNormal, [
-            {'scale': torch.tensor([0., 1.], requires_grad=True)},
-            {'scale': torch.tensor([1., -1.], requires_grad=True)},
-        ]),
-        Example(LKJCholesky, [
-            {
-                'dim': -2,
-                'concentration': 0.1
-            },
-            {
-                'dim': 1,
-                'concentration': 2.,
-            },
-            {
-                'dim': 2,
-                'concentration': 0.,
-            },
-        ]),
-        Example(Laplace, [
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([0., 1.], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([1., -1.], requires_grad=True),
-            },
-        ]),
-        Example(LogNormal, [
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([0., 1.], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([1., -1.], requires_grad=True),
-            },
-        ]),
-        Example(MultivariateNormal, [
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
-            },
-        ]),
-        Example(Normal, [
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([0., 1.], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1., 1.], requires_grad=True),
-                'scale': torch.tensor([1., -1.], requires_grad=True),
-            },
-            {
-                'loc': torch.tensor([1.0, 0.0], requires_grad=True),
-                'scale': torch.tensor([1e-5, -1e-5], requires_grad=True),
-            },
-        ]),
-        Example(OneHotCategorical, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
-        ]),
-        Example(OneHotCategoricalStraightThrough, [
-            {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
-            {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
-        ]),
-        Example(Pareto, [
-            {
-                'scale': 0.0,
-                'alpha': 0.0
-            },
-            {
-                'scale': torch.tensor([0.0, 0.0], requires_grad=True),
-                'alpha': torch.tensor([-1e-5, 0.0], requires_grad=True)
-            },
-            {
-                'scale': torch.tensor([1.0]),
-                'alpha': -1.0
-            }
-        ]),
-        Example(Poisson, [
-            {
-                'rate': torch.tensor([-0.1], requires_grad=True),
-            },
-            {
-                'rate': -1.0,
-            }
-        ]),
-        Example(RelaxedBernoulli, [
-            {
-                'temperature': torch.tensor([1.5], requires_grad=True),
-                'probs': torch.tensor([1.7, 0.2, 0.4], requires_grad=True),
-            },
-            {
-                'temperature': torch.tensor([2.0]),
-                'probs': torch.tensor([-1.0]),
-            }
-        ]),
-        Example(RelaxedOneHotCategorical, [
-            {
-                'temperature': torch.tensor([0.5], requires_grad=True),
-                'probs': torch.tensor([[-0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
-            },
-            {
-                'temperature': torch.tensor([2.0]),
-                'probs': torch.tensor([[-1.0, 0.0], [-1.0, 1.1]])
-            }
-        ]),
-        Example(TransformedDistribution, [
-            {
-                'base_distribution': Normal(0, 1),
-                'transforms': lambda x: x,
-            },
-            {
-                'base_distribution': Normal(0, 1),
-                'transforms': [lambda x: x],
-            },
-        ]),
-        Example(Uniform, [
-            {
-                'low': torch.tensor([2.0], requires_grad=True),
-                'high': torch.tensor([2.0], requires_grad=True),
-            },
-            {
-                'low': torch.tensor([0.0], requires_grad=True),
-                'high': torch.tensor([0.0], requires_grad=True),
-            },
-            {
-                'low': torch.tensor([1.0], requires_grad=True),
-                'high': torch.tensor([0.0], requires_grad=True),
-            }
-        ]),
-        Example(Weibull, [
-            {
-                'scale': torch.tensor([0.0], requires_grad=True),
-                'concentration': torch.tensor([0.0], requires_grad=True)
-            },
-            {
-                'scale': torch.tensor([1.0], requires_grad=True),
-                'concentration': torch.tensor([-1.0], requires_grad=True)
-            }
-        ]),
-        Example(Wishart, [
-            {
-                'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
-                'df': torch.tensor([1.5], requires_grad=True),
-            },
-            {
-                'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
-                'df': torch.tensor([3.], requires_grad=True),
-            },
-            {
-                'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
-                'df': 3.,
-            },
-        ]),
-        Example(ContinuousBernoulli, [
-            {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
-            {'probs': torch.tensor([-0.5], requires_grad=True)},
-            {'probs': 1.00001},
-        ])
-    ]
+BAD_EXAMPLES = [
+    Example(Bernoulli, [
+        {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([-0.5], requires_grad=True)},
+        {'probs': 1.00001},
+    ]),
+    Example(Beta, [
+        {
+            'concentration1': torch.tensor([0.0], requires_grad=True),
+            'concentration0': torch.tensor([0.0], requires_grad=True),
+        },
+        {
+            'concentration1': torch.tensor([-1.0], requires_grad=True),
+            'concentration0': torch.tensor([-2.0], requires_grad=True),
+        },
+    ]),
+    Example(Geometric, [
+        {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([-0.3], requires_grad=True)},
+        {'probs': 1.00000001},
+    ]),
+    Example(Categorical, [
+        {'probs': torch.tensor([[-0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[-1.0, 10.0], [0.0, -1.0]], requires_grad=True)},
+    ]),
+    Example(Binomial, [
+        {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
+         'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
+         'total_count': 10},
+    ]),
+    Example(NegativeBinomial, [
+        {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
+         'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
+         'total_count': 10},
+    ]),
+    Example(Cauchy, [
+        {'loc': 0.0, 'scale': -1.0},
+        {'loc': torch.tensor([0.0]), 'scale': 0.0},
+        {'loc': torch.tensor([[0.0], [-2.0]]),
+         'scale': torch.tensor([[-0.000001], [1.0]])}
+    ]),
+    Example(Chi2, [
+        {'df': torch.tensor([0.], requires_grad=True)},
+        {'df': torch.tensor([-2.], requires_grad=True)},
+    ]),
+    Example(StudentT, [
+        {'df': torch.tensor([0.], requires_grad=True)},
+        {'df': torch.tensor([-2.], requires_grad=True)},
+    ]),
+    Example(Dirichlet, [
+        {'concentration': torch.tensor([0.], requires_grad=True)},
+        {'concentration': torch.tensor([-2.], requires_grad=True)}
+    ]),
+    Example(Exponential, [
+        {'rate': torch.tensor([0., 0.], requires_grad=True)},
+        {'rate': torch.tensor([-2.], requires_grad=True)}
+    ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': torch.tensor([0., 0.], requires_grad=True),
+            'df2': torch.tensor([-1., -100.], requires_grad=True),
+        },
+        {
+            'df1': torch.tensor([1., 1.], requires_grad=True),
+            'df2': torch.tensor([0., 0.], requires_grad=True),
+        }
+    ]),
+    Example(Gamma, [
+        {
+            'concentration': torch.tensor([0., 0.], requires_grad=True),
+            'rate': torch.tensor([-1., -100.], requires_grad=True),
+        },
+        {
+            'concentration': torch.tensor([1., 1.], requires_grad=True),
+            'rate': torch.tensor([0., 0.], requires_grad=True),
+        }
+    ]),
+    Example(Gumbel, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([0., 1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([1., -1.], requires_grad=True),
+        },
+    ]),
+    Example(HalfCauchy, [
+        {'scale': -1.0},
+        {'scale': 0.0},
+        {'scale': torch.tensor([[-0.000001], [1.0]])}
+    ]),
+    Example(HalfNormal, [
+        {'scale': torch.tensor([0., 1.], requires_grad=True)},
+        {'scale': torch.tensor([1., -1.], requires_grad=True)},
+    ]),
+    Example(LKJCholesky, [
+        {
+            'dim': -2,
+            'concentration': 0.1
+        },
+        {
+            'dim': 1,
+            'concentration': 2.,
+        },
+        {
+            'dim': 2,
+            'concentration': 0.,
+        },
+    ]),
+    Example(Laplace, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([0., 1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([1., -1.], requires_grad=True),
+        },
+    ]),
+    Example(LogNormal, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([0., 1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([1., -1.], requires_grad=True),
+        },
+    ]),
+    Example(MultivariateNormal, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+        },
+    ]),
+    Example(Normal, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([0., 1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([1., -1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1.0, 0.0], requires_grad=True),
+            'scale': torch.tensor([1e-5, -1e-5], requires_grad=True),
+        },
+    ]),
+    Example(OneHotCategorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(OneHotCategoricalStraightThrough, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(Pareto, [
+        {
+            'scale': 0.0,
+            'alpha': 0.0
+        },
+        {
+            'scale': torch.tensor([0.0, 0.0], requires_grad=True),
+            'alpha': torch.tensor([-1e-5, 0.0], requires_grad=True)
+        },
+        {
+            'scale': torch.tensor([1.0]),
+            'alpha': -1.0
+        }
+    ]),
+    Example(Poisson, [
+        {
+            'rate': torch.tensor([-0.1], requires_grad=True),
+        },
+        {
+            'rate': -1.0,
+        }
+    ]),
+    Example(RelaxedBernoulli, [
+        {
+            'temperature': torch.tensor([1.5], requires_grad=True),
+            'probs': torch.tensor([1.7, 0.2, 0.4], requires_grad=True),
+        },
+        {
+            'temperature': torch.tensor([2.0]),
+            'probs': torch.tensor([-1.0]),
+        }
+    ]),
+    Example(RelaxedOneHotCategorical, [
+        {
+            'temperature': torch.tensor([0.5], requires_grad=True),
+            'probs': torch.tensor([[-0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
+        },
+        {
+            'temperature': torch.tensor([2.0]),
+            'probs': torch.tensor([[-1.0, 0.0], [-1.0, 1.1]])
+        }
+    ]),
+    Example(TransformedDistribution, [
+        {
+            'base_distribution': Normal(0, 1),
+            'transforms': lambda x: x,
+        },
+        {
+            'base_distribution': Normal(0, 1),
+            'transforms': [lambda x: x],
+        },
+    ]),
+    Example(Uniform, [
+        {
+            'low': torch.tensor([2.0], requires_grad=True),
+            'high': torch.tensor([2.0], requires_grad=True),
+        },
+        {
+            'low': torch.tensor([0.0], requires_grad=True),
+            'high': torch.tensor([0.0], requires_grad=True),
+        },
+        {
+            'low': torch.tensor([1.0], requires_grad=True),
+            'high': torch.tensor([0.0], requires_grad=True),
+        }
+    ]),
+    Example(Weibull, [
+        {
+            'scale': torch.tensor([0.0], requires_grad=True),
+            'concentration': torch.tensor([0.0], requires_grad=True)
+        },
+        {
+            'scale': torch.tensor([1.0], requires_grad=True),
+            'concentration': torch.tensor([-1.0], requires_grad=True)
+        }
+    ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([1.5], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': 3.,
+        },
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([-0.5], requires_grad=True)},
+        {'probs': 1.00001},
+    ])
+]
 
 
 class DistributionsTestCase(TestCase):
@@ -897,13 +898,13 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(actual, expected_with_expand)
 
     def test_repr(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 dist = Dist(**param)
                 self.assertTrue(repr(dist).startswith(dist.__class__.__name__))
 
     def test_sample_detached(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 variable_params = [p for p in param.values() if getattr(p, 'requires_grad', False)]
                 if not variable_params:
@@ -915,7 +916,7 @@ class TestDistributions(DistributionsTestCase):
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_rsample_requires_grad(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 if not any(getattr(p, 'requires_grad', False) for p in param.values()):
                     continue
@@ -927,7 +928,7 @@ class TestDistributions(DistributionsTestCase):
                                 msg=f'{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad')
 
     def test_enumerate_support_type(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 try:
@@ -963,15 +964,15 @@ class TestDistributions(DistributionsTestCase):
         self.assertIsNotNone(cov.grad)
 
     def test_has_examples(self):
-        distributions_with_examples = {e.Dist for e in _get_examples()}
+        distributions_with_examples = {e.Dist for e in EXAMPLES}
         for Dist in globals().values():
             if isinstance(Dist, type) and issubclass(Dist, Distribution) \
                     and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
-                              f"Please add {Dist.__name__} to the _get_examples list in test_distributions.py")
+                              f"Please add {Dist.__name__} to the EXAMPLES list in test_distributions.py")
 
     def test_support_attributes(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 d = Dist(**param)
                 event_dim = len(d.event_shape)
@@ -988,7 +989,7 @@ class TestDistributions(DistributionsTestCase):
 
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 for shape in shapes:
                     d = Dist(**param)
@@ -1013,7 +1014,7 @@ class TestDistributions(DistributionsTestCase):
 
     def test_distribution_subclass_expand(self):
         expand_by = torch.Size((2,))
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
 
             class SubClass(Dist):
                 pass
@@ -1031,7 +1032,6 @@ class TestDistributions(DistributionsTestCase):
                 self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                 self.assertEqual(actual_shape, expected_shape)
 
-    @set_default_dtype(torch.double)
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -1077,7 +1077,6 @@ class TestDistributions(DistributionsTestCase):
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
-    @set_default_dtype(torch.double)
     def test_geometric(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -1098,7 +1097,6 @@ class TestDistributions(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.geometric_(0.2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_geometric_log_prob_and_entropy(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         s = 0.3
@@ -1122,7 +1120,6 @@ class TestDistributions(DistributionsTestCase):
                                          scipy.stats.geom(p=prob, loc=-1),
                                          f'Geometric(prob={prob})')
 
-    @set_default_dtype(torch.double)
     def test_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
         for total_count in [1, 2, 10]:
@@ -1140,7 +1137,6 @@ class TestDistributions(DistributionsTestCase):
                                              f'Binomial(total_count={count}, probs={prob})')
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_binomial_log_prob_and_entropy(self):
         probs = torch.arange(0.05, 1, 0.1)
         for total_count in [1, 2, 10]:
@@ -1172,7 +1168,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(grad(y, x)[0], torch.tensor(-0.5))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
@@ -1189,7 +1184,6 @@ class TestDistributions(DistributionsTestCase):
         ]
         self._check_enumerate_support(Binomial, examples)
 
-    @set_default_dtype(torch.double)
     def test_binomial_extreme_vals(self):
         total_count = 100
         bin0 = Binomial(total_count, 0)
@@ -1205,7 +1199,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(bin2.sample(), zero_counts)
         self.assertEqual(bin2.log_prob(zero_counts), zero_counts)
 
-    @set_default_dtype(torch.double)
     def test_binomial_vectorized_count(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]], dtype=torch.float64)
@@ -1217,7 +1210,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(samples.mean(dim=0), bin1.mean, atol=0.02, rtol=0)
         self.assertEqual(samples.var(dim=0), bin1.variance, atol=0.02, rtol=0)
 
-    @set_default_dtype(torch.double)
     def test_negative_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
         for total_count in [1, 2, 10]:
@@ -1241,7 +1233,6 @@ class TestDistributions(DistributionsTestCase):
             self._check_log_prob(NegativeBinomial(total_count, logits=logits), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_negative_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
@@ -1267,7 +1258,6 @@ class TestDistributions(DistributionsTestCase):
         assert (vals == 0.0).sum() > 4000
         assert (vals == 1.0).sum() > 4000
 
-    @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1279,7 +1269,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_multinomial_1d_log_prob_and_entropy(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1298,7 +1287,6 @@ class TestDistributions(DistributionsTestCase):
         expected = scipy.stats.multinomial.entropy(total_count, dist.probs.detach().numpy())
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
 
-    @set_default_dtype(torch.double)
     def test_multinomial_2d(self):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1316,7 +1304,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Multinomial(total_count, s).sample(),
                          torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64))
 
-    @set_default_dtype(torch.double)
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         self.assertTrue(is_all_nan(Categorical(p).mean))
@@ -1328,7 +1315,6 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Categorical, (p,))
         self.assertRaises(NotImplementedError, Categorical(p).rsample)
 
-    @set_default_dtype(torch.double)
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1371,7 +1357,6 @@ class TestDistributions(DistributionsTestCase):
         ]
         self._check_enumerate_support(Categorical, examples)
 
-    @set_default_dtype(torch.double)
     def test_one_hot_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
@@ -1381,7 +1366,6 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(OneHotCategorical, (p,))
         self.assertRaises(NotImplementedError, OneHotCategorical(p).rsample)
 
-    @set_default_dtype(torch.double)
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1416,7 +1400,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @set_default_dtype(torch.double)
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -1459,7 +1442,6 @@ class TestDistributions(DistributionsTestCase):
                                          f'Poisson(lambda={rate}, cuda)',
                                          failure_rate=1e-3)
 
-    @set_default_dtype(torch.double)
     def test_relaxed_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -1501,7 +1483,6 @@ class TestDistributions(DistributionsTestCase):
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
 
-    @set_default_dtype(torch.double)
     def test_relaxed_one_hot_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         temp = torch.tensor(0.67, requires_grad=True)
@@ -1511,7 +1492,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(lambda t, p: RelaxedOneHotCategorical(t, p, validate_args=False), (temp, p))
 
-    @set_default_dtype(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1561,7 +1541,6 @@ class TestDistributions(DistributionsTestCase):
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
 
-    @set_default_dtype(torch.double)
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
@@ -1618,7 +1597,6 @@ class TestDistributions(DistributionsTestCase):
             norm = prob.mean().item() * 2 * math.pi
             self.assertLess(abs(norm - 1), 1e-3)
 
-    @set_default_dtype(torch.double)
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1649,7 +1627,6 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_forward_ad(lambda x: x.cauchy_())
 
-    @set_default_dtype(torch.double)
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
@@ -1673,7 +1650,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(scale.grad, eps)
         scale.grad.zero_()
 
-    @set_default_dtype(torch.double)
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
         std_1d = torch.randn(1).abs().requires_grad_()
@@ -1718,7 +1694,6 @@ class TestDistributions(DistributionsTestCase):
                                         scipy.stats.halfnorm(scale=std),
                                         f'HalfNormal(scale={std})')
 
-    @set_default_dtype(torch.double)
     def test_lognormal(self):
         mean = torch.randn(5, 5, requires_grad=True)
         std = torch.randn(5, 5).abs().requires_grad_()
@@ -1771,7 +1746,6 @@ class TestDistributions(DistributionsTestCase):
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
                                         f'LogNormal(loc={mean}, scale={std})')
 
-    @set_default_dtype(torch.double)
     def test_logisticnormal(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, 5).requires_grad_()
@@ -1927,7 +1901,6 @@ class TestDistributions(DistributionsTestCase):
             f'''MixtureSameFamily(Categorical(probs={probs}),
             Normal(loc={loc}, scale={scale}))''')
 
-    @set_default_dtype(torch.double)
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -1985,7 +1958,6 @@ class TestDistributions(DistributionsTestCase):
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         f'Normal(mean={loc}, std={scale})')
 
-    @set_default_dtype(torch.double)
     def test_lowrank_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -2105,7 +2077,6 @@ class TestDistributions(DistributionsTestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, atol=0.02, rtol=0)
 
-    @set_default_dtype(torch.double)
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -2165,7 +2136,6 @@ class TestDistributions(DistributionsTestCase):
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
-    @set_default_dtype(torch.double)
     def test_multivariate_normal_stable_with_precision_matrix(self):
         x = torch.randn(10)
         P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
@@ -2230,7 +2200,6 @@ class TestDistributions(DistributionsTestCase):
                                     f'MultivariateNormal(loc={mean}, scale_tril={scale_tril})',
                                     multivariate=True)
 
-    @set_default_dtype(torch.double)
     def test_multivariate_normal_properties(self):
         loc = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
@@ -2239,7 +2208,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
-    @set_default_dtype(torch.double)
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
@@ -2252,7 +2220,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
-    @set_default_dtype(torch.double)
     def test_wishart_shape(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
@@ -2322,7 +2289,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @set_default_dtype(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
@@ -2368,7 +2334,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
@@ -2418,7 +2383,6 @@ class TestDistributions(DistributionsTestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
 
-    @set_default_dtype(torch.double)
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -2467,7 +2431,6 @@ class TestDistributions(DistributionsTestCase):
                                         scipy.stats.expon(scale=1. / rate),
                                         f'Exponential(rate={rate})')
 
-    @set_default_dtype(torch.double)
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -2512,7 +2475,6 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_laplace_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -2647,7 +2609,6 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_gumbel_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -2772,7 +2733,6 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(StudentT(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @set_default_dtype(torch.double)
     def test_studentT_sample(self):
         set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -2801,7 +2761,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_dirichlet_log_prob(self):
         num_samples = 10
         alpha = torch.exp(torch.randn(5))
@@ -2871,7 +2830,6 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(float(actual_log_prob), float(expected_log_prob), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype(torch.double)
     def test_beta_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
@@ -2916,7 +2874,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
         self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
 
-    @set_default_dtype(torch.double)
     def test_continuous_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -2981,7 +2938,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
 
     def test_independent_shape(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 base_dist = Dist(**param)
                 x = base_dist.sample()
@@ -3009,7 +2966,7 @@ class TestDistributions(DistributionsTestCase):
                         pass
 
     def test_independent_expand(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 base_dist = Dist(**param)
                 for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):
@@ -3025,10 +2982,9 @@ class TestDistributions(DistributionsTestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
-    @set_default_dtype(torch.double)
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 samples = dist.sample(sample_shape=(20,))
@@ -3053,10 +3009,9 @@ class TestDistributions(DistributionsTestCase):
             self.assertAlmostEqual(dist.log_prob(0), log_prob)
             self.assertAlmostEqual(dist.log_prob(0), scipy_dist.logpdf(0))
 
-    @set_default_dtype(torch.double)
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 # We do not need grads wrt params here, e.g. shape of gamma distribution.
                 param = {key: value.detach() if isinstance(value, torch.Tensor) else value
@@ -3288,7 +3243,6 @@ class TestDistributions(DistributionsTestCase):
         ordering = (delta > -1e-12).all(axis=0)
         self.assertTrue(ordering[batch_isfinite].all())
 
-    @set_default_dtype(torch.double)
     def test_mode(self):
         discrete_distributions = (
             Bernoulli, Binomial, Categorical, Geometric, NegativeBinomial, OneHotCategorical, Poisson,
@@ -3298,7 +3252,7 @@ class TestDistributions(DistributionsTestCase):
             RelaxedBernoulli, RelaxedOneHotCategorical,
         )
 
-        for dist_cls, params in _get_examples():
+        for dist_cls, params in EXAMPLES:
             for param in params:
                 dist = dist_cls(**param)
                 if isinstance(dist, no_mode_available) or type(dist) is TransformedDistribution:
@@ -3496,7 +3450,6 @@ class TestRsample(DistributionsTestCase):
                 "error = %.2g" % torch.abs(expected_grad - actual_grad).max(),
             ]))
 
-    @set_default_dtype(torch.double)
     def test_dirichlet_tangent_field(self):
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
@@ -3543,7 +3496,7 @@ class TestDistributionShapes(DistributionsTestCase):
         self.tensor_sample_2 = torch.ones(3, 2, 3)
 
     def test_entropy_shape(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(validate_args=False, **param)
                 try:
@@ -4323,7 +4276,7 @@ class TestKL(DistributionsTestCase):
         self.assertEqual(kl_divergence(Categorical(torch.tensor([0., 1.])), Categorical(torch.tensor([0., 1.]))), 0)
 
     def test_kl_shape(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 try:
@@ -4347,10 +4300,9 @@ class TestKL(DistributionsTestCase):
         self.assertEqual(kl_divergence(diag_normal, diag_normal).shape, (2,))
         self.assertEqual(kl_divergence(trans_dist, trans_dist).shape, (2,))
 
-    @set_default_dtype(torch.double)
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 try:
@@ -4368,9 +4320,8 @@ class TestKL(DistributionsTestCase):
                     f'max error = {torch.abs(actual - expected).max()}',
                 ]))
 
-    @set_default_dtype(torch.double)
     def test_entropy_exponential_family(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             if not issubclass(Dist, ExponentialFamily):
                 continue
             for i, param in enumerate(params):
@@ -4401,7 +4352,7 @@ class TestConstraints(DistributionsTestCase):
             RelaxedOneHotCategorical
         )
 
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
@@ -4428,7 +4379,7 @@ class TestConstraints(DistributionsTestCase):
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
     def test_support_constraints(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -4664,7 +4615,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
         super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
         # from 'logits', but 'probs' is also needed
-        self.examples = [e for e in _get_examples() if e.Dist in
+        self.examples = [e for e in EXAMPLES if e.Dist in
                          (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
     def test_lazy_logits_initialization(self):
@@ -4710,11 +4661,11 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 class TestAgainstScipy(DistributionsTestCase):
     def setUp(self):
         super().setUp()
-        positive_var = torch.randn(20, dtype=torch.double).exp()
-        positive_var2 = torch.randn(20, dtype=torch.double).exp()
-        random_var = torch.randn(20, dtype=torch.double)
-        simplex_tensor = softmax(torch.randn(20, dtype=torch.double), dim=-1)
-        cov_tensor = torch.randn(20, 20, dtype=torch.double)
+        positive_var = torch.randn(20).exp()
+        positive_var2 = torch.randn(20).exp()
+        random_var = torch.randn(20)
+        simplex_tensor = softmax(torch.randn(20), dim=-1)
+        cov_tensor = torch.randn(20, 20)
         cov_tensor = cov_tensor @ cov_tensor.mT
         self.distribution_pairs = [
             (
@@ -4775,7 +4726,7 @@ class TestAgainstScipy(DistributionsTestCase):
                 scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
             ),
             (
-                LowRankMultivariateNormal(random_var, torch.zeros(20, 1, dtype=torch.double), positive_var2),
+                LowRankMultivariateNormal(random_var, torch.zeros(20, 1), positive_var2),
                 scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
             ),
             (
@@ -4862,7 +4813,6 @@ class TestAgainstScipy(DistributionsTestCase):
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), msg=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, msg=pytorch_dist)
 
-    @set_default_dtype(torch.double)
     def test_cdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = pytorch_dist.sample((5,))
@@ -4874,7 +4824,7 @@ class TestAgainstScipy(DistributionsTestCase):
 
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            samples = torch.rand((5,) + pytorch_dist.batch_shape, dtype=torch.double)
+            samples = torch.rand((5,) + pytorch_dist.batch_shape)
             try:
                 icdf = pytorch_dist.icdf(samples)
             except NotImplementedError:
@@ -5002,15 +4952,14 @@ class TestFunctors(DistributionsTestCase):
 
 class TestValidation(DistributionsTestCase):
     def test_valid(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 Dist(validate_args=True, **param)
 
-    @set_default_dtype(torch.double)
     def test_invalid_log_probs_arg(self):
         # Check that validation errors are indeed disabled,
         # but they might raise another error
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             if Dist == TransformedDistribution:
                 # TransformedDistribution has a distribution instance
                 # as the argument, so we cannot do much about that
@@ -5055,9 +5004,8 @@ class TestValidation(DistributionsTestCase):
                         fail_string.format(Dist.__name__, i + 1, len(params))
                     ) from e
 
-    @set_default_dtype(torch.double)
     def test_invalid(self):
-        for Dist, params in _get_bad_examples():
+        for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
                 try:
                     with self.assertRaises(ValueError):
@@ -5092,7 +5040,7 @@ class TestValidation(DistributionsTestCase):
 
 class TestJit(DistributionsTestCase):
     def _examples(self):
-        for Dist, params in _get_examples():
+        for Dist, params in EXAMPLES:
             for param in params:
                 keys = param.keys()
                 values = tuple(param[key] for key in keys)
@@ -5131,7 +5079,6 @@ class TestJit(DistributionsTestCase):
             sample = Dist(**param).sample()
             return values, sample
 
-    @set_default_dtype(torch.double)
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
 
@@ -5191,7 +5138,6 @@ class TestJit(DistributionsTestCase):
             if Dist not in xfail:
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
-    @set_default_dtype(torch.double)
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
@@ -5283,7 +5229,6 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(expected, actual,
                              msg=f'{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}')
 
-    @set_default_dtype(torch.double)
     def test_entropy(self):
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
@@ -5308,7 +5253,6 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(expected, actual,
                              msg=f'{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}')
 
-    @set_default_dtype(torch.double)
     def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
 
