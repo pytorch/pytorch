@@ -2945,13 +2945,13 @@
     CPU: _validate_compressed_sparse_indices_cpu
     CUDA: _validate_compressed_sparse_indices_cuda
 
-- func: _cufft_get_plan_cache_size(int device_index) -> int
+- func: _cufft_get_plan_cache_size(DeviceIndex device_index) -> int
 
-- func: _cufft_get_plan_cache_max_size(int device_index) -> int
+- func: _cufft_get_plan_cache_max_size(DeviceIndex device_index) -> int
 
-- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
+- func: _cufft_set_plan_cache_max_size(DeviceIndex device_index, int max_size) -> ()
 
-- func: _cufft_clear_plan_cache(int device_index) -> ()
+- func: _cufft_clear_plan_cache(DeviceIndex device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   device_check: NoCheck   # TensorIterator
