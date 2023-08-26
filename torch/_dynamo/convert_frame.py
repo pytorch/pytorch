@@ -224,6 +224,15 @@ def is_recompilation(cache_size):
     return cache_size >= 1
 
 
+def compute_cache_size(cache_entry):
+    # Walk the linked list to calculate the cache size
+    running_cache_size = 0
+    while cache_entry:
+        running_cache_size += 1
+        cache_entry = cache_entry.next
+    return running_cache_size
+
+
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
@@ -238,12 +247,13 @@ def convert_frame_assert(
     reset_graph_break_dup_checker()
 
     def _convert_frame_assert(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
         increment_frame()
 
         code = frame.f_code
 
+        cache_size = compute_cache_size(cache_entry)
         if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
@@ -393,6 +403,11 @@ def convert_frame_assert(
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+
+    def _clone_with_backend(backend):
+        return convert_frame_assert(backend, one_graph, export, export_constraints)
+
+    _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
@@ -658,6 +673,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+    _convert_frame._clone_with_backend = lambda backend: convert_frame(backend, hooks)  # type: ignore[attr-defined]
     return _convert_frame
 
 

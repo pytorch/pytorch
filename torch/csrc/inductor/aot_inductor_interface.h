@@ -76,6 +76,12 @@ AOTInductorError AOTInductorModelContainerGetInputName(
     size_t input_idx,
     const char** input_name_out);
 
+// Retrieves the input dtype at the given index.
+AOTInductorError AOTInductorModelContainerGetInputDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t input_idx,
+    const char** input_name_out);
+
 // Retrieves the number of outputs for the model.
 AOTInductorError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
@@ -83,6 +89,12 @@ AOTInductorError AOTInductorModelContainerGetNumOutputs(
 
 // Retrieves the output name at the given index.
 AOTInductorError AOTInductorModelContainerGetOutputName(
+    AOTInductorModelContainerHandle container_handle,
+    size_t output_idx,
+    const char** output_name_out);
+
+// Retrieves the output dtype at the given index.
+AOTInductorError AOTInductorModelContainerGetOutputDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** output_name_out);
