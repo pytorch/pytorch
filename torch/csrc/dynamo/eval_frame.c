@@ -4,6 +4,13 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+// Problem in CPython includes when mixing core and non-core build
+// The fix was not backported to 3.12 so this is needed here
+// https://github.com/python/cpython/issues/105268
+#if IS_PYTHON_3_12_PLUS
+#undef _PyGC_FINALIZED
+#endif
+
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
@@ -39,7 +46,11 @@ static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObj
   return res; \
 }
 
+#if IS_PYTHON_3_12_PLUS
+DECLARE_PYOBJ_ATTR(f_funcobj)
+#else
 DECLARE_PYOBJ_ATTR(f_func)
+#endif
 DECLARE_PYOBJ_ATTR(f_globals)
 DECLARE_PYOBJ_ATTR(f_builtins)
 DECLARE_PYOBJ_ATTR(f_locals)
@@ -79,7 +90,11 @@ static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObj
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
+#if IS_PYTHON_3_12_PLUS
+    {"f_func", (getter)THPPyInterpreterFrame_f_funcobj, NULL, NULL, NULL},
+#else
     {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
+#endif
     {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
     {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
     {"f_locals", (getter)THPPyInterpreterFrame_f_locals, NULL, NULL, NULL},
@@ -723,10 +738,18 @@ inline static PyObject* eval_custom_code(
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
+  #if IS_PYTHON_3_12_PLUS
+  // Most of these don't exist in 3.12 anymore.
+  // _PyFunction_CopyWithNewCode and _PyFrame_InitializeSpecials in particular
+  PyFunctionObject* func;
+  PyErr_SetString(PyExc_RuntimeError, "Dynamo is not supported in Python 3.12 yet");
+  return NULL;
+  #else
   PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
   if (func == NULL) {
     return NULL;
   }
+  #endif
 
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
   // THP_EVAL_API_FRAME_OBJECT (_PyInterpreterFrame) is a regular C struct, so
@@ -739,7 +762,9 @@ inline static PyObject* eval_custom_code(
 
   Py_INCREF(func);
   // consumes reference to func
+  #if !(IS_PYTHON_3_12_PLUS)
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
+  #endif
 
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;

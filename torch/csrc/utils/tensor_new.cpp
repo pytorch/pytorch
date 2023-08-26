@@ -1107,6 +1107,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_DEVICE1,
     ARG_REQUIRES_GRAD1,
     ARG_CHECK_INVARIANTS1,
+    ARG_IS_COALESCED1,
     ARGS_COUNT1
   };
   enum {
@@ -1117,6 +1118,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_CHECK_INVARIANTS2,
     ARGS_COUNT2
   };
+
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
   bool default_check_invariants =
@@ -1184,7 +1186,8 @@ Tensor sparse_coo_tensor_ctor(
                indices,
                values,
                r.intlist(ARG_SIZE1),
-               values.options().layout(at::kSparse))
+               values.options().layout(at::kSparse),
+               r.toBoolOptional(ARG_IS_COALESCED1))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   } else if (r.idx == 2) {
     const auto inferred_options =
