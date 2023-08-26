@@ -3826,49 +3826,6 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
-@register_decomposition(aten.view_as_complex)
-@out_wrapper()
-def view_as_complex(self: Tensor) -> Tensor:
-    input_dtype = self.dtype
-    torch._check(
-        input_dtype == torch.float16 or input_dtype == torch.float32 or input_dtype == torch.float64,
-        lambda: f"view_as_complex is only supported for half, float and double"
-                f"tensors, but got a tensor of scalar type: {input_dtype}",
-        )
-    sizes = self.size()
-    torch._check(
-        len(sizes) != 0,
-        lambda: "Input tensor must have one or more dimensions",
-        )
-    torch._check(
-        sizes[-1] == 2,
-        lambda: "Tensor must have a last dimension of size 2",
-        )
-    def compute_stride_for_view_as_complex(old_strides: Tuple):
-        torch._check(
-            old_strides[-1] == 2,
-            lambda: "Tensor must have a last dimension with stride 1",
-            )
-        dims = old_strides[:-1]
-        for stride in dims:
-            torch._check(
-                stride % 2 == 0,
-                lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
-            )
-        return tuple(dim // 2 for dim in dims)
-
-    new_sizes = sizes[:-1]
-    new_strides = compute_stride_for_view_as_complex(self.stride())
-    complex_type = input_dtype if utils.is_complex_dtype(input_dtype) else utils.corresponding_complex_dtype(input_dtype)
-    torch._check(
-        self.storage_offset() % 2 == 0,
-        lambda: "Tensor must have a storage_offset divisible by 2",
-    )
-    new_storage_offset = self.storage_offset() // 2
-
-    return aten.view(self, complex_type, new_storage_offset, new_sizes, new_strides)
-
-
 
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)

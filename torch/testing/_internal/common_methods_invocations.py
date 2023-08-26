@@ -20880,6 +20880,10 @@ python_ref_db = [
             ),
         ],
     ),
+    PythonRefInfo(
+        "_refs.view_as_complex",
+        torch_opinfo_name="view_as_complex",
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
