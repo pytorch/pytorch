@@ -1,10 +1,11 @@
 import copy
 import functools
+import math
 import operator
 
 import torch
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, Match
+from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -442,10 +443,86 @@ def _register_quantization_maxpool2d():
         )
 
 
+def _is_valid_quantized_cat_optimization_pattern():
+    def fn(match):
+        # Ensure all the inputs and output has same scale and zero point
+        # Step 1: Check inputs/output zero point
+        sub_nodes = filter_nodes(match.nodes, aten.sub.Tensor)
+        zero_points = [node.args[1] for node in sub_nodes]
+        add_nodes = filter_nodes(match.nodes, aten.add.Tensor)
+        assert len(add_nodes) == 1, "expect only 1 add node at output quant pattern"
+        zero_points.append(add_nodes[0].args[1])
+        if not all(zero_point == zero_points[0] for zero_point in zero_points):
+            return False
+
+        # Step 2: Check inputs/output scale
+        mul_nodes = filter_nodes(match.nodes, aten.mul.Tensor)
+        # We need to find mul node at output since the scale value is reciprocal to input scale.
+        # Mul node at output should connect to cat node directly.
+        scales = [
+            (
+                mul_node.args[1]
+                if mul_node.args[0].target is aten.cat.default
+                else 1.0 / mul_node.args[1]
+            )
+            for mul_node in mul_nodes
+        ]
+        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
+            return False
+
+        return True
+
+    return fn
+
+
+def _register_quantized_cat_lowering(
+    pattern,
+    computation_op,
+):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_cat_optimization_pattern(),
+    )
+    def qcat(match: Match, inputs, dim, **kwargs):
+        # inputs is with format: [[x1, x1_dq_dtype, x1_zp, x1_scale], ...]
+        uint8_inputs = [input[0] for input in inputs]
+        return L[computation_op](uint8_inputs, dim)
+
+    return qcat
+
+
+_raw_dequantize_per_tensor_activation_pattern = CallFunction(
+    aten.mul.Tensor,
+    CallFunction(
+        aten.sub.Tensor,
+        CallFunction(
+            prims.convert_element_type.default,
+            Arg(),
+            Arg(),
+        ),
+        Arg(),
+    ),
+    Arg(),
+)
+
+
+def _register_quantization_cat():
+    dequantize_cat_pattern = CallFunction(
+        aten.cat.default,
+        ListOf(_raw_dequantize_per_tensor_activation_pattern),
+        KeywordArg("dim"),
+    )
+    _register_quantized_cat_lowering(
+        generate_pattern_with_output_quant(dequantize_cat_pattern),
+        aten.cat,
+    )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
+    _register_quantization_cat()
 
 
 def _is_valid_dequant_promotion_pattern(match):
