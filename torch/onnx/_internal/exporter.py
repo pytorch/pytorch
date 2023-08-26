@@ -917,7 +917,7 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # TODO:Retire FXSymbolicTracer
+        # TODO: Retire FXSymbolicTracer
         # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
         from torch.onnx._internal.fx import fx_symbolic_graph_extractor
 
@@ -954,10 +954,23 @@ class Exporter:
                 op_level_debug=self.options.op_level_debug,
             )
 
+            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
+            # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
+            # not valid.
+            # Concrete data is expected to be filled for those initializers later during `ExportOutput.save`.
+            if self.options.fake_context is not None:
+                initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
+                for (
+                    initializer_name,
+                    initializer,
+                ) in onnxscript_graph.initializers.items():
+                    if not isinstance(initializer, torch._subclasses.FakeTensor):
+                        initializers_with_real_tensors[initializer_name] = initializer
+                onnxscript_graph.initializers = initializers_with_real_tensors
+
             # Export TorchScript graph to ONNX ModelProto.
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
-                include_initializers=self.options.fake_context is None,
             )
 
             return torch.onnx.ExportOutput(
@@ -971,6 +984,7 @@ class Exporter:
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""
 
+        # Case 1: Model with fake inputs/weights and without enabling fake mode
         has_any_fake_tensor = pytree.tree_any(
             lambda x: isinstance(x, torch._subclasses.FakeTensor),
             (self.model_args, self.model_kwargs),
@@ -987,6 +1001,7 @@ class Exporter:
             raise RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
+        # Case 2: Model with non fake inputs/weights and enabled fake mode
         has_any_non_fake_tensors = pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor)
             and not isinstance(x, torch._subclasses.FakeTensor),
