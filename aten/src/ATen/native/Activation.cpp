@@ -413,9 +413,10 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor grady = itensor_from_tensor(grad);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
+    // Reordering to expected desc prevents problems with transposed tensors
+    const ideep::tensor& x = itensor_view_from_dense(self, gradx.get_desc());
     ideep::eltwise_backward::compute(x, grady, gradx,
       ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   } else {
