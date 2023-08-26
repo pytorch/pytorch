@@ -381,11 +381,6 @@ kernel void lgamma(device {0} *input [[buffer(0)]],
 )METAL";
 
 
-
-
-
-void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length);
-
 static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device,
                                                const std::string& t1,
                                                const std::string& t2) {
@@ -407,7 +402,7 @@ static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device,
   return rc;
 }
 
-id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
+static <MTLComputePipelineState> getCPLState(id<MTLDevice> device,
                                                const std::string& t1,
                                                const std::string& t2,
                                                const std::string& fname) {
@@ -426,6 +421,15 @@ id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
       rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
   cplMap[key] = rc;
   return rc;
+}
+
+static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
+                          id<MTLComputePipelineState> cplState,
+                          uint32_t length) {
+  uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
 } // namespace mps
