@@ -80,3 +80,27 @@ def get_param(
         return program.state_dict[parameter_name]
 
     return None
+
+
+def is_buffer(program: ExportedProgram, node: torch.fx.Node) -> bool:
+    """
+    Checks if the given node is a buffer within the exported program
+    """
+
+    return node.name in program.graph_signature.inputs_to_buffers
+
+
+def get_buffer(
+    program: ExportedProgram,
+    node: torch.fx.Node,
+) -> Optional[torch.Tensor]:
+    """
+    Returns the buffer associated with the given node in the exported program.
+    Returns None if the node is not a buffer within the exported program
+    """
+
+    if is_buffer(program, node):
+        buffer_name = program.graph_signature.inputs_to_buffers[node.name]
+        return program.state_dict[buffer_name]
+
+    return None
