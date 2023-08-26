@@ -1808,7 +1808,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
-            input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+            input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
                 memory_format=torch.channels_last
             )
             maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -2385,6 +2385,17 @@ class CPUReproTests(TestCase):
             return x
 
         self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":
