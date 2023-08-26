@@ -1,11 +1,11 @@
-import functools
 import logging
-from subprocess import PIPE, Popen
 from typing import Optional
 
 import torch
 
 from ... import config
+
+log = logging.getLogger(__name__)
 
 
 def get_cuda_arch() -> Optional[str]:
@@ -17,7 +17,7 @@ def get_cuda_arch() -> Optional[str]:
             cuda_arch = major * 10 + minor
         return str(cuda_arch)
     except Exception as e:
-        logging.error(f"Error getting cuda arch: {e=}")
+        log.error("Error getting cuda arch: %s", e)
         return None
 
 
@@ -28,5 +28,5 @@ def get_cuda_version() -> Optional[str]:
             cuda_version = torch.version.cuda
         return cuda_version
     except Exception as e:
-        logging.error(f"Error getting cuda version: {e=}")
+        log.error("Error getting cuda version: %s", e)
         return None
