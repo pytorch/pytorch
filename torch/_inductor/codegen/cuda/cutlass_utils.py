@@ -126,7 +126,8 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     """
-    Returns all possible alignments for a given torch dtype.
+    Returns all possible number of elements for a dtype which forms valid cutlass alignments.
+    CUTLASS gemm / conv APIs support 16 bytes max alignment, and 2 bytes min alignment.
     """
 
     if torch_dtype in (torch.float16, torch.half, torch.bfloat16):
@@ -139,7 +140,7 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
 
 def get_alignment(inductor_layout: Layout) -> int:
     """
-    Returns the max alignment for a given Inductor Layout.
+    Returns the max alignment (in terms of number of elements) for a given Inductor Layout.
     """
 
     dtype = inductor_layout.dtype
