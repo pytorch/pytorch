@@ -1583,7 +1583,7 @@ class AsyncCompile:
 
     def cuda(self, source_code, dst_file_ext):
         def task():
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+            return CUDACodeCache.load(dst_file_ext, source_code)[0]
 
         return self.submit(task)
 
