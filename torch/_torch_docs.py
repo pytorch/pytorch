@@ -9774,7 +9774,7 @@ Args:
 Example::
 
     >>> a = torch.zeros(8, 8)
-    >>> b = torch.ones(8)
+    >>> b = torch.ones(2, 8)
     >>> a.slice_scatter(b, start=6)
     tensor([[0., 0., 0., 0., 0., 0., 0., 0.],
             [0., 0., 0., 0., 0., 0., 0., 0.],
@@ -9785,7 +9785,7 @@ Example::
             [1., 1., 1., 1., 1., 1., 1., 1.],
             [1., 1., 1., 1., 1., 1., 1., 1.]])
 
-    >>> b = torch.ones(2)
+    >>> b = torch.ones(8, 2)
     >>> a.slice_scatter(b, dim=1, start=2, end=6, step=2)
     tensor([[0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
@@ -12437,6 +12437,8 @@ Examples:
     (105, 1, 21, 3)
     >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
     (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).dim_order()
+    (0, 2, 3, 1)
 """.format(
         **factory_common_args
     ),
