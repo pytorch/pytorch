@@ -697,7 +697,7 @@ struct AttentionBackwardKernel {
     int32_t q_strideH = -1;
     int32_t k_strideH = -1;
     int32_t v_strideH = -1;
-    int32_t bias_strideH = 0;
+    int64_t bias_strideH = 0;
     int64_t o_strideB = -1;
     int64_t q_strideB = -1;
     int64_t k_strideB = -1;
