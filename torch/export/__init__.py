@@ -2,6 +2,7 @@ import copy
 import dataclasses
 import io
 import pathlib
+import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -581,10 +582,27 @@ class _ConstraintTarget:
     dim: int
 
 
-# TODO(ycao): Disable constructor of Constraint so that it can only be constructed
-# with dynamic_dim
+class _ConstraintFactory(type):
+    """
+    Metaclass that ensures a private constructor for Constraint
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+            f"Please use torch.export.dynamic_dim() to create one"
+        )
+
+    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None):
+        return super().__call__(w_tensor, t_id, dim, constraint_range, shared)
+
+
+def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None):
+    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared)
+
+
 @dataclasses.dataclass
-class Constraint(_ConstraintTarget):
+class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     .. warning::
@@ -608,7 +626,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(
+        return _create_constraint(
             self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
         )
 
@@ -669,7 +687,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
-        return Constraint(
+        return _create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,

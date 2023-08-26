@@ -3093,7 +3093,6 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),)
                ),
