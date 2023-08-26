@@ -679,7 +679,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.debug(f"Max autotune selects from {len(choices)} choices.")
+        log.info(f"Max autotune selects from {len(choices)} choices.")
 
         @functools.lru_cache(None)
         def make_benchmark_fn():

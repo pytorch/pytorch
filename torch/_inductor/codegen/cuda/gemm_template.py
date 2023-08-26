@@ -266,10 +266,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         op: cutlass_gemm_op.GemmOperation,
     ) -> cutlass_gemm_op.GemmOperation:
-        # Skip GroupedGemmOperation.
-        if isinstance(op, cutlass_gemm_op.GroupedGemmOperation):
-            return None
-
         # Skip simt kernels
         if (
             op.tile_description.math_instruction.opcode_class
@@ -277,8 +273,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         ):
             return None
 
-        # Skip sparse kernels
-        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+        # Skip sparse and grouped kernels
+        if op.gemm_kind in {
+            cutlass_lib.GemmKind.Sparse,
+            cutlass_lib.GemmKind.Grouped,
+        }:
             return None
 
         # Filter ops by dtypes.
@@ -323,7 +322,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Set bias layout and alignment.
         if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
-            op.C.layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
+            bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
+            if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
+                if bias_layout != op.D.layout:
+                    # For cutlass2, bias and output layout must match
+                    return None
+            else:
+                op.C.layout = bias_layout
             if not self.set_alignment(Bias.get_layout(), op.C):
                 return None
         else:

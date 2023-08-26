@@ -136,7 +136,7 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            V.graph.scheduler.current_device.index,
+            device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=False,
         )

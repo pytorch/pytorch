@@ -1,6 +1,11 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
+from typing import List
+
 import torch
+torch.cuda.init()
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
@@ -16,6 +21,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+)
+from torch.testing._internal.common_cuda import (
+    SM75OrLater,
+    SM90OrLater,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -189,9 +198,10 @@ class TestDoBench(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
-    def test_max_autotune_multi_backends_regular_mm(
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
         """
@@ -217,9 +227,10 @@ class TestDoBench(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
-    def test_max_autotune_multi_backends_mm_bias(
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
         """
@@ -278,8 +289,9 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
-    @parametrize("max_autotune_gemm_backends", ("Aten,Triton,CUTLASS",))
-    def test_max_autotune_addmm_multi_backends(self, max_autotune_gemm_backends):
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    def test_max_autotune_addmm_cutlass_backend(self, max_autotune_gemm_backends):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -309,7 +321,13 @@ class TestDoBench(TestCase):
             # Broadcast first dim.
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            if SM90OrLater:
+                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
+                    # CUTLASS2 doesn't support Bias last-dim broadcast.
+                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+
 
     @skipIfRocm
     def test_autotune_conv1x1(self):
