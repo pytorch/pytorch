@@ -57,6 +57,13 @@ def gen_ops() -> List[Any]:
 
     arch = get_cuda_arch()
     version = get_cuda_version()
+    if arch is None or version is None:
+        log.error(
+            f"Cannot find cuda arch {arch} or cuda version {version}. "
+            "Will discard all cutlass ops. "
+            "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs."
+        )
+        return list()
     args = Args(arch, version)
     manifest = cutlass_manifest.Manifest(args)
 
@@ -121,7 +128,7 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
             return torch.float
     if torch_dtype in {torch.bfloat16, torch.float, torch.float32}:
         return torch.float
-    raise NotimplementedError(f"Unsupported data type: {input_torch_dtypes=}")
+    raise NotImplementedError(f"Unsupported data type: {input_torch_dtypes=}")
 
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
