@@ -919,13 +919,13 @@ def trunc(a):
     return prims.trunc(a)
 
 
-@register_decomposition(aten.view_as_complex)
-def view_as_complex(self: Tensor) -> Tensor:
+# TODO: register this as a real ref/decomposition once TorchInductor supports complex!
+def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     input_dtype = self.dtype
     torch._check(
         utils.is_float_dtype(input_dtype),
         lambda: f"view_as_complex is only supported for floating point"
-                f"tensors, but got a tensor of scalar type: {input_dtype}",
+        f"tensors, but got a tensor of scalar type: {input_dtype}",
     )
     sizes = self.size()
     torch._check(
@@ -944,8 +944,10 @@ def view_as_complex(self: Tensor) -> Tensor:
         lambda: "Tensor must have a last dimension with stride 1",
     )
     dims = old_strides[:-1]
-    torch._check(py_all(stride % 2 == 0 for stride in dims),
-                 lambda: "Tensor must have a stride divisible by 2 for all but last dimension")
+    torch._check(
+        py_all(stride % 2 == 0 for stride in dims),
+        lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
+    )
     new_strides = tuple(dim // 2 for dim in dims)
     torch._check(
         self.storage_offset() % 2 == 0,
@@ -955,8 +957,7 @@ def view_as_complex(self: Tensor) -> Tensor:
     if not utils.is_complex_dtype(input_dtype):
         self = prims.view_of_dtype(self, utils.corresponding_complex_dtype(input_dtype))
 
-    return as_strided(self, new_sizes, new_strides, new_storage_offset)
-
+    return self.as_strided(new_sizes, new_strides, new_storage_offset)
 
 
 def _make_elementwise_binary_reference(

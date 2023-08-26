@@ -1784,6 +1784,7 @@ view_of = _make_prim(
     doc=_view_of_doc,
 )
 
+
 def _view_of_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     return a.view(dtype)
 

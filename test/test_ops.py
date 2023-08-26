@@ -1880,6 +1880,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
+        '_refs.view_as_complex' # TorchInductor does not support complex at the moment.
     }
 
     @parametrize("op", ref_ops_names)
