@@ -786,6 +786,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self.assertTrue(input_obs_of_avgpool is output_obs_of_avgpool)
         self.assertTrue(input_obs_of_avgpool is output_obs_of_conv)
 
+    @skipIfNoX86
     def test_linear(self):
         """
         Test pattern of single linear with X86InductorQuantizer.
