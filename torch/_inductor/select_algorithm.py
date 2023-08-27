@@ -494,13 +494,14 @@ class TritonTemplate(KernelTemplate):
         grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
         bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
-            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(layout),
             module_cache_key=mod.key,
+            kernel_name=kernel_name,
             grid=grid,
             extra_args=extra_args,
             num_stages=num_stages,
             num_warps=num_warps,
+            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
+            output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(

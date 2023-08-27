@@ -1060,7 +1060,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError()
 
-    def output_node(self) -> 'TensorBox':
+    def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
         raise NotImplementedError()
 
 
