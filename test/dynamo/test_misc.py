@@ -6877,7 +6877,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
 
 
-
 class TestTracer(JitTestCase):
     def test_jit_save(self):
         def fn():
