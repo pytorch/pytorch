@@ -40,6 +40,8 @@ from .exc import (
     TorchRuntimeError,
     unimplemented,
     Unsupported,
+    UserError,
+    UserErrorType,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
@@ -654,6 +656,14 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
             # someone wanted these to also get suppressed.  If so, you'll
             # need to make these exceptions not get wrapped
+
+            # Directly raise if a control flow op (e.g. cond) has a graph break in it.
+            if (
+                isinstance(e, UserError)
+                and e.error_type == UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW
+            ):
+                raise
+
             soft_fail = isinstance(e, Unsupported)
             if not config.suppress_errors and not soft_fail:
                 raise
