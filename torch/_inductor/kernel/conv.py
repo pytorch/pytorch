@@ -417,8 +417,8 @@ def convolution(
         ):
             conv2d_template.maybe_append_choice(
                 choices,
-                (x, weight),
-                layout,
+                input_nodes=(x, weight),
+                layout=layout,
                 KERNEL_H=kernel_shape[0],
                 KERNEL_W=kernel_shape[1],
                 STRIDE_H=stride[0],

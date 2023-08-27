@@ -18,11 +18,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
-<<<<<<< HEAD
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
-=======
-from .autotune_process import TritonBenchmarkRequest, TensorMeta
->>>>>>> 6f031c8630e ([Inductor CUTLASS backend] Step 4: CUDA (template) kernels)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
@@ -695,8 +691,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     choice,
                 )
             except CUDACompileError as e:
-                log.warning("CUDA compilation error: \n%s. \nIgnore this choice.", str(e))
-                return float('inf')
+                log.warning(
+                    "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                )
+                return float("inf")
             except RuntimeError as e:
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -730,7 +728,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
-        if make_benchmark_fn.cache_info().currsize or log.getEffectiveLevel() == logging.DEBUG:
+        if (
+            make_benchmark_fn.cache_info().currsize
+            or log.getEffectiveLevel() == logging.DEBUG
+        ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
