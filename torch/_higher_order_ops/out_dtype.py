@@ -22,6 +22,7 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
+    torch.ops.aten.linear.default,
     torch.ops.aten.mm.default,
     torch.ops.aten.conv2d.default,
     torch.ops.aten.convolution.default,
