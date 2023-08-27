@@ -529,6 +529,5 @@ aten::var.correction_out
 aten::var_mean.correction
 aten::var_mean.correction_out
 aten::view
-aten::view_as_complex
 aten::where.self
 aten::where.self_out

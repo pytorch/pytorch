@@ -1785,24 +1785,24 @@ view_of = _make_prim(
 )
 
 
-def _view_of_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+def _view_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     return a.view(dtype)
 
 
-def _view_of_dtype_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+def _view_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
     return a.view(dtype)
 
 
-_view_of_dtype_doc = """
+_view_element_type_doc = """
     Creates a view of the tensor with a different dtype.
     """
 
-view_of_dtype = _make_prim(
+view_element_type = _make_prim(
     schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
-    meta=_view_of_dtype_meta,
-    impl_aten=_view_of_dtype_aten,
+    meta=_view_element_type_meta,
+    impl_aten=_view_element_type_aten,
     return_type=RETURN_TYPE.VIEW,
-    doc=_view_of_dtype_doc,
+    doc=_view_element_type_doc,
 )
 
 #

@@ -1316,6 +1316,7 @@ aten::values_copy.out
 aten::vdot
 aten::vdot.out
 aten::view.dtype
+aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out
 aten::view_as_real
