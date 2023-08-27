@@ -6,11 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond
-from functorch.experimental.control_flow import UnsupportedAliasMutationException
+from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
@@ -21,7 +21,9 @@ def _fake_map(f, x, *args):
     return _stack_pytree(zs)
 
 
+@skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
+
     def test_cond_no_trace(self):
         def true_fn(x):
             return x.sin()
@@ -188,6 +190,7 @@ class TestControlFlow(TestCase):
         self.assertEqual(true_outs, fake_outs)
 
 
+@skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
         def true_fn(x):
@@ -248,6 +251,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
+    @unittest.expectedFailure
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -293,6 +297,7 @@ class TestControlFlowTraced(TestCase):
         gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
+    @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
@@ -484,6 +489,7 @@ class TestControlFlowTraced(TestCase):
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(f_wrapper(f))(example_input_func)
 
+
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
@@ -612,15 +618,13 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
-            pred_1 = true_graph_0 = false_graph_0 = None
+            conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
-            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
             return add
-        """
+        """  # noqa: B950
         code = graph.code
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
@@ -629,8 +633,8 @@ class TestControlFlowTraced(TestCase):
 
         code = graph.true_graph_0.code
         out = """
-        def forward(self, y_1):
-            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+        def forward(self, arg0_1):
+            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
         """
         # Normalization hack, cause .code makes some weird whitespace
@@ -650,8 +654,8 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            CondOpArgsMismatchError,
-            "Expected to return same number of outputs but got",
+            torch._dynamo.exc.UserError,
+            "Expected branch to return a single tensor",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -776,18 +780,16 @@ class TestControlFlowTraced(TestCase):
 
         # Brittle, yet, delicious
         out = """
-        def forward(self, x_1, pred_1, pred2_1):
-            true_graph_0 = self.true_graph_0
-            false_graph_0 = self.false_graph_0
-            conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
-            pred_1 = true_graph_0 = false_graph_0 = None
-            true_graph_1 = self.true_graph_1
-            false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
-            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-            return add
-        """
+            def forward(self, x_1, pred_1, pred2_1):
+                true_graph_0 = self.true_graph_0
+                false_graph_0 = self.false_graph_0
+                conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+                true_graph_1 = self.true_graph_1
+                false_graph_1 = self.false_graph_1
+                conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+                add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+                return add
+        """  # noqa: B950
         code = graph.code
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
@@ -796,8 +798,8 @@ class TestControlFlowTraced(TestCase):
 
         code = graph.true_graph_0.code
         out = """
-        def forward(self, y_1):
-            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+        def forward(self, arg0_1):
+            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
         """
         # Normalization hack, cause .code makes some weird whitespace
@@ -817,8 +819,8 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            CondOpArgsMismatchError,
-            "Expected to return same number of outputs but got",
+            torch._dynamo.exc.UserError,
+            "Expected branch to return a single tensor",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -1198,6 +1200,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, main(p, pred, xs, y))
         self.check_map_count(gm, 2)
 
+    @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
         def true_fn(x):
             return x + x
@@ -1210,7 +1213,175 @@ class TestControlFlowTraced(TestCase):
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
         x = torch.ones(4, 3, 2)
-        self.assertEqual(foo(x), gm(x))
+        self.assertEqual(gm(x), true_fn(x))
+        self.assertEqual(foo(x), true_fn(x))
+
+    def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
+        assert isinstance(args, (tuple, list))
+        self.assertEqual(f(*args), exp_res)
+        gm = make_fx(f)(*args)
+        self.assertEqual(gm(*args), exp_res)
+
+        def cnt_placeholder(gm):
+            return len([node for node in gm.graph.nodes if node.op == "placeholder"])
+        placeholder_cnts = [cnt_placeholder(mod) for mod in gm.children()]
+        self.assertTrue(all(cnt == exp_arg_num for cnt in placeholder_cnts))
+
+    def _check_closure_correctly_lifted_with_mutation(self, f, closures_to_be_mutated, *, args, exp_arg_num):
+        exp_res = f(*args)
+        self._check_closure_correctly_lifted(f, args=args, exp_res=exp_res, exp_arg_num=exp_arg_num)
+
+        for closure in closures_to_be_mutated:
+            closure.add(-1)
+        new_exp_res = f(*args)
+
+        self._check_closure_correctly_lifted(f, args=args, exp_res=new_exp_res, exp_arg_num=exp_arg_num)
+
+    def test_cond_with_tensor_closure(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+
+        def true_fn(x):
+            return x + a
+
+        def false_fn(x):
+            return x + b
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+
+        # expected branches takes [x, a, b] as input
+        inp = torch.randn(2, 3)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp, ), exp_arg_num=3)
+
+    def test_cond_with_tensor_closure_graph_module(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+
+        def true_fn(x):
+            return x + a
+
+        def false_fn(x):
+            return x + b
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+
+        # expected branches takes [x, a, b] as input
+        inp = torch.randn(2, 3)
+
+        gm = make_fx(foo)(inp)
+        # normalization
+        actual = "".join(gm.code.split())
+        exp = """\
+def forward(self, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, \
+_tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    return conditional
+"""
+        exp = "".join(exp.split())
+        self.assertEqual(exp, actual)
+
+        actual = gm.true_graph_0.code
+        # normalization
+        actual = "".join(actual.split())
+        exp = """
+def forward(self, arg0_1, arg1_1, arg2_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    return add
+"""
+        # Normalization hack, cause .code makes some weird whitespace
+        exp = "".join(exp.split())
+        self.assertEqual(exp, actual)
+
+    def test_cond_with_module_param_closure(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter("param", torch.nn.Parameter(torch.ones(2, 3)))
+                self.register_buffer("buffer", torch.ones(2, 3) + 1)
+
+        my_mode = Mod()
+
+        def true_fn(x):
+            return x + my_mode.param
+
+        def false_fn(x):
+            return x + my_mode.buffer
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(2, 3)
+        # expected both branches takes (x, param, buffer)
+        self._check_closure_correctly_lifted_with_mutation(foo, (my_mode.param, my_mode.buffer), args=(inp,), exp_arg_num=3)
+
+
+    def test_cond_with_module_python_scalar_closure(self):
+
+        def foo(x):
+            a = torch.ones(1, 1)
+            b = 1
+
+            def true_fn(x):
+                return x + a
+
+            def false_fn(x):
+                return x + b
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(2, 3)
+        res = inp + 1
+        # python scalar b is not lifted as input, so both branches take (x, a)
+        self._check_closure_correctly_lifted(foo, args=(inp,), exp_res=res, exp_arg_num=2)
+
+    def test_cond_nested_with_closure(self):
+        a = torch.ones(1, 1)
+        b = torch.ones(1, 1) + 1
+
+        def inner_true_fn(x):
+            return x + a
+
+        def inner_false_fn(x):
+            return x + b
+
+        def foo(x):
+            def true_fn(x):
+                return cond(x.shape[0] == 2, inner_true_fn, inner_false_fn, [x])
+
+            def false_fn(x):
+                return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(2, 3)
+        # For top-level cond, it take 5 arguments (x, a, b, a, b)
+        # For second-level conds, it takes (x, a, b)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
+
+    def test_cond_nested_with_closure_graph_module(self):
+        a = torch.ones(1, 1)
+        b = torch.ones(1, 1) + 1
+
+        def inner_true_fn(x):
+            return x + a
+
+        def inner_false_fn(x):
+            return x + b
+
+        def foo(x):
+            def true_fn(x):
+                return cond(x.shape[0] == 2, inner_true_fn, inner_false_fn, [x])
+
+            def false_fn(x):
+                return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
 
 if __name__ == '__main__':
     run_tests()

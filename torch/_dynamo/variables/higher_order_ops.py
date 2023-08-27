@@ -18,6 +18,7 @@ from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .lists import ListVariable, TupleVariable
+from .nn_module import NNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -351,13 +352,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         assert isinstance(
-            args[1], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[1],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
-            args[2], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[2],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[2])
         )  # false_fn
@@ -400,7 +403,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if not isinstance(ret_val, TensorVariable):
                 raise UserError(
                     UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
-                    "Expected branch out type to be a single tensor",
+                    "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
 
