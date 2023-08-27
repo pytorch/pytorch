@@ -853,6 +853,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qlinear_unary(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, use_bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        for bias in [True, False]:
+            mod = M(bias).eval()
+            v = torch.randn((2, 4))
+
+            # Totally 3 pattern_matcher_count, 10 pattern_matcher_nodes
+            # 1. pair of to_int8 and to_fp32 at linear input matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. dequant-linear pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, addmm/mm]
+            # 3. pair of to_int8 and to_fp32 at linear output matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            self._test_common(
+                mod,
+                (v,),
+                3,
+                10,
+                check_quantization=True,
+            )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
