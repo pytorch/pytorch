@@ -52,14 +52,16 @@ class NodeDef(NamedTuple):
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
-# _SerializeNodeDef holds two callables:
+# _SerializeNodeDef holds the following:
+# - typ: the type of the node (e.g., "Dict", "List", etc)
+# - type_fqn: the fully qualified name of the type, e.g. "collections.OrderedDict"
 # - to_dumpable_context takes a TreeSpec, and returns a serialized string format of the
 #   context, and the version number
 # - from_dumpable_context takes in a string representation of the context, and the
 #   version, and returns the deserialized context
 class _SerializeNodeDef(NamedTuple):
     typ: Type[Any]
-    serialized_type: str
+    type_fqn: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
 
@@ -74,6 +76,24 @@ def _register_pytree_node(
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
+    """
+    Args:
+        typ: the type to register
+        flatten_fn: A callable that takes a pytree and returns a flattened
+            representation of the pytree and additional context to represent the
+            flattened pytree.
+        unflatten_fn: A callable that takes a flattened version of the pytree,
+            additional context, and returns an unflattedn pytree.
+        to_dumpable_context: An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable
+            representation. This is used for json serialization, which is being
+            used in torch.export right now.
+        from_dumpable_context: An optional keyword argument to custom specify how
+            to convert the custom json dumpable representation of the context
+            back to the original context. This is used for json deserialization,
+            which is being used in torch.export right now.
+    """
+
     node_def = NodeDef(
         typ,
         flatten_fn,
@@ -87,12 +107,12 @@ def _register_pytree_node(
             "be None or registered."
         )
 
-    serialized_type = f"{typ.__module__}.{typ.__name__}"
+    type_fqn = f"{typ.__module__}.{typ.__name__}"
     serialize_node_def = _SerializeNodeDef(
-        typ, serialized_type, to_dumpable_context, from_dumpable_context
+        typ, type_fqn, to_dumpable_context, from_dumpable_context
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type] = typ
+    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -435,7 +455,7 @@ def _treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
 
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[spec.type]
 
-    serialized_type = serialize_node_def.serialized_type
+    type_fqn = serialize_node_def.type_fqn
 
     if serialize_node_def.to_dumpable_context is None:
         try:
@@ -451,7 +471,7 @@ def _treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
 
     child_schemas = [_treespec_to_json(child) for child in spec.children_specs]
 
-    return _TreeSpecSchema(serialized_type, serialized_context, child_schemas)
+    return _TreeSpecSchema(type_fqn, serialized_context, child_schemas)
 
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     if (

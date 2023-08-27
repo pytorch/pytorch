@@ -335,7 +335,7 @@ TreeSpec(TupleVariable, None, [*,
             from_dumpable_context=lambda dumpable_context: None,
         )
         spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
-        serialized_spec = treespec_dumps(spec)
+        serialized_spec = treespec_dumps(spec, 1)
         self.assertTrue("moo" in serialized_spec)
         roundtrip_spec = treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
