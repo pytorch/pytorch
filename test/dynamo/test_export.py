@@ -1630,7 +1630,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(pred, true_fn, false_fn, [x, y])
 
-        for Module in [Foo, Bar, FooBar]:
+        for Module in [Foo, Bar]:
             mod = Module()
             x = torch.randn([3, 3])
             pred = torch.tensor(x[0][0].item() < 0)
@@ -1638,6 +1638,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             out_graph, _ = torch._dynamo.export(mod.forward)(pred, x)
             dynamo_result = out_graph(pred, x)
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expect branches to return tensor with same requires_grad",
+        ):
+            mod = FooBar()
+            x = torch.randn([3, 3])
+            pred = torch.tensor(x[0][0].item() < 0)
+            real_result = mod.forward(pred, x)
+            torch._dynamo.export(mod.forward)(pred, x)
 
     def test_export_with_cond_with_closed_function(self):
         def hello(x):
@@ -1671,7 +1681,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x.sin()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
@@ -1680,6 +1690,33 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph, _ = torch._dynamo.export(mod)(x)
         test_x = torch.randn(3, 2)
         self.assertEqual(out_graph(test_x), mod(test_x))
+
+    def test_export_with_cond_raise_when_branch_output_mismatch(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x[:2]
+
+                return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
+
+        mod = Module()
+        x = torch.randn(3, 2)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expect branches to return tensor with same size but got",
+        ):
+            torch._dynamo.export(mod)(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expect branches to return tensor with same size but got",
+        ):
+            mod(x)
 
     def test_export_with_cond_dynamic_shape_pred_tuple_operands(self):
         from functorch.experimental.control_flow import cond
@@ -1690,7 +1727,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x.sin()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
@@ -3022,8 +3059,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected each tensor to have same metadata but got",
+            torch._dynamo.exc.UserError,
+            "Expect branches to return tensor that has same size but got",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,

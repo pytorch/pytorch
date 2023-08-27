@@ -468,9 +468,39 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             + list(true_lifted_freevars.keys())
             + list(false_lifted_freevars.keys()),
         )
-        # TODO: assert that the true/false return values are
-        # consistent
-        example_value = true_r.as_proxy().node.meta["example_value"]
+        true_example_value = true_r.as_proxy().node.meta["example_value"]
+        false_example_value = false_r.as_proxy().node.meta["example_value"]
+
+        def check_tensor_meta_same(a, b):
+            size_a = a.size()
+            size_b = b.size()
+            if len(size_a) != len(size_b):
+                raise UserError(
+                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                    f"Expect branches to return tensor that has same size but got\
+                     true_r: {size_a}, false_r: {size_b}",
+                )
+            for l, r in zip(size_a, size_b):
+                if l != r:
+                    raise UserError(
+                        UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                        f"Expect branches to return tensor with same size but got\
+                         true_r: {size_a}, false_r: {size_b}",
+                    )
+            if a.dtype != b.dtype:
+                raise UserError(
+                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                    f"Expect branches to return tensor with same dtype but got\
+                     {a.dtype}, {b.dtype}",
+                )
+            if a.requires_grad != b.requires_grad:
+                raise UserError(
+                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                    f"Expect branches to return tensor with same requires_grad but got\
+                     {a.requires_grad}, {b.requires_grad}",
+                )
+
+        check_tensor_meta_same(true_example_value, false_example_value)
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
@@ -483,7 +513,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=tuple(p_args),
                 kwargs=p_kwargs,
             ),
-            example_value=example_value,
+            example_value=true_example_value,
         )
 
 
