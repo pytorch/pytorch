@@ -74,12 +74,15 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
 
             def from_fun(t):
                 if isinstance(t, torch.Tensor):
-                    return torch.empty_strided(
-                        t.size(),
-                        t.stride(),
-                        dtype=t.dtype,
-                        requires_grad=t.requires_grad,
-                    )
+                    if t.dtype != torch.bool:
+                        return torch.empty_strided(
+                            t.size(),
+                            t.stride(),
+                            dtype=t.dtype,
+                            requires_grad=t.requires_grad,
+                        )
+                    else:
+                        return t.clone()
                 return t
 
             example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
