@@ -1642,10 +1642,21 @@ class Module:
 
     def __getstate__(self):
         state = self.__dict__.copy()
+
+        # Support for slots in child classes
+        for key in self.__slots__:
+            state[key] = getattr(self, key)
+
         state.pop("_compiled_call_impl", None)
         return state
 
     def __setstate__(self, state):
+
+        # Support for slots in child classes
+        for key in self.__slots__:
+            self.__setattr__(key, state[key])
+            state.pop(key, None)
+
         self.__dict__.update(state)
 
         # Support loading old checkpoints that don't have the following attrs:

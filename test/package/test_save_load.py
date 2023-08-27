@@ -261,6 +261,23 @@ class TestSaveLoad(PackageTestCase):
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
 
+    def test_save_load_with_slots_in_child_class(self):
+        """
+        Check that saving and loading with with slots in subclasses works fine.
+        """
+
+        obj = TestModule()
+        obj.var = "test_value"
+
+        with tempfile.TemporaryFile() as f:
+            torch.save(obj, f)
+            f.seek(0)
+            m_obj = torch.load(f)
+            self.assertEqual(m_obj.var, "test_value")
+
+# Had to move it out as serialization fails on local object
+class TestModule(torch.nn.Module):
+    __slots__ = ['var']
 
 if __name__ == "__main__":
     run_tests()
