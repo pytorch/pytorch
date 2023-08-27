@@ -2918,7 +2918,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list but got",
+            "Expected a tuple but got",
         ):
             torch._dynamo.export(
                 f_non_list_operands,
@@ -2935,7 +2935,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list of tensors",
+            "Expected a tuple of tensors",
         ):
             torch._dynamo.export(
                 f_non_tensor_operands,
