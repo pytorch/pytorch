@@ -1228,7 +1228,7 @@ def _cuda_lib_options() -> List[str]:
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
-        raise NotImplementedError(f"Unsupported env, failed to find cuda libs!")
+        raise NotImplementedError("Unsupported env, failed to find cuda libs!")
     return extra_ldflags
 
 
@@ -1307,7 +1307,7 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug(f"CUDA command: {res}")
+    log.debug("CUDA command: %s", res)
     return res
 
 
@@ -1339,7 +1339,7 @@ class DLLWrapper:
             if hasattr(syms, "dlclose"):
                 f_dlclose = syms.dlclose
         else:
-            raise NotImplementedError(f"Unsupported env, failed to do dlclose!")
+            raise NotImplementedError("Unsupported env, failed to do dlclose!")
 
         if f_dlclose is not None:
             f_dlclose.argtypes = [c_void_p]
