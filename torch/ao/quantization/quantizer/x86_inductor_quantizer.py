@@ -278,6 +278,52 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
             )
 
+    def _annotate_linear_node_helper(
+        self,
+        linear_node: torch.fx.Node,
+        annotate_output: bool,
+        quantization_config: QuantizationConfig,
+    ) -> None:
+        """Helper function to annotate the linear node"""
+        input_qspec_map = {}
+        assert linear_node.target in (
+            torch.ops.aten.mm.default,
+            torch.ops.aten.addmm.default,
+        )
+        has_bias = linear_node.target is torch.ops.aten.addmm.default
+        input_index = 1 if has_bias else 0
+        weight_index = input_index + 1
+
+        input_node = linear_node.args[input_index]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+
+        t_node = linear_node.args[weight_index]
+        assert isinstance(t_node, Node)
+        weight_node = t_node.args[0]
+        assert isinstance(weight_node, Node)
+        quantization_annotation = weight_node.meta.get(
+            "quantization_annotation", QuantizationAnnotation()
+        )
+        quantization_annotation.output_qspec = get_weight_qspec(quantization_config)
+        weight_node.meta["quantization_annotation"] = quantization_annotation
+
+        bias_node = linear_node.args[0] if has_bias else None
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+
+        if annotate_output:
+            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                # TODO<leslie> Remove the annotate of output
+                output_qspec=get_output_act_qspec(quantization_config),
+                _annotated=True,
+            )
+        else:
+            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map, _annotated=True
+            )
+
     def _get_output_nodes_of_partitions(
         self,
         partition_list: List[SourcePartition],
@@ -367,6 +413,8 @@ class X86InductorQuantizer(Quantizer):
         self._annotate_conv2d_binary(model, config)
         self._annotate_conv2d_unary(model, config)
         self._annotate_conv2d(model, config)
+        self._annotate_linear_unary(model, config)
+        self._annotate_linear(model, config)
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
@@ -657,6 +705,61 @@ class X86InductorQuantizer(Quantizer):
                 input_node = node.all_input_nodes[0]
                 self._annotate_output_share_observer_as_input(input_node, node)
         return
+
+    def _annotate_linear(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        linear_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
+        )
+        linear_partitions = list(itertools.chain(*linear_partitions.values()))
+        for partition in linear_partitions:
+            if len(partition.output_nodes) > 1:
+                raise ValueError(
+                    "Linear partition cannot have more than one output node"
+                )
+            linear_node = partition.output_nodes[0]
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.addmm.default,
+                torch.ops.aten.mm.default,
+            ):
+                raise ValueError(f"{linear_node} is not an aten addmm/mm operator")
+            # skip annotation if it is already annotated
+            if _is_annotated([linear_node]):
+                continue
+            self._annotate_linear_node_helper(linear_node, True, quantization_config)
+
+    def _annotate_linear_unary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        postop_list = [
+            torch.nn.ReLU,
+            torch.nn.LeakyReLU,
+            torch.nn.Tanh,
+        ]
+        fused_partitions: List[tuple] = []
+        for postop in postop_list:
+            fused_partitions = fused_partitions + find_sequential_partitions(
+                gm, [torch.nn.Linear, postop]
+            )
+        for fused_partition in fused_partitions:
+            linear_partition, unary_partition = fused_partition
+            linear_node, unary_node = self._get_output_nodes_of_partitions(
+                [linear_partition, unary_partition]
+            )
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.addmm.default,
+                torch.ops.aten.mm.default,
+            ):
+                continue
+            if _is_annotated([unary_node, linear_node]):
+                continue
+            self._annotate_linear_node_helper(linear_node, False, quantization_config)
+            unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True,
+            )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
