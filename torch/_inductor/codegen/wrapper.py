@@ -1111,7 +1111,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         )
                     resize_to = self.resized_outputs.get(name, None)
                     if resize_to is not None:
-                        resize_to_args = ", ".join(self.expr_printer(d) for d in resize_to)
+                        resize_to_args = ", ".join(
+                            self.expr_printer(d) for d in resize_to
+                        )
                         self.wrapper_call.writeline(
                             f"outputs[{idx}].resize_({{{resize_to_args}}});"
                         )
@@ -1273,8 +1275,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # avoid resize_output warning:
                 # "An output with one or more elements was resized since it had..."
                 if buffer.get_size() != output_buffer.get_size():
-                    resize_to_args = ", ".join(self.expr_printer(d) for d in buffer.get_size())
-                    alloc += f" {name}.resize_({{{resize_to_args}}});"
+                    resize_to_args = ", ".join(
+                        self.expr_printer(d) for d in buffer.get_size()
+                    )
+                    buf_str += f" {name}.resize_({{{resize_to_args}}});"
                     assert name not in self.resized_outputs
                     self.resized_outputs[name] = list(output_buffer.get_size())
                 return buf_str
