@@ -1554,6 +1554,7 @@ def native_batch_norm(
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
 @aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+@aten.native_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def native_batch_norm_decomposition(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1689,6 +1690,26 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+def device_hint(tensor):
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device
+    else:
+        return None
+
+
+def wrap_output_with_input_device_(x, common_device):
+    # wrap meta tensor
+    if common_device is not None and x.device.type == "meta":
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode()
+        fake_mode.in_kernel_invocation = True
+        converter = fake_mode.fake_tensor_converter
+        return converter.from_meta_and_device(fake_mode, x, common_device)
+
+    return x
+
+
 @register_decomposition(aten._to_copy)
 def _to_copy(
     x: Tensor,
@@ -1705,6 +1726,7 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
+    common_device = device_hint(x)
     if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
@@ -1713,6 +1735,11 @@ def _to_copy(
         x = torch._prims.device_put(x, device)
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
+        dtype_converted = True
+    # In case of dtype promotion, faketensor converted into tensor.
+    # Need to convert into faketensor if input was a faketensor.
+    if dtype_converted:
+        x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
