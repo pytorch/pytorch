@@ -1,6 +1,4 @@
-from typing import List, Optional
-
-import sympy
+from typing import Dict, List, Optional
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import Callable, CUDATemplateBuffer, IRNode, Layout, TensorBox
@@ -24,7 +22,7 @@ class CUDAKernel(Kernel):
     Kernels defined by the CUDA language.
     """
 
-    overrides = OpOverrides
+    overrides = OpOverrides  # type: ignore[assignment]
 
 
 class CUDATemplateKernel(CUDAKernel):
@@ -40,9 +38,14 @@ class CUDATemplateKernel(CUDAKernel):
     ):
         super().__init__()
         self.kernel_name = kernel_name
-        self.named_nodes = {}
+        # Mapping from arg name to IRNode.
+        self.named_nodes: Dict[str, IRNode] = {}
 
     def arg_name(self, node: IRNode) -> Optional[str]:
+        """
+        Returns arg name of a given input or output node.
+        """
+
         if node is None:
             return None
         return {**self.args.input_buffers, **self.args.output_buffers}.get(
@@ -50,6 +53,10 @@ class CUDATemplateKernel(CUDAKernel):
         )
 
     def check_not_null(self, node: IRNode) -> str:
+        """
+        Generates code to check that a node is not null.
+        """
+
         if node is None:
             return ""
 
@@ -61,7 +68,7 @@ class CUDATemplateKernel(CUDAKernel):
         res = IndentedBuffer(initial_indent=2)
         res.tabwidth = 1
         res.splice(
-            """
+            f"""
             {{
               if (!{name_str}) {{
                 int64_t {name_str}_size = {size_str};
@@ -70,9 +77,7 @@ class CUDATemplateKernel(CUDAKernel):
                 }}
               }}
             }}
-            """.format(
-                name_str=name_str, size_str=size_str
-            )
+            """
         )
         return res.getvalue()
 
@@ -81,11 +86,18 @@ class CUDATemplateKernel(CUDAKernel):
         inputs: List[IRNode],
         outputs: List[IRNode],
         names_str: str = "",
-        input_reorder: List[int] = None,
+        input_reorder: Optional[List[int]] = None,
     ) -> str:
         """
         Hook called from template code to generate function def and
         needed args.
+
+        inputs / outputs: List of input / output IRNodes. Note that IRNode can be None for optional arguments.
+        names_str: Comma separated list of input + output argument names.
+        input_reorder: The actual order of input nodes.
+                       e.g. The template might have input argument defined as [X, W, Bias],
+                       and the actual input passed into this template could be [Bias, X, W].
+                       In this case, the `input_reorder` would be [2, 0, 1].
         """
 
         names = [x.strip() for x in names_str.strip().split(",")]
@@ -115,6 +127,13 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(self, name: str, node: CUDATemplateBuffer) -> None:
+        """
+        Generates code to call the kernel through V.graph.wrapper_code.
+
+        name: Name of kernel function.
+        node: The IRNode which represents the kernel.
+        """
+
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -142,21 +161,30 @@ class CUDATemplateKernel(CUDAKernel):
         )
 
     def dtype(self, node: IRNode) -> str:
+        """
+        Generates code which represents dtype of a given node.
+        """
+
         if node is None:
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
     def offset(self, node: IRNode) -> str:
+        """
+        Generates code which represents offset of a given node.
+        """
+
         if node is None:
             return "0"
         return str(node.get_layout().offset)
 
-    def ptr(self, node: IRNode, default_node: IRNode = None) -> str:
+    def ptr(self, node: IRNode) -> str:
+        """
+        Generates code which represents pointer of a given node.
+        """
+
         if node is None:
-            if default_node is not None:
-                node = default_node
-            else:
-                return "nullptr"
+            return "nullptr"
         arg_name = self.arg_name(node)
         if arg_name is None:
             return "nullptr"
@@ -172,7 +200,10 @@ class CUDATemplateKernel(CUDAKernel):
     ) -> str:
         """
         Hook called from template code to get the size of an arg.
-        Will add needed args to pass it in if it is dynamic.
+        Generates code which represents size of a given node in [start_index, end_index).
+        If node is None, returns default_value.
+
+        TODO: Will add needed args to pass it in if it is dynamic.
         """
 
         if node is None:
@@ -193,7 +224,10 @@ class CUDATemplateKernel(CUDAKernel):
     def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
         """
         Hook called from template code to get the stride of an arg.
-        Will add needed args to pass it in if it is dynamic.
+        Generates code which represents stride of a given node at index.
+        If node is None, returns default_value.
+
+        TODO: Will add needed args to pass it in if it is dynamic.
         """
 
         if node is None:
@@ -209,9 +243,11 @@ class CUDATemplateKernel(CUDAKernel):
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """
         Hook called from template code to get the row or column stride of an arg.
-        Will add needed args to pass it in if it is dynamic.
+        This is required by some CUTLASS 2.X APIs.
         If the node is in row_major, it returns stride[-2].
         If the node is in column_major, it returns stride[-1].
+
+        TODO: Will add needed args to pass it in if it is dynamic.
         """
 
         if node is None or len(node.get_stride()) < 2:
@@ -244,7 +280,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
@@ -254,7 +290,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def call_name(self) -> str:
         return f"cuda_template_kernels.{self.name}"
 
-    def hash_key(self):
+    def hash_key(self) -> str:
         return "-".join(
             [
                 self.category,
@@ -262,7 +298,7 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-    def output_node(self):
+    def output_node(self) -> TensorBox:
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

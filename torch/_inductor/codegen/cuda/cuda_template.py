@@ -2,12 +2,10 @@ import functools
 import itertools
 import logging
 
-from copy import copy
-from typing import List
+from typing import List, Optional
 from unittest.mock import patch
 
 # import cutlass libs
-import scripts as cutlass_lib
 
 import sympy
 
@@ -17,9 +15,8 @@ from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, IRNode, Layout
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
-from ..common import jinja2_env, KernelTemplate
+from ..common import KernelTemplate
 
-from . import cutlass_utils
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 log = logging.getLogger(__name__)
@@ -33,7 +30,7 @@ class CUDATemplate(KernelTemplate):
         name: str,
         input_nodes: List[IRNode],
         layout: Layout,
-        input_reorder: List[int] = None,
+        input_reorder: Optional[List[int]] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
@@ -49,9 +46,11 @@ class CUDATemplate(KernelTemplate):
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
-            log.debug(f"Generated Code:\n{code}")
+            log.debug("Generated Code:\n%s", code)
             log.debug(
-                f"Args: {kernel.args.cpp_argdefs()}, {kernel.args.python_argdefs()}"
+                "Args: cpp_argdefs: %s, python_argdefs: %s",
+                kernel.args.cpp_argdefs(),
+                kernel.args.python_argdefs(),
             )
 
         input_reorder = (
