@@ -18,7 +18,11 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
+<<<<<<< HEAD
+from .autotune_process import TensorMeta, TritonBenchmarkRequest
+=======
 from .autotune_process import TritonBenchmarkRequest, TensorMeta
+>>>>>>> 6f031c8630e ([Inductor CUTLASS backend] Step 4: CUDA (template) kernels)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
@@ -493,10 +497,9 @@ class TritonTemplate(KernelTemplate):
         # create the BenchmarkRequest
         grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
         bmreq = TritonBenchmarkRequest(
-            kernel_name=kernel_name,
+            module_path=mod.__file__,
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
-            module_path=mod.__file__,
             module_cache_key=mod.key,
             grid=grid,
             extra_args=extra_args,
