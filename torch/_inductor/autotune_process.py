@@ -171,11 +171,26 @@ class BenchmarkRequest:
     can be done inside the same process since they usually don't cause crash.
     """
 
-    # the kernel name defined in the module
-    kernel_name: str
-    input_tensor_meta: List[TensorMeta]
-    output_tensor_meta: TensorMeta
-    extra_args: Dict[str, Any]
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Dict[str, Any],
+    ):
+        # the kernel name defined in the module
+        self.kernel_name = kernel_name
+
+        if isinstance(input_tensor_meta, TensorMeta):
+            input_tensor_meta = [input_tensor_meta]
+        self.input_tensor_meta = input_tensor_meta
+
+        if isinstance(output_tensor_meta, (tuple, list)):
+            assert len(output_tensor_meta) == 1
+            output_tensor_meta = output_tensor_meta[0]
+        self.output_tensor_meta = output_tensor_meta
+
+        self.extra_args = extra_args
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -227,8 +242,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: List[TensorMeta],
-        output_tensor_meta: TensorMeta,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Dict[str, Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
@@ -273,8 +288,8 @@ class CUDABenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: List[TensorMeta],
-        output_tensor_meta: TensorMeta,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Dict[str, Any],
         source_code: str,
     ):
