@@ -531,10 +531,27 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 temp = self.conv2(temp) + self.conv3(temp)
                 return temp
 
+        class M2(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+                self.linear3 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                temp = self.linear1(x)
+                temp = self.linear2(temp) + self.linear3(temp)
+                return temp
+
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        mod2 = M2().eval()
+        v2 = torch.rand((2, 4))
 
-        # Totally 11 pattern_matcher_count, 54 pattern_matcher_nodes
+        # Totally 11 pattern_matcher_count
+        # 54 pattern_matcher_nodes for conv, 50 pattern_matcher_nodes for linear
         # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
         #    matched in pointless_convert pass at
         #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
@@ -547,13 +564,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # 5. Qconv2d_add * 1
         #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
         #     clamp_min_3, clamp_max_3, convert_element_type_6]
-        self._test_common(
-            mod,
-            (v,),
-            11,
-            54,
-            check_quantization=True,
-        )
+        for mod, v, num_nodes in zip([mod, mod2], [v, v2], [54, 50]):
+            self._test_common(
+                mod,
+                (v,),
+                11,
+                num_nodes,
+                check_quantization=True,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfRocm
