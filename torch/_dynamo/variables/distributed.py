@@ -36,11 +36,13 @@ def is_constant_pg_functions(value):
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
         get_process_group_ranks,
+        get_rank,
     )
 
     constant_processgroup_functions = [
         get_process_group_ranks,
         _get_group_tag,
+        get_rank,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions

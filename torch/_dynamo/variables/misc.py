@@ -720,7 +720,7 @@ class SkipFilesVariable(VariableTracker):
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
 
-                def _func():
+                def func(tx, item, acc):
                     return BuiltinVariable(sum).call_function(tx, [item, acc], {})
 
             elif (
@@ -729,9 +729,7 @@ class SkipFilesVariable(VariableTracker):
                 and args[1].is_callable(tx)
             ):
                 seq = args[0].unpack_var_sequence(tx)
-
-                def _func():
-                    return args[1].call_function
+                func = args[1].call_function
 
             else:
                 raise unimplemented("Unsupported arguments for itertools.accumulate")
@@ -743,7 +741,7 @@ class SkipFilesVariable(VariableTracker):
                     acc = item
                 else:
                     try:
-                        acc = _func(tx, item, acc)
+                        acc = func(tx, item, acc)
                     except Exception:
                         raise unimplemented(
                             f"Unexpected failure in invoking function during accumulate. Failed running func {_func}({item}{acc})"
