@@ -134,7 +134,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.broadcast_shapes,
         torch.can_cast,
         torch.compile,
-        torch.cond,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
         torch.cudnn_convolution,

@@ -55,7 +55,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export', 'cond',
+    'export',
 ]
 
 ################################################################################
@@ -1832,6 +1832,5 @@ def __getattr__(name):
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-from torch._higher_order_ops.cond import cond
 from . import _logging
 _logging._init_logs()

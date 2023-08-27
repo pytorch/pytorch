@@ -13,7 +13,6 @@ from torch._functorch.eager_transforms import (
     _wrap_all_tensors_to_functional,
     functionalize,
 )
-from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -54,7 +53,6 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
-@exposed_in("torch")
 def cond(pred, true_branch, false_branch, operands):
     r"""
     `cond` can logically be seen as implemented as follows::
@@ -91,7 +89,7 @@ def cond(pred, true_branch, false_branch, operands):
             return x.cos()
         def false_fn(x: torch.Tensor):
             return x.sin()
-        return torch.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
+        return cond(x.shape[0] > 4, true_fn, false_fn, (x,))
 
     Restrictions:
         - The conditional statement (aka `pred`) must meet one of the following constraints:
