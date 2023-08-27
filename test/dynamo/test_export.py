@@ -1681,6 +1681,25 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         test_x = torch.randn(3, 2)
         self.assertEqual(out_graph(test_x), mod(test_x))
 
+    def test_export_with_cond_dynamic_shape_pred_tuple_operands(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x[:2]
+
+                return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
+
+        mod = Module()
+        x = torch.randn(2, 2)
+        out_graph, _ = torch._dynamo.export(mod)(x)
+        test_x = torch.randn(3, 2)
+        self.assertEqual(out_graph(test_x), mod(test_x))
+
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
 
