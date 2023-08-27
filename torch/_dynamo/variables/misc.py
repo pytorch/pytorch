@@ -744,7 +744,7 @@ class SkipFilesVariable(VariableTracker):
                         acc = func(tx, item, acc)
                     except Exception:
                         raise unimplemented(
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {_func}({item}{acc})"
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
                         )
                 items.append(acc)
 
