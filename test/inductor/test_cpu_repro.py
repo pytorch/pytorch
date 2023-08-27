@@ -991,6 +991,53 @@ class CPUReproTests(TestCase):
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
+    def test_non_contiguous_load_buf_quant(self):
+        def fn(
+            x1,
+            x2,
+            groups,
+        ):
+            x = torch.cat((x1, x2), dim=1)
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, num_channels, height, width)
+            return x
+
+        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    x,
+                    x2,
+                    2,
+                ),
+            )
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
     def test_tile2d_store_channel_shuffle_cl_quant_output(self):
         def channel_shuffle(x, groups, output_scale, output_zero_point):
             batchsize, num_channels, height, width = x.size()
