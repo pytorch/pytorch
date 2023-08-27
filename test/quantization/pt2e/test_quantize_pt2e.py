@@ -2114,7 +2114,28 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             M(), example_inputs, is_per_channel=True, verify_convert=True,
         )
 
-    @unittest.skip("some issues with conv2d rewrite, will fix in a separate PR")
+    def test_representation_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 5),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
     def test_representation_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
