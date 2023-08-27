@@ -1068,7 +1068,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 def false_fn(x):
                     return x.sum() - z.sum() - self.buffer.sum()
 
-                return control_flow.cond(y, true_fn, false_fn, [x])
+                return control_flow.cond(x, true_fn, false_fn, [y])
 
         mod_for_compile = torch.compile(
             Foo(), backend=cnt, dynamic=True, fullgraph=True

@@ -75,7 +75,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             def from_fun(t):
                 if isinstance(t, torch.Tensor):
                     return torch.empty_strided(
-                        t.size(), t.stride(), requires_grad=t.requires_grad
+                        t.size(),
+                        t.stride(),
+                        dtype=t.dtype,
+                        requires_grad=t.requires_grad,
                     )
                 return t
 
