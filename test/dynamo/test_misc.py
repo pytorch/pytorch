@@ -6848,6 +6848,35 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(counter.frame_count, 1)
 
+    def test_pure_python_accumulate(self):
+        def accumulate(iterable, func=lambda x, y: x + y):
+            it = iter(iterable)
+            try:
+                # Initialize the accumulator with the first value from the iterable
+                accumulator = next(it)
+            except StopIteration:
+                # If the iterable is empty, return an empty generator
+                return
+            yield accumulator
+
+            for element in it:
+                accumulator = func(accumulator, element)
+                yield accumulator
+
+        def fn(it):
+            return accumulate(it)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        eager = fn(t_list)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(t_list)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
