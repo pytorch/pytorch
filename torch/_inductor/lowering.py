@@ -938,6 +938,15 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    if all(input.get_dtype() is torch.uint8 for input in inputs):
+        # TODO <leslie> Remove this fallback when we support vectorization
+        # code gen with uint8 data type directly.
+        for input in inputs:
+            input.realize()
+        if all(len(input.layout.size) == 4 for input in inputs):
+            inputs, _ = require_channels_last(aten.cat, *inputs)
+        return fallback_handler(aten.cat)(inputs, dim)
+
     if len(inputs) == 1:
         return clone(inputs[0])
 
@@ -1779,6 +1788,13 @@ def require_dense(_, *args, **kwargs):
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_channels_last(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
     )
     return args, kwargs
 
@@ -4716,3 +4732,7 @@ except ImportError:
 from . import kernel
 
 import_submodule(kernel)
+
+from . import quantized_lowerings
+
+quantized_lowerings.register_quantized_ops()
