@@ -20,7 +20,7 @@ from torch._dynamo.utils import counters, identity
 from . import config, ir
 from .autotune_process import TritonBenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import ChoiceCaller, IndentedBuffer, jinja2_env, KernelTemplate
+from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -679,7 +679,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.info(f"Max autotune selects from {len(choices)} choices.")
+        log.info("Max autotune selects from %s choices.", str(len(choices)))
 
         @functools.lru_cache(None)
         def make_benchmark_fn():
@@ -692,7 +692,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     choice,
                 )
             except CUDACompileError as e:
-                log.warning(f"CUDA compilation error: \n{str(e)}. \nIgnore this choice.")
+                log.warning("CUDA compilation error: \n%s. \nIgnore this choice.", str(e))
                 return float('inf')
             except RuntimeError as e:
                 msg = str(e)
@@ -730,7 +730,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if make_benchmark_fn.cache_info().currsize or log.getEffectiveLevel() == logging.DEBUG:
             self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
-        log.debug(f"selected choice: {str(selected_choice)}")
+        log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
     @classmethod

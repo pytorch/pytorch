@@ -1856,9 +1856,6 @@ class ReinterpretView(BaseView):
     def get_dtype(self):
         return self.layout.dtype
 
-    def get_layout(self):
-        return self.layout
-
     def get_size(self):
         return list(self.layout.size)
 
@@ -2441,6 +2438,7 @@ class Buffer(IRNode):
         """
         return 0
 
+
 class InputBuffer(Buffer):
     pass
 
@@ -2773,8 +2771,10 @@ class TemplateBuffer(Buffer):
             None,
         )
 
+
 class TritonTemplateBuffer(TemplateBuffer):
     pass
+
 
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
@@ -2790,6 +2790,7 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
+
 
 @dataclasses.dataclass
 class InputsKernel(Buffer):
