@@ -24,7 +24,6 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TypeVar,
     Union,
     ValuesView,

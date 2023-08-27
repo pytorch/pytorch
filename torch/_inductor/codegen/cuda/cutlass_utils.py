@@ -3,9 +3,9 @@ import logging
 from typing import Any, List
 
 # Import cutlass python scripts.
-import generator as cutlass_generator  # type: ignore
-import library as cutlass_lib  # type: ignore
-import manifest as cutlass_manifest  # type: ignore
+import generator as cutlass_generator  # type: ignore[import]
+import library as cutlass_lib  # type: ignore[import]
+import manifest as cutlass_manifest  # type: ignore[import]
 
 import sympy
 
