@@ -730,6 +730,7 @@ Preview: torch.onnx TorchDynamo Exporter
 
 .. autofunction:: torch.onnx.dynamo_export
 .. autofunction:: torch.onnx.enable_fake_mode
+.. autofunction:: torch.onnx.is_onnxrt_backend_supported
 
 .. autosummary::
     :toctree: generated
