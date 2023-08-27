@@ -207,13 +207,6 @@ class TestDeserialize(TestCase):
             else:
                 self.assertEqual(orig, loaded)
 
-        self.assertEqual(len(ep.original_traced_arguments), len(deserialized_ep.original_traced_arguments))
-        for arg1, arg2 in zip(ep.original_traced_arguments, deserialized_ep.original_traced_arguments):
-            if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
-                self.assertTrue(torch.allclose(arg1, arg2))
-            else:
-                self.assertEqual(type(arg1), type(arg2))
-
         def _check_graph_nodes(gm1, gm2, _check_meta=True):
             # TODO: The _check_meta flag bypasses checking for
             # source_fn/nn_module_stack as there is an issue with
@@ -429,6 +422,18 @@ class TestDeserialize(TestCase):
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
 
+    def test_get_attr(self) -> None:
+        def f(x):
+            return x + torch.tensor(3)
+
+        self.check_graph(f, (torch.tensor(3),))
+
+    def test_get_attr_list(self) -> None:
+        def f(x):
+            return torch.cat([x, torch.tensor([1, 1])])
+
+        self.check_graph(f, (torch.tensor([1, 1]),))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -476,10 +481,6 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_pytree_flatten
-)
-# getattr node in the graph from a torch.tensor call
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_cond_branch_nonlocal_variables
 )
 
 
