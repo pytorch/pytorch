@@ -11,7 +11,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
-from torch._dynamo.testing import normalize_gm
 
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
@@ -1256,30 +1255,50 @@ class TestControlFlowTraced(TestCase):
         inp = torch.randn(2, 3)
         self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp, ), exp_arg_num=3)
 
+    def test_cond_with_tensor_closure_graph_module(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+
+        def true_fn(x):
+            return x + a
+
+        def false_fn(x):
+            return x + b
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+
+        # expected branches takes [x, a, b] as input
+        inp = torch.randn(2, 3)
+
         gm = make_fx(foo)(inp)
-        actual = normalize_gm(gm.print_readable(print_output=False))
+        # normalization
+        actual = "".join(gm.code.split())
         exp = """\
-class foo(torch.nn.Module):
-    def forward(self, x_1: f32[2, 3]):
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _tensor_constant0 = self._tensor_constant0
-        _tensor_constant1 = self._tensor_constant1
-        conditional: f32[2, 3] = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, \
-[x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
-        return conditional
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[2, 3], arg1_1: f32[2, 3], arg2_1: f32[2, 3]):
-            add: f32[2, 3] = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            return add
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[2, 3], arg1_1: f32[2, 3], arg2_1: f32[2, 3]):
-            add: f32[2, 3] = torch.ops.aten.add.Tensor(arg0_1, arg2_1);  arg0_1 = arg2_1 = None
-            return add
+def forward(self, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, \
+_tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    return conditional
 """
-        self.assertExpectedInline(actual, exp)
+        exp = "".join(exp.split())
+        self.assertEqual(exp, actual)
+
+        actual = gm.true_graph_0.code
+        # normalization
+        actual = "".join(actual.split())
+        exp = """
+def forward(self, arg0_1, arg1_1, arg2_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    return add
+"""
+        # Normalization hack, cause .code makes some weird whitespace
+        exp = "".join(exp.split())
+        self.assertEqual(exp, actual)
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
