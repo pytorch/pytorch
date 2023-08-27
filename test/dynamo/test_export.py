@@ -1671,7 +1671,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     return x + x
 
                 def false_fn(x):
-                    return x.sin()
+                    return x[:2]
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
