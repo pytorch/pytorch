@@ -2603,6 +2603,7 @@ class CppKernelProxy(CppKernel):
                         node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
+        V.graph.removed_buffers |= scalar_kernel.removed_buffers
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
