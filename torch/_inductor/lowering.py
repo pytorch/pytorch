@@ -1403,6 +1403,40 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(torch.ops.onednn.qlinear_pointwise, type_promotion_kind=None)
+        def qlinear_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QLinearPointwisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
         if torch._C.has_mkl:
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 

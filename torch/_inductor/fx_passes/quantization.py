@@ -73,6 +73,23 @@ dequantize_qconv_pt2e_pattern = CallFunction(
     Arg(),  # algorithm
 )
 
+qlinear_pt2e_pattern = CallFunction(
+    torch.ops.onednn.qlinear_pointwise.default,
+    KeywordArg("x"),
+    KeywordArg("x_scale"),
+    KeywordArg("x_zp"),
+    KeywordArg("packed_weight"),
+    KeywordArg("w_scale"),
+    KeywordArg("w_zp"),
+    KeywordArg("b"),
+    KeywordArg("output_scale"),
+    KeywordArg("output_zero_point"),
+    KeywordArg("fp32_output"),
+    KeywordArg("postop_name"),
+    KeywordArg("postop_args"),
+    KeywordArg("postop_algorithm"),
+)
+
 dequantize_accum_pattern = CallFunction(
     aten.mul.Tensor,
     CallFunction(
@@ -114,7 +131,7 @@ def generate_pattern_with_output_quant(computation_call):
         output = clamp_max(output, 127)
         output = output.to(uint8)
     """
-    quantize_conv_output_pattern_pt2e = CallFunction(
+    quantized_op_output_pattern_pt2e = CallFunction(
         prims.convert_element_type.default,
         CallFunction(
             aten.clamp_max.default,
@@ -138,7 +155,7 @@ def generate_pattern_with_output_quant(computation_call):
         ),
         KeywordArg("o_dtype"),
     )
-    return quantize_conv_output_pattern_pt2e
+    return quantized_op_output_pattern_pt2e
 
 
 def _register_quantized_conv_lowering(
@@ -203,6 +220,63 @@ def _register_quantized_conv_lowering(
         return L[computation_op](*computation_args)
 
     return qconv
+
+
+def _register_quantized_linear_lowering(
+    pattern,
+    pass_number,
+    computation_op,
+    fp32_output,
+    unary_attr,
+):
+    @register_lowering_pattern(pattern, pass_number=pass_number)
+    def qlinear(match: Match, *args, **kwargs):
+        # Activation QParams
+        x, x_scale, x_zp = (
+            kwargs["x"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
+        )
+        # Weight QParams
+        packed_weight, w_scale, w_zp = (
+            kwargs["packed_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+
+        # bias
+        b = kwargs["b"] if "b" in kwargs else None
+
+        # Output QParams
+        o_inv_scale, o_zero_point = (
+            kwargs["o_inv_scale"],
+            kwargs["o_zp"],
+        )
+        assert (
+            kwargs["fp32_output"] is True
+        )  # Expected int8-in fp32-out qlinear in weight prepack phase
+        assert (
+            kwargs["postop_name"] == "none"
+        )  # Expected no post op fused in weight prepack phase
+
+        computation_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            b,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            unary_attr.op_name,
+            unary_attr.scalars_attr,
+            unary_attr.algorithm_attr,
+        )
+        return L[computation_op](*computation_args)
+
+    return qlinear
 
 
 def _register_quantized_conv_binary_lowering(
@@ -273,7 +347,7 @@ def _register_quantization_unary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
-    unary_replace_patterns = {
+    conv_unary_replace_patterns = {
         UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
             dequantize_qconv_pt2e_pattern
         ),
@@ -284,12 +358,30 @@ def _register_quantization_unary_fusion():
         ),
     }
 
-    for unary_attr, patterns in unary_replace_patterns.items():
+    for unary_attr, patterns in conv_unary_replace_patterns.items():
         # Register qconv2d pattern for ExternKernel Lowering
         _register_quantized_conv_lowering(
             patterns,
             1 if unary_attr.op_name != "none" else 2,  # pass_number
             torch.ops.onednn.qconv2d_pointwise,  # computation_op
+            False,  # fp32_output
+            unary_attr,  # unary_attr
+        )
+
+    linear_unary_replace_patterns = {
+        UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+            qlinear_pt2e_pattern
+        ),
+        UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default)
+        ),
+    }
+
+    for unary_attr, patterns in linear_unary_replace_patterns.items():
+        _register_quantized_linear_lowering(
+            patterns,
+            1 if unary_attr.op_name != "none" else 2,  # pass_number
+            torch.ops.onednn.qlinear_pointwise,  # computation_op
             False,  # fp32_output
             unary_attr,  # unary_attr
         )
