@@ -215,8 +215,12 @@ class DeviceMesh:
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
         assert rank_coords.size(0) in (0, 1)
+        ele = None
+        if rank_coords.size(0) > 0:
+            ele = rank_coords[0].tolist()
+
         self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+            ele
         )
         return _get_default_group()
 

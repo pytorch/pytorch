@@ -546,6 +546,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 def local_scalar_dense(fake_mode, func, arg):
     if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
         # Without symints/symfloats, cannot handle this
+        print("SHAPE_ENV", fake_mode.shape_env, fake_mode.shape_env.allow_scalar_outputs)
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symfloat()

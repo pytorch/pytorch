@@ -5,11 +5,12 @@ import os
 
 import torch
 import torch._dynamo
+from torch._dynamo import compiled_autograd
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-
+import contextlib
 
 def init():
     torch.manual_seed(0)
@@ -39,7 +40,7 @@ def run(model, optim):
     torch.manual_seed(42)
     losses = []
     inp = torch.randn((2, 3), device="cuda")
-
+    
     for _ in range(4):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
@@ -64,10 +65,24 @@ def run(model, optim):
 
 def main(compiled):
     model, optim = init()
+
+    def compiler_fn(gm):
+        print("Compiling autograd?")
+        return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=False)
+
+    compile_bwd = False
+    ctx = compiled_autograd.enable(compiler_fn) if compile_bwd else contextlib.nullcontext()
+
     if compiled:
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-        model = torch._dynamo.optimize("eager", nopython=True)(model)
-    return run(model, optim)
+        with ctx:
+            print("RUNNING COMPILE")
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+            torch._dynamo.config.capture_scalar_outputs = True
+            model = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(model)
+            res = run(model, optim)
+    else:
+        res = run(model, optim)
+    return res
 
 
 
