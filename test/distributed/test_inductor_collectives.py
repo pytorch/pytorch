@@ -254,6 +254,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+            # TODO(yf225): assert code is correct
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
