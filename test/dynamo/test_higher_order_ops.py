@@ -1037,26 +1037,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
-<<<<<<< Updated upstream
-        ref = mod_for_eager(torch.ones(6, 4))
-=======
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r"Can't inplace modify module params/buffers inside HigherOrderOp",
         ):
             mod_for_eager(torch.ones(6, 4))
->>>>>>> Stashed changes
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r"Can't inplace modify module params/buffers inside HigherOrderOp",
         ):
-<<<<<<< Updated upstream
             mod_for_compile(torch.ones(3, 4))
-=======
-            actual = mod_for_compile(torch.ones(3, 4))
->>>>>>> Stashed changes
 
     def test_cond_free_variable_in_both_branches(self):
         backend = EagerAndRecordGraphs()
@@ -1129,12 +1121,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 return control_flow.cond(y, true_fn, false_fn, [x])
 
         mod_for_eager = Foo()
-        mod_for_eager(torch.tensor(True), torch.tensor(5))
-
         mod_for_compile = torch.compile(
             Foo(), backend=cnt, dynamic=True, fullgraph=False
         )
-        mod_for_eager = Foo()
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r"Mutating a variable not in the current scope",
