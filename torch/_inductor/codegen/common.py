@@ -21,7 +21,6 @@ from ..utils import (
     DeferredLineBase,
     do_bench_using_profiling,
     free_symbol_startswith,
-    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
@@ -1034,32 +1033,42 @@ def jinja2_env():
 
 
 class ChoiceCaller:
+    """
+    Represents a possible choice used in autotune_process.py.
+    During autotuning, self.benchmark() is first called to get benchmark result,
+    and if this choice is selected, self.output_node() is called to get the output_node.
+
+    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    """
+
     def __init__(self, name, input_nodes, layout):
         super().__init__()
         self.name = name
         self.layout = layout
         self.input_nodes = input_nodes
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
         return do_bench_using_profiling(lambda: algo(*args, out=out))
 
-    def call_name(self):
+    def call_name(self) -> str:
         raise NotImplementedError()
 
     def to_callable(self):
         raise NotImplementedError()
 
-    def hash_key(self):
+    def hash_key(self) -> str:
         raise NotImplementedError()
 
-    def output_node(self):
+    def output_node(self) -> 'TensorBox':
         raise NotImplementedError()
 
 
 class KernelTemplate:
     """
     Base class for defining kernel templates.
+
+    Children classes: TritonTemplate, CUDATemplate
     """
 
     @staticmethod
@@ -1085,7 +1094,10 @@ class KernelTemplate:
 
     def maybe_append_choice(self, choices, **kwargs):
         """
-        Maybe generates a ChoiceCaller and appends it into choices.
+        Maybe generates a new ChoiceCaller and appends it into existing choices.
+
+        choices: A list of ChoiceCallers.
+        kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
         """
 
         try:

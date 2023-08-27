@@ -376,6 +376,7 @@ class CppPrinter(ExprPrinter):
             return f"std::max({il})"
 
 
+# A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
 
 

@@ -1,13 +1,11 @@
 import copy
 import logging
 import re
-from typing import List, Optional
-
-import torch
+from typing import Dict, List, Optional, Tuple
 
 # import cutlass libs
-import gemm_operation as cutlass_gemm_op
-import library as cutlass_lib
+import gemm_operation as cutlass_gemm_op  # type: ignore[import]
+import library as cutlass_lib  # type: ignore[import]
 
 from ...ir import Buffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
@@ -149,7 +147,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: List[int]=None,
+        input_reorder: Optional[List[int]] = None,
     ):
         super().__init__("cutlass_gemm", input_nodes, layout, input_reorder)
         self.alpha = alpha
@@ -211,7 +209,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def define_gemm_instance(
         op: cutlass_gemm_op.GemmOperation,
-    ) -> str:
+    ) -> Tuple[str, str]:
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
             op_def = emitter.emit(op)
@@ -289,8 +287,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if not (
             cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
             and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
-            and cutlass_utils.dtype_match(self.output_node.get_layout().dtype, op.C.element)
-            and cutlass_utils.dtype_match(accumulator_torch_dtype, op.accumulator_type())
+            and cutlass_utils.dtype_match(
+                self.output_node.get_layout().dtype, op.C.element
+            )
+            and cutlass_utils.dtype_match(
+                accumulator_torch_dtype, op.accumulator_type()
+            )
         ):
             return None
 
@@ -341,20 +343,29 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def gen_ops(self) -> List[cutlass_gemm_op.GemmOperation]:
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res = dict()
+        res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         num_3x_ops = 0
         num_2x_ops = 0
-        for key, op_list in ops.items():
+        for op_list in ops.values():
             for op in op_list:
                 filter_res = self.filter_op(op)
-                if filter_res is not None and res.get(filter_res.configuration_name(), None) is None:
+                if (
+                    filter_res is not None
+                    and res.get(filter_res.configuration_name(), None) is None
+                ):
                     res[filter_res.configuration_name()] = filter_res
         for op in res.values():
             if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
                 num_3x_ops += 1
             else:
                 num_2x_ops += 1
-        log.debug(f"Got cutlass configs: {len(res)=}, {num_3x_ops=}, {num_2x_ops=}")
+        log.debug(
+            "Got cutlass configs: total number of ops: %s, "
+            "total number of 3x ops: %s, total number of 2x ops: %s",
+            str(len(res)),
+            str(num_3x_ops),
+            str(num_2x_ops),
+        )
         return list(res.values())
 
     def gemm_mode(self) -> str:
@@ -410,10 +421,17 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 new_W = clone_with_transposed_stride(W)
                 new_Bias = clone_with_transposed_stride(Bias)
                 new_Y = clone_with_transposed_stride(Y)
-                options['X'], options['W'], options['Bias'], options['Y'] = new_W, new_X, new_Bias, new_Y
-                options['M'], options['N'] = "N", "M"
+                options["X"], options["W"], options["Bias"], options["Y"] = (
+                    new_W,
+                    new_X,
+                    new_Bias,
+                    new_Y,
+                )
+                options["M"], options["N"] = "N", "M"
 
-            epilogue_arguments = self._template_from_string(epilogue_template).render(**options)
+            epilogue_arguments = self._template_from_string(epilogue_template).render(
+                **options
+            )
             arguments = self._template_from_string(argument_template).render(
                 epilogue_arguments=epilogue_arguments, **options
             )
@@ -423,7 +441,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             )
         return arguments
 
-    def render(
+    def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
         op: cutlass_gemm_op.GemmOperation,
@@ -434,7 +452,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 or self.input_nodes[2] is None else self.input_nodes[2]
+        Bias = (
+            None
+            if len(self.input_nodes) == 2 or self.input_nodes[2] is None
+            else self.input_nodes[2]
+        )
 
         epilogue_template: Optional[str] = None
         argument_template: Optional[str] = None

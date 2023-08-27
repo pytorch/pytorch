@@ -24,7 +24,6 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -46,7 +45,7 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
-def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> None:
+def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
     Returns benchmark results by examining torch profiler events.
     This could be more accurate as it doesn't count CPU side overhead.
@@ -115,7 +114,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> None:
     log.debug("filtered events")
     log.debug(filtered_events)
     res = sum(event.cuda_time for event in filtered_events) / 1000.0
-    log.debug(f"profiling results: {res}")
+    log.debug("profiling results: %s", res)
     return res
 
 
@@ -213,7 +212,7 @@ def ceildiv(numer: int, denom: int) -> int:
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2 ** 32, "32-bit only"
+    assert n <= 2**32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
@@ -727,6 +726,7 @@ def is_big_gpu(index):
         return False
     return True
 
+
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
         (
@@ -739,21 +739,22 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
         and is_big_gpu(layout.device.index or 0)
     )
 
+
 def use_triton_template(layout, *, enable_int32=False):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return (
-        _use_template_for_cuda(layout, layout_dtypes)
-        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
-    )
+    return _use_template_for_cuda(
+        layout, layout_dtypes
+    ) and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+
 
 def use_cutlass_template(layout):
-    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
-    return (
-        _use_template_for_cuda(layout, layout_dtypes)
-        and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
-    )
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    return _use_template_for_cuda(
+        layout, layout_dtypes
+    ) and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
+
 
 def use_aten_gemm_kernels():
     return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")

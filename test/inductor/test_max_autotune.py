@@ -5,7 +5,6 @@ import unittest
 from typing import List
 
 import torch
-torch.cuda.init()
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
@@ -200,7 +199,7 @@ class TestDoBench(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -229,7 +228,7 @@ class TestDoBench(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -290,7 +289,7 @@ class TestDoBench(TestCase):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS",))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_addmm_cutlass_backend(self, max_autotune_gemm_backends):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -321,13 +320,12 @@ class TestDoBench(TestCase):
             # Broadcast first dim.
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
-            if SM90OrLater:
-                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-            else:
+            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
                 with self.assertRaisesRegex(RuntimeError, "No choices to select"):
                     # CUTLASS2 doesn't support Bias last-dim broadcast.
                     compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-
+            else:
+                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     @skipIfRocm
     def test_autotune_conv1x1(self):

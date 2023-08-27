@@ -19,7 +19,7 @@ from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
 if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
-from .utils import do_bench, do_bench_using_profiling
+from .utils import do_bench_using_profiling
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -171,11 +171,26 @@ class BenchmarkRequest:
     can be done inside the same process since they usually don't cause crash.
     """
 
-    # the kernel name defined in the module
-    kernel_name: str
-    input_tensor_meta: List[TensorMeta]
-    output_tensor_meta: TensorMeta
-    extra_args: Dict[str, Any]
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Dict[str, Any],
+    ):
+        # the kernel name defined in the module
+        self.kernel_name = kernel_name
+
+        if isinstance(input_tensor_meta, TensorMeta):
+            input_tensor_meta = [input_tensor_meta]
+        self.input_tensor_meta = input_tensor_meta
+
+        if isinstance(output_tensor_meta, (tuple, list)):
+            assert len(output_tensor_meta) == 1
+            output_tensor_meta = output_tensor_meta[0]
+        self.output_tensor_meta = output_tensor_meta
+
+        self.extra_args = extra_args
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -227,8 +242,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: List[TensorMeta],
-        output_tensor_meta: TensorMeta,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Dict[str, Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
@@ -273,21 +288,19 @@ class CUDABenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: List[TensorMeta],
-        output_tensor_meta: TensorMeta,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Dict[str, Any],
         source_code: str,
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
-        self.workspace: Optional[Tensor] = None
+        self.workspace: Optional[torch.Tensor] = None
         self.DLL: Optional[DLLWrapper] = None
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = CUDACodeCache.write(
-            self.source_code, "so"
-        )
+        self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -300,9 +313,13 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             for tensor in list(input_tensors) + [output_tensor]
         ]
         log.debug(
-            "make_run_fn: "
-            f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}, {self.DLL=}"
-            f"{args=}, {self.extra_args=}"
+            "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            self.kernel_name,
+            self.source_file,
+            self.hash_key,
+            self.DLL,
+            args,
+            self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
@@ -337,7 +354,8 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         )
 
     def cleanup_run_fn(self) -> None:
-        self.DLL.close()
+        if self.DLL is not None:
+            self.DLL.close()
         self.workspace = None
 
     def __str__(self) -> str:
