@@ -740,24 +740,30 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     )
 
 
+def _use_autotune_backend(backend: str) -> bool:
+    return backend in [
+        x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
+    ]
+
+
 def use_triton_template(layout, *, enable_int32=False):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(
-        layout, layout_dtypes
-    ) and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "TRITON"
+    )
 
 
 def use_cutlass_template(layout):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-    return _use_template_for_cuda(
-        layout, layout_dtypes
-    ) and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
+    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "CUTLASS"
+    )
 
 
 def use_aten_gemm_kernels():
-    return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
+    return _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
