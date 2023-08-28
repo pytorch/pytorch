@@ -38,10 +38,9 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
+    UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
-    UserError,
-    UserErrorType,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
@@ -578,6 +577,7 @@ def _compile(
             ConstraintViolationError,
             GuardOnDataDependentSymNode,
             ValidationException,
+            UncapturedHigherOrderOpError,
         ) as e:
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
@@ -658,10 +658,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # need to make these exceptions not get wrapped
 
             # Directly raise if a control flow op (e.g. cond) has a graph break in it.
-            if (
-                isinstance(e, UserError)
-                and e.error_type == UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW
-            ):
+            if isinstance(e, UncapturedHigherOrderOpError):
                 raise
 
             soft_fail = isinstance(e, Unsupported)

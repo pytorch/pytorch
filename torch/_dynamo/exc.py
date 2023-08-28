@@ -141,6 +141,10 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class UncapturedHigherOrderOpError(TorchDynamoException):
+    pass
+
+
 class IncorrectUsage(Exception):
     pass
 
