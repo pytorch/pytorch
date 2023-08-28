@@ -1100,7 +1100,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
-        example_value = op(*fake_args).to(dtype=output_dtype)
+        example_value = op(*fake_sub_args).to(dtype=output_dtype)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
