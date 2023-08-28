@@ -402,7 +402,7 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if not self._match_fns(node):
+        if not self._match_fns(node) or len(node.args) != len(self.args):
             return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
@@ -410,7 +410,7 @@ class _TargetArgsExpr(_TargetExpr):
 
         _args = node.args
         _kwargs = node.kwargs
-        if len(_args) != len(self.args) or len(_kwargs) != len(self.kwargs):
+        if len(_kwargs) != len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
 
             arg_types = [type(node.args[i]) for i in range(len(node.args))]
