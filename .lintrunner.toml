@@ -199,7 +199,6 @@ exclude_patterns = [
     'torch/_inductor/debug.py',
     'torch/_inductor/hooks.py',
     'torch/_inductor/decomposition.py',
-    'torch/_inductor/optimize_indexing.py',
     'torch/_inductor/bounds.py',
     'torch/_inductor/config.py',
     'torch/_inductor/ir.py',

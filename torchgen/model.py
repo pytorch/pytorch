@@ -1808,6 +1808,7 @@ class BaseTy(Enum):
     bool = auto()
     Layout = auto()
     Device = auto()
+    DeviceIndex = auto()
     Scalar = auto()
     MemoryFormat = auto()
     QScheme = auto()
