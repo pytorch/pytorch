@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
     TEST_WITH_ASAN,
+    freeze_rng_state,
 )
 
 try:
@@ -990,6 +991,20 @@ class CudaReproTests(TestCase):
         opt_fn = torch.compile(m)
         actual = opt_fn(x)
         self.assertEqual(expect, actual)
+
+    @config.patch(fallback_random=True)
+    def test_multi_output_layout_fallback(self):
+        mod = nn.RReLU(lower=3.2350976, upper=8.4220314, inplace=True)
+        inp = torch.rand([4, 4]).cuda()
+        m = torch.compile(mod)
+
+        with freeze_rng_state():
+           o1 = m(inp.clone())
+
+        o2 = mod(inp.clone())
+
+        self.assertEqual(o1, o2)
+
 
 
 if __name__ == "__main__":

@@ -2288,7 +2288,9 @@ class TritonScheduling(BaseScheduling):
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # We can ignore fallback kernels for triton indexing
+        buf_sizes = [buf.get_layout().storage_size() for buf in buffers if not isinstance(buf, ir.FallbackKernel)]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
