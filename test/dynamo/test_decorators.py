@@ -303,6 +303,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
 
+    def test_optimizer_zero_grad_static_err(self):
+        mod = torch.nn.Linear(10, 10)
+
+        for param in mod.parameters():
+            param.grad = torch.randn_like(param)
+            torch._dynamo.mark_static_address(param.grad)
+
+        optim = torch.optim.SGD(mod.parameters(), lr=1e-2)
+
+        with self.assertRaises(RuntimeError):
+            optim.zero_grad(set_to_none=True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
