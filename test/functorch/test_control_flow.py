@@ -654,7 +654,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected branch to return a single tensor",
         ):
             make_fx(f)(x, torch.tensor(False))
@@ -819,7 +819,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected branch to return a single tensor",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
