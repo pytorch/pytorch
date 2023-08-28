@@ -115,6 +115,7 @@ class CondOpArgsMismatchError(ArgsMismatchError):
 
 class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
+    GRAPH_BREAK_IN_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
@@ -138,6 +139,10 @@ class UserError(Unsupported):
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
+
+
+class UncapturedHigherOrderOpError(TorchDynamoException):
+    pass
 
 
 class IncorrectUsage(Exception):

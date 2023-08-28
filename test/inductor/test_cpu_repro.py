@@ -991,6 +991,53 @@ class CPUReproTests(TestCase):
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
+    def test_non_contiguous_load_buf_quant(self):
+        def fn(
+            x1,
+            x2,
+            groups,
+        ):
+            x = torch.cat((x1, x2), dim=1)
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, num_channels, height, width)
+            return x
+
+        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    x,
+                    x2,
+                    2,
+                ),
+            )
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
     def test_tile2d_store_channel_shuffle_cl_quant_output(self):
         def channel_shuffle(x, groups, output_scale, output_zero_point):
             batchsize, num_channels, height, width = x.size()
@@ -1808,7 +1855,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
-            input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+            input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
                 memory_format=torch.channels_last
             )
             maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -2385,6 +2432,17 @@ class CPUReproTests(TestCase):
             return x
 
         self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":

@@ -445,16 +445,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+
+            while dynamic_subobj is subobj and hasattr(subobj, "_torchdynamo_inline"):
+                subobj = subobj._torchdynamo_inline
+                dynamic_subobj = subobj
+                source = AttrSource(source, "_torchdynamo_inline") if source else None
+
             if isinstance(subobj, types.MethodType):
+                if dynamic_subobj.__self__ is not self.value:
+                    unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
                 source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
-            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
-            # Static lookup can't tell us it's a method or function correctly,
-            # so we trigger dynamic lookup here to get the correct type.
-            dynamic_subobj = getattr(self.value, name)
+
             if inspect.ismethod(dynamic_subobj):
                 return variables.UserMethodVariable(
                     func, self, source=source, **options
@@ -570,7 +579,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     def is_matching_object(obj):
         try:
             from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
-        except ImportError:
+        except (ImportError, AttributeError):
             return False
         else:
             return type(obj) is KeyedJaggedTensor

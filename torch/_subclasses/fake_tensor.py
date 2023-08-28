@@ -111,6 +111,14 @@ _device_not_kwarg_ops = (
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
 
+# This function indicates if the backend device
+# supports non-contiguous tensors
+def is_noncontiguous_supported(device):
+    if device.type == "hpu":
+        return False
+    return True
+
+
 def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
     return type.isSubtypeOf(tensor_type) or any(
@@ -163,13 +171,17 @@ def _is_tensor_constructor(func: OpOverload):
 def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
-    if is_traceable_wrapper_subclass(x):
+    elif is_traceable_wrapper_subclass(x):
         flattened_tensors, _ = type(x).__tensor_flatten__(x)
         # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return is_fake(unwrapped)
     return False
 
 
@@ -540,7 +552,8 @@ def nonzero(fake_mode, func, arg):
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
             if arg.numel() >= 2:
-                maxval = arg.numel()
+                maxval = int(arg.numel())
+
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
@@ -571,6 +584,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
+        if not is_noncontiguous_supported(out_device):
+            out = out.new_empty(out.shape)
 
     if out is new_kwargs["input"]:
         return out  # copy_
@@ -822,15 +837,17 @@ def make_fast_binary_impl(slow_ref):
         is_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
-        for op in operands:
-            if not isinstance(op, torch.Tensor):
-                continue
-            is_contiguous = is_contiguous and op.is_contiguous(
-                memory_format=torch.contiguous_format
-            )
-            is_channels_last = is_channels_last and op.is_contiguous(
-                memory_format=torch.channels_last
-            )
+
+        if is_noncontiguous_supported(common_device):
+            for op in operands:
+                if not isinstance(op, torch.Tensor):
+                    continue
+                is_contiguous = is_contiguous and op.is_contiguous(
+                    memory_format=torch.contiguous_format
+                )
+                is_channels_last = is_channels_last and op.is_contiguous(
+                    memory_format=torch.channels_last
+                )
         if is_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
@@ -1491,6 +1508,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
+                "quantized",
             }
             grandfathered_ops_FIXME = {
                 "fbgemm::gmm",

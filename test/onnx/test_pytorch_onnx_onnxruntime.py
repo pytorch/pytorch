@@ -40,16 +40,9 @@ from pytorch_test_common import (
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, errors, verification
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
-
-# The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
-# The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = (
-    _constants.ONNX_MAX_OPSET - 1
-)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -165,7 +158,7 @@ def _parametrize_rnn_args(arg_name):
 
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(
-        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+        onnx_test_common.MIN_ONNX_OPSET_VERSION, onnx_test_common.MAX_ONNX_OPSET_VERSION
     ),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
@@ -7844,6 +7837,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+        int_x = torch.tensor([9920, 1036, -1500, 35], dtype=torch.int32)
+        self.run_test(Round(), int_x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_round_with_decimals(self):
+        class Round(torch.nn.Module):
+            def __init__(self, decimals):
+                super().__init__()
+                self.decimals = decimals
+
+            def forward(self, x):
+                return torch.round(x, decimals=self.decimals)
+
+        x = torch.tensor([0.9920, -1234.0362, -1.58960, 3.5000])
+        for decimals in (0, -2, 3):
+            self.run_test(Round(decimals), x)
 
     @skipIfUnsupportedMinOpsetVersion(17)
     def test_stft_default(self):
