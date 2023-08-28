@@ -568,9 +568,14 @@ class TorchLogsFormatter(logging.Formatter):
         record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
-        prefix = (
-            f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
-        )
+
+        record.compileid = ""
+        if (
+            compile_id := torch._guards.CompileContext.current_compile_id()
+        ) is not None:
+            record.compileid = f" [{compile_id}]"
+
+        prefix = f"{record.rankprefix}[{record.asctime}]{record.compileid} {record.name}: [{record.levelname}]"
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 
@@ -681,4 +686,5 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
+import torch._guards
 import torch.distributed as dist

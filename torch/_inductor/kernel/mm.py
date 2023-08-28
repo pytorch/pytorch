@@ -220,9 +220,12 @@ aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    choices = []
-    if not inductor_config.force_mixed_mm:
-        choices.append(aten_fallback_mixed_mm.bind((mat1, mat2), layout))
+    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
+    if mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous():
+        # can't use triton kernel unless one of these is true
+        return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+    if inductor_config.force_mixed_mm:
+        choices = []
     b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
     has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
     for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
