@@ -409,10 +409,7 @@ def break_graph_if_unsupported(*, push):
                     assert isinstance(ctx, GenericContextWrappingVariable)
                     unimplemented(f"Graph break under {ctx}")
 
-                if (
-                    isinstance(excp, exc.UserError)
-                    and excp.error_type == exc.UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW
-                ):
+                if isinstance(excp, exc.UncapturedHigherOrderOpError):
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -697,13 +694,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         except Unsupported as e:
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
-                raise
-
-            # Directly raise UserError and abort when encountered a GRAPH_BREAK_IN_CONTROL_FLOW
-            if (
-                isinstance(e, exc.UserError)
-                and e.error_type == exc.UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW
-            ):
                 raise
 
             log.debug("step triggered compile", exc_info=True)

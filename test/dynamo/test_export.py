@@ -1640,7 +1640,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expect branches to return tensor with same requires_grad",
         ):
             mod = FooBar()
@@ -1707,13 +1707,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mod = Module()
         x = torch.randn(3, 2)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expect branches to return tensor with same size but got",
         ):
             torch._dynamo.export(mod)(x)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expect branches to return tensor with same size but got",
         ):
             mod(x)
@@ -2982,7 +2982,30 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "too many positional arguments",
+        ):
+            torch._dynamo.export(
+                f_branch_args_mismatch,
+                aten_graph=True,
+            )(
+                *example_inputs,
+            )
+
+    @config.patch(suppress_errors=True)
+    def test_uncaptured_higher_order_op_error_not_suppresed(self):
+        def true_fn(x, y):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f_branch_args_mismatch(x, y):
+            return cond(torch.tensor([[[[True]]]]), true_fn, false_fn, [x, y])
+
+        example_inputs = (torch.rand(5), torch.rand(2))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "too many positional arguments",
         ):
             torch._dynamo.export(
@@ -2998,7 +3021,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "HigherOrderOperator body's output must consist of tensors only",
         ):
             torch._dynamo.export(
@@ -3012,7 +3035,8 @@ def forward(self, x):
 
         example_inputs = (torch.tensor(True), torch.randn(2))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, "Expected branch to return a single tensor"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected branch to return a single tensor",
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -3040,7 +3064,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, "Expected branch to return a single tensor"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected branch to return a single tensor",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3059,7 +3084,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expect branches to return tensor that has same size but got",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(

@@ -13,7 +13,13 @@ from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
-from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..exc import (
+    UncapturedHigherOrderOpError,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
@@ -313,16 +319,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
-            raise UserError(
-                UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+            raise UncapturedHigherOrderOpError(
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
-            raise UserError(
-                UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
-                f"Expected pred to be bool/int or a tensor with single "
+            raise UncapturedHigherOrderOpError(
+                f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
@@ -330,16 +334,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
-            raise UserError(
-                UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+            raise UncapturedHigherOrderOpError(
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
-            raise UserError(
-                UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+            raise UncapturedHigherOrderOpError(
                 "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
@@ -396,13 +398,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
-                raise UserError(
-                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW, str(e)
-                ) from e
+                raise UncapturedHigherOrderOpError(str(e)) from e
 
             if not isinstance(ret_val, TensorVariable):
-                raise UserError(
-                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                raise UncapturedHigherOrderOpError(
                     "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
@@ -475,29 +474,25 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             size_a = a.size()
             size_b = b.size()
             if len(size_a) != len(size_b):
-                raise UserError(
-                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                raise UncapturedHigherOrderOpError(
                     f"Expect branches to return tensor that has same size but got\
-                     true_r: {size_a}, false_r: {size_b}",
+                     true_branch: {size_a}, false_branch: {size_b}",
                 )
             for l, r in zip(size_a, size_b):
                 if l != r:
-                    raise UserError(
-                        UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                    raise UncapturedHigherOrderOpError(
                         f"Expect branches to return tensor with same size but got\
-                         true_r: {size_a}, false_r: {size_b}",
+                         true_branch: {size_a}, false_branch: {size_b}",
                     )
             if a.dtype != b.dtype:
-                raise UserError(
-                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                raise UncapturedHigherOrderOpError(
                     f"Expect branches to return tensor with same dtype but got\
-                     {a.dtype}, {b.dtype}",
+                     true branch: {a.dtype}, false_branch: {b.dtype}",
                 )
             if a.requires_grad != b.requires_grad:
-                raise UserError(
-                    UserErrorType.GRAPH_BREAK_IN_CONTROL_FLOW,
+                raise UncapturedHigherOrderOpError(
                     f"Expect branches to return tensor with same requires_grad but got\
-                     {a.requires_grad}, {b.requires_grad}",
+                     true branch: {a.requires_grad}, false_branch: {b.requires_grad}",
                 )
 
         check_tensor_meta_same(true_example_value, false_example_value)
