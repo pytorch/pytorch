@@ -61,5 +61,5 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def __len__(self):
         if self.length == -1:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length

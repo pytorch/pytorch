@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -192,10 +194,10 @@ static torch::_RegisterOrVerify register_or_verify() {
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     py::args args,
-    py::kwargs kwargs) {
+    const py::kwargs& kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      args,
+      std::move(args),
       kwargs,
       /*self=*/c10::nullopt);
   {
@@ -306,24 +308,33 @@ void initDispatchBindings(PyObject* module) {
           py::arg("debug") = "impl_t_t")
       .def(
           "impl",
-          [](py::object self,
+          [](const py::object& self,
              const char* name,
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            lib.impl(
-                name,
-                torch::dispatch(
-                    dispatch,
-                    CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(func, dispatch))),
-                register_or_verify());
-            python_registrations_[lib._resolve(name)].insert_or_assign(
-                dispatch,
-                std::make_shared<c10::SafePyObject>(
-                    func.release().ptr(), getPyInterpreter()));
+            if (func.is(py::module::import("torch.library")
+                            .attr("fallthrough_kernel"))) {
+              lib.impl(
+                  name,
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
+                  register_or_verify());
+            } else {
+              lib.impl(
+                  name,
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch))),
+                  register_or_verify());
+              python_registrations_[lib._resolve(name)].insert_or_assign(
+                  dispatch,
+                  std::make_shared<c10::SafePyObject>(
+                      func.release().ptr(), getPyInterpreter()));
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
@@ -332,7 +343,9 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"))
       .def(
           "define",
-          [](py::object self, const char* schema, const char* alias_analysis) {
+          [](const py::object& self,
+             const char* schema,
+             const char* alias_analysis) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
@@ -561,10 +574,12 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastIPU)
       DEF_ONE(AutocastCUDA)
       DEF_ONE(AutocastPrivateUse1)
   // clang-format on
@@ -723,6 +738,11 @@ void initDispatchBindings(PyObject* module) {
     return (
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
+
+  m.def("_get_singleton_int", [](int64_t data) {
+    return c10::SymInt(
+        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
 }
 

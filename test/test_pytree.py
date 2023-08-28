@@ -8,13 +8,15 @@ from torch.utils._pytree import (
     tree_unflatten,
     TreeSpec,
     LeafSpec,
-    pytree_to_str,
-    str_to_pytree,
+    treespec_dumps,
+    treespec_loads,
+    _register_pytree_node,
 )
+import unittest
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
 from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
 from collections import namedtuple, OrderedDict
-from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests, TEST_WITH_TORCHDYNAMO
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -206,16 +208,30 @@ class TestPytree(TestCase):
         self.assertFalse(tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
 
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = tree_flatten(pytree)
         self.assertEqual(repr(spec), ("TreeSpec(tuple, None, [*,\n"
-                                      "                       TreeSpec(list, None, [*,\n"
-                                      "                                             *,\n"
-                                      "                                             TreeSpec(list, None, [*])])])"))
+                                      "  TreeSpec(list, None, [*,\n"
+                                      "    *,\n"
+                                      "    TreeSpec(list, None, [*])])])"))
+
+    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
+    def test_treespec_repr_dynamo(self):
+        # Check that it looks sane
+        pytree = (0, [0, 0, [0]])
+        _, spec = tree_flatten(pytree)
+        self.assertExpectedInline(repr(spec),
+                                  """\
+TreeSpec(TupleVariable, None, [*,
+  TreeSpec(ListVariable, None, [*,
+    *,
+    TreeSpec(ListVariable, None, [*])])])""")
 
     def test_broadcast_to_and_flatten(self):
+
         cases = [
             (1, (), []),
 
@@ -259,15 +275,28 @@ class TestPytree(TestCase):
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
-    @parametrize("spec, str_spec", [
-        (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
-        (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
-        (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),
-        (
-            TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
-            "D(a:*,b:*,c:*)"
-        ),
-        (TreeSpec(list, None, [
+    @parametrize("spec", [
+        TreeSpec(list, None, []),
+        TreeSpec(tuple, None, []),
+        TreeSpec(dict, [], []),
+        TreeSpec(list, None, [LeafSpec()]),
+        TreeSpec(list, None, [LeafSpec(), LeafSpec()]),
+        TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]),
+        TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
+        TreeSpec(OrderedDict, ['a', 'b', 'c'], [
+            TreeSpec(
+                tuple,
+                None,
+                [LeafSpec(), LeafSpec()]
+            ),
+            LeafSpec(),
+            TreeSpec(
+                dict,
+                ['a', 'b', 'c'],
+                [LeafSpec(), LeafSpec(), LeafSpec()]
+            ),
+        ]),
+        TreeSpec(list, None, [
             TreeSpec(tuple, None, [
                 LeafSpec(),
                 LeafSpec(),
@@ -276,24 +305,123 @@ class TestPytree(TestCase):
                     LeafSpec(),
                 ]),
             ]),
-        ]), "L(T(*,*,L(*,*)))"),
-    ], name_fn=lambda _, str_spec: str_spec)
-    def test_pytree_serialize(self, spec, str_spec):
-        self.assertEqual(pytree_to_str(spec), str_spec)
-        self.assertTrue(spec == str_to_pytree(str_spec))
-        self.assertTrue(spec == str_to_pytree(pytree_to_str(spec)))
+        ]),
+    ],)
+    def test_pytree_serialize(self, spec):
+        serialized_spec = treespec_dumps(spec)
+        self.assertTrue(isinstance(serialized_spec, str))
+        self.assertTrue(spec == treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
         spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
-        str_spec = "N(Point(x, y),*,*)"
 
-        self.assertEqual(pytree_to_str(spec), str_spec)
-
-        roundtrip_spec = str_to_pytree(pytree_to_str(spec))
+        roundtrip_spec = treespec_loads(treespec_dumps(spec))
         # The context in the namedtuple is different now because we recreated
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
+
+    def test_pytree_custom_type_serialize(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        _register_pytree_node(
+            DummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: Dummy(*xs),
+            to_dumpable_context=lambda context: "moo",
+            from_dumpable_context=lambda dumpable_context: None,
+        )
+        spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
+        serialized_spec = treespec_dumps(spec, 1)
+        self.assertTrue("moo" in serialized_spec)
+        roundtrip_spec = treespec_loads(serialized_spec)
+        self.assertEqual(roundtrip_spec, spec)
+
+    def test_pytree_serialize_register_bad(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertRaisesRegex(ValueError, "Both to_dumpable_context and from_dumpable_context"):
+            _register_pytree_node(
+                DummyType,
+                lambda dummy: ([dummy.x, dummy.y], None),
+                lambda xs, _: Dummy(*xs),
+                to_dumpable_context=lambda context: "moo",
+            )
+
+    def test_pytree_context_serialize_bad(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        _register_pytree_node(
+            DummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: Dummy(*xs),
+            to_dumpable_context=lambda context: DummyType,
+            from_dumpable_context=lambda dumpable_context: None,
+        )
+
+        spec = TreeSpec(DummyType, None, [LeafSpec(), LeafSpec()])
+
+        with self.assertRaisesRegex(TypeError, "Object of type type is not JSON serializable"):
+            treespec_dumps(spec)
+
+    def test_pytree_serialize_bad_input(self):
+        with self.assertRaises(AttributeError):
+            treespec_dumps("random_blurb")
+
+    def test_pytree_serialize_bad_protocol(self):
+        import json
+
+        Point = namedtuple("Point", ["x", "y"])
+        spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
+
+        with self.assertRaisesRegex(ValueError, "Unknown protocol"):
+            treespec_dumps(spec, -1)
+
+        serialized_spec = treespec_dumps(spec)
+        protocol, data = json.loads(serialized_spec)
+        bad_protocol_serialized_spec = json.dumps((-1, data))
+
+        with self.assertRaisesRegex(ValueError, "Unknown protocol"):
+            treespec_loads(bad_protocol_serialized_spec)
+
+    def test_saved_serialized(self):
+        complicated_spec = TreeSpec(OrderedDict, [1, 2, 3], [
+            TreeSpec(
+                tuple,
+                None,
+                [LeafSpec(), LeafSpec()]
+            ),
+            LeafSpec(),
+            TreeSpec(
+                dict,
+                [4, 5, 6],
+                [LeafSpec(), LeafSpec(), LeafSpec()]
+            ),
+        ])
+
+        serialized_spec = treespec_dumps(complicated_spec)
+        saved_spec = (
+            '[1, {"type": "collections.OrderedDict", "context": "[1, 2, 3]", '
+            '"children_spec": [{"type": "builtins.tuple", "context": "null", '
+            '"children_spec": [{"type": null, "context": null, '
+            '"children_spec": []}, {"type": null, "context": null, '
+            '"children_spec": []}]}, {"type": null, "context": null, '
+            '"children_spec": []}, {"type": "builtins.dict", "context": '
+            '"[4, 5, 6]", "children_spec": [{"type": null, "context": null, '
+            '"children_spec": []}, {"type": null, "context": null, "children_spec": '
+            '[]}, {"type": null, "context": null, "children_spec": []}]}]}]'
+        )
+        self.assertEqual(serialized_spec, saved_spec)
+        self.assertEqual(complicated_spec, treespec_loads(saved_spec))
 
 
 instantiate_parametrized_tests(TestPytree)

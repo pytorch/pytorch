@@ -174,6 +174,8 @@ class SocketImpl {
     return hnd_;
   }
 
+  bool waitForInput(std::chrono::milliseconds timeout);
+
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
@@ -398,6 +400,14 @@ bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
   return setSocketOption(hnd_, level, optname, &buf, sizeof(buf)) == 0;
 }
 
+bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
+  ::pollfd pfd{};
+  pfd.fd = hnd_;
+  pfd.events = POLLIN;
+
+  return pollFd(&pfd, 1, static_cast<int>(timeout.count())) > 0;
+}
+
 namespace {
 
 struct addrinfo_delete {
@@ -552,7 +562,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   }
 
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  if (::listen(socket_->handle(), /*backlog=*/2048) != 0) {
+  if (::listen(socket_->handle(), -1 /* backlog */) != 0) {
     recordError(
         "The server socket has failed to listen on {} {}.",
         addr,
@@ -604,7 +614,7 @@ std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
         expected_port_)};
   }
 
-  if (::listen(socket->handle(), 2048 /* backlog */) != 0) {
+  if (::listen(socket->handle(), -1 /* backlog */) != 0) {
     throw SocketError{fmt::format(
         "Failed to listen on socket initialized from fd {}: {}.",
         socket->handle(),
@@ -982,6 +992,10 @@ std::uint16_t Socket::port() const {
 
 Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
     : impl_{std::move(impl)} {}
+
+bool Socket::waitForInput(std::chrono::milliseconds timeout) {
+  return impl_->waitForInput(timeout);
+}
 
 } // namespace detail
 

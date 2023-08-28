@@ -2,13 +2,13 @@ import inspect
 from typing import Dict, List
 
 import torch._C
-from torch._guards import Guard, GuardSource
+from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, DummyGlobalSource
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -111,7 +111,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
+    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.GRAD_MODE)}
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -147,11 +147,41 @@ class GradModeVariable(ContextWrappingVariable):
         return "set_grad_enabled"
 
 
+class TorchFunctionDisableVariable(ContextWrappingVariable):
+    """represents whether torch function overrides are enabled or not"""
+
+    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = TorchFunctionDisableVariable(
+            target_values=[False],
+            initial_values=[torch._C._is_torch_function_enabled()],
+            **kwargs,
+        )
+        # mlazos: I think this is here to make sure we don't reinvoke on clone()
+        var._call_func(tx, [False])
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.guards = self.guards | self._guards_singleton
+
+    def enter(self, tx):
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        tx.output.set_torch_function_state(values[0])
+
+
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
     _guards_singleton = {
-        Guard("", GuardSource.GLOBAL, GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        Guard(DummyGlobalSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
     }
 
     @staticmethod
@@ -186,6 +216,57 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "use_deterministic_algorithms"
+
+
+class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
+    """represents torch.autograd.graph.disable_saved_tensors_hook."""
+
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        var = DisabledSavedTensorsHooksVariable(
+            target_values=[target_value],
+            initial_values=[
+                torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+            ],
+            **kwargs,
+        )
+        var._call_func(tx, [target_value])
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
+        if value is not None:
+            # Disable `saved_tensors_hooks` with message (`value`)
+            # OR
+            # we are exiting this context and restoring the previous message.
+            tx.output.create_node(
+                "call_function",
+                torch._C._autograd._saved_tensors_hooks_disable,
+                (value,),
+                {},
+            )
+            torch._C._autograd._saved_tensors_hooks_disable(value)
+        else:
+            # We are exiting this context and if prev_message was None, we re-enable `saved_tensors_hooks`.
+            tx.output.create_node(
+                "call_function", torch._C._autograd._saved_tensors_hooks_enable, (), {}
+            )
+            torch._C._autograd._saved_tensors_hooks_enable()
+
+    def module_name(self):
+        return "torch.autograd.graph"
+
+    def fn_name(self):
+        return "disable_saved_tensors_hooks"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -231,17 +312,17 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def exit(self, tx, *args):
         self.mode = (
-            exit_functional_autocast(self.mode[0]),
+            torch.amp._exit_autocast(self.mode[0]),
             tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
+                "call_function", torch.amp._exit_autocast, (self.mode[1],), {}
             ),
         )
 
     def enter(self, tx):
         self.mode = (
-            enter_functional_autocast(*self.target_values),
+            torch.amp._enter_autocast(*self.target_values),
             tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
+                "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
             ),
         )
 
@@ -250,16 +331,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "autocast"
-
-
-def enter_functional_autocast(*vals):
-    mode = torch.amp.autocast(*vals)
-    mode.__enter__()
-    return mode
-
-
-def exit_functional_autocast(mode):
-    mode.__exit__(None, None, None)
 
 
 class NullContextVariable(ContextWrappingVariable):

@@ -8,7 +8,7 @@ from torchgen.api.python import (
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from torchgen.gen import parse_native_yaml
+from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
 from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
@@ -185,21 +185,19 @@ def sig_for_ops(opname: str) -> List[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), "Unexpected op {}".format(
-        opname
-    )
+    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
     if name in binary_ops:
-        return ["def {}(self, other: Any) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     elif name in comparison_ops:
-        sig = "def {}(self, other: Any) -> Tensor: ...".format(opname)
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
         if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
             sig += "  # type: ignore[override]"
         return [sig]
     elif name in unary_ops:
-        return ["def {}(self) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
@@ -209,7 +207,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
             tname = "builtins." + tname
-        return ["def {}(self) -> {}: ...".format(opname, tname)]
+        return [f"def {opname}(self) -> {tname}: ..."]
     else:
         raise Exception("unknown op", opname)
 
@@ -370,9 +368,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "leaky_relu_": [
-                "def leaky_relu_({}) -> Tensor: ...".format(
-                    ", ".join(["input: Tensor", "negative_slope: float = ..."])
-                )
+                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
             ],
             "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
             "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
@@ -387,9 +383,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
             ],
             "hardsigmoid": [
-                "def hardsigmoid({}) -> Tensor: ...".format(
-                    ", ".join(["input: Tensor", "*", "out: Optional[Tensor] = None"])
-                )
+                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
             ],
             "linear": [
                 "def linear({}) -> Tensor: ...".format(
@@ -468,7 +462,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "pdist",
         "cosine_similarity",
     ]
-    imported_hints = ["from .. import {0} as {0}".format(_) for _ in torch_imports]
+    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
@@ -485,9 +479,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    imported_hints += [
-        "from .._C._nn import {0} as {0}".format(_) for _ in c_nn_imports
-    ]
+    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed
     imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
 
@@ -673,6 +665,7 @@ def gen_pyi(
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
+                            "is_coalesced: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -881,15 +874,13 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
-                binop
-            )
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1035,6 +1026,7 @@ def gen_pyi(
                 "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
             ],
             "_is_view": ["def _is_view(self) -> _bool: ..."],
+            "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
@@ -1091,8 +1083,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
@@ -1101,9 +1093,9 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                "*, alpha: Optional[Number] = 1{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
@@ -1119,9 +1111,7 @@ def gen_pyi(
         "bfloat16",
     ]
     for name in simple_conversions:
-        unsorted_tensor_method_hints[name].append(
-            "def {}(self) -> Tensor: ...".format(name)
-        )
+        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
@@ -1150,7 +1140,7 @@ def gen_pyi(
                 namedtuples[tuple_name] = tuple_def
 
     for op in all_ops:
-        name = "__{}__".format(op)
+        name = f"__{op}__"
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
@@ -1164,7 +1154,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
+    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1183,7 +1173,7 @@ def gen_pyi(
         "ByteTensor",
         "BoolTensor",
     ):
-        legacy_class_hints.append("class {}(Tensor): ...".format(c))
+        legacy_class_hints.append(f"class {c}(Tensor): ...")
 
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1191,7 +1181,7 @@ def gen_pyi(
     # TODO: don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
-        "{}: dtype = ...".format(n)
+        f"{n}: dtype = ..."
         for n in [
             "float32",
             "float",
@@ -1232,11 +1222,19 @@ def gen_pyi(
     ]
     all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
-    all_directive[0] = "__all__ = {}".format(all_directive[0])
+    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+
+    # Tags Enum type hints
+    # ~~~~~~~~~~~~~~~~~~~~
+
+    tag_names = sorted(parse_tags_yaml(tags_yaml_path))
+    tag_attributes = "\n".join(
+        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+    )
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -1250,6 +1248,7 @@ def gen_pyi(
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
         "all_directive": all_directive,
+        "tag_attributes": tag_attributes,
     }
     fm.write_with_template(
         "torch/_C/__init__.pyi",

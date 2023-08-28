@@ -263,6 +263,14 @@ template <class T>
 template <typename X, typename... Args>
 auto Function<T>::apply(Args&&... args)
     -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>> {
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    // Function support for functorch is handled in Python.
+    // Here we are dealing with a (C++) Function, which is not supported.
+    // Let's raise an error instead of being silently incorrect.
+    functorch_tls->checkSupportsCppAutogradFunction();
+  }
+
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list input_vars;

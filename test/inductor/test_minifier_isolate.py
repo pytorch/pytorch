@@ -10,8 +10,8 @@ from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
+    skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
@@ -39,6 +39,7 @@ inner(torch.randn(2, 2).to("{device}"))
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", "")
 
+    @skipIfRocm
     @requires_cuda()
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cuda_runtime_error(self):
@@ -53,10 +54,5 @@ if __name__ == "__main__":
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
     # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
     # also skip on Py 3.11+ since unhandled exceptions can cause segfaults
-    if (
-        not IS_MACOS
-        and not TEST_WITH_ASAN
-        and sys.version_info < (3, 11)
-        and not TEST_WITH_ROCM
-    ):
+    if not IS_MACOS and not TEST_WITH_ASAN and sys.version_info < (3, 11):
         run_tests()

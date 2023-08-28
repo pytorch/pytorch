@@ -46,9 +46,8 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    # calling div on only symint args
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -62,8 +61,6 @@ if TEST_WITH_ROCM:
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
-    # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -201,6 +198,39 @@ class TestInductorDynamic(TestCase):
         res = opt(x, (5, 5), (2, 2))
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    def test_slice_scatter(self, device):
+        def fn(i):
+            s3 = i.size(0)
+            x = torch.ones(64, s3, device=device)
+            y = torch.ones(64, s3 // 2, device=device)
+            return torch.slice_scatter(x, y, 1, s3 // 2, 2 * (s3 // 2))
+
+        a = torch.randn(16, device=device)
+        cfn = self.compile_fn(fn)
+        expect = fn(a)
+        actual = cfn(a)
+        self.assertEqual(expect, actual)
+
+    def test_slice_index_changing_sign(self, device):
+        def fn(x, y):
+            y0, y1 = y.shape
+            return x[: (y0 - y1)].clone()
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+
+        # y0 > y1 -> y0 - y1 is positive
+        b = torch.randn(16, 2, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+        # y0 < y1 -> y0 - y1 is negative
+        b = torch.randn(2, 16, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

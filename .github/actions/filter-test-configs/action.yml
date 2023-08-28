@@ -24,6 +24,9 @@ outputs:
   keep-going:
     description: True if keep-going label was on PR.
     value: ${{ steps.filter.outputs.keep-going }}
+  reenabled-issues:
+    description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
+    value: ${{ steps.filter.outputs.reenabled-issues }}
 
 runs:
   using: composite
@@ -89,6 +92,11 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TAG: ${{ steps.parse-ref.outputs.tag }}
+        EVENT_NAME: ${{ github.event_name }}
+        SCHEDULE: ${{ github.event.schedule }}
+        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -100,11 +108,11 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
-          --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}" \
-          --branch "${{ github.event.workflow_run.head_branch }}"
+          --pr-number "${PR_NUMBER}" \
+          --tag "${TAG}" \
+          --event-name "${EVENT_NAME}" \
+          --schedule "${SCHEDULE}" \
+          --branch "${HEAD_BRANCH}"
 
     - name: Print the filtered test matrix
       shell: bash
@@ -117,3 +125,6 @@ runs:
 
         echo
         echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
+
+        echo
+        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"

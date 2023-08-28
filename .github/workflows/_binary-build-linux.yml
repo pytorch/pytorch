@@ -11,6 +11,16 @@ on:
         required: true
         type: string
         description: The build environment
+      runs_on:
+          required: false
+          default: linux.12xlarge
+          type: string
+          description: Hardware to run this "build"job on, linux.12xlarge or linux.t4g.2xlarge.
+      ALPINE_IMAGE:
+        required: false
+        type: string
+        default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        description: Alpine image to use
       PYTORCH_ROOT:
         required: true
         type: string
@@ -67,7 +77,7 @@ on:
 
 jobs:
   build:
-    runs-on: linux.12xlarge
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 180
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -86,7 +96,7 @@ jobs:
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
       # Needed for conda builds
-      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
       ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
@@ -135,18 +145,27 @@ jobs:
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
 
       - name: Clean workspace
         shell: bash
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
+
+          if [[ inputs.build_environment == 'linux-aarch64-binary-manywheel' ]]; then
+            rm -rf "${RUNNER_TEMP}/artifacts"
+            mkdir "${RUNNER_TEMP}/artifacts"
+          fi
 
       - name: Checkout PyTorch to pytorch dir
         uses: malfet/checkout@silent-checkout
@@ -225,7 +244,11 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
+            docker exec -t "${container_name}" bash -c "bash /builder/aarch64_linux/aarch64_ci_build.sh"
+          else
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          fi
 
       - name: Chown artifacts
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
@@ -249,3 +272,5 @@ jobs:
       - name: Chown workspace
         if: always()
         uses: ./pytorch/.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

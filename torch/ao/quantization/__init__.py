@@ -158,6 +158,7 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         quant_min: Optional[int]=None,
         quant_max: Optional[int]=None,
         qscheme: Optional[torch.qscheme]=None,
+        ch_axis: Optional[int] = None
     ):
         super().__init__(dtype)
         self.obs_or_fqs = obs_or_fqs
@@ -165,6 +166,11 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.qscheme = qscheme
+        self.ch_axis = ch_axis
+
+        from .utils import is_per_channel
+        if is_per_channel(self.qscheme):
+            assert self.ch_axis is not None, "Must provide a valid ch_axis if qscheme is per channel"
 
     def forward(self, x: Tensor) -> Tensor:
         return x

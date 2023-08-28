@@ -3,13 +3,17 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import warnings
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
 import yaml
+
+REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
 
 PREFIX = "test-config/"
 
@@ -69,6 +73,7 @@ TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
+MEM_LEAK_LABEL = "enable-mem-leak-check"
 
 
 class IssueType(Enum):
@@ -114,9 +119,10 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def get_labels(pr_number: int) -> Set[str]:
+@lru_cache(maxsize=None)
+def get_pr_info(pr_number: int) -> Dict[str, Any]:
     """
-    Dynamical get the latest list of labels from the pull request
+    Dynamically get PR information
     """
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     pytorch_repo = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
@@ -127,16 +133,26 @@ def get_labels(pr_number: int) -> Set[str]:
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {github_token}",
     }
-    json_response = download_json(
-        url=f"{pytorch_github_api}/issues/{pr_number}/labels",
+    json_response: Dict[str, Any] = download_json(
+        url=f"{pytorch_github_api}/issues/{pr_number}",
         headers=headers,
     )
 
     if not json_response:
         warnings.warn(f"Failed to get the labels for #{pr_number}")
-        return set()
+        return {}
 
-    return {label.get("name") for label in json_response if label.get("name")}
+    return json_response
+
+
+def get_labels(pr_number: int) -> Set[str]:
+    """
+    Dynamically get the latest list of labels from the pull request
+    """
+    pr_info = get_pr_info(pr_number)
+    return {
+        label.get("name") for label in pr_info.get("labels", []) if label.get("name")
+    }
 
 
 def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, List[Any]]:
@@ -303,12 +319,12 @@ def process_jobs(
     try:
         # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
         # it into its two components first
-        current_platform, _ = [n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n]
+        current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
     except ValueError as error:
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
-    for _, record in download_json(url=url, headers={}).items():
+    for record in download_json(url=url, headers={}).values():
         (
             author,
             _,
@@ -430,8 +446,35 @@ def set_output(name: str, val: Any) -> None:
         print(f"::set-output name={name}::{val}")
 
 
+def parse_reenabled_issues(s: Optional[str]) -> List[str]:
+    # NB: When the PR body is empty, GitHub API returns a None value, which is
+    # passed into this function
+    if not s:
+        return []
+
+    # The regex is meant to match all *case-insensitive* keywords that
+    # GitHub has delineated would link PRs to issues, more details here:
+    # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.
+    # E.g., "Close #62851", "fixES #62851" and "RESOLVED #62851" would all match, but not
+    # "closes  #62851" --> extra space, "fixing #62851" --> not a keyword, nor "fix 62851" --> no #
+    issue_numbers = [x[5] for x in re.findall(REENABLE_TEST_REGEX, s)]
+    return issue_numbers
+
+
+def get_reenabled_issues(pr_body: str = "") -> List[str]:
+    default_branch = os.getenv("GIT_DEFAULT_BRANCH", "main")
+    try:
+        commit_messages = subprocess.check_output(
+            f"git cherry -v {default_branch}".split(" ")
+        ).decode("utf-8")
+    except Exception as e:
+        warnings.warn(f"failed to get commit messages: {e}")
+        commit_messages = ""
+    return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
+
+
 def perform_misc_tasks(
-    labels: Set[str], test_matrix: Dict[str, List[Any]], job_name: str
+    labels: Set[str], test_matrix: Dict[str, List[Any]], job_name: str, pr_body: str
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
@@ -455,6 +498,14 @@ def perform_misc_tasks(
         "is-unstable",
         is_unstable,
     )
+
+    set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
+
+    if MEM_LEAK_LABEL in labels:
+        # Enable mem leak check if label is added
+        for config in test_matrix.get("include", []):
+            if is_cuda_or_rocm_job(job_name):
+                config["mem_leak_check"] = "mem_leak_check"
 
 
 def main() -> None:
@@ -519,6 +570,15 @@ def main() -> None:
             args.workflow, args.job_name, filtered_test_matrix
         )
 
+    pr_body = get_pr_info(int(pr_number)).get("body", "") if pr_number else ""
+
+    perform_misc_tasks(
+        labels=labels,
+        test_matrix=filtered_test_matrix,
+        job_name=args.job_name,
+        pr_body=pr_body,
+    )
+
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
 
@@ -526,12 +586,6 @@ def main() -> None:
     # and also put a flag if the test matrix is empty, so subsequent jobs can
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
-
-    perform_misc_tasks(
-        labels=labels,
-        test_matrix=filtered_test_matrix,
-        job_name=args.job_name,
-    )
 
 
 if __name__ == "__main__":

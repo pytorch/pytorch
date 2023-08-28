@@ -4,19 +4,24 @@
   - .ci/onnx/*
   - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
+  - benchmarks/dynamo/**
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
   - test/onnx/**
   - tools/onnx/**
+  - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
+  - torch/_C/_onnx.pyi
+  - torch/_logging/**
   - torch/csrc/jit/passes/onnx.*
   - torch/csrc/jit/passes/onnx/**
   - torch/csrc/jit/serialization/export.*
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
@@ -111,6 +116,23 @@
   - IvanKobzarev
   - dreiss
   - raziel
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: PrimTorch
+  patterns:
+  - aten/src/ATen/native_functions.yaml
+  - aten/src/ATen/native/**
+  - test/**
+  - torch/_meta_registrations.py
+  - torch/_decomp/**
+  - torch/_refs/**
+  - torch/_prims/**
+  - torch/_prims_common/**
+  approved_by:
+  - nkaretnikov
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -413,6 +435,7 @@
   - lezcano
   - Skylion007
   - ngimel
+  - peterbell10
   mandatory_checks_name:
   - EasyCLA
   - Lint

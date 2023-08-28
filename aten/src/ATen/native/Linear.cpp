@@ -6,6 +6,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
@@ -53,20 +54,29 @@ static inline bool parseLinearFlatten3d() {
   return bool(value);
 }
 
-// `_flatten_3d_linear` flattens the first two dimensions of the input tensor
-// before passing it to linear operation, if the input tensor is 3D
-static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+// `_flatten_nd_linear` flattens all but the last dimension of the input tensor
+// before passing it to linear operation
+static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+    // can't use -1 in reshape because it errors when a dimension is 0
+    c10::SymInt flattened_dim = 1;
+    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
+      flattened_dim = flattened_dim * input_sizes[i];
+    }
+    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
+    const auto result = at::addmm(bias, inp_reshape, weight.t());
+    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
 }
+
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(c10::in_place);
-
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
@@ -75,19 +85,22 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias->defined()) {
+  const auto input_dim = input.dim();
+  if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (input.dim() == 3 && bias->defined() && !input.is_xla()) {
+  if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    if (input.is_contiguous()) {
-      return _flatten_3d_linear(input, weight, *bias);
-    } else if (parseLinearFlatten3d()) {
+    if (input.is_contiguous() && input_dim == 3) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
       const Tensor input_cont = input.contiguous();
-      return _flatten_3d_linear(input_cont, weight, *bias);
+      return _flatten_nd_linear(input_cont, weight, *bias);
     }
   }
   auto output = at::matmul(input, weight.t());
@@ -734,9 +747,9 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     SymInt s1 = input1.sym_size(dims1[i]);
     SymInt s2 = input2.sym_size(dims2[i]);
     if (s2 == 1) { // broadcasted dimensions can be summed right away
-      t1 = t1.sum(dims1[i], true);
+      t1 = t1.sum(dims1[i], true, t1.scalar_type());
     } else if (s1 == 1) {
-      t2 = t2.sum(dims2[i], true);
+      t2 = t2.sum(dims2[i], true, t2.scalar_type());
     } else {
       TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
                " and second has size ", s2, " in dim ", dims2[i]);

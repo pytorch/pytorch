@@ -57,8 +57,8 @@
 # differentiable.
 #
 # Gradient expressions are standard C++ expressions operating on ATen
-# variables.  In a gradient expression, the following variables are in
-# scope:
+# variables.  In a gradient expression, the following variables/functions
+# are in scope:
 #
 #   - 'grad', the gradient of the output (often spelled grad_output
 #     in Python) which we are going to left-multiply.
@@ -109,6 +109,23 @@
 #     run again later.  This allows an optimization where we can
 #     destroy saved buffers if we know variables are not going to be retained,
 #     e.g., it is used by _cudnn_rnn
+#
+#   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
+#     variable and a boolean condition that dictates whether to save that
+#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     and it is `c10::nullopt` when the condition evalutes to `false`,
+#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
+#     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
+#     or the third (grad_input_mask[2]) argument requires gradients.
+#     Another interpretation of this expression would read as `var_0` is needed
+#     in the backward computation of the second or the third argument.
+#     NOTE: the usage of `var_i.requires_grad()` in the conditional expression
+#     is not supported, use `grad_input_mask[i]` instead.
+#     NOTE: `wrap_opt_if` could be used to prevent saving redundant variables
+#     with multi-output backward formulas.
+#     See https://github.com/pytorch/pytorch/issues/97575 for more details
+#     on the issue.
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in torch/csrc/autograd/FunctionsManual.cpp
@@ -716,6 +733,18 @@
   output_differentiability: [False]
 
 - name: _indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: crow_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: col_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: ccol_indices(Tensor(a) self) -> Tensor(a)
+  output_differentiability: [False]
+
+- name: row_indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
 
 - name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
@@ -1365,8 +1394,8 @@
 
 # [Note: Sometimes view derivatives]
 # The following situation applies to other operations as well.
-# TODO: This note is only referenced once by to_dense. Make this
-# more generic if it's been referenced more than once.
+# TODO: This note is only referenced by to_dense and to_sparse*. Make
+# this more generic if it's been referenced more than once.
 #
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1696,22 +1725,46 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   self: to_dense_backward(grad, self, masked_grad)
 
-- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse.sparse_dim
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+#
+- name: _to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+# DO NOT define a backward for to_sparse
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
@@ -1817,11 +1870,18 @@
   result: auto_linear
 
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
-  self: grad.to_dense().sparse_mask(mask).to_dense()
+  self: sparse_mask_backward(grad, mask, self.layout())
   mask: non_differentiable
 
-- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False, bool? is_coalesced=None) -> Tensor
+  indices: non_differentiable
   values: grad.sparse_mask(result)._values()
+
+- name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+  compressed_indices: non_differentiable
+  plain_indices: non_differentiable
+  # TODO: remove to_dense after gh-107381 is fixed
+  values: grad.to_dense().sparse_mask(result).values()
 
 - name: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
   self: at::_sparse_sum_backward(grad, self, dim)
@@ -1846,7 +1906,11 @@
 
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
-  i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, grad_input_mask)
+  i1, i2, i3: "_trilinear_backward(grad,
+               wrap_opt_if(i1, grad_input_mask[1] || grad_input_mask[2]),
+               wrap_opt_if(i2, grad_input_mask[0] || grad_input_mask[2]),
+               wrap_opt_if(i3, grad_input_mask[0] || grad_input_mask[1]),
+               expand1, expand2, expand3, sumdim, grad_input_mask)"
   result: "_trilinear(i1_t, i2_p, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
@@ -2212,12 +2276,12 @@
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
 
-- name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
+- name: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
   self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
 
-- name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
+- name: max_unpool3d(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding) -> Tensor
   self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
   result: auto_linear
@@ -2441,9 +2505,11 @@
   result: replication_pad3d_backward_symint(grad_output_t, self_p, padding)
 
 - name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
-  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
-  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
+  self, mat1, mat2: "sparse_sampled_addmm_backward(grad,
+                                                   self,
+                                                   wrap_opt_if(mat1, grad_input_mask[2]),
+                                                   wrap_opt_if(mat2, grad_input_mask[1]),
+                                                   alpha, beta, grad_input_mask)"
 
 - name: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
   output_differentiability: [True, False]
@@ -2694,14 +2760,9 @@
   nested_strides: non_differentiable
 
 # Transformers
-- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp)
-  output_differentiability: [True, False]
-  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, output, log_sumexp, is_causal, false, scale)
-
-# - name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor, Tensor)
-#   output_differentiability: [True, False]
-#   query, key, value, bias: _efficient_attention_backward(grad, query, key, value, bias, result0, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, key.size(0), result1, custom_mask_type, false, scale)
-# # Returns ouput, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, rng_state
+- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
+  output_differentiability: [True, False, False, False]
+  query, key, value, attn_bias: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, attn_bias, output, log_sumexp, philox_seed, philox_offset, dropout_p, grad_input_mask, is_causal, scale)
 
 - name: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False, False, False, False, False]
@@ -2998,13 +3059,16 @@
 - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
   other: div_tensor_other_backward(grads[i], self[i], other[i])
+  result: (self_t - other_t * result[i]) / other_p
 
 - name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   self: pow_backward_self(grads[i], self[i], exponent[i])
   exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
+  result: (pow_backward_self(self_t.conj(), self_p, exponent_p) + pow_backward_exponent(exponent_t.conj(), self_p, exponent_p, result[i])).conj()
 
 - name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
   self: pow_backward(grads[i], self[i], exponent[i])
+  result: pow_backward(self_t.conj(), self_p, exponent[i]).conj()
 
 - name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
   exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
@@ -3013,12 +3077,22 @@
 # of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.
 - name: _foreach_minimum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] > scalar, 0)
+  result: scalar + at::where(self_p == scalar, at::scalar_tensor(0.5, result[i].options()), (self_p < scalar).to(result[i].scalar_type())) * (self_t - scalar)
 
 - name: _foreach_minimum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > scalars[i], 0)
+  result: scalars[i] + at::where(self_p == scalars[i], at::scalar_tensor(0.5, result[i].options()), (self_p < scalars[i]).to(result[i].scalar_type())) * (self_t - scalars[i])
 
 - name: _foreach_maximum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] < scalar, 0)
+  result: scalar + at::where(self_p == scalar, at::scalar_tensor(0.5, result[i].options()), (self_p > scalar).to(result[i].scalar_type())) * (self_t - scalar)
 
 - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
+  result: scalars[i] + at::where(self_p == scalars[i], at::scalar_tensor(0.5, result[i].options()), (self_p > scalars[i]).to(result[i].scalar_type())) * (self_t - scalars[i])
+
+# note(crcrpar): forward-mode AD is tricky for a simple string replace to handle:
+#   formula.replace("p", "ord") produces `norm_jvord(self_ord, self_t, ord, result)`
+- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2) -> Tensor[]
+  self: norm_backward(grads[i], self[i], ord, result[i])
+  result: norm_jvp(self_p, self_t, ord, result[i])

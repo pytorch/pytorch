@@ -61,10 +61,9 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
 
   TORCH_CHECK(
       output_w >= 1,
-      2,
       "input (W: ",
       input_w,
-      ")is too small. Calculated output W: ",
+      ") is too small. Calculated output W: ",
       output_w);
 
   if (input.ndimension() == 2) {
@@ -202,7 +201,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_h == grad_output.size(dim_h), "grad_output height unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_h));
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
-    " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
+    " Expected: ", output_d, ", Got: ", grad_output.size(dim_d));
 
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
@@ -244,22 +243,27 @@ void reflection_pad2d_out_template(
   TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_l, ", ", pad_r,
-    ") at dimension ", dim_w, " of input ", ndim);
+    ") at dimension ", dim_w, " of input ", input.sizes());
 
   TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Argument #6: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
-    ") at dimension ", dim_h, " of input ", ndim);
+    ") at dimension ", dim_h, " of input ", input.sizes());
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small. Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   /* resize output */
   if (ndim == 3) {
     output.resize_({nplane, output_h, output_w});
   } else {
-    output.resize_({nbatch, nplane, output_h, output_w});
+    if (input.is_quantized()) {
+      // quantized tensor can not be resized with argument `memory_format`
+      output.resize_({nbatch, nplane, output_h, output_w});
+    } else {
+      output.resize_({nbatch, nplane, output_h, output_w}, input.suggest_memory_format());
+    }
   }
   reflection_pad2d_kernel(kCPU, output, input, padding);
 }
@@ -357,7 +361,7 @@ Tensor& reflection_pad2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding,
     Tensor& grad_input) {
-  grad_input.resize_as_(input);
+  grad_input.resize_as_(input, input.suggest_memory_format());
   grad_input.zero_();
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
@@ -368,7 +372,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::zeros_like(input, input.suggest_memory_format());
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -376,6 +380,9 @@ Tensor reflection_pad2d_backward_cpu(
 
 TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   reflection_pad3d_kernel(kCPU, output, input, padding);
 }
 
@@ -386,6 +393,9 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  grad_input.resize_(input.sizes(), input.suggest_memory_format());
 
   grad_input.zero_();
   reflection_pad3d_backward_kernel(kCPU, grad_input, grad_output, padding);

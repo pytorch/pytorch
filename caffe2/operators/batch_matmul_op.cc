@@ -7,7 +7,7 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<CPUContext>);
 
-static vector<TensorShape> TensorInferenceForBatchMatMul(
+vector<TensorShape> TensorInferenceForBatchMatMul(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   ArgumentHelper helper(def);
@@ -101,7 +101,7 @@ static vector<TensorShape> TensorInferenceForBatchMatMul(
   }
 }
 
-static OpSchema::Cost CostInferenceForBatchMatMul(
+OpSchema::Cost CostInferenceForBatchMatMul(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_EQ(in.size(), 2U, "BatchMatMul requires two inputs");

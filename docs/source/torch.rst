@@ -706,6 +706,18 @@ Symbolic Numbers
     sym_min
     sym_not
 
+Export Path
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+    export
+    generated/exportdb/index
+
 Optimizations
 -------------
 .. autosummary::
@@ -725,23 +737,10 @@ Operator Tags
 .. py:module:: torch.contrib
 .. py:module:: torch.utils.backcompat
 
-.. This submodule is split manually without a top level page.
-.. py:module:: torch.utils
-
 .. This module is only used internally for ROCm builds.
 .. py:module:: torch.utils.hipify
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
-
-.. automodule:: torch.autograd
-.. currentmodule:: torch.autograd
-
-Engine Configuration
-----------------------------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    set_multithreading_enabled
+.. py:module:: torch.utils.viz

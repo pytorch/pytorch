@@ -45,6 +45,13 @@ def remove_no_ops(
 
     def replace_no_op(node, replace_input_index):
         replacement = node.args[replace_input_index]
+
+        # https://github.com/pytorch/pytorch/issues/86128 causes
+        # non-Tensor inputs even for ops with only Tensor inputs.
+        # TODO - decompose/type promote to avoid this
+        if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+            return
+
         if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
             if fake_tensors_eq(
                 node.meta["val"],
@@ -105,7 +112,10 @@ def constant_fold_uniform_value(gm):
     aten = torch.ops.aten
     from torch._inductor.freezing import ConstantFolder
 
-    cf = ConstantFolder(gm)
+    def is_uniform_valued_tensor(t):
+        return t.numel() != 0 and (t == t.flatten()[0]).all()
+
+    cf = ConstantFolder(gm, insertable_tensor_check=is_uniform_valued_tensor)
     cf.run()
 
     node_replacements = cf.node_replacements
@@ -131,7 +141,7 @@ def constant_fold_uniform_value(gm):
         # remove constants which can be replaced with a constructor.
 
         # TODO - we could also Tensors which get replaced with arange here
-        if constant.numel() == 0 or not (constant == constant.flatten()[0]).all():
+        if not is_uniform_valued_tensor(constant):
             continue
 
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now

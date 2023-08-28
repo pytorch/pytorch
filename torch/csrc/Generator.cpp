@@ -14,6 +14,8 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#include <utility>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
@@ -33,7 +35,7 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
+  self_->cdata = std::move(cdata);
   return self.release();
 }
 
@@ -117,8 +119,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 }
 
 uint64_t unpack_uint64(PyObject* pyobj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t unsigned_obj;
+  uint64_t unsigned_obj = 0;
   try {
     // First try to interpret as unsigned long
     unsigned_obj = THPUtils_unpackUInt64(pyobj);
@@ -221,11 +222,7 @@ static PyMethodDef THPGenerator_methods[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
-    {(char*)"_cdata",
-     T_ULONGLONG,
-     offsetof(THPGenerator, cdata),
-     READONLY,
-     nullptr},
+    {"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
     {nullptr}};
 
 PyTypeObject THPGeneratorType = {

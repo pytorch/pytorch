@@ -1335,8 +1335,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
