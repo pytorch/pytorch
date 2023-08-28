@@ -92,6 +92,10 @@ aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
 
+def _is_int8_mat(mat):
+    return mat.get_dtype() in (torch.int8, torch.uint8)
+
+
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
     Giving torch.addmm a 1D tensor calls a different (faster) cublasLt
@@ -220,7 +224,8 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     if not inductor_config.force_mixed_mm:
         choices.append(aten_fallback_mixed_mm.bind((mat1, mat2), layout))
     b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-    for config in mm_configs(m, n, k):
+    has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
+    for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
         mm_template.maybe_append_choice(
             choices,
             (mat1, mat2),
