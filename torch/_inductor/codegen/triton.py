@@ -1864,7 +1864,7 @@ class TritonKernel(Kernel):
         code = IndentedBuffer()
 
         size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel)) if not free_symbols(numel) else 64 for numel in self.numels
+            next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
         if self.persistent_reduction:
             assert self.inside_reduction
