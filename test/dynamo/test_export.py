@@ -3006,7 +3006,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "too many positional arguments",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_args_mismatch,
@@ -3022,7 +3022,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "HigherOrderOperator body's output must consist of tensors only",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_return_non_tensor,
@@ -3793,7 +3793,6 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
 
         self.assertTrue(torch.allclose(m(x), gm(x)))
 
-    @unittest.expectedFailure
     def test_predispatch_with_for_out_dtype_nested(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
