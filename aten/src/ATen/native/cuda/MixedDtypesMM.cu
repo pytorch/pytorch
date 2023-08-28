@@ -14,7 +14,6 @@
 #include <cutlass_extensions/gemm/kernel/default_fpA_intB_traits.h>
 #include <cutlass_extensions/gemm/kernel/fpA_intB_gemm.h>
 #include <cutlass_extensions/gemm/threadblock/default_mma.h>
-
 #endif
 
 #ifndef USE_ROCM
