@@ -2891,10 +2891,10 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            TypeError,
-            r"cond\(\) missing 1 required positional argument: 'operands'",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected 4 arguments",
         ):
-            f(*example_inputs)
+            torch._dynamo.export(f, aten_graph=True)(*example_inputs)
 
     def test_cond_raise_user_error_on_unsupported_pred(self):
         def f_unsupported_pred(x):
@@ -2903,10 +2903,29 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected pred to be bool or tensor, but got Module()",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected pred to be bool or a boolean tensor with single",
         ):
-            f_unsupported_pred(*example_inputs)
+            torch._dynamo.export(
+                f_unsupported_pred,
+                aten_graph=True,
+            )(*example_inputs)
+
+    @config.patch(suppress_errors=True)
+    def test_uncaptured_higher_order_op_error_not_suppresed(self):
+        def f_unsupported_pred(x):
+            pred = torch.nn.Module()
+            return cond(pred, lambda x: x.sin(), lambda x: x.cos(), [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected pred to be bool or a boolean tensor with single",
+        ):
+            torch._dynamo.export(
+                f_unsupported_pred,
+                aten_graph=True,
+            )(*example_inputs)
 
     def test_cond_raise_user_error_on_non_list_operands(self):
         def f_non_list_operands(x):
@@ -2914,10 +2933,13 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expect operands to be a tuple of Tensors, but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected a tuple but got",
         ):
-            f_non_list_operands(*example_inputs)
+            torch._dynamo.export(
+                f_non_list_operands,
+                aten_graph=True,
+            )(*example_inputs)
 
     def test_cond_raise_user_error_on_non_tensor_operands(self):
         def f_non_tensor_operands(x):
@@ -2928,10 +2950,13 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected pred to be bool or single-element boolean tensor, but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected a tuple of tensors",
         ):
-            f_non_tensor_operands(*example_inputs)
+            torch._dynamo.export(
+                f_non_tensor_operands,
+                aten_graph=True,
+            )(*example_inputs)
 
     def test_cond_raise_user_error_on_branch_args_mismatch(self):
         def true_fn(x, y):
@@ -2941,30 +2966,7 @@ def forward(self, x):
             return x.cos()
 
         def f_branch_args_mismatch(x, y):
-            return cond(torch.tensor([[[[True]]]]), true_fn, false_fn, [x, y])
-
-        example_inputs = (torch.rand(5), torch.rand(2))
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "too many positional arguments",
-        ):
-            torch._dynamo.export(
-                f_branch_args_mismatch,
-                aten_graph=True,
-            )(
-                *example_inputs,
-            )
-
-    @config.patch(suppress_errors=True)
-    def test_uncaptured_higher_order_op_error_not_suppresed(self):
-        def true_fn(x, y):
-            return x.sin()
-
-        def false_fn(x):
-            return x.cos()
-
-        def f_branch_args_mismatch(x, y):
-            return cond(torch.tensor([[[[True]]]]), true_fn, false_fn, [x, y])
+            return cond(torch.tensor([[[[100]]]]), true_fn, false_fn, [x, y])
 
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
@@ -2992,14 +2994,14 @@ def forward(self, x):
                 aten_graph=True,
             )(*example_inputs)
 
-    def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
+    def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
         def f_branch_return_multiple_tensors(x, y):
-            return cond(x, lambda x: (x, x), lambda x: (x, x), [y])
+            return cond(y, lambda x: (x, x), lambda x: (x, x), [x])
 
-        example_inputs = (torch.tensor(True), torch.randn(2))
+        example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -3023,12 +3025,12 @@ def forward(self, x):
             return (x, x)
 
         def f_mismatch_return_length(x):
-            return cond(torch.tensor(True), true_fn, false_fn, [x])
+            return cond(torch.tensor(100), true_fn, false_fn, [x])
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3048,7 +3050,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expected each tensor to have same metadata but got",
+            r"Unmatched tensor metadata from cond\(\) branches.",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,

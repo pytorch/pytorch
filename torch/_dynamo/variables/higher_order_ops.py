@@ -24,7 +24,6 @@ from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .lists import ListVariable, TupleVariable
-from .nn_module import NNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -316,19 +315,17 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         self.check_kwargs(kwargs, ConstantVariable)
 
-        exc_prefix = "Cond doesn't work unless it is captured completely with torch.compile. Fail reason: "
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
             raise UncapturedHigherOrderOpError(
-                exc_prefix + f"Expected 4 arguments but got {len(args)}.\n"
+                f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             raise UncapturedHigherOrderOpError(
-                exc_prefix
-                + f"Expected pred to be bool or a boolean tensor with single "
+                f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
@@ -337,15 +334,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
             raise UncapturedHigherOrderOpError(
-                exc_prefix + f"Expected a tuple but got {args[3].python_type()}",
+                f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
             raise UncapturedHigherOrderOpError(
-                exc_prefix
-                + "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
+                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)
@@ -357,15 +353,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         assert isinstance(
-            args[1],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            args[1], (UserFunctionVariable, NestedUserFunctionVariable)
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
-            args[2],
-            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
+            args[2], (UserFunctionVariable, NestedUserFunctionVariable)
         ), str(
             type(args[2])
         )  # false_fn
@@ -402,13 +396,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
                 raise UncapturedHigherOrderOpError(
-                    exc_prefix
-                    + "Cond doesn't work unless it is captured completely with torch.compile"
+                    "Cond doesn't work unless it is captured completely with torch.compile"
                 ) from e
 
             if not isinstance(ret_val, TensorVariable):
                 raise UncapturedHigherOrderOpError(
-                    exc_prefix + "Expected branch to return a single tensor",
+                    "Expected branch out type to be a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
 
