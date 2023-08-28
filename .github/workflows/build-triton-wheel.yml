@@ -3,7 +3,7 @@ name: Build Triton wheels
 on:
   push:
     branches:
-      - main
+      - release/2.1
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
@@ -168,7 +168,7 @@ jobs:
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
-      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
