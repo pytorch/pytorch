@@ -355,6 +355,7 @@ def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
 def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
     return [i_a - i_b for i_a, i_b in zip(a, b)]
 
+
 class _ReaderView(io.IOBase):
     def __init__(self, base_stream: io.IOBase, offset: int, len: int):
         super().__init__()
@@ -386,6 +387,16 @@ class _ReaderView(io.IOBase):
     def read(self, size=-1):
         return self.base_stream.read(size)
 
+
 def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
     # FIXME (kumpera) torch.load fails if we wrap with io.BufferedReader
     return _ReaderView(file, offset, length)
+
+
+def _normalize_device_info(device_type: str, device_id: int) -> str:
+    """
+    Device info normalization.
+    """
+    if device_type == "cpu":
+        return "cpu"
+    return f"{device_type}:{device_id}"
