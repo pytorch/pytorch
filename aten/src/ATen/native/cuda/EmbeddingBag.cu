@@ -1,12 +1,13 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/EmbeddingBag.h>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -332,33 +333,22 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
 
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-_embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
-                   const Tensor &offsets_, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
-                   bool include_last_offset, int64_t padding_idx) {
-  TORCH_CHECK(indices_.dim() == 1 || indices_.dim() == 2,
-      "input has to be a 1D or 2D Tensor, but got Tensor of dimension ",
-      indices_.dim());
-  if (indices_.dim() == 1) {
-    TORCH_CHECK(offsets_.dim() == 1,
-        "offsets has to be a 1D Tensor, but got Tensor of dimension ",
-        offsets_.dim());
-  }
-  TORCH_CHECK(weight.dim() == 2,
-      "weight has to be a 2D Tensor, but got Tensor of dimension ",
-      weight.dim());
+std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cuda(
+    const Tensor& weight,
+    const Tensor& indices,
+    const Tensor& offsets,
+    const bool scale_grad_by_freq,
+    const int64_t mode,
+    bool sparse,
+    const c10::optional<Tensor>& per_sample_weights_opt,
+    bool include_last_offset,
+    int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   auto indices_arg = TensorArg(indices, "indices", 1);
-  checkScalarTypes("embedding_bag_cuda", indices_arg, {kLong, kInt});
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
-  checkScalarTypes("embedding_bag_cuda", offsets_arg, {kLong, kInt});
-  checkSameType("embedding_bag_cuda", indices_arg, offsets_arg);
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkSameGPU("embedding_bag_cuda", weight_arg, indices_arg);
   checkSameGPU("embedding_bag_cuda", weight_arg, offsets_arg);
@@ -366,12 +356,6 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
   if (include_last_offset) {
-    // Check https://github.com/pytorch/pytorch/issues/29019
-    // We plan to add one more element in offsets, which is equal to the size of
-    // indices. Currently for cuda devices, we still use the legacy
-    // implementation even this flag is enabled.
-    TORCH_CHECK(
-        numBags >= 1, "include_last_offset: numBags should be at least 1");
     numBags -= 1;
   }
   int64_t featureSize = weight.size(1);
