@@ -1,7 +1,5 @@
-import functools
-
 from enum import auto, Enum
-from typing import List
+from typing import List, Optional
 
 import torch
 
@@ -25,7 +23,7 @@ def frozen_offload(
     _check_module_params(module)
     _init_data(state, module)
     state._forward_handle = module.register_forward_hook(to_cpu)
-    state._forward_pre_handle = module.register_forward_pre_hook(to_gpu)
+    state._forward_pre_handle = module.register_forward_pre_hook(_to_gpu_synced)
 
 
 def to_cpu(module: nn.Module, *unused_args, **unused_kwargs):
@@ -37,12 +35,14 @@ def to_cpu(module: nn.Module, *unused_args, **unused_kwargs):
         return
     if state._device_state == _DeviceState.CPU:
         return
-    print(f"Resetting to CPU!")
-    # Choose to not persist any changes from the GPU copy to the CPU copy
-    for param, cpu_view in zip(state._params, state._cpu_views):
-        param.data = cpu_view
-    state._gpu_flat_tensor.untyped_storage().resize_(0)
-    state._device_state = _DeviceState.CPU
+    with torch.profiler.record_function("frozen_offload::to_cpu"):
+        # Choose to not persist any changes from the GPU copy to the CPU copy
+        for param, cpu_view in zip(state._params, state._cpu_views):
+            param.data = cpu_view
+        # state._gpu_flat_tensor.untyped_storage().resize_(0)
+        state._gpu_flat_tensor.record_stream(torch.cuda.current_stream())
+        state._gpu_flat_tensor = None
+        state._device_state = _DeviceState.CPU
 
 
 def to_gpu(module: nn.Module, *unused_args, **unused_kwargs):
@@ -56,17 +56,27 @@ def to_gpu(module: nn.Module, *unused_args, **unused_kwargs):
         return
     if state._device_state in (_DeviceState.GPU_UNSYNCED, _DeviceState.GPU_SYNCED):
         return
-    print(f"Copying to GPU!")
-    state._gpu_flat_tensor.untyped_storage().resize_(
-        state._gpu_flat_tensor_storage_size
-    )
-    with torch.cuda.stream(state._stream):
-        state._gpu_flat_tensor.copy_(state._cpu_flat_tensor)
-        for param, gpu_view in zip(state._params, state._gpu_views):
-            param.data = gpu_view
-    torch.cuda.current_stream().wait_stream(state._stream)
-    # state._device_state = _DeviceState.GPU_UNSYNCED
-    state._device_state = _DeviceState.GPU_SYNCED
+    with torch.profiler.record_function("frozen_offload::to_gpu"):
+        with torch.cuda.stream(state._stream):
+            state._gpu_flat_tensor = state._cpu_flat_tensor.to(torch.device("cuda"), non_blocking=True)
+            offset = 0
+            for param, numel, size in zip(state._params, state._numels, state._sizes):
+                param.data = state._gpu_flat_tensor[offset : offset + numel].view(size)
+                offset += numel
+        state._device_state = _DeviceState.GPU_UNSYNCED
+    
+
+def _to_gpu_synced(module: nn.Module, *unused_args, **unused_kwargs):
+    # NOTE: If `to_gpu()` was called in the last iteration's backward, then
+    # this `to_gpu()` call here will be a no-op, and we only use this function
+    # for the stream wait.
+    to_gpu(module, *unused_args, **unused_kwargs)
+    state = frozen_offload.state(module)
+    if state is None:
+        return
+    with torch.profiler.record_function("frozen_offload::wait_stream"):
+        torch.cuda.current_stream().wait_stream(state._stream)
+        state._device_state = _DeviceState.GPU_SYNCED
 
 
 def _init_data(state: _State, module: nn.Module) -> None:
@@ -86,21 +96,15 @@ def _init_data(state: _State, module: nn.Module) -> None:
     cpu_flat_tensor = torch.empty(
         (total_numel,), device=torch.device("cpu"), dtype=state._params[0].dtype
     ).pin_memory()
-    gpu_flat_tensor = torch.empty(
-        (total_numel,), device=torch.device("cuda"), dtype=state._params[0].dtype
-    )
     state._cpu_views: List[torch.Tensor] = []
-    state._gpu_views: List[torch.Tensor] = []
     offset = 0
     for param, numel, size in zip(state._params, state._numels, state._sizes):
+        cpu_flat_tensor[offset : offset + numel].view(size).copy_(param)
         state._cpu_views.append(cpu_flat_tensor[offset : offset + numel].view(size))
-        state._gpu_views.append(gpu_flat_tensor[offset : offset + numel].view(size))
         param.data = state._cpu_views[-1]
         offset += numel
-    state._gpu_flat_tensor_storage_size = gpu_flat_tensor.untyped_storage().size()
-    gpu_flat_tensor.untyped_storage().resize_(0)
     state._cpu_flat_tensor = cpu_flat_tensor
-    state._gpu_flat_tensor = gpu_flat_tensor
+    state._gpu_flat_tensor: Optional[torch.Tensor] = None
 
 
 def _check_module_params(module: nn.Module) -> None:
