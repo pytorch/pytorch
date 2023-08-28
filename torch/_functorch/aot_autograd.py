@@ -1146,6 +1146,7 @@ def run_functionalized_fw_and_collect_metadata(
             is_result_of_custom_autograd_fn = False
             if isinstance(o, torch.Tensor):
                 # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
+                # print("Grad fn?!", o.grad_fn)
                 if type(o.grad_fn).__name__ == "CppFunction":
                     is_result_of_custom_autograd_fn = True
                 if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
@@ -3727,7 +3728,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         compiled_bw_func = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
-                        breakpoint()
+                        # breakpoint()
                     except Exception:
                         log.warning(
                             "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
@@ -4950,9 +4951,9 @@ https://github.com/pytorch/pytorch/issues/101192
                 else:
                     assert grad is None
             return *fw_outs, *output_gradients
-        breakpoint()
+        # breakpoint()
         fx_g = make_fx(flattened_joint)(*full_args)
-        breakpoint()
+        # breakpoint()
 
     user_args_flat, _ = pytree.tree_flatten(args)
     return fx_g, create_graph_signature(

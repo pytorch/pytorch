@@ -991,12 +991,17 @@ def _move_states_to_device(
         # Move the parameters and buffers like the `.data` code path in
         # `nn.Module._apply()`, which underlies `nn.Module.to()`
         for param in params:
-            with torch.no_grad():
-                param.data = param.to(device_from_device_id)
+            # with torch.no_grad():
+                x = param.to(device_from_device_id)
+                # with torch.no_grad():
+                param.data = x
                 if param.grad is not None:
+                    # with torch.no_grad():
                     param.grad.data = param.grad.to(device_from_device_id)
         for buffer in buffers:
-            buffer.data = buffer.to(device_from_device_id)
+            y = buffer.to(device_from_device_id)
+            # with torch.no_grad():
+            buffer.data = y
     elif current_device == cpu_device:
         _warn_cpu_init()
 

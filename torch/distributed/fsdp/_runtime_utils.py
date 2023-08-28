@@ -347,7 +347,7 @@ def _reshard(
     if state.limit_all_gathers and free_unsharded_flat_param:
         if (
             not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-        ):  
+        ):
             # We don't run a even queue for freeing under torch compile atm
             # But maybe we need to? TODO(voz): Look into this
             free_event = state._device_handle.Event()
@@ -1044,7 +1044,9 @@ def _cast_grad_to_param_dtype(
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
     if not _low_precision_hook_enabled(state) and sharded_grad.dtype != param.dtype:
         low_prec_grad_data = sharded_grad.data
-        sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)
+        x = sharded_grad.data.to(dtype=param.dtype)
+        # with torch.no_grad():
+        sharded_grad.data = x
         # Since for `NO_SHARD`, the gradient is produced in the computation
         # stream and consumed here in the post-backward stream, inform the
         # caching allocator; for the sharded strategies, the gradient is
@@ -1458,12 +1460,13 @@ def _register_post_backward_hook(
         "The `grad_fn` is needed to access the `AccumulateGrad` and "
         "register the post-backward hook",
     )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+    # acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+    # assert acc_grad is not None
+    # hook_handle = acc_grad.register_hook(
+        # functools.partial(_post_backward_hook, state, handle)
+    # )
+    # temp_flat_param.set_(temp_flat_param)
+    # flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1640,7 +1643,11 @@ def _cast_buffers_to_dtype_and_device(
         f"{len(buffer_dtypes)}",
     )
     for buffer, buffer_dtype in zip(buffers, buffer_dtypes):
-        if not torch.is_floating_point(buffer) or buffer_dtype is None:
-            buffer.data = buffer.to(device=device)
-        else:
-            buffer.data = buffer.to(device=device, dtype=buffer_dtype)
+            if not torch.is_floating_point(buffer) or buffer_dtype is None:
+                x = buffer.to(device=device)
+                # with torch.no_grad():
+                buffer.data = x
+            else:
+                x = buffer.to(device=device, dtype=buffer_dtype)
+                # with torch.no_grad():
+                buffer.data = x
