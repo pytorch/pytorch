@@ -6266,7 +6266,7 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         if output_split_sizes is not None:
             output_shape_first_dim_s = V.graph.current_node.meta['val'].size()[0].node.expr
             new_size[0] = output_shape_first_dim_s
-        # In the average case, output.shape[0] == input.shape[0], so we use that as size hint
+        # In the average case, `output.shape[0]` equals to `input.shape[0]`, so we use that as size hint
         V.graph.sizevars.shape_env.var_to_size_hint[output_shape_first_dim_s] = x_realized.get_size()[0]
 
         layout = FlexibleLayout(
