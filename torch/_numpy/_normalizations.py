@@ -52,6 +52,12 @@ def normalize_array_like_or_scalar(x, parm=None):
     return normalize_array_like(x, parm)
 
 
+def normalize_optional_array_like_or_scalar(x, parm=None):
+    if x is None:
+        return None
+    return normalize_array_like_or_scalar(x, parm)
+
+
 def normalize_optional_array_like(x, parm=None):
     # This explicit normalizer is needed because otherwise normalize_array_like
     # does not run for a parameter annotated as Optional[ArrayLike]
@@ -121,6 +127,7 @@ normalizers = {
     "Union[ArrayLike, Scalar]": normalize_array_like_or_scalar,
     "Optional[ArrayLike]": normalize_optional_array_like,
     "Sequence[ArrayLike]": normalize_seq_array_like,
+    "Optional[Union[ArrayLike, Scalar]]": normalize_optional_array_like_or_scalar,
     "Optional[NDArray]": normalize_ndarray,
     "Optional[OutArray]": normalize_outarray,
     "NDArray": normalize_ndarray,

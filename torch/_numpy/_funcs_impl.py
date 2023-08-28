@@ -626,8 +626,8 @@ def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
 
 def where(
     condition: ArrayLike,
-    x: Optional[ArrayLike] = None,
-    y: Optional[ArrayLike] = None,
+    x: Optional[ArrayLikeOrScalar] = None,
+    y: Optional[ArrayLikeOrScalar] = None,
     /,
 ):
     if (x is None) != (y is None):
@@ -994,8 +994,7 @@ def clip(
     return torch.clamp(a, min, max)
 
 
-def repeat(a: ArrayLike, repeats: ArrayLike, axis=None):
-    # XXX: scalar repeats; ArrayLikeOrScalar ?
+def repeat(a: ArrayLike, repeats: ArrayLikeOrScalar, axis=None):
     return torch.repeat_interleave(a, repeats, axis)
 
 
