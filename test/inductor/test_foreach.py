@@ -491,59 +491,37 @@ class ForeachTests(TestCase):
     @bin_ops
     def test_2d_blocking(self, op):
         def fn(a0, a1, b0, b1):
-            a0_c = torch.cat((a0, a0), 0)
-            b0_c = torch.cat((b0, b0), 0)
-            a1_c = torch.cat((a1, a1), 0)
-            b1_c = torch.cat((b1, b1), 0)
-            return op([a0_c, a1_c], [b0_c, b1_c])
+            return op([a0, a1], [b0, b1])
 
         self.check_model_cuda(
             fn,
             (
-                torch.rand(2, 2, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(2, 2, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
+                torch.rand(10, 40, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(40, 10, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
     def test_2d_blocking_partitioning(self, op):
         def fn(a0, a1, b0, b1):
-            a0_c = torch.cat((a0, a0), 0)
-            b0_c = torch.cat((b0, b0), 0)
-            return op([a0_c, a1], [b0_c, b1])
+            return op([a0, a1], [b0, b1])
 
         self.check_model_cuda(
             fn,
             (
-                torch.rand(2, 2, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(2, 2, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(40, 30, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(30, 40, device="cuda:0").t(),
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
     @bin_ops
@@ -551,68 +529,21 @@ class ForeachTests(TestCase):
         """2D blocking should be grouped by number of yelems"""
 
         def fn(a0, a1, a2, b0, b1, b2):
-            a0_c = torch.cat((a0, a0), 0)
-            b0_c = torch.cat((b0, b0), 0)
-            a1_c = torch.cat((a1, a1), 0)
-            b1_c = torch.cat((b1, b1), 0)
-            a2_c = torch.cat((a2, a2), 0)
-            b2_c = torch.cat((b2, b2), 0)
-            return op([a0_c, a1_c, a2_c], [b0_c, b1_c, b2_c])
+            return op([a0, a1, a2], [b0, b1, b2])
 
         self.check_model_cuda(
             fn,
             (
-                torch.rand(2, 2, 4, 4, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(10, 10, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(2, 2, 4, 4, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(10, 10, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
+                torch.rand(10, 20, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(20, 10, device="cuda:0").t(),
+                torch.rand(20, 30, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 9)
-
-        torch._inductor.metrics.reset()
-
-        torch._logging.set_logs(output_code=True)
-        self.check_model_cuda(
-            fn,
-            (
-                torch.rand(20, 20, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 4, 4, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 3, 3, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 4, 4, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-                torch.rand(20, 20, 2, 2, device="cuda:0").to(
-                    memory_format=torch.channels_last
-                ),
-            ),
-        )
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 7)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 if __name__ == "__main__":

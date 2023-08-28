@@ -665,6 +665,7 @@ def gen_pyi(
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
+                            "is_coalesced: Optional[_bool] = None",
                         ]
                     )
                 )
