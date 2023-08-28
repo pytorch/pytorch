@@ -156,7 +156,7 @@ EOL
 # nproc doesn't exist on darwin
 if [[ "$(uname)" != Darwin ]]; then
   # Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
-  MEMORY_LIMIT_MAX_JOBS=14
+  MEMORY_LIMIT_MAX_JOBS=12
   NUM_CPUS=$(( $(nproc) - 2 ))
 
   # Defaults here for **binary** linux builds so they can be changed in one place
