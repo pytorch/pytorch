@@ -7,7 +7,11 @@ import typing
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
-from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._decomp import (
+    core_aten_decompositions,
+    get_decompositions,
+    remove_decompositions,
+)
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     pw_cast_for_opmath,
@@ -58,6 +62,14 @@ inductor_decompositions = get_decompositions(
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+
+# Remove unwanted decompositions included via the core ATen decompositions from
+# the Inductor decomp table.
+decomps_to_exclude = [
+    aten._unsafe_index,
+]
+
+remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(ops):

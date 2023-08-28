@@ -68,6 +68,7 @@ if is_available():
         _rank_not_in_group,
         _coalescing_manager,
         _CoalescingManager,
+        _get_process_group_name,
     )
 
     from .rendezvous import (

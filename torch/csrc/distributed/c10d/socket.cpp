@@ -562,7 +562,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   }
 
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  if (::listen(socket_->handle(), /*backlog=*/2048) != 0) {
+  if (::listen(socket_->handle(), -1 /* backlog */) != 0) {
     recordError(
         "The server socket has failed to listen on {} {}.",
         addr,
@@ -614,7 +614,7 @@ std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
         expected_port_)};
   }
 
-  if (::listen(socket->handle(), 2048 /* backlog */) != 0) {
+  if (::listen(socket->handle(), -1 /* backlog */) != 0) {
     throw SocketError{fmt::format(
         "Failed to listen on socket initialized from fd {}: {}.",
         socket->handle(),
