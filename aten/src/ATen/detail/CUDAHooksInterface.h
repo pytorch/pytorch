@@ -114,11 +114,11 @@ struct TORCH_API CUDAHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
-  virtual bool hasPrimaryContext(int64_t device_index) const {
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t current_device() const {
+  virtual DeviceIndex current_device() const {
     return -1;
   }
 
@@ -167,19 +167,19 @@ struct TORCH_API CUDAHooksInterface {
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t /*device_index*/) const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t /*device_index*/, int64_t /*max_size*/) const {
+  virtual void cuFFTSetPlanCacheMaxSize(DeviceIndex /*device_index*/, int64_t /*max_size*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize(int64_t /*device_index*/) const {
+  virtual int64_t cuFFTGetPlanCacheSize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache(int64_t /*device_index*/) const {
+  virtual void cuFFTClearPlanCache(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -187,7 +187,7 @@ struct TORCH_API CUDAHooksInterface {
     return 0;
   }
 
-  virtual void deviceSynchronize(int64_t /*device_index*/) const {
+  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
 };
