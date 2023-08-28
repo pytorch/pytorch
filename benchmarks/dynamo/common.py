@@ -22,6 +22,7 @@ import time
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
+from typing_extensions import Self
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -912,7 +913,19 @@ def speedup_experiment_onnx(
         iobinding, outputs = onnx_model.create_iobinding(pt_inputs, example_outputs)
 
         def onnxrt_model_iter_fn(model, inputs, collect_outputs=True):
-            onnx_model.run_with_iobinding(iobinding, outputs)
+            if onnx_model.is_cpu():
+                # Fallback already happened, run without iobinding since session is on cpu.
+                return onnx_model.run(inputs)
+            try:
+                onnx_model.run_with_iobinding(iobinding, outputs)
+            except Exception as e:
+                err_msg = str(e)
+                oom_msgs = ("out of memory", "CUDNN_STATUS_NOT_INITIALIZED", "CUBLAS_STATUS_ALLOC_FAILED", "CUBLAS", "CUDNN")
+                if any(msg in err_msg for msg in oom_msgs):
+                    # Fallback to CPU
+                    print(f"{err_msg}\nFalling back to CPUProvider`!")
+                    return onnx_model.cpu().run(inputs)
+                raise
             if collect_outputs:
                 return outputs
 
@@ -939,7 +952,7 @@ def speedup_experiment_onnx(
             collect_outputs=args.collect_outputs,
         )
 
-        if current_device == "cpu":
+        if current_device == "cpu" or onnx_model.is_cpu():
             onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
         else:
             onnxrt_model_iter_fn = create_onnx_input_binded_fn(
@@ -1315,17 +1328,26 @@ class OnnxModelFromTorchScript:
         else:
             # NOTE(bowbao): Reduce OOM by running ORT on another gpu.
             # TODO(bowbao): This works to avoid OOM, but performance is surprisingly very bad.
-            # cuda_provider_options = {
-            #     "device_id": 1 if torch.cuda.device_count() > 1 else 0,
-            # }
-            # ort_providers = [("CUDAExecutionProvider", cuda_provider_options)]
-            ort_providers = ["CUDAExecutionProvider"]
+            cuda_provider_options = {
+                "device_id": 1 if torch.cuda.device_count() > 1 else 0,
+            }
+            ort_providers = [("CUDAExecutionProvider", cuda_provider_options)]
+        session_options = onnxruntime.SessionOptions()
+        session_options.log_severity_level = 3  # Error
 
         ort_session = onnxruntime.InferenceSession(
             self.model_path,
             providers=ort_providers,
+            sess_options=session_options,
         )
         return ort_session
+
+    def is_cpu(self) -> bool:
+        return self.onnx_session.get_providers()[0] == "CPUExecutionProvider"
+
+    def cpu(self) -> Self:
+        self.onnx_session.set_providers(["CPUExecutionProvider"])
+        return self
 
     def format_pt_inputs(self, pt_inputs):
         # NOTE(bowbao): For huggingface benchmark, pt_inputs are formatted as dictionary,
@@ -1371,10 +1393,9 @@ class OnnxModelFromTorchScript:
         iobinding = self.onnx_session.io_binding()
         args = [arg.contiguous() for arg in pt_inputs]
         for ort_input, arg in zip(self.onnx_session.get_inputs(), args):
-            # NOTE: Small hack to reduce OOM issue by running ORT on another device.
-            # Disabled due to ORT perf regression.
-            # if torch.cuda.device_count() > 1:
-            #     arg = arg.detach().to("cuda:1")
+            # NOTE: Run ORT on another cuda device to reduce OOM.
+            if torch.cuda.device_count() > 1:
+                arg = arg.detach().to("cuda:1")
             device = arg.device
             iobinding.bind_input(
                 ort_input.name,
@@ -1387,8 +1408,8 @@ class OnnxModelFromTorchScript:
 
         outputs = self.create_outputs(*example_outputs)
         for ort_output, output in zip(self.onnx_session.get_outputs(), outputs):
-            # if torch.cuda.device_count() > 1:
-            #     output = output.detach().to("cuda:1")
+            if torch.cuda.device_count() > 1:
+                output = output.detach().to("cuda:1")
             device = output.device
             iobinding.bind_output(
                 ort_output.name,
@@ -1488,9 +1509,19 @@ def optimize_onnx_ctx(
                     output_directory, model, copy.deepcopy(inputs)
                 )
 
-            for _ in range(n - 1):
-                onnx_model.run(inputs)
-            return onnx_model.run(inputs)
+            for _ in range(n):
+                try:
+                    outputs = onnx_model.run(inputs)
+                except Exception as e:
+                    err_msg = str(e)
+                    oom_msgs = ("out of memory", "CUDNN_STATUS_NOT_INITIALIZED", "CUBLAS_STATUS_ALLOC_FAILED")
+                    if any(msg in err_msg for msg in oom_msgs):
+                        # Fallback to CPU
+                        print(f"{err_msg}\nFalling back to CPUProvider`!")
+                        outputs = onnx_model.cpu().run(inputs)
+                    else:
+                        raise
+            return outputs
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
             diagnostic_context = e.export_output.diagnostic_context

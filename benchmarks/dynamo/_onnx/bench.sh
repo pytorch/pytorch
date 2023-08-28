@@ -78,13 +78,20 @@ echo "Benchmark logs will be saved under pytorch/$log_folder"
     --devices "$device" \
     --inference \
     --batch_size 1 \
+    --flag-compilers dynamo-onnx \
+    --flag-compilers torchscript-onnx \
+    --flag-compilers dort \
     --compilers dynamo-onnx \
     --compilers torchscript-onnx \
+    --compilers dort \
     ${quick:+"$quick"} \
     ${filter:+--extra-args "$filter"} \
     --dashboard-image-uploader None \
     --dashboard-archive-path "$log_folder"/cron_logs \
     --dashboard-gh-cli-path None \
-    --output-dir "$log_folder"/benchmark_logs)
+    --output-dir "$log_folder"/benchmark_logs \
+    --update-dashboard \
+    --no-gh-comment \
+    --no-graphs )
 
 popd
