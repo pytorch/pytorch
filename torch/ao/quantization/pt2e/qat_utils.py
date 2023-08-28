@@ -311,8 +311,8 @@ def _has_conv_bias_filter(
     the original graph has bias.
     """
     for n in match.nodes_map.values():
-        if n.target == torch.ops.aten.convolution.default:
-            return n.args[2] is not None
+        if n.target == torch.ops.aten.conv2d.default:
+            return len(n.args) > 2 and n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
 def _no_conv_bias_filter(
@@ -364,7 +364,7 @@ def _get_conv_bn_getitem_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node]:
     for n in nodes:
         if n.op != "call_function":
             continue
-        if n.target == torch.ops.aten.convolution.default:
+        if n.target == torch.ops.aten.conv2d.default:
             assert conv_node is None
             conv_node = n
         elif n.target == torch.ops.aten._native_batch_norm_legit.default:
@@ -395,6 +395,7 @@ def _filter_nodes_map(nodes_map: Dict[Node, Node]) -> Dict[Node, Node]:
         new_nodes_map[pattern_node] = graph_node
     return new_nodes_map
 
+# TODO: this is error prone, use the replace_literals_with_placeholders hack instead
 def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     """
     Copy over literal args in conv, such as stride and padding, from the matched node
@@ -410,10 +411,14 @@ def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     Note: Unlike other tensor args like conv weights and biases, literal args are
     preserved in the original nodes after replacement, so we can access them here.
     """
-    assert original_node.target == torch.ops.aten.convolution.default
-    assert new_node.target == torch.ops.aten.convolution.default
+    assert original_node.target == torch.ops.aten.conv2d.default
+    assert new_node.target == torch.ops.aten.conv2d.default
     # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
-    new_node.args = new_node.args[:3] + original_node.args[3:]
+    new_args = list(new_node.args)
+    if len(new_args) < 3:
+        # bias is optional, when it is not present, it means it is None
+        new_args.append(None)
+    new_node.args = tuple(new_args[:3]) + original_node.args[3:]
 
 def _update_conv_input_qspec_map_after_replacement(original_node: Node, replacement_node: Node):
     """
@@ -423,8 +428,8 @@ def _update_conv_input_qspec_map_after_replacement(original_node: Node, replacem
     so the keys in the `input_qspec_map` will need to be updated to reflect
     the corresponding nodes in the replacement graph.
     """
-    assert original_node.target == torch.ops.aten.convolution.default
-    assert replacement_node.target == torch.ops.aten.convolution.default
+    assert original_node.target == torch.ops.aten.conv2d.default
+    assert replacement_node.target == torch.ops.aten.conv2d.default
     if "quantization_annotation" not in original_node.meta:
         return
     original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
@@ -557,7 +562,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
 
         # Step (3a): Copy over metadata for all three nodes in [conv - bn - getitem]
         for original_node in _filter_nodes_map(r.nodes_map).values():
-            if original_node.target == torch.ops.aten.convolution.default:
+            if original_node.target == torch.ops.aten.conv2d.default:
                 replacement_conv_node.meta = original_node.meta
                 original_to_replacement_node[original_node] = replacement_conv_node
                 # Step (3b): Copy over conv literal args
@@ -691,7 +696,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
         conv_weight = conv_weight_q.args[0]
         assert isinstance(conv_weight, Node)
         assert conv_weight.op == "get_attr"
-        conv_bias = conv_node.args[2]
+        conv_bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         assert conv_bias is None or isinstance(conv_bias, Node)
 
         (weight_q_node, weight_dq_node) = _get_fused_convbn_q_dq_nodes(r.replacements)
@@ -724,7 +729,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
 
         # Copy over literal args for conv
         for original_node in _filter_nodes_map(r.nodes_map).values():
-            if original_node.target == torch.ops.aten.convolution.default:
+            if original_node.target == torch.ops.aten.conv2d.default:
                 _copy_over_literal_conv_args(original_node, conv_node)
 
     m.graph.eliminate_dead_code()

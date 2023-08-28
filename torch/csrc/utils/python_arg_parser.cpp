@@ -43,6 +43,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"MemoryFormat", ParameterType::MEMORY_FORMAT},
     {"QScheme", ParameterType::QSCHEME},
     {"Device", ParameterType::DEVICE},
+    {"DeviceIndex", ParameterType::INT64},
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
@@ -1051,8 +1052,7 @@ std::string FunctionParameter::type_name() const {
 static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return c10::nullopt;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  char* str_end;
+  char* str_end = nullptr;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
   return (*str_end == 0) ? c10::optional<int64_t>(ans) : c10::nullopt;
@@ -1662,8 +1662,8 @@ void PythonArgParser::print_error(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
-  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  size_t num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
+  size_t num_args =
+      (args ? PyTuple_GET_SIZE(args) : 0) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<unsigned> plausible_idxs;
   unsigned i = 0;
   for (auto& signature : signatures_) {
