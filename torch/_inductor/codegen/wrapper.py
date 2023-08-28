@@ -34,14 +34,22 @@ pexpr = PythonPrinter().doprint
 def buffer_reuse_key(node: ir.Buffer):
     size = node.get_size()
     stride = node.get_stride()
-    last_element = sympy_dot([s - 1 for s in size], stride)
-    return (
-        node.get_device(),
-        node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(size)),
-        # Detect gaps in tensor storage caused by strides
-        V.graph.sizevars.size_hint(last_element),
-    )
+    if any([V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in size]):
+        return (
+            node.get_device(),
+            node.get_dtype(),
+            str(size),
+            str(stride),
+        )
+    else:
+        last_element = sympy_dot([s - 1 for s in size], stride)
+        return (
+            node.get_device(),
+            node.get_dtype(),
+            V.graph.sizevars.simplify(sympy_product(size)),
+            # Detect gaps in tensor storage caused by strides
+            V.graph.sizevars.size_hint(last_element),
+        )
 
 
 def is_int(s: str):

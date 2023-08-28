@@ -5801,6 +5801,9 @@ class CollectiveKernel(ExternKernel):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
 
+    def should_register_tensor_work(self):
+        return True
+
     def codegen_collective(self, wrapper, output_name, input_names):
         # factor so the boilerplate can be handled in CollectiveKernel.codegen
         raise NotImplementedError("Must implement")
@@ -5833,9 +5836,10 @@ class CollectiveKernel(ExternKernel):
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
-        wrapper.writeline(
-            f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
-        )
+        if self.should_register_tensor_work():
+            wrapper.writeline(
+                f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
+            )
 
 
 class CollectiveKernelAlloc(ExternKernelAlloc):
@@ -5992,6 +5996,9 @@ class MultiOutputNoSizeAssert(MultiOutput):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
+        for i, s in enumerate(self.get_size()):
+            if str(s).startswith("i"):   # TODO: replace with is_unbacked_symint()
+                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
 
 
 class AllReduceCoalesced(InPlaceCollectiveKernel):
@@ -6214,16 +6221,14 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
         )
 
 
-class AllToAllSingle(CollectiveKernelAlloc):
+class AllToAllSingle(OutOfPlaceCollectiveKernel):
     """
-    NOTE: `all_to_all_single` is implemented differently from other collectives
-    because its output shape is data-dependent on input `output_split_sizes`.
-    Instead of letting Inductor manage allocation of output buffer that has
-    data-dependent dim size which is difficult to do, we resort to using
-    `ExternKernelAlloc` and letting the underlying `fun_col_impl._all_to_all_single`
-    kernel manage the output buffer allocation.
+    NOTE: Difference of AllToAllSingle compared to other OutOfPlaceCollectiveKernel:
+    1. `create_output_buffers` is not called, because we rely on the underlying
+    `fun_col_impl._all_to_all_single` kernel to do the output buffer allocation.
+    2. `fun_col_impl._register_tensor_work` is not emitted, because the underlying
+    `fun_col_impl._all_to_all_single` kernel already calls it.
     """
-
     def __init__(
         self,
         layout,
@@ -6231,9 +6236,15 @@ class AllToAllSingle(CollectiveKernelAlloc):
         constant_args,
         arg_index_to_input_index,
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.inputs = inputs
+        super().__init__(layout, inputs, [], constant_args)
         self.arg_index_to_input_index = arg_index_to_input_index
+
+    def should_register_tensor_work(self):
+        return False
+
+    def codegen_output(self, wrapper, output_name, input_names):
+        input_names = [t.codegen_reference() for t in self.original_inputs]
+        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
 
     @classmethod
     def create(
@@ -6266,14 +6277,30 @@ class AllToAllSingle(CollectiveKernelAlloc):
             else:
                 arg_index_to_input_index[i] = None
 
-        return AllToAllSingle(
-            layout=inputs[0].get_layout(),
+        new_size = x_realized.get_size()
+        output_split_sizes_sum_s = None
+        if output_split_sizes is not None:
+            output_split_sizes_sum_s = V.graph.current_node.meta['val'].size()[0].node.expr
+            new_size[0] = output_split_sizes_sum_s
+
+        layout = FlexibleLayout(
+            device=x_realized.get_device(),
+            dtype=x_realized.get_dtype(),
+            size=new_size,
+        )
+
+        coll = AllToAllSingle(
+            layout=layout,
             inputs=inputs,
             constant_args=[tag, ranks, group_size],
             arg_index_to_input_index=arg_index_to_input_index,
         )
 
-        return cls.create_output_nodes(packed, outputs)[0]
+        return MultiOutputNoSizeAssert(
+            layout,
+            coll,
+            f"",
+        )
 
     def codegen_input(self, wrapper, output_name, input_names):
         wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")

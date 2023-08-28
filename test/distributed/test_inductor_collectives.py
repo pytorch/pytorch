@@ -219,11 +219,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
-        def example(inp, split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
-                output_split_sizes=split_sizes_tensor,
-                input_split_sizes=split_sizes_tensor,
+                output_split_sizes=input_split_sizes_tensor,
+                input_split_sizes=output_split_sizes_tensor,
                 tag=tag,
                 ranks=ranks,
                 group_size=group_size,
@@ -241,16 +241,28 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
-            split_sizes_tensor = torch.tensor(
+            input_split_sizes_tensor = torch.tensor(
                 [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
                 dtype=torch.int64,
                 device="cuda",
             )
-            inputs = (torch.ones(int(row), 5, device="cuda") * (self.rank + 1), split_sizes_tensor)
+            output_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+                device="cuda",
+            )
+            inputs = (
+                torch.ones(int(row), 5, device="cuda") * (self.rank + 1),
+                input_split_sizes_tensor,
+                output_split_sizes_tensor,
+            )
             trs = self.get_world_trs()
 
-            eager_out = example(*inputs, **trs)
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            print(f"code: {code}")
+
+            eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
@@ -283,8 +295,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes_tensor)
             trs = self.get_world_trs()
 
-            eager_out = example(*inputs, **trs)
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            print(f"code: {code}")
+
+            eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
@@ -322,8 +337,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes_tensor)
             trs = self.get_world_trs()
 
-            eager_out = example(*inputs, **trs)
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            print(f"code: {code}")
+
+            eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
@@ -349,8 +367,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),)
             trs = self.get_world_trs()
 
-            eager_out = example(*inputs, **trs)
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            print(f"code: {code}")
+
+            eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
