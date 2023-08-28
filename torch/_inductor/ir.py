@@ -5842,28 +5842,6 @@ class CollectiveKernel(ExternKernel):
             )
 
 
-class CollectiveKernelAlloc(ExternKernelAlloc):
-    def __init__(self, layout, inputs, constant_args):
-        super().__init__(layout, inputs, constant_args)
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        raise NotImplementedError("Must implement")
-
-    def codegen_input(self, wrapper, output_name, input_names):
-        raise NotImplementedError("Must implement")
-
-    def codegen(self, wrapper):
-        _wrapper_add_import_for_dist(wrapper)
-        # extract references to our args in string form for codegen output
-        input_names = [t.codegen_reference() for t in self.inputs]
-        output_name = self.get_name()
-
-        self.codegen_input(wrapper, output_name, input_names)
-        # NOTE: the underlying external kernel for this collective
-        # is responsible for calling `_register_tensor_work`.
-        self.codegen_collective(wrapper, output_name, input_names)
-
-
 class InPlaceCollectiveKernel(CollectiveKernel):
     """
     InPlaceCollectiveKernel are those with in-out arguments such as all_reduce.
