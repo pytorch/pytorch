@@ -372,6 +372,7 @@ def merge_logs(
         "gh_title.txt",
         "gh_build_summary.txt",
         "gh_executive_summary.txt",
+        "gh_metric_regression.txt",
         f"gh_{mode}.txt",
     ]
     logs_to_merge.extend(f"gh_{compiler}_error_summary.log" for compiler in compilers)
