@@ -373,7 +373,7 @@ class SizeVarAllocator:
 
     def size_hint(self, expr: Expr) -> int:
         out = self.symbolic_hint(expr)
-        if str(out).startswith("i"):  # TODO(yf225): replace with is_unbacked_symint()
+        if self.shape_env.is_unbacked_symint(out):
             return 64
         try:
             return int(out)

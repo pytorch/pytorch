@@ -5793,7 +5793,10 @@ class CollectiveKernel(ExternKernel):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
 
-    def should_register_tensor_work(self):
+    def should_emit_register_tensor_work(self):
+        return True
+
+    def should_emit_find_or_create_pg(self):
         return True
 
     def codegen_collective(self, wrapper, output_name, input_names):
@@ -5825,14 +5828,15 @@ class CollectiveKernel(ExternKernel):
         output_name = self.get_name()
         tag, ranks, group_size = self.constant_args
 
-        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
-        wrapper.writeline(
-            f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-        )
+        if self.should_emit_find_or_create_pg():
+            # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+            wrapper.writeline(
+                f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+            )
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
-        if self.should_register_tensor_work():
+        if self.should_emit_register_tensor_work():
             wrapper.writeline(
                 f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
             )
@@ -5971,7 +5975,7 @@ class MultiOutputNoSizeAssert(MultiOutput):
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
         for i, s in enumerate(self.get_size()):
-            if str(s).startswith("i"):   # TODO: replace with is_unbacked_symint()
+            if V.graph.sizevars.shape_env.is_unbacked_symint(s):
                 wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
 
 
@@ -6198,9 +6202,12 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
 class AllToAllSingle(OutOfPlaceCollectiveKernel):
     """
     NOTE: Difference of AllToAllSingle compared to other OutOfPlaceCollectiveKernel:
+
     1. `create_output_buffers` is not called, because we rely on the underlying
     `fun_col_impl._all_to_all_single` kernel to do the output buffer allocation.
     2. `fun_col_impl._register_tensor_work` is not emitted, because the underlying
+    `fun_col_impl._all_to_all_single` kernel already calls it.
+    3. `c10d._find_or_create_pg_by_ranks_and_tag` is not emitted, because the underlying
     `fun_col_impl._all_to_all_single` kernel already calls it.
     """
     def __init__(
@@ -6213,7 +6220,10 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         super().__init__(layout, inputs, [], constant_args)
         self.arg_index_to_input_index = arg_index_to_input_index
 
-    def should_register_tensor_work(self):
+    def should_emit_register_tensor_work(self):
+        return False
+
+    def should_emit_find_or_create_pg(self):
         return False
 
     def codegen_output(self, wrapper, output_name, input_names):
