@@ -1,5 +1,5 @@
 import contextlib
-from typing import Optional
+from typing import Optional, Union
 
 import warnings
 import torch
@@ -56,7 +56,12 @@ class TorchDispatchMode:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _pop_mode(self.__dict__.get("_dispatch_key", None))
+        mb_dk_or_mode_key = self.__dict__.get("_dispatch_key", None)
+        if mb_dk_or_mode_key is None:
+            # Today, mode keys are not used at all in the per-dispatch-key-mode logic (for pre-dispatch)
+            # We should probably revisit this.
+            mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
+        _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -66,7 +71,10 @@ class TorchDispatchMode:
 
 def _get_current_dispatch_mode():
     stack_len = _len_torch_dispatch_stack()
-    return _get_dispatch_stack_at(stack_len - 1) if stack_len > 0 else None
+    # Return a user mode on the stack if there are any
+    if stack_len > 0:
+        return _get_dispatch_stack_at(stack_len - 1)
+    return None
 
 
 def _get_current_dispatch_mode_stack():
@@ -87,12 +95,14 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         _push_on_torch_dispatch_stack(mode)
 
 
-def _pop_mode(k: Optional[DispatchKey] = None):
-    if k is not None:
-        from torch._ops import pop_mode_for_key
-        return pop_mode_for_key(k)
-    else:
-        return _pop_torch_dispatch_stack()
+def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+    if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
+        return _pop_torch_dispatch_stack(k)
+    from torch._ops import pop_mode_for_key
+    # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
+    # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
+    # that we push onto these per-dispatch-key-mode-stacks.
+    return pop_mode_for_key(k)
 
 
 @contextlib.contextmanager
@@ -108,6 +118,8 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
 def _disable_current_modes():
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
+
+    # Manually disable proxy and fake modes, if any are active
     try:
         yield old_modes
     finally:
@@ -120,7 +132,6 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
-
 
 def is_traceable_wrapper_subclass(t):
     """
