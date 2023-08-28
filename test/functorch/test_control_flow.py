@@ -3,6 +3,7 @@ import functools
 import unittest
 
 import torch
+import torch._dynamo.test_case
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
