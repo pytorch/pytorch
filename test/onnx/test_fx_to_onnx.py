@@ -458,6 +458,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(export_output.model_proto)
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
+    @pytorch_test_common.xfail(
+        "This is addressed in main branch of transformers."
+        "https://github.com/huggingface/transformers/pull/24941"
+    )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
         config = transformers.GPTNeoXConfig(
             vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
