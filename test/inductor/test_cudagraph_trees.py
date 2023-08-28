@@ -9,22 +9,24 @@ import warnings
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -135,7 +137,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                (self.device_idx if not device_index else device_index)
+                self.device_idx if not device_index else device_index
             ).tree_manager
 
         def get_roots(self):
@@ -202,6 +204,42 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("fallback_random", True)
         def test_rng_non_trees(self):
             self.check_rng()
+
+        def test_mutation(self):
+            @torch.compile()
+            def foo(x):
+                x.add_(2)
+                return x
+
+            def inp():
+                return torch.ones([10], device="cuda")
+
+            foo(inp())
+
+            # mutation on inp doesnt hit cudagraphs
+            self.assertIsNone(self.get_manager())
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.buf = torch.ones([10], device="cuda")
+
+                def forward(self, x):
+                    self.buf.add_(x)
+                    return self.buf + x
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            mod = Mod()
+            mod2 = Mod()
+
+            for _ in range(3):
+                self.assertEqual(foo(mod, inp()), mod2(inp()))
+                self.assertEqual(mod.buf, mod2.buf)
+
+            self.assertIsNotNone(self.get_manager())
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
@@ -345,6 +383,53 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # we should not have cudagraph'd the y backward
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 3)
+
+        def _test_unaligned_static_input_impl(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def get_aligned_inputs():
+                return [torch.rand([5, 5], device="cuda") for _ in range(2)]
+
+            mod = make_fx(fn)(*get_aligned_inputs())
+
+            mode = torch._subclasses.FakeTensorMode()
+
+            with mode:
+                inps = [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
+
+            compiled_f = compile_fx_inner(mod, inps, num_fixed=1, cudagraphs=True)
+
+            def get_unaligned_inputs():
+                return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
+
+            class CloneCounterMode(TorchDispatchMode):
+                def __init__(self):
+                    self.count = 0
+
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    kwargs = {} if kwargs is None else kwargs
+                    self.count += func is torch.ops.aten.clone.default
+                    return func(*args, **kwargs)
+
+            for _ in range(3):
+                with CloneCounterMode() as m:
+                    compiled_f(get_unaligned_inputs())
+                    self.assertEqual(m.count, 2)
+
+                    compiled_f(get_aligned_inputs())
+                    self.assertEqual(m.count, 2)
+
+        def test_unaligned_static_input_trees(self):
+            self._test_unaligned_static_input_impl()
+
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        def test_unaligned_static_input_non_trees(self):
+            self._test_unaligned_static_input_impl()
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_unaligned_static_input_no_cudagraphs(self):
+            self._test_unaligned_static_input_impl()
 
         def test_accumulate_multiple_recordings(self):
             def foo(x):
@@ -516,6 +601,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(first_node.unaliased_in_all_paths[0])
             self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
+        @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -755,6 +841,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
+        @skipIfRocm
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
@@ -778,9 +865,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    FileCheck().check("at::cuda::getNewWorkspace").check(
-                        "at::cuda::blas::gemm<float>"
-                    ).run(str(e))
+                    self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
+                    self.assertTrue(
+                        "getCurrentCUDABlasHandle" in str(e)
+                        or "getNewWorkspace" in str(e)
+                    )
 
                 self.assertTrue(thrown)
 
@@ -1037,6 +1126,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
                 out2 + out2
 
+        @skipIfRocm
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):
             with torch.backends.cudnn.flags(
@@ -1067,6 +1157,65 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             } - streams_init
             self.assertEqual(len(streams), 1)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        @torch._dynamo.config.patch("assume_static_by_default", False)
+        def test_dynamic_backward(self):
+            def foo(x):
+                x = torch.cat([x, x])
+                return torch.addmm(x, x, x).relu(), x.size(0)
+
+            opt_foo = torch.compile(mode="reduce-overhead")(foo)
+
+            def run_test(foo, inp):
+                r, s = foo(inp)
+                r.sum().backward()
+                g = inp.grad.clone()
+                inp.grad = None
+                r = r.clone()
+                return r, s, g
+
+            def run_big_test(inp):
+                r0, s0, g0 = run_test(foo, inp)
+                r1, s1, g1 = run_test(opt_foo, inp)
+                r2, s2, g2 = run_test(opt_foo, inp)
+                self.assertEqual(r0, r1)
+                self.assertEqual(r0, r2)
+                self.assertEqual(s0, s1)
+                self.assertEqual(s0, s2)
+                self.assertEqual(g0, g1)
+                self.assertEqual(g0, g2)
+
+            inp = torch.randn(2, 4, device="cuda", requires_grad=True)
+            run_big_test(inp)
+
+            inp = torch.randn(3, 6, device="cuda", requires_grad=True)
+            run_big_test(inp)
+
+        def test_dynamic_warmup(self):
+            COUNTER = 0
+
+            def f(inps):
+                i, x = inps
+                inps.clear()
+                nonlocal COUNTER
+                COUNTER += 1
+                return x * 2
+
+            x = torch.randn(2, device="cuda")
+            inp_list = [2, x]
+            foo_cg = self.cudagraphify_impl(f, inp_list, ())
+            foo_cg(inp_list)  # warmup
+            foo_cg([2, x])  # record
+            foo_cg([2, x])  # replay
+            self.assertEqual(COUNTER, 2)
+
+            # Switching the size will require a warmup again
+            x = torch.randn(3, device="cuda")
+            inp_list = [3, x]
+            foo_cg(inp_list)  # warmup
+            foo_cg([3, x])  # record
+            foo_cg([3, x])  # replay
+            self.assertEqual(COUNTER, 4)
 
         def test_forward_generation(self):
             def foo(x):
@@ -1136,5 +1285,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

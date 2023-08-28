@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -65,6 +64,7 @@ def check_codegen(
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.metrics.reset()
 
     called = False
 
@@ -124,14 +124,13 @@ test_failures = {
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
-    "test_layer_norm_dynamic_shapes": TestFailure(("cuda")),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
-    "test_to_device_constant_dynamic_shapes": TestFailure(("cpu")),
+    "test_to_device_constant_dynamic_shapes": TestFailure("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
@@ -161,6 +160,9 @@ test_failures = {
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_bucketize_dynamic_shapes": TestFailure("cpu"),
+    "test_bucketize_default_kwargs_dynamic_shapes": TestFailure("cpu"),
+    "test_bucketize_int_dynamic_shapes": TestFailure("cpu"),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -184,14 +186,17 @@ test_failures = {
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_to_device_dynamic_shapes": TestFailure(("cpu",)),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
+    "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
+    "test_adaptive_avg_pool_with_output_size_0_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
@@ -200,7 +205,6 @@ test_failures = {
     "test_cat_of_loops_and_extern_kernel_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -215,7 +219,6 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_gather2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_gather_scatter_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
@@ -236,7 +239,6 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_min_max_reduction_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_move_arange_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_multi_gpu_recompile_on_index_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -248,23 +250,12 @@ test_failures = {
     "test_rand_like_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_scheduler_vertical_fusion1_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     "test_slice_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_softmax_one_kernel_loop_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
-    "test_softmax_one_kernel_persist_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     "test_strided_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_transpose_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_transposed_propagates_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
     "test_unspec_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_vertical_fusion1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_zero_dim_reductions_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -309,7 +300,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
@@ -335,5 +326,5 @@ if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

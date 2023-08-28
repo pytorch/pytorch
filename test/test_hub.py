@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase
 
 def sum_of_state_dict(state_dict):
     s = 0
-    for _, v in state_dict.items():
+    for v in state_dict.values():
         s += v.sum()
     return s
 
@@ -96,6 +96,12 @@ class TestHub(TestCase):
             hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, f, progress=False)
             loaded_state = torch.load(f)
             self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+            # Check that the downloaded file has default file permissions
+            f_ref = os.path.join(tmpdir, 'reference')
+            open(f_ref, 'w').close()
+            expected_permissions = oct(os.stat(f_ref).st_mode & 0o777)
+            actual_permissions = oct(os.stat(f).st_mode & 0o777)
+            assert actual_permissions == expected_permissions
 
     @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):

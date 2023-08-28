@@ -1,8 +1,15 @@
+Thank you for your interest in contributing to PyTorch!
+If you're a new contributor, please first take a read through our
+[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+that walks through the process of contributing a change to PyTorch.
+
+The rest of this document (CONTRIBUTING.md) covers some of the more technical
+aspects of contributing to PyTorch.
+
 # Table of Contents
 
 <!-- toc -->
 
-- [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
@@ -54,27 +61,6 @@
 - [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
-
-## Contributing to PyTorch
-
-Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important
-that you share your intention to contribute with the team, based on the type of contribution:
-
-1. You want to propose a new feature and implement it.
-    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues),
-    and we shall discuss the design and implementation. Once we agree that the plan looks good,
-    go ahead and implement it.
-2. You want to implement a feature or bug-fix for an outstanding issue.
-    - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
-    - Pick an issue and comment that you'd like to work on the feature or bug-fix.
-    - If you need more context on a particular issue, please ask and we shall provide.
-
-Once you implement and test your feature or bug-fix, please submit a Pull Request to
-https://github.com/pytorch/pytorch.
-
-This document covers some of the more technical aspects of contributing
-to PyTorch.  For more non-technical guidance about how to contribute to
-PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
@@ -405,7 +391,7 @@ If not, leave the Reviewers section empty. Our triage squad will review your PR,
 
 Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
 
-If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 

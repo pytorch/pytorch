@@ -1,6 +1,5 @@
 #include <ATen/autocast_mode.h>
 
-#include <iostream>
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
@@ -33,12 +32,28 @@ void set_xpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
 }
 
+bool is_ipu_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
+}
+
+void set_ipu_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
+}
+
 bool is_hpu_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
 }
 
 void set_hpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
+}
+
+bool is_xla_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
+}
+
+void set_xla_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
 }
 
 bool is_privateuseone_enabled() {
@@ -84,8 +99,14 @@ thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 // autocast_xpu_dtype is the lower_precision_fp used by AutocastXPU.
 thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
 
+// autocast_ipu_dtype is the lower_precision_fp used by AutocastIPU.
+thread_local at::ScalarType autocast_ipu_dtype = at::kHalf;
+
 // autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
 thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
+
+// autocast_xla_dtype is the lower_precision_fp used by AutocastXLA.
+thread_local at::ScalarType autocast_xla_dtype = at::kBFloat16;
 
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
@@ -122,8 +143,16 @@ at::ScalarType get_autocast_xpu_dtype() {
   return autocast_xpu_dtype;
 }
 
+at::ScalarType get_autocast_ipu_dtype() {
+  return autocast_ipu_dtype;
+}
+
 at::ScalarType get_autocast_hpu_dtype() {
   return autocast_hpu_dtype;
+}
+
+at::ScalarType get_autocast_xla_dtype() {
+  return autocast_xla_dtype;
 }
 
 at::ScalarType get_autocast_privateuseone_dtype() {
@@ -145,8 +174,16 @@ void set_autocast_xpu_dtype(at::ScalarType dtype) {
   autocast_xpu_dtype = dtype;
 }
 
+void set_autocast_ipu_dtype(at::ScalarType dtype) {
+  autocast_ipu_dtype = dtype;
+}
+
 void set_autocast_hpu_dtype(at::ScalarType dtype) {
   autocast_hpu_dtype = dtype;
+}
+
+void set_autocast_xla_dtype(at::ScalarType dtype) {
+  autocast_xla_dtype = dtype;
 }
 
 void set_autocast_privateuseone_dtype(at::ScalarType dtype) {

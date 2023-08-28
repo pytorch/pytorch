@@ -48,7 +48,7 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-static vector<TensorShape> TensorInferenceForBatchOneHot(
+vector<TensorShape> TensorInferenceForBatchOneHot(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
   std::vector<int64_t> output_dims(2);
@@ -58,7 +58,7 @@ static vector<TensorShape> TensorInferenceForBatchOneHot(
       CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
 }
 
-static vector<TensorShape> TensorInferenceForBucketBatchOneHot(
+vector<TensorShape> TensorInferenceForBucketBatchOneHot(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
   std::vector<int64_t> output_dims(2);
@@ -68,7 +68,7 @@ static vector<TensorShape> TensorInferenceForBucketBatchOneHot(
       CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
 }
 
-static OpSchema::Cost CostInferenceForBatchOneHot(
+OpSchema::Cost CostInferenceForBatchOneHot(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_EQ(in.size(), 3, "BatchOneHot requires three inputs");

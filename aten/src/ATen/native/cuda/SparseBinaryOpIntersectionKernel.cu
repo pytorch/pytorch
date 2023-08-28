@@ -194,10 +194,11 @@ void sparse_mask_projection_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
+    const OptTensor& x_hash_opt,
+    bool accumulate_matches) {
   using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, /*accumulate_matches=*/false
+      result, x, y, x_hash_opt, c10::nullopt, accumulate_matches
   );
 }
 

@@ -171,10 +171,10 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::
-    vector<c10::intrusive_ptr<LinearPackedContext>> static pack_lstm_linear_op_contexts(
-        const std::vector<Tensor>& params_cpu,
-        int64_t num_layers) {
+std::vector<c10::intrusive_ptr<LinearPackedContext>>
+pack_lstm_linear_op_contexts(
+    const std::vector<Tensor>& params_cpu,
+    int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
       "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'."

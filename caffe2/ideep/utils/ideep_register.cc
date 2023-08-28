@@ -41,11 +41,6 @@ namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
 
-C10_DECLARE_REGISTRY(
-    IDEEPOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
 C10_DEFINE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,

@@ -315,7 +315,7 @@ class PythonOutArgument(PythonArgument):
                 outputs=outputs,
             )
         elif size > 1:
-            if any((not a.type.is_tensor_like() for a in outputs)):
+            if any(not a.type.is_tensor_like() for a in outputs):
                 raise RuntimeError(f"Unsupported output type: {outputs}")
             return PythonOutArgument(
                 name="out",
@@ -661,6 +661,7 @@ def argument_type_str(
             BaseTy.Storage,
             BaseTy.Layout,
             BaseTy.Device,
+            BaseTy.DeviceIndex,
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
@@ -882,10 +883,10 @@ def signature_from_schema(
 
 
 def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
-    if len(returns) <= 1 or all((r.name is None for r in returns)):
+    if len(returns) <= 1 or all(r.name is None for r in returns):
         return []
     else:
-        if any((r.name is None for r in returns)):
+        if any(r.name is None for r in returns):
             # When building on Windows, `PyStructSequence_UnnamedField` could not be
             # resolved by the linker for some reason, which cause error in building:
             #
@@ -907,7 +908,7 @@ def argument_type_str_pyi(t: Type) -> str:
         add_optional = True
 
     if isinstance(t, BaseType):
-        if t.name == BaseTy.int:
+        if t.name in [BaseTy.int, BaseTy.DeviceIndex]:
             ret = "_int"
         if t.name == BaseTy.SymInt:
             ret = "Union[_int, SymInt]"
@@ -1163,7 +1164,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(
-        (Return(r.name, r.type, None) for r in f.func.returns)
+        Return(r.name, r.type, None) for r in f.func.returns
     )
     return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
@@ -1195,7 +1196,7 @@ def cpp_dispatch_exprs(
     exprs: Tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
-        exprs = tuple((a.name for a in cpp_args))
+        exprs = tuple(a.name for a in cpp_args)
     else:
         # For deprecated python signature we may need fill in some constants.
         exprs = tuple(
@@ -1255,6 +1256,8 @@ def arg_parser_unpack_method(
             return "scalartypeWithDefault" if has_default_init else "scalartype"
         elif t.name == BaseTy.Device:
             return "deviceWithDefault" if has_default_init else "device"
+        elif t.name == BaseTy.DeviceIndex:
+            return "toInt64"
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
@@ -1426,7 +1429,7 @@ def dispatch_lambda_exprs(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
         if not all(
-            (a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys())
+            a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys()
         ):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
@@ -1454,7 +1457,7 @@ torch::utils::maybe_initialize_cuda(options);
                 raise RuntimeError(
                     f"{f.func}: dtype in tensor_options_args without output arg"
                 )
-            if not all((a in tensor_options_args_names for a in ("layout", "device"))):
+            if not all(a in tensor_options_args_names for a in ("layout", "device")):
                 raise RuntimeError(
                     f"{f.func}: incomplete tensor options for output check"
                 )
@@ -1473,6 +1476,6 @@ check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dt
             )
 
     return DispatchLambdaArgumentExprs(
-        exprs=tuple((lambda_args_exprs[a.name] for a in lambda_args)),
+        exprs=tuple(lambda_args_exprs[a.name] for a in lambda_args),
         inits=inits,
     )

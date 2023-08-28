@@ -330,7 +330,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
   return shape;
 }
 
-static std::vector<TensorShape> InferOutput(
+std::vector<TensorShape> InferOutput(
     const OperatorDef& op,
     const std::vector<TensorShape>& input_shapes) {
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());

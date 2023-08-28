@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
@@ -92,7 +93,7 @@ class SelectiveBuilder:
             di_list = data["debug_info"]
             assert isinstance(di_list, list)
 
-            debug_info = tuple((str(x) for x in di_list))
+            debug_info = tuple(str(x) for x in di_list)
 
         operators = {}
         operators_dict = data.get("operators", {})
@@ -140,7 +141,7 @@ class SelectiveBuilder:
 
     @staticmethod
     def from_yaml_path(config_path: str) -> "SelectiveBuilder":
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             contents = yaml.safe_load(f)
             return SelectiveBuilder.from_yaml_dict(contents)
 
@@ -234,9 +235,10 @@ class SelectiveBuilder:
         """
         Return a list of kernel keys that cover the used ops
         """
+        # If no kernel metadata, either it's implied by include_all_operators=True or the op is not used.
         if op_name not in self.et_kernel_metadata:
-            # Operator is unused at all
-            return []
+            return kernel_key if self.include_all_operators else []
+        # Otherwise, only return the specific kernel keys.
 
         result_set = set()
 
@@ -276,6 +278,8 @@ class SelectiveBuilder:
             k: sorted(v) for (k, v) in self.kernel_metadata.items()
         }
 
+        ret["et_kernel_metadata"] = self.et_kernel_metadata
+
         ret["custom_classes"] = sorted(self.custom_classes)
 
         ret["build_features"] = sorted(self.build_features)
@@ -298,6 +302,18 @@ def merge_kernel_metadata(
     return kernel_metadata
 
 
+def merge_et_kernel_metadata(
+    lhs: Dict[str, List[str]],
+    rhs: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
+    merge_et_kernel_metadata: Dict[str, Set[str]] = defaultdict(set)
+    for op in list(lhs.keys()) + list(rhs.keys()):
+        merge_et_kernel_metadata[op].update(lhs.get(op, []))
+        merge_et_kernel_metadata[op].update(rhs.get(op, []))
+
+    return {op: sorted(val) for op, val in merge_et_kernel_metadata.items()}
+
+
 def combine_selective_builders(
     lhs: SelectiveBuilder, rhs: SelectiveBuilder
 ) -> SelectiveBuilder:
@@ -305,8 +321,9 @@ def combine_selective_builders(
     debug_info = merge_debug_info(lhs._debug_info, rhs._debug_info)
     operators = merge_operator_dicts(lhs.operators, rhs.operators)
     kernel_metadata = merge_kernel_metadata(lhs.kernel_metadata, rhs.kernel_metadata)
-    # TODO(T149265497): Need to parse the et kernel metadata
-    et_kernel_metadata: Dict[str, List[str]] = {}
+    et_kernel_metadata = merge_et_kernel_metadata(
+        lhs.et_kernel_metadata, rhs.et_kernel_metadata
+    )
     include_all_non_op_selectives = (
         lhs.include_all_non_op_selectives or rhs.include_all_non_op_selectives
     )

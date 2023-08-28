@@ -117,7 +117,6 @@ class CheckpointWrapper(ActivationWrapper):
         mod: torch.nn.Module,
         checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
         checkpoint_fn=None,
-        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     ):
         super().__init__(mod)
@@ -127,14 +126,12 @@ class CheckpointWrapper(ActivationWrapper):
             self.checkpoint_fn = partial(
                 torch_utils_checkpoint,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
-                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
         else:
             # Construct user-specified checkpoint function.
             self.checkpoint_fn = partial(
                 checkpoint_fn,
-                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
 
@@ -194,7 +191,6 @@ def checkpoint_wrapper(
     module: torch.nn.Module,
     checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
     checkpoint_fn=None,
-    *checkpoint_fn_args,
     **checkpoint_fn_kwargs,
 ) -> torch.nn.Module:
     """
@@ -219,7 +215,6 @@ def checkpoint_wrapper(
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
             implementation and the `checkpoint_impl` argument will be ignored.
-        *checkpoint_fn_args: (Sequence[Any]): Arguments to pass into `checkpoint_fn`.
         **checkpoint_fn_kwargs: (Dict[str, Any]): Keyword arguments to pass into `checkpoint_fn`.
 
     Returns:
@@ -238,7 +233,6 @@ def checkpoint_wrapper(
         module,
         checkpoint_impl,
         checkpoint_fn,
-        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     )
 
@@ -283,7 +277,8 @@ def apply_activation_checkpointing(
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
-    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
+    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _Policy
+    from torch.distributed.fsdp._wrap_utils import _construct_wrap_fn, _post_order_apply
 
     policy = (
         auto_wrap_policy
@@ -291,11 +286,16 @@ def apply_activation_checkpointing(
         else partial(lambda_auto_wrap_policy, lambda_fn=check_fn)
     )
     if not callable(policy):
-        if not hasattr(policy, "policy") or not callable(policy.policy):  # type: ignore[attr-defined]
-            raise RuntimeError(
-                f"Expected {policy} to be callable or have a callable ``policy`` attribute."
+        if not isinstance(policy, _Policy):
+            raise ValueError(
+                f"Expected {policy} to be callable or be a pre-defined wrap policy"
             )
-        policy = policy.policy  # type: ignore[attr-defined]
+        target_module_to_kwargs = policy._run_policy(
+            model, ignored_modules=set(), root_kwargs={}
+        )
+        wrap_fn = _construct_wrap_fn(model, target_module_to_kwargs, checkpoint_wrapper_fn)
+        _post_order_apply(model, wrap_fn)
+        return
 
     _recursive_wrap(
         module=model,

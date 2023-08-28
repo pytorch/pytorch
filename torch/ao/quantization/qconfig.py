@@ -22,6 +22,7 @@ from torch.ao.quantization.fake_quantize import (
 
 from .observer import (
     _PartialWrapper,
+    MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -56,6 +57,7 @@ __all__ = [
     "per_channel_dynamic_qconfig",
     "float_qparams_weight_only_qconfig",
     "float_qparams_weight_only_qconfig_4bit",
+    "default_quint8_weight_qconfig",
     "default_qat_qconfig",
     "default_dynamic_qat_qconfig",
     "default_weight_only_qconfig",
@@ -74,6 +76,7 @@ __all__ = [
     "get_default_qat_qconfig_dict",
     "QConfigAny",
     "qconfig_equals",
+
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -100,7 +103,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfig, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
@@ -125,7 +128,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
-        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 default_qconfig = QConfig(activation=default_observer,
@@ -233,7 +236,7 @@ def get_default_qconfig(backend='x86', version=0):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            " not supported. backend must be one of {}".format(supported_backends)
+            f" not supported. backend must be one of {supported_backends}"
         )
 
     if version == 0:
@@ -305,6 +308,8 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
+default_quint8_weight_qconfig = QConfig(activation=HistogramObserver, weight=MinMaxObserver)
+
 def get_default_qat_qconfig(backend='x86', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
@@ -321,7 +326,7 @@ def get_default_qat_qconfig(backend='x86', version=1):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            " not supported. backend must be one of {}".format(supported_backends)
+            f" not supported. backend must be one of {supported_backends}"
         )
 
     # Histogram observer is too slow for quantization aware training

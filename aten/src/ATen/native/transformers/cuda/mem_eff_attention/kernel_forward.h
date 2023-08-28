@@ -54,6 +54,7 @@
 
 using namespace gemm_kernel_utils;
 
+namespace PyTorchMemEffAttention {
 namespace {
 template <typename scalar_t, typename Arch>
 constexpr int getWarpsPerSmFw() {
@@ -156,6 +157,7 @@ struct AttentionKernel {
     int32_t head_dim_value;
     int32_t num_queries;
     int32_t num_keys;
+    int32_t num_keys_absolute;
 
     uint8_t custom_mask_type = NoCustomMask;
 
@@ -171,12 +173,12 @@ struct AttentionKernel {
     int32_t q_strideH;
     int32_t k_strideH;
     int32_t v_strideH;
-    int32_t bias_strideH = 0;
+    int64_t bias_strideH = 0;
 
     int64_t q_strideB;
     int64_t k_strideB;
     int64_t v_strideB;
-    int32_t bias_strideB = 0;
+    int64_t bias_strideB = 0;
 
     int32_t num_batches;
     int32_t num_heads;
@@ -186,7 +188,8 @@ struct AttentionKernel {
     unsigned long long dropout_batch_head_rng_offset;
     float dropout_prob;
     at::PhiloxCudaState rng_engine_inputs;
-
+    int64_t* extragraph_offset;
+    int64_t* seed;
 
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
@@ -274,6 +277,9 @@ struct AttentionKernel {
       if (custom_mask_type == CausalFromBottomRight) {
         causal_diagonal_offset += num_keys - num_queries;
       }
+      // We use num_keys_absolute to index into the rng_state
+      // We need this index to match between forward and backwards
+      num_keys_absolute = num_keys;
       if (custom_mask_type == CausalFromTopLeft ||
           custom_mask_type == CausalFromBottomRight) {
         // the bottom row of the current block is query_start + kQueriesPerBlock
@@ -656,7 +662,16 @@ struct AttentionKernel {
     curandStatePhilox4_32_10_t curand_state_init;
     if (kSupportsDropout && p.use_dropout) {
       const auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
-
+      if (p.rng_engine_inputs.captured_) {
+        // See Note [Seed and Offset Device]
+        // When we are in cuda graph capture mode the seed and offset are stored
+        // on device We pass in int64_t* seed, and int64_t* offset to act as
+        // scratch space for storing the rng state during the forward pass and
+        // saving for backwards.
+        auto [seed, offset] = seeds;
+        *p.seed = seed;
+        *p.extragraph_offset = offset;
+      }
       // each element of the attention matrix P with shape
       // (batch_sz, n_heads, n_queries, n_keys) is associated with a single
       // offset in RNG sequence. we initialize the RNG state with offset that
@@ -862,7 +877,6 @@ struct AttentionKernel {
 
       __syncthreads();
 
-
       // apply dropout (if applicable) after we've written Pij to smem.
       // dropout is applied by multiplying each element of Pij by:
       // - 0 with probability dropout_p
@@ -899,7 +913,7 @@ struct AttentionKernel {
           curandStatePhilox4_32_10_t curand_state = curand_state_init;
           skipahead(
               static_cast<unsigned long long>(
-                  (query_start + thread_i) * p.num_keys +
+                  (query_start + thread_i) * p.num_keys_absolute +
                   (iter_key_start + thread_start_j)),
               &curand_state);
           const float dropout_scale = 1.0 / (1.0 - p.dropout_prob);
@@ -1269,3 +1283,5 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 template <typename AK>
 __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
     attention_kernel_batched(typename AK::Params params);
+
+} // namespace PyTorchMemEffAttention

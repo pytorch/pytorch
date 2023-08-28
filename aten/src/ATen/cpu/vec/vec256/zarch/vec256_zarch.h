@@ -1154,28 +1154,70 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_i0e);
   }
 
+  template <
+      typename U = T,
+      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+  Vectorized<T> minimum(const Vectorized<T>& other) const {
+    return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+  }
+
   /* Propagates NaN if either input is a NaN. */
+  template <
+      typename U = T,
+      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
   Vectorized<T> minimum(const Vectorized<T>& other) const {
     Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
     tmp = blendv(tmp, *this, isnan());
     return blendv(tmp, other, other.isnan());
   }
 
+  template <
+      typename U = T,
+      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+  Vectorized<T> maximum(const Vectorized<T>& other) const {
+    return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+  }
+
   /* Propagates NaN if either input is a NaN. */
+  template <
+      typename U = T,
+      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
   Vectorized<T> maximum(const Vectorized<T>& other) const {
     Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
     tmp = blendv(tmp, *this, isnan());
     return blendv(tmp, other, other.isnan());
   }
 
-  /* Does not propagate NaN */
+  template <
+      typename U = T,
+      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
   Vectorized<T> clamp_min(const Vectorized<T>& min) const {
-    return Vectorized<T> {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+    return {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
   }
 
-  /* Does not propagate NaN */
+  /* Keeps NaN if actual value is NaN */
+  template <
+      typename U = T,
+      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    Vectorized<T> tmp = {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+    return blendv(tmp, *this, isnan());
+  }
+
+  template <
+      typename U = T,
+      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
   Vectorized<T> clamp_max(const Vectorized<T>& max) const {
-    return Vectorized<T> {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
+    return {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
+  }
+
+  /* Keeps NaN if actual value is NaN */
+  template <
+      typename U = T,
+      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    Vectorized<T> tmp = {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
+    return blendv(tmp, *this, isnan());
   }
 
   template <
@@ -2370,11 +2412,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   vinner_data abs_() const {
     auto ret = abs_2_();
-    return Vectorized<T>{ret}.sqrt().data();
+    return Vectorized<T>{ret}.real().sqrt().data();
   }
 
   Vectorized<T> abs() const {
-    return Vectorized<T>{abs_()}.real();
+    return Vectorized<T>{abs_()};
   }
 
   Vectorized<T> exp() const {
