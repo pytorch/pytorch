@@ -5,7 +5,6 @@ from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from functorch.experimental import control_flow
 from functorch.experimental import _map
 from functorch.experimental._map import _unstack_pytree
 from torch import fx
@@ -191,7 +190,7 @@ class _ExportPassBase(PassBase):
                     kwargs,
                     meta,
                 )
-            elif target == control_flow.cond:
+            elif target == torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == _map.map_impl:
@@ -340,8 +339,8 @@ class _ExportPassBase(PassBase):
         assert false_branch is not None
         return self._fx(
             "call_function",
-            control_flow.cond,
-            (pred, true_branch.graph_module, false_branch.graph_module, inputs),
+            torch.ops.higher_order.cond,
+            (pred, true_branch.graph_module, false_branch.graph_module, list(inputs)),
             {},
             meta,
         )

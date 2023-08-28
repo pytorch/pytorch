@@ -1037,7 +1037,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
-        ref = mod_for_eager(torch.ones(6, 4))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_eager(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
@@ -1116,11 +1121,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 return control_flow.cond(y, true_fn, false_fn, [x])
 
         mod_for_eager = Foo()
-        mod_for_eager(torch.tensor(True), torch.tensor(5))
-
         mod_for_compile = torch.compile(
             Foo(), backend=cnt, dynamic=True, fullgraph=False
         )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_eager(torch.tensor(True), torch.tensor(5))
+
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             r"Cond doesn't work unless it is captured completely with torch.compile",
