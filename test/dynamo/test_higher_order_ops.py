@@ -970,6 +970,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_cond_subgraph_name_is_valid(self):
+        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1017,6 +1018,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         dynamic_shapes=True,
     )
     def test_cond_graph_break_in_one_branch(self):
+        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1046,11 +1048,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Can't inplace modify module params/buffers inside HigherOrderOp",
+            r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             mod_for_compile(torch.ones(3, 4))
 
     def test_cond_free_variable_in_both_branches(self):
+        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1099,6 +1102,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                     self.assertEqual(num_placeholders, 5)
 
     def test_cond_side_effect_in_one_branches(self):
+        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1126,7 +1130,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Mutating a variable not in the current scope",
+            r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             mod_for_eager(torch.tensor(True), torch.tensor(5))
 
@@ -1137,6 +1141,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
     def test_cond_with_constant_pred(self):
+        torch._dynamo.reset()
         def test(pred, x):
             def true_fn(x):
                 return x
