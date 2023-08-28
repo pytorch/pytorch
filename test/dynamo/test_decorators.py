@@ -304,6 +304,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self._test_mark_static_address(guarded=False)
 
     def test_optimizer_zero_grad_static_err(self):
+        import re
+
         mod = torch.nn.Linear(10, 10)
 
         for param in mod.parameters():
@@ -312,8 +314,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         optim = torch.optim.SGD(mod.parameters(), lr=1e-2)
 
-        with self.assertRaises(RuntimeError):
-            optim.zero_grad(set_to_none=True)
+        err = (
+            "Default zero_grad(set_to_none=True) will not respect grads that "
+            "are marked as tensors with static addresses in dynamo and will "
+            "set them to None. Use zero_grad(set_to_none=False) instead."
+        )
+        with self.assertRaisesRegex(RuntimeError, re.escape(err)):
+            optim.zero_grad()
 
 
 if __name__ == "__main__":

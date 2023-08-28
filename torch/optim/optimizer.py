@@ -807,9 +807,10 @@ class Optimizer:
                     if p.grad is not None:
                         if set_to_none:
                             if get_static_address_type(p.grad) is not None:
-                                raise RuntimeError("Default zero_grad(set_to_none=True) will not respect grads that "
-                                                   "are marked as tensors with static addresses in dynamo and will "
-                                                   "set them to None. Use zero_grad(set_to_none=False) instead.")
+                                err = ("Default zero_grad(set_to_none=True) will not respect grads that "
+                                       "are marked as tensors with static addresses in dynamo and will "
+                                       "set them to None. Use zero_grad(set_to_none=False) instead.")
+                                raise RuntimeError(err)
                             p.grad = None
                         else:
                             if p.grad.grad_fn is not None:
