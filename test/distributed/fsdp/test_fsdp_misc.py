@@ -7,6 +7,7 @@ import warnings
 from collections import namedtuple
 from contextlib import nullcontext
 from copy import deepcopy
+from itertools import chain
 from typing import Any, Tuple
 
 import torch
@@ -666,6 +667,21 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         )
         self.assertEqual(meta_device, next(m.a.parameters()).device)
 
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_id_no_move_ignored_params_and_bufs(self):
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+                self.a.register_buffer("buf", torch.ones(1))
+
+        m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        ignored_params = m.a.parameters()
+        ignored_bufs = m.a.buffers()
+        for t in chain(ignored_params, ignored_bufs):
+            self.assertEqual(torch.device("cpu"), t.device)
 
     @skip_if_lt_x_gpu(2)
     def test_multigpu_module(self):
