@@ -408,7 +408,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         self,
         module: nn.Module,
         process_group: ProcessGroupType = None,
-        device_mesh: Optional[DeviceMesh] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
@@ -424,6 +423,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
+        device_mesh: Optional[DeviceMesh] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()

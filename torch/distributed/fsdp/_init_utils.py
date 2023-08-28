@@ -154,13 +154,13 @@ def _init_process_group_state_for_hybrid_shard(
     if device_mesh:
         if _is_valid_hybrid_shard_device_mesh(device_mesh):
             state._device_mesh = device_mesh
-            # We currenlty only allow _inter_node_pg to be the outermost dimension, and the
+            # We currently only allow _inter_node_pg to be the outermost dimension, and the
             # process_group(intra_node) to be the innermost dimension.
             state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
             state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
         else:
             raise ValueError(
-                "Expected device_mesh to be passed in has ndim=2 "
+                "Expected device_mesh to have ndim=2 "
                 f"but got {len(device_mesh.get_dim_groups())}"
             )
     elif process_group is None:
@@ -201,9 +201,7 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
-    return (
-        isinstance(device_mesh, DeviceMesh) and len(device_mesh.get_dim_groups()) == 2
-    )
+    return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
 @no_type_check

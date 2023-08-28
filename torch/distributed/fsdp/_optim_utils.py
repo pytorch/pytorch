@@ -288,10 +288,7 @@ def _unflatten_communicated_optim_state(
             optim_state: Union[torch.Tensor, ShardedTensor, DTensor] = next(views)
             if shard_state:
                 osd_config = fsdp_state._optim_state_dict_config
-                if (
-                    hasattr(osd_config, "_use_dtensor")
-                    and osd_config._use_dtensor is True
-                ):
+                if getattr(osd_config, "_use_dtensor", False):
                     assert fsdp_state._device_mesh is not None
                     optim_state = _ext_chunk_dtensor(
                         optim_state, fsdp_state.rank, fsdp_state._device_mesh
@@ -1673,7 +1670,7 @@ def _gather_orig_param_state(
         )
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
-            if hasattr(osd_config, "_use_dtensor") and osd_config._use_dtensor is True:
+            if getattr(osd_config, "_use_dtensor", False):
                 assert fsdp_state._device_mesh is not None
                 value = _ext_chunk_dtensor(
                     value, fsdp_state.rank, fsdp_state._device_mesh
