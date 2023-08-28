@@ -12,7 +12,6 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
-from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -3734,13 +3733,6 @@ def aminmax(self, *, dim=None, keepdim=False):
 @out_wrapper()
 def nansum(self, dim=None, keepdim=False, *, dtype=None):
     return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
-
-
-@register_decomposition(out_dtype)
-def out_dtype_decomp(*args, **kwargs):
-    from torch._higher_order_ops.out_dtype import out_dtype_dense
-
-    return out_dtype_dense(*args, **kwargs)
 
 
 @register_decomposition([aten.arange.default, aten.arange.out])

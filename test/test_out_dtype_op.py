@@ -3,6 +3,8 @@ import unittest
 
 import torch
 import torch._dynamo
+import torch._inductor
+import torch._inductor.decomposition
 import torch._export
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -182,6 +184,20 @@ class TestOutDtypeOp(TestCase):
 def forward(self, x_1, w_1):
     _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
     return _int_mm""")
+
+    def test_out_dtype_default_trace(self) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
+
+        # By default, out_dtype is preserved in the trace
+        gm = make_fx(func, tracing_mode="symbolic")(x, w)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1, w_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
+    return out_dtype""")
 
     def test_out_dtype_wrong_output(self) -> None:
         def multiple_out(x):
