@@ -316,17 +316,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         self.check_kwargs(kwargs, ConstantVariable)
 
+        exc_prefix = "Cond doesn't work unless it is captured completely with torch.compile. Fail reason: "
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
             raise UncapturedHigherOrderOpError(
-                f"Expected 4 arguments but got {len(args)}.\n"
+                exc_prefix + f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             raise UncapturedHigherOrderOpError(
-                f"Expected pred to be bool or a boolean tensor with single "
+                exc_prefix
+                + f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
@@ -335,14 +337,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
             raise UncapturedHigherOrderOpError(
-                f"Expected a tuple but got {args[3].python_type()}",
+                exc_prefix + f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
             raise UncapturedHigherOrderOpError(
-                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
+                exc_prefix
+                + "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)
@@ -399,12 +402,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
                 raise UncapturedHigherOrderOpError(
-                    "Cond doesn't work unless it is captured completely with torch.compile"
+                    exc_prefix
+                    + "Cond doesn't work unless it is captured completely with torch.compile"
                 ) from e
 
             if not isinstance(ret_val, TensorVariable):
                 raise UncapturedHigherOrderOpError(
-                    "Expected branch to return a single tensor",
+                    exc_prefix + "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
 
@@ -477,22 +481,26 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             size_b = b.size()
             if len(size_a) != len(size_b):
                 raise UncapturedHigherOrderOpError(
+                    exc_prefix +
                     f"Expect branches to return tensor that has same size but got\
                      true_branch: {size_a}, false_branch: {size_b}",
                 )
             for l, r in zip(size_a, size_b):
                 if l != r:
                     raise UncapturedHigherOrderOpError(
+                        exc_prefix +
                         f"Expect branches to return tensor with same size but got\
                          true_branch: {size_a}, false_branch: {size_b}",
                     )
             if a.dtype != b.dtype:
                 raise UncapturedHigherOrderOpError(
+                    exc_prefix +
                     f"Expect branches to return tensor with same dtype but got\
                      true branch: {a.dtype}, false_branch: {b.dtype}",
                 )
             if a.requires_grad != b.requires_grad:
                 raise UncapturedHigherOrderOpError(
+                    exc_prefix +
                     f"Expect branches to return tensor with same requires_grad but got\
                      true branch: {a.requires_grad}, false_branch: {b.requires_grad}",
                 )
