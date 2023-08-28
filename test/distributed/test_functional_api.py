@@ -481,6 +481,28 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(y, expected)
 
     @with_comms()
+    def test_all_to_all_single_1d_input(self):
+        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
+        rank = dist.get_rank()
+
+        row = self.world_size * (rank + 1) * (self.world_size + 1) / 2
+        x = torch.ones(int(row), device=device) * (rank + 1)
+        split_sizes = torch.tensor(
+            [(i + 1) * (rank + 1) for i in range(self.world_size)],
+            dtype=torch.int64,
+            device=device
+        )
+        y = ft_c.all_to_all_single(
+            x, output_split_sizes=split_sizes, input_split_sizes=split_sizes, group=mesh
+        )
+        expected = []
+        for idx, tensor in enumerate(torch.split(x, split_sizes.tolist())):
+            expected.append(torch.full_like(tensor, (idx + 1)))
+        expected = torch.cat(expected)
+        self.assertEqual(y, expected)
+
+    @with_comms()
     def test_all_to_all_single_output_split_sizes_none(self):
         device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))

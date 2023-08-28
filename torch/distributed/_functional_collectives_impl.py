@@ -320,6 +320,7 @@ def _all_to_all_single(
         input_split_sizes = input_split_sizes.tolist()  # type: ignore[assignment]
     if isinstance(output_split_sizes, torch.Tensor):
         output_split_sizes = output_split_sizes.tolist()  # type: ignore[assignment]
+        assert input.dim() >= 1, f"Expected input to have at least 1 dim but got {input.dim()} dim"
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         out_tensor = input.new_empty(out_size)
