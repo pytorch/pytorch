@@ -545,7 +545,6 @@ def aot_compile(
     Returns:
         Path to the generated shared library, and the exported program
     """
-    from torch._inductor.compile_fx import compile_fx_aot
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
@@ -562,9 +561,9 @@ def aot_compile(
     unlifted_module.graph.set_codegen(torch.fx.CodeGen())  # type: ignore[attr-defined]
     unlifted_module.recompile()
     options = (
-        {"ignore_aot_autograd": True}
+        {"from_export": True}
         if options is None
-        else {**options, "ignore_aot_autograd": True}
+        else {**options, "from_export": True}
     )
     so_path = torch._inductor.aot_compile(unlifted_module, flat_example_inputs, options)  # type: ignore[arg-type]
 
