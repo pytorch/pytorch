@@ -23,7 +23,6 @@ static PyObject* THPStream_pynew(
           args,
           kwargs,
           "|LLL",
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -54,8 +53,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
 
   THPStream* self = (THPStream*)ptr.get();
   self->stream_id = stream.id();
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  self->device_index = static_cast<int64_t>(stream.device_index());
+  self->device_index = stream.device_index();
   self->device_type = static_cast<int64_t>(stream.device_type());
   return ptr.release();
   END_HANDLE_TH_ERRORS
@@ -67,9 +65,11 @@ static void THPStream_dealloc(THPStream* self) {
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(c10::Device(
-      static_cast<c10::DeviceType>(self->device_type),
-      static_cast<c10::DeviceIndex>(self->device_index)));
+  return THPDevice_New(c10::Stream::unpack3(
+                           self->stream_id,
+                           self->device_index,
+                           static_cast<c10::DeviceType>(self->device_type))
+                           .device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -84,17 +84,17 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStream_members[] = {
-    {"stream_id",
+    {(char*)"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
      READONLY,
      nullptr},
-    {"device_index",
+    {(char*)"device_index",
      T_LONGLONG,
      offsetof(THPStream, device_index),
      READONLY,
      nullptr},
-    {"device_type",
+    {(char*)"device_type",
      T_LONGLONG,
      offsetof(THPStream, device_type),
      READONLY,
@@ -108,7 +108,7 @@ static struct PyGetSetDef THPStream_properties[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStream_methods[] = {
-    {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
+    {(char*)"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPStreamType = {
