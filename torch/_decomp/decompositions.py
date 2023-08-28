@@ -1042,6 +1042,16 @@ def logit_backward(
         )
 
 
+@register_decomposition(aten.dropout)
+@aten.dropout.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.dropout.default.py_impl(DispatchKey.Autograd)
+def dropout(input: Tensor, p: float, train: Optional[bool]):
+    if train and p != 0:
+        return aten.native_dropout(input, p, train)[0]
+    else:
+        return input.clone()
+
+
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train and p != 0:
@@ -3242,11 +3252,11 @@ def _grid_sampler_2d(
     _expand_grid: bool = True,
 ) -> Tensor:
     # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
-    # optionaly expand the input grid for performance reasons. Namely, we do not expand the grid (_expand_grid=False)
-    # on cpu for performance reasons. Experimenting locally it was found that compiled CUDA code
-    # can be accelerated by ~10-20x. If we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
-    # However, this leads to a slowdown on CPU bilinear mode channels last around ~0.8x,
-    # thus we do  not expand the grid for this case.
+    # optionaly expand the input grid for performance reasons.
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
 
     torch._check(
         interpolation_mode in (0, 1, 2),
