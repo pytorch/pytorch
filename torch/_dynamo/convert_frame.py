@@ -657,7 +657,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # someone wanted these to also get suppressed.  If so, you'll
             # need to make these exceptions not get wrapped
 
-            # Directly raise if a control flow op (e.g. cond) has a graph break in it.
+            # We intentionally don't want to suppress error here.
             if isinstance(e, UncapturedHigherOrderOpError):
                 raise
 
