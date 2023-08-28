@@ -51,6 +51,7 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         aten.std,
         aten.std_mean,
+        torch.ops.higher_order.out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,

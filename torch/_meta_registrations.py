@@ -5668,6 +5668,12 @@ def activate_meta():
                 activate_meta_table[opo] = registry[opo]
 
     for op_overload, fn in activate_meta_table.items():
+        # Don't register meta for HigherOrderOp's decomp.
+        # We can reconsider this in the future, but in general,
+        # the way you do a meta for a HigherOrderOp is different from
+        # OpOverload.
+        if isinstance(op_overload, torch._ops.HigherOrderOperator):
+            continue
         assert isinstance(op_overload, OpOverload)
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
