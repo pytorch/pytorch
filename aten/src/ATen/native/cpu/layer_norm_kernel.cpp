@@ -55,17 +55,17 @@ void LayerNormKernelImplInternal(
       std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
-      const T bias = -rstd_val * mean_val;
+      const T bias = - mean_val;
       if (gamma_null || beta_null) {
         for (const auto j : c10::irange(N)) {
           const T gamma_v = gamma_null ? T(1) : gamma_data[j];
           const T beta_v = beta_null ? T(0) : beta_data[j];
-          Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
+          Y_ptr[j] = (X_ptr[j] + bias) * rstd_val * gamma_v + beta_v;
         }
       } else {
         vec::map3<T>(
-            [scale, bias](Vec x, Vec gamma, Vec beta) {
-              return (x * Vec(scale) + Vec(bias)) * gamma + beta;
+            [scale, bias, mean_val](Vec x, Vec gamma, Vec beta) {
+              return (x + Vec(bias)) * Vec(scale) * gamma + beta;
             },
             Y_ptr,
             X_ptr,
