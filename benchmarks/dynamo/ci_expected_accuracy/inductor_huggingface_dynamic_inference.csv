@@ -3,12 +3,12 @@ AlbertForMaskedLM,pass,0
 AlbertForQuestionAnswering,pass,0
 AllenaiLongformerBase,pass,4
 BartForCausalLM,pass,0
-BertForMaskedLM,pass,0
-BertForQuestionAnswering,pass,0
+BertForMaskedLM,pass,3
+BertForQuestionAnswering,pass,3
 BlenderbotForCausalLM,pass_due_to_skip,0
 BlenderbotSmallForCausalLM,pass,0
 BlenderbotSmallForConditionalGeneration,pass,0
-CamemBert,pass,0
+CamemBert,pass,3
 DebertaForMaskedLM,pass,0
 DebertaForQuestionAnswering,pass,0
 DebertaV2ForMaskedLM,pass_due_to_skip,0
@@ -34,8 +34,8 @@ PLBartForCausalLM,pass,0
 PLBartForConditionalGeneration,pass,0
 PegasusForCausalLM,pass,0
 PegasusForConditionalGeneration,pass,0
-RobertaForCausalLM,pass,0
-RobertaForQuestionAnswering,pass,0
+RobertaForCausalLM,pass,3
+RobertaForQuestionAnswering,pass,3
 Speech2Text2ForCausalLM,pass,0
 T5ForConditionalGeneration,pass,0
 T5Small,pass,0
