@@ -99,14 +99,14 @@ py::handle type_caster<c10::SymBool>::cast(
     const c10::SymBool& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (auto m = si.maybe_as_bool()) {
-    return py::cast(*m).release();
-  } else {
+  if (si.is_symbolic()) {
     // TODO: generalize this to work with C++ backed class
     auto* py_node =
         dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
     TORCH_INTERNAL_ASSERT(py_node);
     return torch::get_symbool_class()(py_node->getPyObj()).release();
+  } else {
+    return py::cast(si.as_bool_unchecked()).release();
   }
 }
 

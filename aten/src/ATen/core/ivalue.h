@@ -620,12 +620,12 @@ public:
   c10::SymFloat toSymFloat() const&;
 
   IValue(c10::SymBool i) {
-     if (auto mi = i.maybe_as_bool()) {
-      tag = Tag::Bool;
-      payload.u.as_int = *mi;
-    } else {
+    if (i.is_symbolic()) {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Bool;
+      payload.u.as_bool = i.as_bool_unchecked();
     }
   }
 

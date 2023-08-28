@@ -1111,7 +1111,7 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
 
   if (used_cudaMallocAsync && used_native_specific_option) {
     TORCH_WARN(
-        "backend:cudaMallocAsync ignores max_split_size_mb,"
+        "backend:cudaMallocAsync ignores max_split_size_mb, roundup_bypass_threshold_mb,"
         "roundup_power2_divisions, and garbage_collect_threshold.");
   }
 }

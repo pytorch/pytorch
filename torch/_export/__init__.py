@@ -20,7 +20,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint
+from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature

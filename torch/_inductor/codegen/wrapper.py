@@ -14,7 +14,6 @@ import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
-
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -1052,9 +1051,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
                 self.prefix.writeline(f"""inputs_info_[{idx}].name = "{name}";""")
-                self.prefix.writeline(
-                    f"""inputs_info_[{idx}].dtype = "{V.graph.graph_inputs[name].get_dtype()}";"""
-                )
                 sizes = V.graph.graph_inputs[name].get_size()
                 self.prefix.writeline(
                     f"inputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1070,9 +1066,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
                 self.prefix.writeline(f"""outputs_info_[{idx}].name = "output{idx}";""")
-                self.prefix.writeline(
-                    f"""outputs_info_[{idx}].dtype = "{output.get_dtype()}";"""
-                )
                 sizes = output.get_size()
                 self.prefix.writeline(
                     f"outputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1355,21 +1348,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 }                                                               \\
             } while (0)
 
-            static inline CUfunction loadKernel(
-                    const std::string &filePath,
-                    const std::string &funcName,
-                    int sharedMemBytes) {
+            static inline CUfunction loadKernel(const std::string &filePath,
+                    const std::string &funcName) {
                 CUmodule mod;
                 CUfunction func;
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ));
-                }
                 return func;
             }
 
@@ -1416,10 +1400,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             cubin_path
         ), "cubin file should already exist at this moment"
 
-        shared_mem = params.get("shared_mem", 0)
         self.writeline(f"if ({name} == nullptr) {{")
         self.writeline(
-            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
+            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}");"""
         )
         self.writeline("}")
 

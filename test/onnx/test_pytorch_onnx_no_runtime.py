@@ -21,6 +21,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.onnx import OperatorExportTypes, symbolic_helper, utils
+from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
@@ -33,7 +34,7 @@ def export_to_onnx(
     ] = None,
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
-    opset_version: int = 17,
+    opset_version: int = GLOBALS.export_onnx_opset_version,
     **torch_onnx_export_kwargs,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
@@ -405,7 +406,11 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = export_to_onnx(
             MyClip(),
             torch.randn(3, 4, requires_grad=True),
-            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, 17)],
+            custom_ops=[
+                common_utils.custom_op(
+                    "aten::clamp", bad_clamp, GLOBALS.export_onnx_opset_version
+                )
+            ],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")

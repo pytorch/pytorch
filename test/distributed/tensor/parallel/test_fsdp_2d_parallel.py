@@ -18,7 +18,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
@@ -129,14 +128,6 @@ def is_nested_tensor(val: Any) -> bool:
     return False
 
 
-def _apply_optim_in_backward(param_group):
-    _apply_optimizer_in_backward(
-        optimizer_class=torch.optim.Adam,
-        params=param_group["params"],
-        optimizer_kwargs={"lr": param_group["lr"]},
-    )
-
-
 class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -199,7 +190,6 @@ class Test2dParallelIntegration(DTensorTestBase):
         fsdp_nested=False,
         multi_param_group=False,
         recompute_activation=False,
-        optim_in_backward=False,
     ) -> None:
         if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
@@ -225,40 +215,21 @@ class Test2dParallelIntegration(DTensorTestBase):
                 print(name, param_names_2d)
             self.assertTrue(name in param_names_2d)
         self._compare_params(model, model_2d)
+
         if multi_param_group and use_orig_params:
             param_group = [
                 {"params": model.net1.parameters(), "lr": 0.02},
                 {"params": model.net2.parameters(), "lr": 0.15},
             ]
-            if optim_in_backward:
-                for grp_idx in len(param_group):
-                    _apply_optim_in_backward(param_group=param_group[grp_idx])
-            else:
-                optim = torch.optim.Adam(param_group, lr=0.01)
+            optim = torch.optim.Adam(param_group, lr=0.01)
             param_group = [
                 {"params": model_2d.net1.parameters(), "lr": 0.02},
                 {"params": model_2d.net2.parameters(), "lr": 0.15},
             ]
-            if optim_in_backward:
-                for grp_idx in len(param_group):
-                    _apply_optim_in_backward(param_group=param_group[grp_idx])
-            else:
-                optim_2d = torch.optim.Adam(param_group, lr=0.01)
+            optim_2d = torch.optim.Adam(param_group, lr=0.01)
         else:
-            if optim_in_backward:
-                _apply_optimizer_in_backward(
-                    optimizer_class=torch.optim.Adam,
-                    params=model.parameters(),
-                    optimizer_kwargs={"lr": 0.01},
-                )
-                _apply_optimizer_in_backward(
-                    optimizer_class=torch.optim.Adam,
-                    params=model_2d.parameters(),
-                    optimizer_kwargs={"lr": 0.01},
-                )
-            else:
-                optim = torch.optim.Adam(model.parameters(), lr=0.01)
-                optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+            optim = torch.optim.Adam(model.parameters(), lr=0.01)
+            optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
         for i in range(5):
             # Ensure all input across TP ranks are same.
@@ -269,9 +240,8 @@ class Test2dParallelIntegration(DTensorTestBase):
             self.assertEqual(output, output_2d)
             output.sum().backward()
             output_2d.sum().backward()
-            if not optim_in_backward:
-                optim.step()
-                optim_2d.step()
+            optim.step()
+            optim_2d.step()
             self.assertEqual(model(input), model_2d(input))
 
         # Ensure all params are still the same after optimizer update.
@@ -291,13 +261,6 @@ class Test2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_use_orig_params(self) -> None:
         self._test_2d_e2e_flow(use_orig_params=True)
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_integration_optim_in_backward(self) -> None:
-        self._test_2d_e2e_flow(
-            use_orig_params=True, fsdp_nested=True, optim_in_backward=True
-        )
 
     @with_comms
     @skip_if_lt_x_gpu(4)
