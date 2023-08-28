@@ -736,12 +736,18 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   TORCH_INTERNAL_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch_jit";
-  if (num_blocks_) {
-    block_name += std::to_string(num_blocks_);
+  if (nullptr == block->owningNode()) {
+    // Top level main graph.
+    graph_proto->set_name("main_graph");
+  } else {
+    // TODO: Set more meaningful name for sub-graphs.
+    std::string block_name = "sub_graph";
+    if (num_blocks_) {
+      block_name += std::to_string(num_blocks_);
+    }
+    num_blocks_++;
+    graph_proto->set_name(block_name);
   }
-  num_blocks_++;
-  graph_proto->set_name(block_name);
 
   // Since ONNX IR VERSION 4, initializers do not have to
   // be a subset of graph inputs. We use keep_initializers_as_inputs
@@ -1401,10 +1407,10 @@ void check_onnx_proto(const std::string& proto_string) {
     onnx::shape_inference::InferShapes(model, schema_registry, options);
   } catch (const onnx::InferenceError& ex) {
     TORCH_WARN(
-        "The exported ONNX model failed ONNX shape inference."
-        "The model will not be executable by the ONNX Runtime."
-        "If this is unintended and you believe there is a bug,"
-        "please report an issue at https://github.com/pytorch/pytorch/issues."
+        "The exported ONNX model failed ONNX shape inference. "
+        "The model will not be executable by the ONNX Runtime. "
+        "If this is unintended and you believe there is a bug, "
+        "please report an issue at https://github.com/pytorch/pytorch/issues. "
         "Error reported by strict ONNX shape inference: ",
         ex.what());
   }

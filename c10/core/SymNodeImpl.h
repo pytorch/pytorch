@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
@@ -151,6 +152,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool expect_true(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  };
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };
@@ -163,13 +169,22 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual int64_t large_negative_int() {
-    return 0; // not a large negative int!
+  virtual c10::optional<int64_t> singleton_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> constant_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<bool> constant_bool() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> maybe_as_int() {
+    return c10::nullopt;
   }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
-  };
+  }
 };
 
 } // namespace c10

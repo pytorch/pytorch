@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
@@ -27,16 +28,14 @@ class TensorCheck {
       PyTypeObject* pt,
       const at::Tensor& v,
       std::vector<std::optional<int64_t>> dynamic_dims_sizes,
-      std::vector<std::optional<int64_t>> dynamic_dims_strides,
-      std::optional<int64_t> storage_offset)
+      std::vector<std::optional<int64_t>> dynamic_dims_strides)
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
         device_index_(v.device().index()),
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
-        strides_(std::move(dynamic_dims_strides)),
-        offset_(storage_offset) {
+        strides_(std::move(dynamic_dims_strides)) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
     dim_ = sizes_.size();
@@ -55,8 +54,8 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -71,16 +70,13 @@ class TensorCheck {
         }
       }
     }
-    if (offset_.has_value() && offset_.value() != v.storage_offset()) {
-      return false;
-    }
     return true;
   }
 
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
-      std::string tensor_name) {
+      const std::string& tensor_name) {
     std::stringstream fail_reason;
     fail_reason << "tensor '" << tensor_name << "' ";
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
@@ -117,27 +113,21 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
-      auto expected_size = sizes_[i];
-      auto expected_stride = strides_[i];
-      if (expected_size.has_value() && (expected_size.value() != sizes[i])) {
+      auto known_size = sizes_[i];
+      auto known_stride = strides_[i];
+      if (known_size.has_value() && (known_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
-                    << expected_size.value() << ", actual " << sizes[i];
+                    << known_size.value() << ", actual " << sizes[i];
         return fail_reason.str();
       }
-      if (expected_stride.has_value() &&
-          expected_stride.value() != strides[i]) {
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
-                    << expected_stride.value() << ", actual " << strides[i];
+                    << known_stride.value() << ", actual " << strides[i];
         return fail_reason.str();
       }
-    }
-    if (offset_.has_value() && offset_.value() != v.storage_offset()) {
-      fail_reason << "storage_offset mismatch, expected " << offset_.value()
-                  << ", actual " << v.storage_offset();
-      return fail_reason.str();
     }
     return "";
   }
@@ -152,11 +142,9 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
-  // NB: These are always set, but will contain empty optionals if dynamic
-  // shapes is enabled.
+  // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<int64_t>> sizes_;
   std::vector<std::optional<int64_t>> strides_;
-  std::optional<int64_t> offset_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
@@ -253,12 +241,6 @@ static int TensorGuards_init(
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_strides=...");
     return -1;
   }
-  PyObject* dynamic_storage_offset_py =
-      PyDict_GetItemString(kwds, "dynamic_storage_offset");
-  if (dynamic_storage_offset_py == NULL) {
-    PyErr_SetString(PyExc_TypeError, "missing dynamic_storage_offset=...");
-    return -1;
-  }
 
   // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
   // an optimization to avoid invoking .size()/.stride() in python needlessly
@@ -267,13 +249,12 @@ static int TensorGuards_init(
   std::vector<std::vector<std::optional<int64_t>>>
       per_tensor_dynamic_dims_strides =
           get_dynamic_dims(dynamic_dims_strides_py);
-  std::vector<std::optional<int64_t>> per_tensor_dynamic_storage_offset =
-      pyListToVecOptInt(dynamic_storage_offset_py);
 
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
   LocalState state;
+
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -289,23 +270,20 @@ static int TensorGuards_init(
         per_tensor_dynamic_dims_strides.size() == 0
         ? wrapIntegersInOptional(tensor.strides())
         : per_tensor_dynamic_dims_strides[i];
-
-    std::optional<int64_t> tensor_storage_offset =
-        per_tensor_dynamic_storage_offset.size() == 0
-        ? std::make_optional(tensor.storage_offset())
-        : per_tensor_dynamic_storage_offset[i];
     checks.emplace_back(
         state,
         Py_TYPE(item),
         std::move(tensor),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride),
-        tensor_storage_offset);
+        std::move(tensor_dims_stride));
   }
   return 0;
 }
 
-PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
+PyObject* TensorGuards_check(
+    TensorGuards* self,
+    PyObject* args,
+    PyObject* kwargs) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
     return NULL;
@@ -313,16 +291,29 @@ PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
 
+  // kwargs is just ignored here
+
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
     return NULL;
   }
 
   LocalState state;
-
+  // Note - all the tensors that make it to guards must be unique. Dynamo
+  // builder handles guarding for positive aliases (X is Y). However, we do not
+  // create guards for negative alias (X is not Y) as that is an N^2
+  // relationship. Instead, we rely on the uniqueness upstream to verify, at
+  // check_fn time (this function).
+  ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
+
     if (Py_TYPE(item) != checks[i].pytype) {
+      Py_RETURN_FALSE;
+    }
+    auto insertion = unique_tensors.insert({item, nullptr});
+    if (!insertion.second) {
+      // Violates uniqueness
       Py_RETURN_FALSE;
     }
     if (!checks[i].check(state, THPVariable_Unpack(item))) {
@@ -382,6 +373,7 @@ PyObject* TensorGuards_check_verbose(
   }
 
   LocalState state;
+  ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
@@ -396,6 +388,15 @@ PyObject* TensorGuards_check_verbose(
       }
       return Py_BuildValue("s", fail_reason.str().c_str());
     }
+
+    auto insertion = unique_tensors.insert({item, nullptr});
+    if (!insertion.second) {
+      std::stringstream fail_reason;
+      fail_reason << "Duplicate tensor found where not expected! ";
+      fail_reason << tensor_check_names[i]
+                  << "should not alias to anything, but is aliased";
+      return Py_BuildValue("s", fail_reason.str().c_str());
+    }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);
     if (fail_reason.length() > 0) {
@@ -407,7 +408,10 @@ PyObject* TensorGuards_check_verbose(
 }
 
 static PyMethodDef TensorGuards_methods[] = {
-    {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
+    {"check",
+     (PyCFunction)(void*)TensorGuards_check,
+     METH_VARARGS | METH_KEYWORDS,
+     ""},
     {"check_verbose",
      (PyCFunction)(void*)TensorGuards_check_verbose,
      METH_VARARGS | METH_KEYWORDS,

@@ -12,19 +12,28 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4 \
-  onnx==1.14.0
+  numpy==1.22.4
 
+# ONNXRuntime should be installed before installing
+# onnx-weekly. Otherwise, onnx-weekly could be
+# overwritten by onnx.
 pip_install \
-  onnxruntime==1.15.0 \
+  onnxruntime==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
-  transformers==4.25.1
+  transformers==4.31.0
+
+# Using 1.15dev branch for the following not yet released features and fixes.
+# - Segfault fix for shape inference.
+# - Inliner to workaround ORT segfault.
+pip_install onnx-weekly==1.15.0.dev20230717
 
 # TODO: change this when onnx-script is on testPypi
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@7e131c578f290ffad1f26bacda11a83daf5476ba"
+# pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
+# NOTE: temp change for CI to run on unpublished onnxscript PR.
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@f69be19ebd3f2e0d7efe64b0c7be3329cbab3822" --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/

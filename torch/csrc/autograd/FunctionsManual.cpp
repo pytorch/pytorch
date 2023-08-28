@@ -1451,11 +1451,14 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
+static Tensor sparse_mask_like_grad(
+    const Tensor& x,
+    const Tensor& gx,
+    bool accumulate_matches) {
   if (x.is_coalesced() && gx.is_coalesced()) {
     if (x._nnz() >= gx._nnz()) {
       // search into x is faster
-      return gx._sparse_mask_projection(x);
+      return gx._sparse_mask_projection(x, accumulate_matches);
     } else {
       // search into gx is faster
       return gx.sparse_mask(x);
@@ -1463,11 +1466,11 @@ static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
   } else if (x.is_coalesced()) {
     return gx.sparse_mask(x);
   } else if (gx.is_coalesced()) {
-    return gx._sparse_mask_projection(x);
+    return gx._sparse_mask_projection(x, accumulate_matches);
   } else {
     if (x._nnz() >= gx._nnz()) {
       // gx.coalesce() is likely faster
-      return gx.coalesce()._sparse_mask_projection(x);
+      return gx.coalesce()._sparse_mask_projection(x, accumulate_matches);
     } else {
       // x.coalesce() is likely faster
       return gx.sparse_mask(x.coalesce());
@@ -1501,6 +1504,17 @@ std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
           : Tensor{});
 }
 
+Tensor sparse_mask_backward(
+    const Tensor& grad,
+    const Tensor& mask,
+    const c10::Layout self_layout) {
+  // NOTE: sparse_mask accumulates matches, so the backward step has to
+  // accumulate as well.
+  const auto self_grad =
+      sparse_mask_like_grad(mask, grad, /*accumulate_matches=*/true);
+  return self_layout == at::kStrided ? self_grad.to_dense() : self_grad;
+}
+
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
@@ -1526,12 +1540,14 @@ Tensor sparse_sparse_matmul_backward(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
 
+  // NOTE: _sparse_sparse_matmul returns a coalesced gradient,
+  //   // hence there is no need in accumulating matches.
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return sparse_mask_like_grad(a, a_grad);
+    return sparse_mask_like_grad(a, a_grad, /*accumulate_matches=*/false);
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return sparse_mask_like_grad(b, b_grad);
+  return sparse_mask_like_grad(b, b_grad, /*accumulate_matches=*/false);
 }
 
 Tensor renorm_backward(
@@ -1546,8 +1562,9 @@ Tensor renorm_backward(
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
 
-  auto acc_type =
-      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto acc_type = self.is_mps()
+      ? self.scalar_type()
+      : at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
   auto norm = at::linalg_vector_norm(
       self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
@@ -6713,7 +6730,9 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
         src_single_zero,
         (grad * masked_src_result).gather(dim, index),
         (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
-    if ((src_num_zeros > 1).any().item<bool>()) {
+    // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
+    // is disabled; this also avoids having the item() call in the usual case.
+    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
@@ -6807,7 +6826,9 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
         (grad * masked_src_result).index_select(dim, index),
         (grad * result).index_select(dim, index) /
             source.masked_fill(src_zero, 1));
-    if ((src_num_zeros > 1).any().item<bool>()) {
+    // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
+    // is disabled this also avoids having the item() call in the usual case
+    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);

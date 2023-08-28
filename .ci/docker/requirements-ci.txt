@@ -25,10 +25,10 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
-expecttest==0.1.3
+expecttest==0.1.6
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.1.3
+#Pinned versions: 0.1.6
 #test that import:
 
 flatbuffers==2.0
@@ -75,10 +75,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==0.960
+mypy==1.4.1
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 0.960
+#Pinned versions: 1.4.1
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -124,7 +124,8 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-#pillow
+pillow==9.3.0 ; python_version <= "3.8"
+pillow==9.5.0 ; python_version > "3.8"
 #Description:  Python Imaging Library fork
 #Pinned versions:
 #test that import:
@@ -179,7 +180,7 @@ xdoctest==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pygments==2.12.0
+pygments==2.15.0
 #Description: support doctest highlighting
 #Pinned versions: 2.12.0
 #test that import: the doctests
@@ -212,7 +213,7 @@ scikit-image==0.20.0 ; python_version >= "3.10"
 
 scipy==1.6.3 ; python_version < "3.10"
 scipy==1.8.1 ; python_version == "3.10"
-scipy==1.9.3 ; python_version == "3.11"
+scipy==1.10.1 ; python_version == "3.11"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.6.3
@@ -268,4 +269,9 @@ jinja2==3.1.2
 pytest-cpp==2.3.0
 #Description: This is used by pytest to invoke C++ tests
 #Pinned versions: 2.3.0
+#test that import:
+
+z3-solver
+#Description: The Z3 Theorem Prover Project
+#Pinned versions:
 #test that import:

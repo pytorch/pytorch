@@ -17,6 +17,7 @@ from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
@@ -28,16 +29,13 @@ from .lowering import fallback_node_due_to_unsupported_type
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
 # Sentinel indicating multiple quantities can be matched
 MULTIPLE = object()
-
-# Preserve these keys while pattern matching. All the nodes in the replacement
-# graph will preserve the key from the first node in the original pattern.
-preserve_meta_keys = {"recompute"}
 
 
 class Match:
@@ -629,11 +627,6 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)
-                    # Retain the meta tags from the first node in the match.
-                    # This is useful for retaining tags like recompute.
-                    for key in first_node.meta.keys():
-                        if key in preserve_meta_keys:
-                            result.meta[key] = first_node.meta[key]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
@@ -655,6 +648,12 @@ class ReplacementPatternEntry(PatternEntry):
             ]
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
+        def percolate_tags(node, recompute_tag):
+            for arg in node.all_input_nodes:
+                if hasattr(arg, "meta"):
+                    arg.meta["recompute"] = recompute_tag
+                    percolate_tags(arg, recompute_tag)
+
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
@@ -668,6 +667,18 @@ class ReplacementPatternEntry(PatternEntry):
                 else:
                     if "val" not in new.meta:
                         new.meta.update(old.meta)
+
+                    # Preserve the recompute tags in the replacement graph. We
+                    # look at the recompute tags of the original output node to
+                    # propagate the tag from the output all the way to the input
+                    # args in the replacement graph.
+                    # Note that this is best effort. Since patterns are from
+                    # many to many, there is no easy way to correctly map the
+                    # recomputable tags. It is possible in some scenarios that we
+                    # incorrectly tag some nodes as recomputables.
+                    if "recompute" in old.meta:
+                        percolate_tags(new, old.meta["recompute"])
+
                     old.replace_all_uses_with(new)
 
         match.erase_nodes(graph)
@@ -726,13 +737,14 @@ def register_replacement(
                 if grad and is_integer_dtype(args[i].dtype):
                     return False
 
-                args[i] = torch.empty_strided(
-                    args[i].size(),
-                    args[i].stride(),
-                    dtype=args[i].dtype,
-                    device=args[i].device,
-                    requires_grad=grad,
-                )
+                with torch._dynamo.utils.detect_fake_mode(args):
+                    args[i] = torch.empty_strided(
+                        args[i].size(),
+                        args[i].stride(),
+                        dtype=args[i].dtype,
+                        device=args[i].device,
+                        requires_grad=grad,
+                    )
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(
             specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names
@@ -1070,10 +1082,17 @@ def init_once_fakemode(fn):
     @functools.lru_cache(None)
     @functools.wraps(fn)
     def lazy_init():
+        counters_ref = counters["inductor"].copy()
+
         with torch._guards.tracing(
             None
         ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
-            return fn()
+            result = fn()
+
+        # clear view matches encountered during tracing
+        counters["inductor"] = counters_ref
+
+        return result
 
     return lazy_init
 
@@ -1118,3 +1137,33 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
+
+
+def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same size/strides"""
+    val1 = node1.meta.get("val")
+    val2 = node2.meta.get("val")
+    return (
+        val1 is not None
+        and val2 is not None
+        and val1.size() == val2.size()
+        and val1.stride() == val2.stride()
+    )
+
+
+def remove_extra_clones(graph: torch.fx.Graph):
+    seen = set()
+    for node in reversed(graph.nodes):
+        if node.target is aten.clone.default:
+            src = node.args[0]
+            if (
+                isinstance(src, torch.fx.Node)
+                and src.op == "call_function"
+                and isinstance(src.target, torch._ops.OpOverload)
+                and not src.target.is_view
+                and not any(u in seen for u in src.users)
+                and same_layout(src, node)
+            ):
+                node.replace_all_uses_with(src)
+                graph.erase_node(node)
+        seen.add(node)

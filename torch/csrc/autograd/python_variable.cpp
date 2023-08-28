@@ -340,12 +340,12 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  if (!tensor.defined() || tensor.use_count() <= 1) {
+    return false;
+  }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
-    return false;
-  }
-  if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
   return true;
@@ -427,6 +427,7 @@ static int THPVariable_clear(THPVariable* self) {
     return 0;
   }
   Py_CLEAR(self->backward_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
     // Two situations to consider:
@@ -683,6 +684,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
                      options.device()) // TODO: this shouldn't be necessary if
                                        // it came from options
                  .options(options)
+                 .allocator(c10::GetAllocator(c10::kMeta))
+                 .resizeable_storage()
                  .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
@@ -906,7 +909,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
 
   TORCH_CHECK_TYPE(
       THPVariable_Check(py_grad),
-      "assigned grad expected to be a Tensor or None but got grad of type",
+      "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
   THPUtils_assertRet(
       -1,
@@ -1157,6 +1160,47 @@ int THPVariable_set_backwards_hooks(
   if (obj) {
     torch::autograd::impl::add_hook(
         tensor, std::make_unique<PyFunctionTensorPreHook>(obj, 0));
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+PyObject* THPVariable_get_post_accumulate_grad_hooks(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
+  }
+  if (self->post_accumulate_grad_hooks) {
+    Py_INCREF(self->post_accumulate_grad_hooks);
+    return self->post_accumulate_grad_hooks;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set_post_accumulate_grad_hooks(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(
+        self, "_post_accumulate_grad_hooks", obj);
+  }
+  THPUtils_assertRet(
+      -1, obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  if (obj == Py_None) {
+    obj = nullptr;
+  }
+  Py_XINCREF(obj);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
+  self->post_accumulate_grad_hooks = obj;
+  const auto& tensor = THPVariable_Unpack(self);
+  if (obj) {
+    torch::autograd::impl::set_post_acc_grad_hooks(
+        tensor, std::make_unique<PyFunctionTensorPostAccGradHooks>(obj));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -1474,6 +1518,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"_backward_hooks",
      (getter)THPVariable_get_backwards_hooks,
      (setter)THPVariable_set_backwards_hooks,
+     nullptr,
+     nullptr},
+    {"_post_accumulate_grad_hooks",
+     (getter)THPVariable_get_post_accumulate_grad_hooks,
+     (setter)THPVariable_set_post_accumulate_grad_hooks,
      nullptr,
      nullptr},
     {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
@@ -2033,6 +2082,7 @@ static int THPVariable_subclass_traverse(
 
   // Finally traverse THPVariable special stuff
   Py_VISIT(var->backward_hooks);
+  Py_VISIT(var->post_accumulate_grad_hooks);
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(var);
     if (tensor.defined()) {

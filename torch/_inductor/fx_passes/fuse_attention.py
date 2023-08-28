@@ -259,6 +259,50 @@ def _sfdp_replacement_10(query, key, value):
     )
 
 
+def _sfdp_pattern_11(query, key, value, inv_scale):
+    # Mainly for huggingface models
+    q = query.permute(0, 2, 1, 3)
+    k = key.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3)
+    return torch.matmul(q, k.transpose(-2, -1)).div(inv_scale).softmax(dim=-1).matmul(v)
+
+
+def _sfdp_replacement_11(query, key, value, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
+def _sfdp_pattern_12(query, key, value, inv_scale_factor, dropout_p):
+    q = query.permute(0, 2, 1, 3)
+    k = key.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3)
+    return torch.nn.functional.dropout(
+        torch.matmul(q, k.transpose(-2, -1)).div(inv_scale_factor).softmax(dim=-1),
+        p=dropout_p,
+    ).matmul(v)
+
+
+def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=None,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / inv_scale_factor,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -301,9 +345,6 @@ def _sfdp_scale_factor_check(scale_factor_op):
 
 @functools.lru_cache(None)
 def _sfdp_init():
-    from ..._dynamo.utils import counters
-
-    counters_ref = counters["inductor"].copy()
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -395,6 +436,20 @@ def _sfdp_init():
             {},
             _sfdp_params_check,
         ),
+        (
+            _sfdp_pattern_11,
+            _sfdp_replacement_11,
+            [g(), g(), g(), c()],
+            {},
+            _sfdp_scale_factor_check(aten.div.Tensor),
+        ),
+        (
+            _sfdp_pattern_12,
+            _sfdp_replacement_12,
+            [g(), g(), g(), c()],
+            d,
+            _sfdp_scale_factor_check(aten.div.Tensor),
+        ),
     ]:
         args = [*args, *workaround.values()]
         register_replacement(
@@ -415,7 +470,3 @@ def _sfdp_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
-
-    counters[
-        "inductor"
-    ] = counters_ref  # clear view matches encountered during sdpa tracing
