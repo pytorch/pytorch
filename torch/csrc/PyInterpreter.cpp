@@ -117,10 +117,10 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {
-    is_main_interpreter_ =
-        at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
-  }
+            ConcretePyInterpreterVTable::instance())),
+        is_main_interpreter_(
+            at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
+                impl_)) {}
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
@@ -158,14 +158,15 @@ py::object torchDispatchFromTensorImpl(
   // TODO: fix the constness of target
   at::Tensor self_t = at::Tensor(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p =
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args =
-      py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
+  auto args = py::reinterpret_steal<py::object>(
+      PyTuple_New(static_cast<Py_ssize_t>(1 + extra_args.size())));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
   int64_t i = 1;
   for (auto& a : extra_args) {
@@ -581,14 +582,15 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
       py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
   auto buffer = get_buffer(sub, values, "stride");
   auto result = THPUtils_unpackLongs(buffer.ptr());
-  int64_t* start = (int64_t*)result[0];
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  int64_t* start = reinterpret_cast<int64_t*>(result[0]);
   int64_t len = result[1];
 
   return c10::IntArrayRef(start, len);
 }
 
 static void set_tensor_attr_with_capsule(
-    c10::TensorImpl* tensor,
+    const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
   c10::optional<PyObject*> mb_obj =
@@ -622,7 +624,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sizes must be a list or a tuple");
-  int64_t len = py::len(out);
+  size_t len = py::len(out);
   int64_t* ptr = new int64_t[len];
   auto capsule =
       py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
@@ -630,8 +632,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<int64_t>(*it);
   }
-  set_tensor_attr_with_capsule(
-      const_cast<c10::TensorImpl*>(self), capsule, "_sizes_capsule");
+  set_tensor_attr_with_capsule(self, capsule, "_sizes_capsule");
   return c10::IntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
@@ -658,7 +659,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sym_size must be a list or a tuple");
-  int64_t len = py::len(out);
+  size_t len = py::len(out);
   c10::SymInt* ptr = new c10::SymInt[len];
   auto capsule = py::capsule(
       ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
@@ -666,8 +667,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-  set_tensor_attr_with_capsule(
-      const_cast<c10::TensorImpl*>(self), capsule, "_sym_sizes_capsule");
+  set_tensor_attr_with_capsule(self, capsule, "_sym_sizes_capsule");
   return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
@@ -767,7 +767,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sym_strides must be a list or a tuple");
-  int64_t len = py::len(out);
+  size_t len = py::len(out);
   c10::SymInt* ptr = new c10::SymInt[len];
   auto capsule = py::capsule(
       ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
@@ -775,8 +775,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
     ptr[idx] = py::cast<c10::SymInt>(*it);
   }
-  set_tensor_attr_with_capsule(
-      const_cast<c10::TensorImpl*>(self), capsule, "_sym_strides_capsule");
+  set_tensor_attr_with_capsule(self, capsule, "_sym_strides_capsule");
   return c10::SymIntArrayRef(ptr, len);
   END_HANDLE_TH_ERRORS_PYBIND
 }
@@ -786,9 +785,10 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   HANDLE_TH_ERRORS
-  Tensor self_t = Tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  Tensor self_t =
+      Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
+                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+             unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p =
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
