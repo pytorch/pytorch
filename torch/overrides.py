@@ -47,6 +47,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -1906,3 +1907,13 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
+
+def get_buffer(tensor_subclass, data, prefix):
+    import ctypes
+    assert prefix in {"stride", "size", "sym_size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
+        SizeType = ctypes.c_longlong * len(data)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
+    return (ptr, len(data))

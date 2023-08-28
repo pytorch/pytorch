@@ -153,22 +153,6 @@ class TestFakePG(TestCase):
         dist.all_to_all_single(out_tensor, in_tensor, output_split, input_split)
         self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
-    def test_send(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        tensor = torch.ones(3, 3)
-        dist.send(tensor, 1)
-        self.assertEqual(tuple(tensor.shape), (3, 3))
-
-    def test_recv(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        output = torch.ones(3, 3)
-        dist.recv(output, 1)
-        self.assertEqual(tuple(output.shape), (3, 3))
-
 
 if __name__ == "__main__":
     run_tests()

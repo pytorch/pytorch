@@ -159,14 +159,14 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_grad_fn_seq_nr(seq_nr)
+            fx_traceback.set_seq_nr(seq_nr, bwd=True)
 
         return prehook
 
     def get_posthook(special_stack_, seq_nr):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
-            fx_traceback.reset_grad_fn_seq_nr()
+            fx_traceback.set_seq_nr(-1, bwd=True)
 
         return posthook
 

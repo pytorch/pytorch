@@ -105,22 +105,6 @@ class FakeProcessGroup(dist.ProcessGroup):
     ):
         return ret_work(output_tensor)
 
-    def send(
-        self,
-        tensors: List[Tensor],
-        dstRank: int,
-        tag: int,
-    ):
-        return ret_work(None)
-
-    def recv(
-        self,
-        tensors: List[Tensor],
-        srcRank: int,
-        tag: int,
-    ):
-        return ret_work(tensors)
-
     def getBackendName(self):
         return "fake"
 

@@ -94,17 +94,6 @@ AOTInductorError AOTInductorModelContainerGetInputName(
       { *input_name_out = container->input_name(input_idx); })
 }
 
-AOTInductorError AOTInductorModelContainerGetInputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const char** input_dtype_out) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *input_dtype_out = container->get_input_dtype(input_idx); })
-}
-
 AOTInductorError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_outputs_out) {
@@ -124,17 +113,6 @@ AOTInductorError AOTInductorModelContainerGetOutputName(
           container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *output_name_out = container->output_name(output_idx); })
-}
-
-AOTInductorError AOTInductorModelContainerGetOutputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const char** output_dtype_out) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *output_dtype_out = container->get_output_dtype(output_idx); })
 }
 
 AOTInductorError AOTInductorModelContainerGetMaxInputShape(

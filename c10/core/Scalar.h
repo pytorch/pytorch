@@ -300,12 +300,12 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymBool sb) {
-    if (auto m = sb.maybe_as_bool()) {
-      tag = Tag::HAS_b;
-      v.i = *m;
-    } else {
+    if (sb.is_symbolic()) {
       tag = Tag::HAS_sb;
       v.p = std::move(sb).release();
+    } else {
+      tag = Tag::HAS_b;
+      v.d = sb.as_bool_unchecked();
     }
   }
 
