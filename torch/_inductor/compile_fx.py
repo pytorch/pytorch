@@ -1050,7 +1050,8 @@ def compile_fx(
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
-            if context is not None and context.fw_metadata:
+            # See Note [User Outputs in the inductor graph]
+            if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = context.fw_metadata.num_mutated_inputs
             else:
                 original_output_start_index = 0
@@ -1067,6 +1068,7 @@ def compile_fx(
 
             assert num_orig_model_outputs <= num_model_outputs
 
+            # Note [User Outputs in the inductor graph]
             # We makes the following assumption
             # For inference
             #   len(orig_model_outputs) == len(model_outputs)
