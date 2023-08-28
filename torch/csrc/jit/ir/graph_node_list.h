@@ -60,12 +60,12 @@ struct generic_graph_node_list_iterator {
   generic_graph_node_list_iterator(T* cur, int d) : cur(cur), d(d) {}
   generic_graph_node_list_iterator(
       const generic_graph_node_list_iterator& rhs) = default;
-  generic_graph_node_list_iterator(generic_graph_node_list_iterator&& rhs) =
-      default;
+  generic_graph_node_list_iterator(
+      generic_graph_node_list_iterator&& rhs) noexcept = default;
   generic_graph_node_list_iterator& operator=(
       const generic_graph_node_list_iterator& rhs) = default;
   generic_graph_node_list_iterator& operator=(
-      generic_graph_node_list_iterator&& rhs) = default;
+      generic_graph_node_list_iterator&& rhs) noexcept = default;
   T* operator*() const {
     return cur;
   }

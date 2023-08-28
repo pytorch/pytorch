@@ -29,10 +29,10 @@ Stats stats() {
 #else
 #include <c10/util/flat_hash_map.h>
 #include <elf.h>
-#include <limits.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <algorithm>
+#include <climits>
 #include <iostream>
 #include <unordered_map>
 #include <vector>
@@ -140,7 +140,7 @@ struct UnwindCache {
             }
             if (segments[i].p_type == PT_GNU_EH_FRAME) {
               std::string library_name = info->dlpi_name;
-              if (library_name == "") {
+              if (library_name.empty()) {
                 library_name = process_name();
               }
               auto eh_frame_hdr =
@@ -153,7 +153,7 @@ struct UnwindCache {
               return 0;
             }
           }
-          self->libraries_with_no_unwind_.push_back(info->dlpi_name);
+          self->libraries_with_no_unwind_.emplace_back(info->dlpi_name);
           return 0;
         },
         this);
@@ -193,7 +193,7 @@ struct UnwindCache {
       // once per frame that cannot be unwound.
       TORCH_WARN("Unsupported unwinding pattern: ", err.what());
     }
-    auto r = ip_cache_.insert_or_assign(addr, std::move(unwinder));
+    auto r = ip_cache_.insert_or_assign(addr, unwinder);
     return r.first->second;
   }
 
@@ -270,7 +270,7 @@ static std::shared_timed_mutex cache_mutex_;
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
-  UnwindState state;
+  UnwindState state{};
   state.rip = *(int64_t*)(rsp);
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
@@ -412,6 +412,7 @@ symbolize(const std::vector<void*>& frames) {
     s.request(f);
   }
   std::vector<Frame> results;
+  results.reserve(frames.size());
   for (auto f : frames) {
     results.emplace_back(s.lookup(f));
   }
