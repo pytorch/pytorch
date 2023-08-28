@@ -14,9 +14,9 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    freeze_rng_state,
     IS_FBCODE,
     TEST_WITH_ASAN,
-    freeze_rng_state,
 )
 
 try:
@@ -999,12 +999,11 @@ class CudaReproTests(TestCase):
         m = torch.compile(mod)
 
         with freeze_rng_state():
-           o1 = m(inp.clone())
+            o1 = m(inp.clone())
 
         o2 = mod(inp.clone())
 
         self.assertEqual(o1, o2)
-
 
 
 if __name__ == "__main__":
