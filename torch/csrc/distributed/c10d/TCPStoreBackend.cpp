@@ -471,9 +471,8 @@ void TCPStoreMasterDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (!(fds[0].revents & POLLIN)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -513,9 +512,8 @@ void TCPStoreMasterDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (fds[0].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -530,9 +528,8 @@ void TCPStoreMasterDaemon::run() {
       // The main thread will write a byte to the pipe then close it before
       // joining the background thread
       if (fds[1].revents & ~(POLLIN | POLLHUP)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the control pipe's reading fd: " +
                 std::to_string(fds[1].revents));
       }
