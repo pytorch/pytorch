@@ -1237,6 +1237,7 @@ class BuiltinVariable(VariableTracker):
                 )
 
                 if name_var.value == "data":
+                    print("SET DATA?", obj.as_proxy().node.meta['example_value'].size(), val.as_proxy().node.meta['example_value'].size())
                     to_remove = []
                     for tf in tx.output.tracked_fakes:
                         if tf.source == obj.source:
@@ -1244,14 +1245,16 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
-                    out = wrap_fx_proxy(
-                        tx,
-                        tx.output.create_proxy(
-                            "call_function",
-                            torch._set_data,
-                            *proxy_args_kwargs([obj, val], {}),
-                        ),
-                    )
+                    with torch.no_grad():
+                        out = wrap_fx_proxy(
+                            tx,
+                            tx.output.create_proxy(
+                                "call_function",
+                                torch.Tensor.set_,
+                                *proxy_args_kwargs([obj, val], {}),
+                            ),
+                        )
+                    # out.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
                     tx.replace_all(obj, out)
             
             return val.add_options(self, obj, name_var)

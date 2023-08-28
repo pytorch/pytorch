@@ -55,7 +55,9 @@ def torchscript(gm, fake_tensor_inputs):
 
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(fx_g, example_inputs):
+    print("IN BOXED NOP")
     def run(args):
+        print("RUNNING WITH ARGS?!")
         return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True

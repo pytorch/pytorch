@@ -186,8 +186,14 @@ def _free_storage(tensor: torch.Tensor) -> None:
                 f"storage size: PLACEHOLDER\n"
                 f"tensor shape: {tensor.shape}",
             )
+<<<<<<< HEAD
             # torch.resize_storage_(tensor, 0)
             tensor._typed_storage()._resize_(0)
+=======
+            torch.resize_storage_(tensor, 0)
+            # tensor._typed_storage()._resize_(0)
+        return not already_freed
+>>>>>>> bae4a4b866b (WIP)
 
 
 Q = TypeVar("Q")

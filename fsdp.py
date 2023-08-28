@@ -78,7 +78,14 @@ def main(compiled):
             print("RUNNING COMPILE")
             torch._dynamo.config.capture_dynamic_output_shape_ops = True
             torch._dynamo.config.capture_scalar_outputs = True
-            model = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(model)
+            if gpu_id == 0:
+                params = {
+                    **dict(model.named_parameters(remove_duplicate=False)),
+                    **dict(model.named_buffers(remove_duplicate=False)),
+                }
+                for name, param in params.items():
+                    print(f"Pre compile. {name} {param.size()}")
+            model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
             res = run(model, optim)
     else:
         res = run(model, optim)
