@@ -409,7 +409,8 @@ class DebugFormatter:
         #     with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
         #         gm = pickle.load(fd)
 
-        node_name_to_buff_name = self._get_fx_node_name_to_buffer(nodes)
+        # node_name_to_buff_name = self._get_fx_node_name_to_buffer(nodes)
+        node_name_to_buff_name = None
 
         # breakpoint()
 
@@ -418,18 +419,27 @@ class DebugFormatter:
         draw_graph(gm, fname=self.filename("fx_graph_diagram.svg"), clear_meta=False, node_name_to_group=node_name_to_buff_name)
     
     def _get_fx_node_name_to_buffer(self, nodes: SchedulerNodeList):
-        node_name_to_buff_name = {}
+        buff_name_to_node_count = {}
         for node in nodes:
             ir_node = node.node
-            if ir_node is None:
+            if ir_node is None or ir_node.origins is None:
                 continue
             buff_name = ir_node.name
-            if ir_node.origins is None:
+            buff_name_to_node_count[buff_name] = len(ir_node.origins)
+
+        node_name_to_buff_name = {}
+        
+        for node in nodes:
+            ir_node = node.node
+            if ir_node is None or ir_node.origins is None:
                 continue
+            buff_name = ir_node.name
             for origin in ir_node.origins:
-                if origin.stack_trace is None:
-                    continue
+                # if origin.stack_trace is None:
+                #     continue
                 node_name = origin.name
+                if node_name in node_name_to_buff_name:
+                    breakpoint()
                 assert node_name not in node_name_to_buff_name, f"node_name={node_name} should not be in {node_name_to_buff_name}"
                 node_name_to_buff_name[node_name] = buff_name
                 # parsed_stack_trace = _parse_stack_trace(origin.stack_trace)

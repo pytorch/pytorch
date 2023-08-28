@@ -352,6 +352,7 @@ if HAS_PYDOT:
                         dot_graph.add_node(dot_node)
                     else:
                         assert group in group_to_subgraph, "group in group_to_subgraph"
+                        # breakpoint()
                         subgraph = group_to_subgraph[group]
                         subgraph.add_node(dot_node)
 

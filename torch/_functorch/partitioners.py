@@ -896,7 +896,8 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     g = graph_drawer.FxGraphDrawer(traced, figname, node_name_to_group=node_name_to_group)
     x = g.get_main_dot_graph()
     # breakpoint()
-    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
+    prog = ['dot', '-Gnslimit=2', '-Gnslimit1=2', '-Gmaxiter=5000', '-v5']
+    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}", prog=prog)
 
 
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
