@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, Tuple, TYPE_CHECKING, Union
+import math
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -33,11 +34,37 @@ if TYPE_CHECKING:
 class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
+        self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
 
     def get_current_mesh(self) -> "DeviceMesh":
         if len(self.mesh_stack) == 0:
             raise RuntimeError("No device mesh is currently active!")
         return self.mesh_stack[-1]
+
+    def create_child_mesh(
+        self, device_mesh: "DeviceMesh", mesh_dim: int
+    ) -> "DeviceMesh":
+        # swap the current dim to the last dim then reshape to flatten out other
+        # dims, so we can just extract the list of ranks which contains cur_rank.
+        cur_rank = device_mesh.get_rank()
+        pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+            -1, device_mesh.mesh.size(mesh_dim)
+        )
+
+        for mesh_1d in pg_ranks_by_dim:
+            sub_mesh = DeviceMesh(
+                device_mesh.device_type, mesh_1d, _init_process_groups=False
+            )
+            if cur_rank in mesh_1d:
+                res_sub_mesh = sub_mesh
+
+        res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+        self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+        return res_sub_mesh
+
+    def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
+        return self.child_to_parent_mapping.get(device_mesh, None)
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
@@ -96,12 +123,14 @@ class DeviceMesh:
 
     device_type: str
     mesh: torch.Tensor
+    mesh_dim_names: Optional[Tuple[str, ...]]
 
     def __init__(
         self,
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
+        mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -111,6 +140,7 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
+        self.mesh_dim_names = mesh_dim_names
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -238,6 +268,54 @@ class DeviceMesh:
             return True
         return self.mesh.equal(other.mesh)
 
+    def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
+        """
+        Slice the current DeviceMesh based on the mesh_dim_name given to create a child
+        DeviceMesh.
+
+        Args:
+            mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
+            to create a child DeviceMesh for.
+        Returns:
+            A :class:`DeviceMesh` object
+
+        Example (2 host with 4 GPUs each):
+        ```
+        # Below is a DeviceMesh with mesh_shape of (2, 4) and mesh_dim_name of ("dp", "tp")
+        mesh = DeviceMesh(device_type="cuda",
+                          mesh=[
+                            [0, 1, 2, 3],
+                            [4, 5, 6, 7]
+                          ],
+                          mesh_dim_names=["dp", "tp"])
+                          )
+        ```
+        Calling mesh["dp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
+        Calling mesh["dp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
+        Calling mesh["tp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
+        Calling mesh["tp"] on rank 1, 3 would return a 1D child DeviceMesh:([1, 3]).
+        Calling mesh["tp"] on rank 2, 5 would return a 1D child DeviceMesh:([2, 5]).
+        Calling mesh["tp"] on rank 4, 7 would return a 1D child DeviceMesh:([4, 7]).
+        """
+        if self.mesh.ndim <= 1:
+            raise RuntimeError(
+                f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
+            )
+        if self.mesh_dim_names is None:
+            raise KeyError(
+                "No `mesh_dim_names` found.",
+                "To slice the device mesh, please call `init_device_mesh` with `mesh_dim_names`.",
+            )
+        if mesh_dim_name not in self.mesh_dim_names:
+            raise KeyError(
+                f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                f"Available mesh dimensions are: {self.mesh_dim_names}",
+            )
+        mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+        submesh = mesh_resources.create_child_mesh(self, mesh_dim)
+
+        return submesh
+
     def get_dim_groups(
         self, mesh_dim: Optional[int] = None
     ) -> Union[ProcessGroup, List[ProcessGroup]]:
@@ -269,3 +347,53 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+
+def init_device_mesh(
+    device_type: str,
+    mesh_shape: Tuple[int, ...],
+    *,
+    mesh_dim_names: Optional[Tuple[str, ...]] = None,
+) -> DeviceMesh:
+    """
+    Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
+    This creates a DeviceMesh with a mesh layout of n-d dimensional array, n being the len(mesh_shape)
+    and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
+    labeled as mesh_dim_names[i].
+
+
+    Args:
+        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
+        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
+        that describes the layout of devices.
+    Kwargs:
+        mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
+        of the multi-dimensional array that describes the layout of devices. Its length must match the length
+        of `mesh_shape`.
+
+    Returns:
+        A :class:`DeviceMesh` object
+
+    .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
+    behind the scene, which are requried for distributed communications.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
+        >>>
+        >>> one_d_mesh = init_device_mesh("cuda", mesh_shape=(8,))
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+    """
+    if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
+        raise RuntimeError(
+            f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_shape)}."
+        )
+
+    mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+    device_mesh = DeviceMesh(
+        device_type=device_type,
+        mesh=mesh,
+        mesh_dim_names=mesh_dim_names,
+    )
+
+    return device_mesh

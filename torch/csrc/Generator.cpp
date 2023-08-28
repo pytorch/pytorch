@@ -40,7 +40,6 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
-  PyObject_GC_UnTrack(_self);
   auto self = reinterpret_cast<THPGenerator*>(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
@@ -231,17 +230,6 @@ static struct PyMemberDef THPGenerator_members[] = {
      nullptr},
     {nullptr}};
 
-static int THPGenerator_traverse(
-    THPGenerator* self,
-    visitproc visit,
-    void* arg) {
-  return 0;
-}
-
-// Even though they can't have cyclic references, we explicitly allow Generator
-// objects to be tracked by the GC. This provides convenient access to all
-// existing Generators instances when we need to re-seed them.
-// See Note [RNG re-seeding in Dataloader workers]
 PyTypeObject THPGeneratorType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
@@ -261,10 +249,9 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
-        Py_TPFLAGS_HAVE_GC, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
-    (traverseproc)THPGenerator_traverse, /* tp_traverse */
+    nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
