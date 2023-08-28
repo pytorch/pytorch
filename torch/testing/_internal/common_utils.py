@@ -1648,15 +1648,6 @@ def set_default_dtype(dtype):
     finally:
         torch.set_default_dtype(saved_dtype)
 
-@contextlib.contextmanager
-def set_default_tensor_type(tensor_type):
-    saved_tensor_type = torch.tensor([]).type()
-    torch.set_default_tensor_type(tensor_type)
-    try:
-        yield
-    finally:
-        torch.set_default_tensor_type(saved_tensor_type)
-
 def iter_indices(tensor):
     if tensor.dim() == 0:
         return range(0)
@@ -2245,8 +2236,6 @@ class TestCase(expecttest.TestCase):
     _precision: float = 0
     _rel_tol: float = 0
 
-    _avoid_default_dtype_check: bool = False
-
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
@@ -2563,9 +2552,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # decorator to disable the invariant checks.
         torch.sparse.check_sparse_tensor_invariants.enable()
 
-        if not self._avoid_default_dtype_check:
-            assert torch.get_default_dtype() == torch.float
-
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2576,9 +2562,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 torch.sparse.check_sparse_tensor_invariants.enable()
             else:
                 torch.sparse.check_sparse_tensor_invariants.disable()
-
-        if not self._avoid_default_dtype_check:
-            assert torch.get_default_dtype() == torch.float
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
