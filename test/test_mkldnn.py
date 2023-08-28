@@ -567,6 +567,24 @@ class TestMkldnn(TestCase):
         self.assertEqual(y1, y2)
         self.assertEqual(x1.grad, x2.grad.to_dense())
 
+    def test_gelu_transpose(self):
+        m = torch.nn.GELU()
+        x = torch.randn((4, 6, 6), dtype=torch.float32) * 10
+        y_target = torch.randn((4, 6, 6), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_(True)
+        x2 = x.clone().requires_grad_(True)
+        y1 = m(x1).transpose(-1, -2)
+        loss1 =  torch.mean((y1 - y_target) ** 2.0)
+        loss1.backward()
+
+        torch._C._set_mkldnn_enabled(False)
+        y2 = m(x2).transpose(-1, -2)
+        loss2 =  torch.mean((y2 - y_target) ** 2.0)
+        loss2.backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_gelu_bf16(self):
         m = torch.nn.GELU()
