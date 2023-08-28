@@ -211,7 +211,6 @@ exclude_patterns = [
     'torch/_inductor/exc.py',
     'torch/_inductor/sizevars.py',
     'torch/_inductor/triton_helpers.py',
-    'torch/_inductor/freezing.py',
     'torch/_inductor/pattern_matcher.py',
     'torch/_inductor/fx_utils.py',
     'torch/_inductor/virtualized.py',
