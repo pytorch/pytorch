@@ -514,7 +514,7 @@ class MetaConverter:
                         if mb_fake_mode is not None:
                             maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
                         with maybe_fake_mgr, torch.no_grad():
-                            r.set_(r_s, t.storage_offset(), t.size(), t.stride())
+                            r.set_(r_s, storage_offset, sizes, strides)
 
                 if safe_grad(t) is not None:
                     from torch._dynamo.source import AttrSource
