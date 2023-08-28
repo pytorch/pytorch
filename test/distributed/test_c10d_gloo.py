@@ -1203,7 +1203,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Output is not a list of lists.
         dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-            TypeError, "Invalid function argument.*output_tensor_lists"
+            RuntimeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 

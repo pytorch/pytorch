@@ -3064,7 +3064,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
-        with self.assertRaisesRegex(TypeError, "Invalid function argument"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
 
     @requires_nccl()

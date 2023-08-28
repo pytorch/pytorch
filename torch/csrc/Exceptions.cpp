@@ -12,9 +12,7 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistError,
-    *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -73,35 +71,6 @@ could not be completed because the input matrix is singular.",
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "_DistBackendError", THPException_DistBackendError) == 0);
-
-  ASSERT_TRUE(
-      THPException_DistNetworkError = PyErr_NewExceptionWithDoc(
-          "torch.distributed.DistNetworkError",
-          "Exception raised when a network error occurs in distributed",
-          PyExc_RuntimeError,
-          nullptr));
-  ASSERT_TRUE(
-      PyModule_AddObject(
-          module, "_DistNetworkError", THPException_DistNetworkError) == 0);
-
-  ASSERT_TRUE(
-      THPException_DistStoreError = PyErr_NewExceptionWithDoc(
-          "torch.distributed.DistStoreError",
-          "Exception raised when an error occurs in the distributed store",
-          PyExc_RuntimeError,
-          nullptr));
-  ASSERT_TRUE(
-      PyModule_AddObject(
-          module, "_DistStoreError", THPException_DistStoreError) == 0);
-
-  ASSERT_TRUE(
-      THPException_DistError = PyErr_NewExceptionWithDoc(
-          "torch.distributed.DistError",
-          "Exception raised when an error occurs in the distributed library",
-          PyExc_RuntimeError,
-          nullptr));
-  ASSERT_TRUE(
-      PyModule_AddObject(module, "_DistError", THPException_DistError) == 0);
 
   return true;
 }
