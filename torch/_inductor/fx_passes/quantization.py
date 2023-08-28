@@ -73,6 +73,23 @@ dequantize_qconv_pt2e_pattern = CallFunction(
     Arg(),  # algorithm
 )
 
+qlinear_pt2e_pattern = CallFunction(
+    torch.ops.onednn.qlinear_pointwise.default,
+    KeywordArg("x"),
+    KeywordArg("x_scale"),
+    KeywordArg("x_zp"),
+    KeywordArg("packed_weight"),
+    KeywordArg("w_scale"),
+    KeywordArg("w_zp"),
+    KeywordArg("b"),
+    KeywordArg("output_scale"),
+    KeywordArg("output_zero_point"),
+    KeywordArg("fp32_output"),
+    KeywordArg("postop_name"),
+    KeywordArg("postop_args"),
+    KeywordArg("postop_algorithm"),
+)
+
 dequantize_accum_pattern = CallFunction(
     aten.mul.Tensor,
     CallFunction(
@@ -114,7 +131,7 @@ def generate_pattern_with_output_quant(computation_call):
         output = clamp_max(output, 127)
         output = output.to(uint8)
     """
-    quantize_conv_output_pattern_pt2e = CallFunction(
+    quantized_op_output_pattern_pt2e = CallFunction(
         prims.convert_element_type.default,
         CallFunction(
             aten.clamp_max.default,
@@ -138,7 +155,7 @@ def generate_pattern_with_output_quant(computation_call):
         ),
         KeywordArg("o_dtype"),
     )
-    return quantize_conv_output_pattern_pt2e
+    return quantized_op_output_pattern_pt2e
 
 
 def _register_quantized_conv_lowering(
@@ -203,6 +220,63 @@ def _register_quantized_conv_lowering(
         return L[computation_op](*computation_args)
 
     return qconv
+
+
+def _register_quantized_linear_lowering(
+    pattern,
+    pass_number,
+    computation_op,
+    fp32_output,
+    unary_attr,
+):
+    @register_lowering_pattern(pattern, pass_number=pass_number)
+    def qlinear(match: Match, *args, **kwargs):
+        # Activation QParams
+        x, x_scale, x_zp = (
+            kwargs["x"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
+        )
+        # Weight QParams
+        packed_weight, w_scale, w_zp = (
+            kwargs["packed_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+
+        # bias
+        b = kwargs["b"] if "b" in kwargs else None
+
+        # Output QParams
+        o_inv_scale, o_zero_point = (
+            kwargs["o_inv_scale"],
+            kwargs["o_zp"],
+        )
+        assert (
+            kwargs["fp32_output"] is True
+        )  # Expected int8-in fp32-out qlinear in weight prepack phase
+        assert (
+            kwargs["postop_name"] == "none"
+        )  # Expected no post op fused in weight prepack phase
+
+        computation_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            b,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            unary_attr.op_name,
+            unary_attr.scalars_attr,
+            unary_attr.algorithm_attr,
+        )
+        return L[computation_op](*computation_args)
+
+    return qlinear
 
 
 def _register_quantized_conv_binary_lowering(
@@ -273,7 +347,7 @@ def _register_quantization_unary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
-    unary_replace_patterns = {
+    conv_unary_replace_patterns = {
         UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
             dequantize_qconv_pt2e_pattern
         ),
@@ -284,12 +358,30 @@ def _register_quantization_unary_fusion():
         ),
     }
 
-    for unary_attr, patterns in unary_replace_patterns.items():
+    for unary_attr, patterns in conv_unary_replace_patterns.items():
         # Register qconv2d pattern for ExternKernel Lowering
         _register_quantized_conv_lowering(
             patterns,
             1 if unary_attr.op_name != "none" else 2,  # pass_number
             torch.ops.onednn.qconv2d_pointwise,  # computation_op
+            False,  # fp32_output
+            unary_attr,  # unary_attr
+        )
+
+    linear_unary_replace_patterns = {
+        UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+            qlinear_pt2e_pattern
+        ),
+        UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default)
+        ),
+    }
+
+    for unary_attr, patterns in linear_unary_replace_patterns.items():
+        _register_quantized_linear_lowering(
+            patterns,
+            1 if unary_attr.op_name != "none" else 2,  # pass_number
+            torch.ops.onednn.qlinear_pointwise,  # computation_op
             False,  # fp32_output
             unary_attr,  # unary_attr
         )
@@ -770,6 +862,149 @@ def _generate_qconv_weight_prepack_patterns():
     )
 
 
+def _is_valid_dequant_linear_pattern(match):
+    # Check dequant pattern has only 1 user.
+    linear_node = match.output_node()
+    assert linear_node.target in (aten.addmm.default, aten.mm.default)
+    input_index = 0 if linear_node.target is aten.mm.default else 1
+    mul_node = linear_node.args[input_index]
+    sub_node = mul_node.args[0]
+    to_fp32_node = sub_node.args[0]
+
+    assert to_fp32_node.target is prims.convert_element_type.default
+    assert sub_node.target is aten.sub.Tensor
+    assert mul_node.target is aten.mul.Tensor
+    if (
+        len(list(to_fp32_node.users)) != 1
+        or len(list(sub_node.users)) != 1
+        or len(list(mul_node.users)) != 1
+    ):
+        # Ensure the dequant pattern only has 1 user
+        # since we will delete the dequant pattern here
+        return False
+    return True
+
+
+def _register_qlinear_weight_prepack_pass(pattern, pass_number):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_dequant_linear_pattern,
+        pass_number=pass_number,
+    )
+    def qlinear_weight_prepack(match: Match, *args, **kwargs):
+        """
+        Match the pattern:
+        int8 activation
+          |
+        dequant_per_tensor
+          |
+        mm/addmm <- t <- dequant_per_channel <- int8_weight
+
+        Insert weight prepack node and change the pattern to:
+        int8 activation
+          |
+        onednn.qlinear_pointwise <- onednn.qlinear_prepack <- int8_weight
+        """
+        linear_node = match.output_node()
+        assert linear_node.target in (aten.addmm.default, aten.mm.default)
+        input_index = 0 if linear_node.target is aten.mm.default else 1
+        weight_index = input_index + 1
+        mul_node = linear_node.args[input_index]
+        sub_node = mul_node.args[0]
+        to_fp32_node = sub_node.args[0]
+        t_node = linear_node.args[weight_index]
+        dequant_per_channel = t_node.args[0]
+        assert (
+            dequant_per_channel.target
+            is quantized_decomposed.dequantize_per_channel.default
+        )
+
+        # Activation QParams
+        qx, x_zp, x_scale = (
+            kwargs["x"],
+            kwargs["x_zp"],
+            kwargs["x_scale"],
+        )
+
+        # Weight QParams
+        qw, w_scale, w_zp = (
+            kwargs["q_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+
+        # Params
+        bias = kwargs["b"] if "b" in kwargs else None
+
+        x_shape = qx.meta.get("tensor_meta").shape
+        graph = match.graph
+        with graph.inserting_before(linear_node):
+            # Insert weight prepack node and the qlinear node
+            packed_weight_inputs = (
+                qw,
+                x_shape,
+            )
+            packed_weight_op = torch.ops.onednn.qlinear_prepack
+            prepack_weight_node = graph.call_function(
+                packed_weight_op, args=packed_weight_inputs
+            )
+
+            new_args = (
+                qx,
+                x_scale,
+                x_zp,
+                prepack_weight_node,
+                w_scale,
+                w_zp,
+                bias,
+                1.0,  # output_scale
+                0,  # output_zero_point
+                True,  # fp32_output
+                "none",  # post op name
+                [],  # post op args
+                "",  # post op algorithm
+            )
+            new_linear_node = graph.call_function(
+                torch.ops.onednn.qlinear_pointwise.default, args=new_args
+            )
+            linear_node.replace_all_uses_with(new_linear_node)
+            new_linear_node.meta.update(linear_node.meta)
+
+            # Erase the original linear node
+            graph.erase_node(linear_node)
+            # Erase the dequant pattern
+            graph.erase_node(mul_node)
+            graph.erase_node(sub_node)
+            graph.erase_node(to_fp32_node)
+            # Erase the dequant per channel pattern
+            graph.erase_node(t_node)
+            graph.erase_node(dequant_per_channel)
+
+
+def _generate_dequant_linear_node_pattern(_dequant_per_channel_pattern):
+    t_pattern = CallFunction(
+        aten.permute.default,
+        _dequant_per_channel_pattern,
+        KeywordArg("permute_axes"),
+    )
+    dequant_linear_bias_pattern = CallFunction(
+        aten.addmm.default,
+        KeywordArg("b"),
+        dequantize_per_tensor_activation_pattern,
+        t_pattern,
+    )
+    dequant_linear_no_bias_pattern = CallFunction(
+        aten.mm.default,
+        dequantize_per_tensor_activation_pattern,
+        t_pattern,
+    )
+    return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
+
+
+def _generate_qlinear_weight_prepack_patterns():
+    return _generate_dequant_linear_node_pattern(dequantize_per_channel_weight_pattern)
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     _register_dequant_promotion_pass(
@@ -779,3 +1014,7 @@ def _register_quantization_weight_pack_pass():
     for weight_prepack_pattern in weight_prepack_patterns:
         # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
         _register_qconv_weight_prepack_pass(weight_prepack_pattern, pass_number=1)
+    weight_prepack_patterns = _generate_qlinear_weight_prepack_patterns()
+    for weight_prepack_pattern in weight_prepack_patterns:
+        # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
+        _register_qlinear_weight_prepack_pass(weight_prepack_pattern, pass_number=1)

@@ -328,10 +328,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         tx.output.guards.update(args[0].guards)
 
         # operands
-        if type(args[3]) is not ListVariable:
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Expected a list but got {args[3].python_type()}",
+                f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
@@ -339,7 +339,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Expected a list of tensors but got {actual_args}".format(  # noqa: UP032
+                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)

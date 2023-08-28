@@ -332,8 +332,9 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
-cond.fallthrough(DispatchKey.PythonDispatcher)
-cond.fallthrough(DispatchKey.PythonTLSSnapshot)
+cond.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
+cond.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
-cond.fallthrough(DispatchKey.AutocastCPU)
+cond.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+cond.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
