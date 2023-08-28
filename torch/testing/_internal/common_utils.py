@@ -928,10 +928,10 @@ def run_tests(argv=UNITTEST_ARGS):
         import pytest
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
-        print("Profiling")
-        for file in sorted(list(experiment)):
-            if "torch" in file or "workspace" in file:
-                print(file)
+        print(f"Profiling for {argv[0]} {len(experiment)}")
+        for file in sorted(experiment):
+            print(f"{argv[0]}: {file}")
+        print(f"End profiling for {argv[0]}")
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
@@ -2157,6 +2157,7 @@ class TypedStoragePair(TensorLikePair):
         )
 
 experiment = set()
+experiment2 = set()
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
@@ -2531,12 +2532,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
     def run(self, result=None):
         import cProfile
-        with cProfile.Profile(builtins=False) as prof:
-            with contextlib.ExitStack() as stack:
-                if TEST_WITH_CROSSREF:
-                    stack.enter_context(CrossRefMode())
-                num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-
+        with contextlib.ExitStack() as stack:
+            if TEST_WITH_CROSSREF:
+                stack.enter_context(CrossRefMode())
+            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+            with cProfile.Profile(builtins=False) as prof:
                 self._run_with_retry(
                     result=result,
                     num_runs_left=num_runs,
@@ -2544,8 +2544,25 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     num_red=0,
                     num_green=0)
                 prof.snapshot_stats()
-                for file in set(k[0] for k in prof.stats):
+                for file in {k[0] for k in prof.stats}:
                     experiment.add(file)
+
+        with torch.profiler.profile(
+            with_stack=True, profile_memory=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True)
+        ) as prof:
+            with contextlib.ExitStack() as stack:
+                if TEST_WITH_CROSSREF:
+                    stack.enter_context(CrossRefMode())
+                num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+                self._run_with_retry(
+                    result=result,
+                    num_runs_left=num_runs,
+                    report_only=not OVERRIDE_FLAKY_SIGNAL,
+                    num_red=0,
+                    num_green=0)
+        for event in prof.events():
+            for s in event.stack:
+                experiment.add(s.split("(")[0])
 
     def setUp(self):
         check_if_enable(self)

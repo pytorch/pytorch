@@ -973,7 +973,6 @@ def get_pytest_args(
 
     pytest_args = [
         "-s",
-        "-vv",
         "-rfEX",
     ]
     if not is_cpp_test:
