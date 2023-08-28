@@ -97,13 +97,13 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch, checkout_pr_head=False) }}
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: !{{ config["container_image"] }}
       - name: Test Pytorch binary

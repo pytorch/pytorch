@@ -61,21 +61,21 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.1
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
@@ -105,5 +105,5 @@ jobs:
         if: always()
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()

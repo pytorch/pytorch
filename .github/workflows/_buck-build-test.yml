@@ -22,7 +22,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           fetch-depth: 1
           submodules: false
@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
 
       - name: Set up JDK 8
         uses: actions/setup-java@v3
@@ -52,7 +52,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@release/2.1
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
