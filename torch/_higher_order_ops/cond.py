@@ -47,29 +47,37 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
-def cond(pred, true_branch, false_branch, operands):
+def cond(pred, true_fn, false_fn, operands):
     r"""
-    `cond` can logically be seen as implemented as follows::
+    Conditionally applies ``true_fn`` or ``false_fn``.
 
-    def cond(pred, true_branch, false_branch, operands):
-        if pred:
-            return true_branch(*operands)
-        else:
-            return false_branch(*operands)
+    ``cond`` is structured control flow operator. That is, it is like a Python if-statement,
+    but has limitations on ``true_fn``, ``false_fn``, and ``operands`` that enable it to be
+    capturable using torch.compile and torch.export.
 
-    Like a normal if statement in Python, users can use it to selectively execute a branch based on
-    the truth value of predicate in eager-mode or torch.compile. What make 'cond' unique is that
-    'cond' is exportable, lowerable: users can use it to capture a data-dependent control flow precisely,
-    preserve it accross the Pytorch stack and compile it in an environemnt without Python.
+    Assuming the constraints on ``cond``'s arguments are met, ``cond`` is equivalent to the following::
+
+        def cond(pred, true_branch, false_branch, operands):
+            if pred:
+                return true_branch(*operands)
+            else:
+                return false_branch(*operands)
+
+    .. warning::
+       cond is a prototype feature in PyTorch, included as a part of the torch.export release. The main limitations are that
+       it may not work in eager-mode PyTorch and you may encounter various failure modes while using it.
+       Please look forward to a more stable implementation in a future version of PyTorch.
+
+    Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     Args:
         - `pred (Union[bool, torch.Tensor])`: A boolean expression or a tensor with one element,
           indicating which branch function to apply.
 
-        - `true_branch (Callable)`: A callable function (a -> b) that is within the
+        - `true_fn (Callable)`: A callable function (a -> b) that is within the
           scope that is being traced.
 
-        - `false_branch (Callable)`: A callable function (a -> b) that is within the
+        - `false_fn (Callable)`: A callable function (a -> b) that is within the
           scope that is being traced. The true branch and false branch must have
           consistent input and outputs, meaning the inputs have to be the same, and
           the outputs have to be the same type and shape.
@@ -92,7 +100,7 @@ def cond(pred, true_branch, false_branch, operands):
 
           - It's a boolean expression, e.g. `x.shape[0] > 10` or `x.dim() > 1 and x.shape[1] > 10`
 
-        - The branch function (aka `true_branch`/`false_branch`) must meet all of the following constraints:
+        - The branch function (aka `true_fn`/`false_fn`) must meet all of the following constraints:
 
           - The function signature must match with operands.
 
@@ -114,18 +122,19 @@ def cond(pred, true_branch, false_branch, operands):
 
     """
 
-    def _validate_input(pred, true_branch, false_branch, operands):
+    if torch._dynamo.is_compiling():
+        return cond_op(pred, true_fn, false_fn, operands)
+
+    def _validate_input(pred, true_fn, false_fn, operands):
         if not isinstance(pred, (bool, torch.Tensor)):
             raise RuntimeError(f"Expected pred to be bool or tensor, but got {pred}.")
 
-        if isinstance(pred, torch.Tensor) and (
-            pred.numel() != 1 or not pred.dtype == torch.bool
-        ):
+        if isinstance(pred, torch.Tensor) and pred.numel() != 1:
             raise RuntimeError(
-                f"Expected pred to be bool or single-element boolean tensor, but got {pred}."
+                f"Expected pred to be bool or single-element tensor, but got {pred}."
             )
 
-        if not callable(true_branch) or not callable(false_branch):
+        if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callbale.")
 
         if not isinstance(operands, (tuple, list)) or any(
@@ -135,17 +144,14 @@ def cond(pred, true_branch, false_branch, operands):
                 f"Expect operands to be a tuple of Tensors, but got {operands}."
             )
 
-    _validate_input(pred, true_branch, false_branch, operands)
-
-    if torch._dynamo.is_compiling():
-        return cond_op(pred, true_branch, false_branch, operands)
+    _validate_input(pred, true_fn, false_fn, operands)
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
         return torch.compile(cond_op, backend="eager", fullgraph=True)(
-            pred, true_branch, false_branch, operands
+            pred, true_fn, false_fn, operands
         )
 
 
@@ -267,18 +273,14 @@ def inner(pred, true_fn, false_fn, operands):
     if len(pre_dispatch_modes) > 0:
         with temporarily_pop_mode(pre_dispatch_modes) as mode:
             if mode.enable_tracing:
-                return trace_cond(
-                    mode, cond_op, pred, true_fn, false_fn, operands
-                )
+                return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
             else:
                 return cond_op(pred, true_fn, false_fn, operands)
     mode = _get_current_dispatch_mode()
     assert mode is not None, "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
-            return trace_cond(
-                mode, cond_op, pred, true_fn, false_fn, operands
-            )
+            return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
         else:
             return cond_op(pred, true_fn, false_fn, operands)
 

@@ -970,7 +970,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_cond_subgraph_name_is_valid(self):
-        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1018,7 +1017,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         dynamic_shapes=True,
     )
     def test_cond_graph_break_in_one_branch(self):
-        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1053,7 +1051,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             mod_for_compile(torch.ones(3, 4))
 
     def test_cond_free_variable_in_both_branches(self):
-        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1071,7 +1068,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 def false_fn(x):
                     return x.sum() - z.sum() - self.buffer.sum()
 
-                return control_flow.cond(x, true_fn, false_fn, [y])
+                return control_flow.cond(y, true_fn, false_fn, [x])
 
         mod_for_compile = torch.compile(
             Foo(), backend=cnt, dynamic=True, fullgraph=True
@@ -1102,7 +1099,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                     self.assertEqual(num_placeholders, 5)
 
     def test_cond_side_effect_in_one_branches(self):
-        torch._dynamo.reset()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -1141,7 +1137,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
     def test_cond_with_constant_pred(self):
-        torch._dynamo.reset()
         def test(pred, x):
             def true_fn(x):
                 return x
