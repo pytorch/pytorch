@@ -395,7 +395,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
-                raise UncapturedHigherOrderOpError(str(e)) from e
+                raise UncapturedHigherOrderOpError(
+                    "Cond doesn't work unless it is captured completely with torch.compile"
+                ) from e
 
             if not isinstance(ret_val, TensorVariable):
                 raise UncapturedHigherOrderOpError(

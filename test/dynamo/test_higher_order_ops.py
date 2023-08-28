@@ -1041,7 +1041,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Can't inplace modify module params/buffers inside HigherOrderOp",
+            r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             mod_for_compile(torch.ones(3, 4))
 
@@ -1123,7 +1123,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Mutating a variable not in the current scope",
+            r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
