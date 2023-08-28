@@ -45,7 +45,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   TORCH_CHECK(r.idx < 2, "Not a type");
-  at::ScalarType scalar_type;
+  at::ScalarType scalar_type = at::ScalarType::Undefined;
   if (r.idx == 1) {
     scalar_type = torch::tensors::get_default_scalar_type();
     // The default tensor type can only be set to a floating point type/
@@ -107,9 +107,9 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
-  int64_t bits = elementSize(self->type) * 8;
-  return THPUtils_packInt64(bits);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  uint64_t bits = elementSize(self->type) * 8;
+  return THPUtils_packUInt64(bits);
 }
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
@@ -163,11 +163,9 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 }
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-local-typedef)
-  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [primary_name] {
-    return PyUnicode_FromString((char*)primary_name.data());
+  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [&primary_name] {
+    return PyUnicode_FromString(primary_name.data());
   });
 }
 
@@ -195,13 +193,13 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-local-typedef)
+  auto primary_name = torch::utils::getDtypeNames(self->type).first;
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      at::kHalf, at::ScalarType::BFloat16, self->type, "dtype", [primary_name] {
-        return PyUnicode_FromString((char*)primary_name.data());
-      });
+      at::kHalf,
+      at::ScalarType::BFloat16,
+      self->type,
+      "dtype",
+      [&primary_name] { return PyUnicode_FromString(primary_name.data()); });
 }
 
 PyObject* THPFInfo_str(THPFInfo* self) {
