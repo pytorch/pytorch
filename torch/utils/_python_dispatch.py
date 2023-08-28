@@ -149,15 +149,15 @@ def is_traceable_wrapper_subclass(t):
 
 def transform_subclass(t, callback):
     """
-    Given a traceable, wrapper tensor subclass `t` that implements __torch_dispatch__
-    and holds some inner tensors,
-    and a callback of type Callable[[str, torch.Tensor], torch.Tensor],
+    Given a traceable, wrapper tensor subclass ``t`` that implements
+    ``__torch_dispatch__`` and holds some inner tensors,
+    and a callback of type ``Callable[[str, torch.Tensor], torch.Tensor]``,
     `transform_subclass` will construct a fresh instance of the wrapper tensor subclass.
     It will do so by grabbing each inner tensor attribute from the wrapper,
-    passing them into `callback` to get a transformed tensor,
+    passing them into ``callback`` to get a transformed tensor,
     and putting each transformed tensor into the fresh tensor subclass instance.
 
-    Note: this function will **not** handle ensuring that the fresh subclass
+    Note: this function will not handle ensuring that the fresh subclass
     gets the same (autograd, and aliasing) metadata as the original tensor.
     This is generally handled in other subsystems like AOTAutograd.
     """
@@ -169,17 +169,14 @@ def transform_subclass(t, callback):
 
 def _correct_storage_aliasing(func, schema_info, args, outs):
     """
-    Given:
-        - an OpOverload
-        - a SchemaInfo (cached information from torchgen about the op's chema)
-        - the arguments it was called with
-        - the outputs that resulted from calling it
-    This function checks to see if func is a "view" operator
+    Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),
+    and the inputs/outputs to the OpOverload,
+    this function checks to see if func is a view operator
     (by checking if any of the outputs in the op's schema
      are immutable aliases of inputs).
     If so, this function manually aliases the storage of the output tensor
     with its corresponding input tensor alias.
-    It does this by **unsafely** overwriting the storage field of the output tensor
+    It does this by unsafely overwriting the storage field of the output tensor
     to be the same storage as the input.
     """
     assert isinstance(func, torch._ops.OpOverload)
@@ -294,6 +291,20 @@ def get_alias_info(func) -> SchemaInfo:
     return schema_info
 
 def return_and_correct_aliasing(func, args, kwargs, out):
+    """
+    This function should be used by wrapper tensor ``__torch_dispatch__`` subclasses
+    that would like to work with torch.compile. It ensures that the subclass
+    properly implements the aliasing behavior of every op,
+    which is needed for correctness in AOTAutograd.
+    This function will handle:
+
+        * When we see a view op, we will alias the storages of any
+          input and output tensor subclasses
+
+        * When we see an inplace or out= op, we will directly
+          return the corresponding input tensor, instead of returning
+          a (potentially) fresh output tensor.
+    """
 
     # Caching here because torchgen parsing is definitely not fast, and this function is called
     # once for every op in the graph during functionalization.
