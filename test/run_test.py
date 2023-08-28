@@ -1655,14 +1655,14 @@ def main():
         def __str__(self):
             s = f"Name: {self.name}\n"
             s += "  Parallel tests:\n"
-            s += "\n".join(
-                f"    {test}" for test in self.sharded_tests if not must_serial(test)
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
             )
             s += "  Serial tests:\n"
-            s += "\n".join(
-                f"    {test}" for test in self.sharded_tests if must_serial(test)
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
             )
-            return s
+            return s.strip()
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
