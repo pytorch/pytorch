@@ -1757,6 +1757,9 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
     if aot_config.enable_log:
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
+    if aot_config.is_export:
+        assert maybe_subclass_meta is None, "aot_export_module does not support tensor subclass inputs for now."
+        return fw_module
     return fw_module, updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
@@ -3273,6 +3276,9 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
+    if aot_config.is_export:
+        assert maybe_subclass_meta is None, "aot_export_module does not support tensor subclass inputs for now."
+        return fx_g
     return fx_g, updated_joint_inputs, maybe_subclass_meta
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
