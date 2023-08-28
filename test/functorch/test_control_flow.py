@@ -25,6 +25,7 @@ def _fake_map(f, x, *args):
 class TestControlFlow(TestCase):
 
     def test_cond_no_trace(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin()
 
@@ -37,6 +38,7 @@ class TestControlFlow(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_cond_gpu(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin()
 
@@ -193,6 +195,7 @@ class TestControlFlow(TestCase):
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin()
 
@@ -214,6 +217,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     def test_cond_nested_traced(self):
+        torch._dynamo.reset()
         def true_nested(y):
             return y * y
 
@@ -253,6 +257,7 @@ class TestControlFlowTraced(TestCase):
 
     @unittest.expectedFailure
     def test_cond_functionalized(self):
+        torch._dynamo.reset()
         def true_fn(x):
             y = x.sin()
             y.add_(4)
@@ -283,6 +288,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
     def test_cond_retrace_functionalized(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin()
 
@@ -299,6 +305,7 @@ class TestControlFlowTraced(TestCase):
 
     @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
+        torch._dynamo.reset()
         def true_true_fn(x):
             y = x.cos()
             y.add_(4)
@@ -338,6 +345,7 @@ class TestControlFlowTraced(TestCase):
         self.assertFalse(any(op._schema.is_mutable for op in all_ops))
 
     def test_cond_functionalized_data_dependent_pred(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin().sum()
 
@@ -356,6 +364,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
     def test_cond_functionalized_input_mutation_on_true_branch(self):
+        torch._dynamo.reset()
         def true_fn(x):
             view_x = x.view(x.shape)
             view_x.add_(1)
@@ -377,6 +386,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_input_mutation_on_false_branch(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin().sum()
 
@@ -398,6 +408,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_output_alias_input(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x
 
@@ -419,6 +430,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation(self):
+        torch._dynamo.reset()
         def true_true_fn(x):
             x.add_(4)
             return x.sin().max()
@@ -446,6 +458,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
+        torch._dynamo.reset()
         def true_true_fn(x):
             x.add_(4)
             return x.sin().max()
@@ -491,6 +504,7 @@ class TestControlFlowTraced(TestCase):
 
 
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x
 
@@ -527,6 +541,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(f_wrapper(f))(example_input)
 
     def test_cond_functionalized_aot_func_check_functional(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.cos()
 
@@ -565,6 +580,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_gm(torch.ones(5, 5)), f(torch.ones(5, 5)))
 
     def test_cond_nested_traced_other_inputs(self):
+        torch._dynamo.reset()
         def true_nested(y):
             return y * y
 
@@ -593,6 +609,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
 
     def test_cond_nested_traced_multi(self):
+        torch._dynamo.reset()
         def true_a(y):
             return y * y
 
@@ -677,6 +694,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(f)(x, torch.tensor(False))
 
     def test_cond_traced_not_nested_fake_tensor(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.sin()
 
@@ -695,6 +713,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_false, torch.cos(x))
 
     def test_cond_nested_traced_fake_tensor(self):
+        torch._dynamo.reset()
         def true_nested(y):
             return y * y
 
@@ -730,6 +749,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_false_true, torch.cos(x))
 
     def test_cond_nested_traced_other_inputs_fake_tensor(self):
+        torch._dynamo.reset()
         def true_nested(y):
             return y * y
 
@@ -758,6 +778,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
 
     def test_cond_nested_traced_multi_fake_tensor(self):
+        torch._dynamo.reset()
         def true_a(y):
             return y * y
 
@@ -1091,6 +1112,7 @@ class TestControlFlowTraced(TestCase):
             functional_f(*example_inputs)
 
     def test_cond_autograd_fail(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x.cos()
 
@@ -1202,6 +1224,7 @@ class TestControlFlowTraced(TestCase):
 
     @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
+        torch._dynamo.reset()
         def true_fn(x):
             return x + x
 
@@ -1238,6 +1261,7 @@ class TestControlFlowTraced(TestCase):
         self._check_closure_correctly_lifted(f, args=args, exp_res=new_exp_res, exp_arg_num=exp_arg_num)
 
     def test_cond_with_tensor_closure(self):
+        torch._dynamo.reset()
         a = torch.ones(2, 3)
         b = torch.ones(2, 3) + 1
 
@@ -1256,6 +1280,7 @@ class TestControlFlowTraced(TestCase):
         self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp, ), exp_arg_num=3)
 
     def test_cond_with_tensor_closure_graph_module(self):
+        torch._dynamo.reset()
         a = torch.ones(2, 3)
         b = torch.ones(2, 3) + 1
 
@@ -1301,6 +1326,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(exp, actual)
 
     def test_cond_with_module_param_closure(self):
+        torch._dynamo.reset()
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1324,6 +1350,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
     def test_cond_with_module_python_scalar_closure(self):
+        torch._dynamo.reset()
 
         def foo(x):
             a = torch.ones(1, 1)
@@ -1342,6 +1369,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self._check_closure_correctly_lifted(foo, args=(inp,), exp_res=res, exp_arg_num=2)
 
     def test_cond_nested_with_closure(self):
+        torch._dynamo.reset()
         a = torch.ones(1, 1)
         b = torch.ones(1, 1) + 1
 
@@ -1365,6 +1393,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
 
     def test_cond_nested_with_closure_graph_module(self):
+        torch._dynamo.reset()
         a = torch.ones(1, 1)
         b = torch.ones(1, 1) + 1
 

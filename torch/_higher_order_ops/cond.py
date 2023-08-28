@@ -33,19 +33,13 @@ from torch.utils._python_dispatch import (
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
-    _old_size_limit = torch._dynamo.config.cache_size_limit
-
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
-        # We need to enlarge the dynamo cache size limit because cond's frame is
-        # hitted with different inputs frequently by tests
-        torch._dynamo.config.cache_size_limit = 256
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
-        torch._dynamo.config.cache_size_limit = _old_size_limit
 
 
 @dataclass
@@ -144,22 +138,22 @@ def cond(pred, true_branch, false_branch, operands):
     _validate_input(pred, true_branch, false_branch, operands)
 
     if torch._dynamo.is_compiling():
-        return cond_higher_order_op(pred, true_branch, false_branch, operands)
+        return cond_op(pred, true_branch, false_branch, operands)
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
-        return torch.compile(cond_higher_order_op, backend="eager", fullgraph=True)(
+        return torch.compile(cond_op, backend="eager", fullgraph=True)(
             pred, true_branch, false_branch, operands
         )
 
 
 """
-We're going to define a `cond_higher_order_op` operation.
+We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-cond_higher_order_op = HigherOrderOperator("cond")
+cond_op = HigherOrderOperator("cond")
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -245,8 +239,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@cond_higher_order_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def cond_higher_order_op_dense(pred, true_fn, false_fn, operands):
+@cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
+def cond_op_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
@@ -255,12 +249,12 @@ def cond_higher_order_op_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-cond_higher_order_op.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(cond_higher_order_op, deferred_error=True)
+cond_op.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(cond_op, deferred_error=True)
 )
 
 
-@cond_higher_order_op.py_impl(ProxyTorchDispatchMode)
+@cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
     # TODO Move this to proper utility function
     from torch._ops import mode_stack_per_key, temporarily_pop_mode
@@ -274,22 +268,22 @@ def inner(pred, true_fn, false_fn, operands):
         with temporarily_pop_mode(pre_dispatch_modes) as mode:
             if mode.enable_tracing:
                 return trace_cond(
-                    mode, cond_higher_order_op, pred, true_fn, false_fn, operands
+                    mode, cond_op, pred, true_fn, false_fn, operands
                 )
             else:
-                return cond_higher_order_op(pred, true_fn, false_fn, operands)
+                return cond_op(pred, true_fn, false_fn, operands)
     mode = _get_current_dispatch_mode()
     assert mode is not None, "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
             return trace_cond(
-                mode, cond_higher_order_op, pred, true_fn, false_fn, operands
+                mode, cond_op, pred, true_fn, false_fn, operands
             )
         else:
-            return cond_higher_order_op(pred, true_fn, false_fn, operands)
+            return cond_op(pred, true_fn, false_fn, operands)
 
 
-@cond_higher_order_op.py_impl(FakeTensorMode)
+@cond_op.py_impl(FakeTensorMode)
 def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     true_outs = true_fn(*operands)
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
@@ -318,7 +312,7 @@ def _has_potential_branch_input_mutation(branch, inputs):
     try:
         gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
-        # this can happen when nested cond_higher_order_op is
+        # this can happen when nested cond_op is
         # functionalized
         return True
     except Exception as e:
@@ -359,7 +353,7 @@ def _has_potential_branch_input_alias(branch, inputs):
         gm = make_fx(branch)(*inputs)
 
     except UnsupportedAliasMutationException:
-        # this can happen when nested cond_higher_order_op is
+        # this can happen when nested cond_op is
         # functionalized
         return True
     except Exception as e:
@@ -393,7 +387,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     return _detect_input_alias(gm)
 
 
-@cond_higher_order_op.py_impl(DispatchKey.Functionalize)
+@cond_op.py_impl(DispatchKey.Functionalize)
 def cond_func(pred, true_fn, false_fn, inputs):
     reapply_views = torch._C._functionalization_reapply_views_tls()
     unwrapped_inputs = _unwrap_all_tensors_from_functional(
@@ -417,13 +411,13 @@ def cond_func(pred, true_fn, false_fn, inputs):
                     "One of torch.cond branch " "might be aliasing the input!"
                 )
 
-        cond_return = cond_higher_order_op(
+        cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return _wrap_all_tensors_to_functional(cond_return, level=0)
 
 
-@cond_higher_order_op.py_impl(torch._C._functorch.TransformType.Functionalize)
+@cond_op.py_impl(torch._C._functorch.TransformType.Functionalize)
 def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
     """
     Functionalization implementation for torch.cond. Currently:
@@ -455,16 +449,16 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
                     "One of torch.cond branch " "might be aliasing the input!"
                 )
 
-        cond_return = cond_higher_order_op(
+        cond_return = cond_op(
             unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs
         )
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
-cond_higher_order_op.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-cond_higher_order_op.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-cond_higher_order_op.fallthrough(DispatchKey.ADInplaceOrView)
-cond_higher_order_op.fallthrough(DispatchKey.BackendSelect)
-cond_higher_order_op.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-cond_higher_order_op.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
+cond_op.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
+cond_op.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+cond_op.fallthrough(DispatchKey.ADInplaceOrView)
+cond_op.fallthrough(DispatchKey.BackendSelect)
+cond_op.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+cond_op.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
