@@ -48,6 +48,13 @@ def buffer_reuse_key(node: ir.Buffer):
             node.get_dtype(),
             V.graph.sizevars.simplify(sympy_product(size)),
             # Detect gaps in tensor storage caused by strides
+            # The point is that the last element size hint says how big
+            # the extent of the tensor is, even if pieces inside it aren't
+            # actually used (because striding skips over it).
+            # Suppose you have a 2x2 tensor with stride 4x1, versus 1x4.
+            # In both cases, the extent of the tensor is (41 + 11 == 5),
+            # so you can represent both variants in the same amount of memory,
+            # so you can reuse the buffer in this case.
             V.graph.sizevars.size_hint(last_element),
         )
 
