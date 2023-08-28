@@ -805,7 +805,11 @@ class Optimizer:
             for group in self.param_groups:
                 for p in group['params']:
                     if p.grad is not None:
-                        if set_to_none and get_static_address_type(p.grad) is None:
+                        if set_to_none:
+                            if get_static_address_type(p.grad) is not None:
+                                raise RuntimeError("zero_grad(set_to_none=True) only expects grads that"
+                                                   "are not marked as tensors with static addresses. "
+                                                   "Use zero_grad(set_to_none=False) instead.")
                             p.grad = None
                         else:
                             if p.grad.grad_fn is not None:
