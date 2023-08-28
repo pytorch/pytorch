@@ -41,3 +41,7 @@ class _FreeEventQueue:
             event = self._queue.popleft()
             return event
         return None
+
+    def clear(self) -> None:
+        """Clear queue."""
+        self._queue.clear()
