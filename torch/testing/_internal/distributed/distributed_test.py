@@ -713,7 +713,7 @@ class DistributedTest:
                 self.assertEqual(dist.get_backend(group_id), backend_str)
             else:
                 with self.assertRaisesRegex(
-                    ValueError, "Invalid process group specified"
+                    RuntimeError, "Invalid process group specified"
                 ):
                     dist.get_backend(group_id)
 
@@ -970,7 +970,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
 
             with self.assertRaisesRegex(
-                ValueError,
+                RuntimeError,
                 "The new group's rank should be within the the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
@@ -1492,7 +1492,7 @@ class DistributedTest:
             if rank == 0:
                 rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
                 device_id = rank_to_GPU[rank][0]
-                with self.assertRaisesRegex(ValueError, "^Invalid ``op``"):
+                with self.assertRaisesRegex(RuntimeError, "^Invalid ``op``"):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
                     dist.batch_isend_irecv([send_op])
@@ -1504,7 +1504,7 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                with self.assertRaisesRegex(ValueError, "^Invalid ``p2p_op_list``"):
+                with self.assertRaisesRegex(RuntimeError, "^Invalid ``p2p_op_list``"):
                     dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
@@ -1519,7 +1519,7 @@ class DistributedTest:
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
                 with self.assertRaisesRegex(
-                    ValueError, "All ops need to use the same group"
+                    RuntimeError, "All ops need to use the same group"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
@@ -2772,7 +2772,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             for unsupported_op in unsupported_ops:
                 with self.assertRaisesRegex(
-                    ValueError, "all_reduce does not support"
+                    RuntimeError, "all_reduce does not support"
                 ):
                     dist.all_reduce(
                         _build_tensor(1, dtype=torch.cfloat), unsupported_op, group_id
@@ -3004,7 +3004,7 @@ class DistributedTest:
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             group, group_id, rank = self._init_global_test()
-            with self.assertRaisesRegex(ValueError, "all_reduce does not support"):
+            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
                 dist.all_reduce_coalesced(
                     [_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id
                 )
@@ -8306,7 +8306,7 @@ class DistributedTest:
             )
             # Ensure errors are raised upon incorrect arguments.
             with self.assertRaisesRegex(
-                ValueError,
+                RuntimeError,
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)

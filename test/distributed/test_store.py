@@ -11,7 +11,6 @@ from sys import platform
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed import DistNetworkError, DistError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
@@ -545,13 +544,12 @@ class RendezvousTCPTest(TestCase):
             next(gen)
 
     def test_dns_timeout(self):
-        with self.assertRaisesRegex(DistNetworkError, "client socket has timed out after.*dnsnotexist") as manager:
+        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
             gen = dist.rendezvous(
                 "tcp://dnsnotexist:23456?world_size=2&rank=0",
                 timeout=timedelta(seconds=1),
             )
             next(gen)
-            self.assertTrue(isinstance(manager.exception, DistError))
 
     @retry_on_connect_failures
     def test_nominal(self):

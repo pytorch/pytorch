@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -522,30 +521,30 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
+        TORCH_CHECK(false, "Socket Timeout");                             \
       } else {                                                            \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
+        throw std::system_error(errno_local, std::system_category());     \
       }                                                                   \
     } else {                                                              \
       break;                                                              \
     }                                                                     \
   }
 #else
-#define SYSCHECK(expr, success_cond)                             \
-  while (true) {                                                 \
-    auto __output = (expr);                                      \
-    (void)__output;                                              \
-    if (!(success_cond)) {                                       \
-      if (errno == EINTR) {                                      \
-        continue;                                                \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
-      } else {                                                   \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
-      }                                                          \
-    } else {                                                     \
-      break;                                                     \
-    }                                                            \
+#define SYSCHECK(expr, success_cond)                            \
+  while (true) {                                                \
+    auto __output = (expr);                                     \
+    (void)__output;                                             \
+    if (!(success_cond)) {                                      \
+      if (errno == EINTR) {                                     \
+        continue;                                               \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+        TORCH_CHECK(false, "Socket Timeout");                   \
+      } else {                                                  \
+        throw std::system_error(errno, std::system_category()); \
+      }                                                         \
+    } else {                                                    \
+      break;                                                    \
+    }                                                           \
   }
 #endif
 
@@ -590,7 +589,7 @@ void sendBytes(
         bytesSent =
             ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      throw std::system_error(ECONNRESET, std::system_category());
     }
 
     bytesToSend -= bytesSent;
@@ -613,7 +612,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      throw std::system_error(ECONNRESET, std::system_category());
     }
 
     bytesToReceive -= bytesReceived;

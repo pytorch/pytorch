@@ -27,9 +27,9 @@
 
 #include <c10/util/Exception.h>
 
-#define SYSASSERT(rv, ...)                                 \
-  if ((rv) < 0) {                                          \
-    C10_THROW_ERROR(DistStoreError, std::strerror(errno)); \
+#define SYSASSERT(rv, ...)                                                 \
+  if ((rv) < 0) {                                                          \
+    throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
   }
 
 #ifdef _WIN32
