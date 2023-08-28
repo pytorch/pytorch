@@ -52,6 +52,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
+        torch.ops.higher_order.out_dtype,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}

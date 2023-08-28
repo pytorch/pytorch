@@ -4,9 +4,10 @@ from functools import wraps
 from itertools import chain
 from typing import Callable, Dict, Sequence, Union
 
+
 import torch
 import torch.library
-from torch._ops import OpOverload, OpOverloadPacket
+from torch._ops import OpOverload, OpOverloadPacket, HigherOrderOperator
 from torch.utils._pytree import tree_map
 
 __all__ = [
@@ -36,7 +37,9 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
     overloads = []
-    if isinstance(op, OpOverload):
+    if isinstance(op, HigherOrderOperator):
+        overloads.append(op)
+    elif isinstance(op, OpOverload):
         overloads.append(op)
     else:
         assert isinstance(op, OpOverloadPacket)

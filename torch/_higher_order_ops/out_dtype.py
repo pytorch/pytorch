@@ -5,6 +5,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
+    maybe_handle_decomp,
 )
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -87,6 +88,12 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
+    # NB: Long-term we should put the decomposition logic into
+    # ProxyTorchDispatchMode so that people do not need to call maybe_handle_decomp
+    # in all HigherOrderOp proxy implementations.
+    r = maybe_handle_decomp(proxy_mode, op, args, {})
+    if r is not NotImplemented:
+        return r
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
@@ -106,6 +113,25 @@ def out_dtype_dense(
     output_dtype: torch.dtype,
     *args
 ):
+    if is_int_mm(op, output_dtype, args):
+        # assert False
+        return torch._int_mm(*args)
+    return out_dtype_fallback(op, output_dtype, *args)
+
+
+def is_int_mm(op, output_dtype, args):
+    return (
+        op == torch.ops.aten.mm.default and
+        output_dtype == torch.int32 and
+        len(args) == 2 and
+        args[0].dtype == torch.int8 and
+        args[1].dtype == torch.int8 and
+        args[0].is_cuda and
+        args[1].is_cuda
+    )
+
+
+def out_dtype_fallback(op, output_dtype, *args):
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,

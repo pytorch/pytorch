@@ -102,6 +102,20 @@ class TestOutDtypeOp(TestCase):
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertTrue(torch.allclose(f(*inp), compiled(*inp)))
 
+    def test_out_dtype_int_mm(self):
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
+        ref = torch._int_mm(x, w)
+        test_out = func(x, w)
+        func_comp = torch.compile(func, mode="max-autotune")
+        # func_comp = torch.compile(func, backend="eager", fullgraph=True)
+        test_out_c = func_comp(x, w)
+        self.assertTrue(torch.allclose(ref, test_out))
+        self.assertTrue(torch.allclose(ref, test_out_c))
+
     def test_out_dtype_mul_scalar_numerical(self):
         def f(x, y):
             return out_dtype(

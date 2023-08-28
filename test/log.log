@@ -1,0 +1,203 @@
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping __init__ /home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping __enter__ /home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping helper /home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping __init__ /home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping __enter__ /home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py
+[2023-08-28 08:23:34,631] torch._dynamo.eval_frame: [DEBUG] skipping enable_dynamic /home/cdhernandez/local/pytorch/torch/_dynamo/eval_frame.py
+[2023-08-28 08:23:34,633] [0/0] torch._dynamo.symbolic_convert: [INFO] Step 1: torchdynamo start tracing func /home/cdhernandez/local/pytorch/test/test_out_dtype_op.py:106
+[2023-08-28 08:23:34,635] [0/0] torch._dynamo.symbolic_convert.__trace_source: [DEBUG] TRACE starts_line func /home/cdhernandez/local/pytorch/test/test_out_dtype_op.py:106
+[2023-08-28 08:23:34,635] [0/0] torch._dynamo.symbolic_convert.__trace_source: [DEBUG]             def func(x, w):
+[2023-08-28 08:23:34,652] [0/0] torch._dynamo.variables.builder: [DEBUG] wrap_to_fake L['x'] (32, 32) [<DimDynamic.STATIC: 2>, <DimDynamic.STATIC: 2>] [None, None]
+[2023-08-28 08:23:34,654] [0/0] torch._dynamo.variables.builder: [DEBUG] wrap_to_fake L['w'] (32, 32) [<DimDynamic.STATIC: 2>, <DimDynamic.STATIC: 2>] [None, None]
+[2023-08-28 08:23:34,655] [0/0] torch._dynamo.symbolic_convert.__trace_source: [DEBUG] TRACE starts_line func /home/cdhernandez/local/pytorch/test/test_out_dtype_op.py:107
+[2023-08-28 08:23:34,655] [0/0] torch._dynamo.symbolic_convert.__trace_source: [DEBUG]                 return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+[2023-08-28 08:23:34,655] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_GLOBAL out_dtype []
+[2023-08-28 08:23:34,657] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_GLOBAL torch [OutDtypeHigherOrderVariable()]
+[2023-08-28 08:23:34,657] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_ATTR ops [OutDtypeHigherOrderVariable(), TorchVariable(<module 'torch' from '/home/cdhernandez/local/pytorch/torch/__init__.py'>)]
+[2023-08-28 08:23:34,658] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_ATTR aten [OutDtypeHigherOrderVariable(), TorchVariable(<module 'torch.ops' from '_ops.py'>)]
+[2023-08-28 08:23:34,658] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_ATTR mm [OutDtypeHigherOrderVariable(), TorchVariable(<module 'torch.ops.aten' from 'torch.ops'>)]
+[2023-08-28 08:23:34,659] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_ATTR default [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm)]
+[2023-08-28 08:23:34,659] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_GLOBAL torch [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm.default)]
+[2023-08-28 08:23:34,659] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_ATTR int32 [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm.default), TorchVariable(<module 'torch' from '/home/cdhernandez/local/pytorch/torch/__init__.py'>)]
+[2023-08-28 08:23:34,660] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_FAST x [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm.default), ConstantVariable(dtype)]
+[2023-08-28 08:23:34,660] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE LOAD_FAST w [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm.default), ConstantVariable(dtype), TensorVariable()]
+[2023-08-28 08:23:34,660] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE CALL_FUNCTION 4 [OutDtypeHigherOrderVariable(), TorchVariable(aten.mm.default), ConstantVariable(dtype), TensorVariable(), TensorVariable()]
+[2023-08-28 08:23:34,663] [0/0] torch._dynamo.symbolic_convert: [DEBUG] TRACE RETURN_VALUE None [TensorVariable()]
+[2023-08-28 08:23:34,664] [0/0] torch._dynamo.symbolic_convert: [INFO] Step 1: torchdynamo done tracing func (RETURN_VALUE)
+[2023-08-28 08:23:34,664] [0/0] torch._dynamo.symbolic_convert: [DEBUG] RETURN_VALUE triggered compile
+[2023-08-28 08:23:34,664] [0/0] torch._dynamo.output_graph: [DEBUG] COMPILING GRAPH due to GraphCompileReason(reason='return_value', user_stack=[<FrameSummary file /home/cdhernandez/local/pytorch/test/test_out_dtype_op.py, line 107 in func>], graph_break=False)
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG] TRACED GRAPH
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]  ===== __compiled_fn_0 =====
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]  <eval_with_key>.0 class GraphModule(torch.nn.Module):
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]     def forward(self, L_x_ : torch.Tensor, L_w_ : torch.Tensor):
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         l_x_ = L_x_
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         l_w_ = L_w_
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         # File: /home/cdhernandez/local/pytorch/test/test_out_dtype_op.py:107, code: return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, l_x_, l_w_);  l_x_ = l_w_ = None
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         return (out_dtype,)
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG]         
+[2023-08-28 08:23:34,665] [0/0] torch._dynamo.output_graph.__graph_code: [DEBUG] 
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] TRACED GRAPH
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG]  __compiled_fn_0 <eval_with_key>.0 opcode         name       target     args                                                                       kwargs
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] -------------  ---------  ---------  -------------------------------------------------------------------------  --------
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] placeholder    l_x_       L_x_       ()                                                                         {}
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] placeholder    l_w_       L_w_       ()                                                                         {}
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] call_function  out_dtype  out_dtype  (<OpOverload(op='aten.mm', overload='default')>, torch.int32, l_x_, l_w_)  {}
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] output         output     output     ((out_dtype,),)                                                            {}
+[2023-08-28 08:23:34,666] [0/0] torch._dynamo.output_graph.__graph: [DEBUG] 
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] TRACED GRAPH TENSOR SIZES
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] ===== __compiled_fn_0 =====
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] l_x_: (32, 32)
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] l_w_: (32, 32)
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] out_dtype: (32, 32)
+[2023-08-28 08:23:34,670] [0/0] torch._dynamo.output_graph.__graph_sizes: [DEBUG] 
+[2023-08-28 08:23:34,671] [0/0] torch._dynamo.output_graph: [INFO] Step 2: calling compiler function inductor
+E
+======================================================================
+ERROR: test_out_dtype_int_mm (__main__.TestOutDtypeOp)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/cdhernandez/local/pytorch/torch/testing/_internal/common_utils.py", line 2382, in wrapper
+    method(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/test/test_out_dtype_op.py", line 115, in test_out_dtype_int_mm
+    test_out_c = func_comp(x, w)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/eval_frame.py", line 333, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/eval_frame.py", line 493, in catch_errors
+    return callback(frame, cache_entry, hooks, frame_state)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 636, in _convert_frame
+    result = inner_convert(frame, cache_size, hooks, frame_state)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 133, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 389, in _convert_frame_assert
+    return _compile(
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 564, in _compile
+    guarded_code = compile_inner(code, one_graph, hooks, transform)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/utils.py", line 189, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 486, in compile_inner
+    out_code = transform_code_object(code, transform)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/bytecode_transformation.py", line 1028, in transform_code_object
+    transformations(instructions, code_options)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/convert_frame.py", line 453, in transform
+    tracer.run()
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/symbolic_convert.py", line 2074, in run
+    super().run()
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/symbolic_convert.py", line 724, in run
+    and self.step()
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/symbolic_convert.py", line 688, in step
+    getattr(self, inst.opname)(inst)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/symbolic_convert.py", line 2162, in RETURN_VALUE
+    self.output.compile_subgraph(
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/output_graph.py", line 833, in compile_subgraph
+    self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
+  File "/home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/output_graph.py", line 957, in compile_and_call_fx_graph
+    compiled_fn = self.call_user_compiler(gm)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/utils.py", line 189, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/output_graph.py", line 1024, in call_user_compiler
+    raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/output_graph.py", line 1009, in call_user_compiler
+    compiled_fn = compiler_fn(gm, self.example_inputs())
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/repro/after_dynamo.py", line 117, in debug_wrapper
+    compiled_gm = compiler_fn(gm, example_inputs)
+  File "/home/cdhernandez/local/pytorch/torch/__init__.py", line 1568, in __call__
+    return compile_fx(model_, inputs_, config_patches=self.config)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 959, in compile_fx
+    return compile_fx(
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 1146, in compile_fx
+    return aot_autograd(
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/backends/common.py", line 55, in compiler_fn
+    cg = aot_module_simplified(gm, example_inputs, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_functorch/aot_autograd.py", line 3891, in aot_module_simplified
+    compiled_fn = create_aot_dispatcher_function(
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/utils.py", line 189, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_functorch/aot_autograd.py", line 3429, in create_aot_dispatcher_function
+    compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
+  File "/home/cdhernandez/local/pytorch/torch/_functorch/aot_autograd.py", line 2212, in aot_wrapper_dedupe
+    return compiler_fn(flat_fn, leaf_flat_args, aot_config, fw_metadata=fw_metadata)
+  File "/home/cdhernandez/local/pytorch/torch/_functorch/aot_autograd.py", line 2392, in aot_wrapper_synthetic_base
+    return compiler_fn(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+  File "/home/cdhernandez/local/pytorch/torch/_functorch/aot_autograd.py", line 1573, in aot_dispatch_base
+    compiled_fw = compiler(fw_module, flat_args)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/utils.py", line 189, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 1088, in fw_compiler_base
+    return inner_compile(
+  File "/home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/repro/after_aot.py", line 80, in debug_wrapper
+    inner_compiled_fn = compiler_fn(gm, example_inputs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/debug.py", line 228, in inner
+    return fn(*args, **kwargs)
+  File "/home/cdhernandez/local/miniconda3/envs/pytorch/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 54, in newFunction
+    return old_func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 342, in compile_fx_inner
+    compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/compile_fx.py", line 551, in fx_codegen_and_compile
+    graph.run(*example_inputs)
+  File "/home/cdhernandez/local/pytorch/torch/_dynamo/utils.py", line 189, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/graph.py", line 447, in run
+    return super().run(*args)
+  File "/home/cdhernandez/local/pytorch/torch/fx/interpreter.py", line 138, in run
+    self.env[node] = self.run_node(node)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/graph.py", line 713, in run_node
+    result = super().run_node(n)
+  File "/home/cdhernandez/local/pytorch/torch/fx/interpreter.py", line 195, in run_node
+    return getattr(self, n.op)(n.target, args, kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/graph.py", line 604, in call_function
+    raise LoweringException(e, target, args, kwargs).with_traceback(
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/graph.py", line 601, in call_function
+    out = lowerings[target](*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/lowering.py", line 281, in wrapped
+    out = decomp_fn(*args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/lowering.py", line 1322, in handler
+    TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/ir.py", line 3720, in create
+    ) = cls.process_kernel(kernel, *args, **kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_inductor/ir.py", line 3014, in process_kernel
+    example_output = kernel(*new_args, **new_kwargs)
+  File "/home/cdhernandez/local/pytorch/torch/_higher_order_ops/out_dtype.py", line 60, in __call__
+    raise ValueError("out_dtype's first argument must be an OpOverload")
+torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+LoweringException: ValueError: out_dtype's first argument must be an OpOverload
+  target: out_dtype
+  args[0]: aten.mm.default
+  args[1]: torch.int32
+  args[2]: TensorBox(StorageBox(
+    InputBuffer(name='arg0_1', layout=FixedLayout('cuda', torch.int8, size=[32, 32], stride=[32, 1]))
+  ))
+  args[3]: TensorBox(StorageBox(
+    InputBuffer(name='arg1_1', layout=FixedLayout('cuda', torch.int8, size=[32, 32], stride=[32, 1]))
+  ))
+
+
+You can suppress this exception and fall back to eager by setting:
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+
+
+To execute this test, run the following from the base repo dir:
+     python test/test_out_dtype_op.py -k test_out_dtype_int_mm
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+
+----------------------------------------------------------------------
+Ran 1 test in 15.921s
+
+FAILED (errors=1)
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] TorchDynamo compilation metrics:
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] Function                                Runtimes (s)
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] ------------------------------------  --------------
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] _compile.<locals>.compile_inner               0
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] OutputGraph.call_user_compiler                0
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] create_aot_dispatcher_function                1.2714
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] compile_fx.<locals>.fw_compiler_base          0
+[2023-08-28 08:23:37,266] torch._dynamo.utils: [INFO] GraphLowering.run                             0
