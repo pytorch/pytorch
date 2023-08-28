@@ -905,6 +905,14 @@ static PyObject* _custom_eval_frame(
       frame->f_iblock);
   #endif
 
+  // In CPython 3.11 and above, a custom evaluation frame
+  // means certain optimizations are disabled.
+  // As after this point we are practically evaluating
+  // CPython bytecode using the standard interpreter,
+  // unset the eval frame to let CPython know that it can
+  // perform its optimizations. 
+  tstate->interp->eval_frame = NULL;
+
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
     // true.  Frame evaluation is supposed to continue unwinding by propagating
