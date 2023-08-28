@@ -64,7 +64,7 @@ void LayerNormKernelImplInternal(
         }
       } else {
         vec::map3<T>(
-            [scale, bias, mean_val](Vec x, Vec gamma, Vec beta) {
+            [scale, bias](Vec x, Vec gamma, Vec beta) {
               return (x + Vec(bias)) * Vec(scale) * gamma + beta;
             },
             Y_ptr,
