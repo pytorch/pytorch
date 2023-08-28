@@ -38,6 +38,7 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
+    UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
 )
@@ -576,6 +577,7 @@ def _compile(
             ConstraintViolationError,
             GuardOnDataDependentSymNode,
             ValidationException,
+            UncapturedHigherOrderOpError,
         ) as e:
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
@@ -654,6 +656,11 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
             # someone wanted these to also get suppressed.  If so, you'll
             # need to make these exceptions not get wrapped
+
+            # We intentionally don't want to suppress error here.
+            if isinstance(e, UncapturedHigherOrderOpError):
+                raise
+
             soft_fail = isinstance(e, Unsupported)
             if not config.suppress_errors and not soft_fail:
                 raise

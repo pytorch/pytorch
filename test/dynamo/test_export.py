@@ -2891,7 +2891,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected 4 arguments",
         ):
             torch._dynamo.export(f, aten_graph=True)(*example_inputs)
@@ -2903,8 +2903,24 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Expected pred to be bool/int or a tensor",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected pred to be bool or a boolean tensor with single",
+        ):
+            torch._dynamo.export(
+                f_unsupported_pred,
+                aten_graph=True,
+            )(*example_inputs)
+
+    @config.patch(suppress_errors=True)
+    def test_uncaptured_higher_order_op_error_not_suppresed(self):
+        def f_unsupported_pred(x):
+            pred = torch.nn.Module()
+            return cond(pred, lambda x: x.sin(), lambda x: x.cos(), [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected pred to be bool or a boolean tensor with single",
         ):
             torch._dynamo.export(
                 f_unsupported_pred,
@@ -2917,7 +2933,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected a tuple but got",
         ):
             torch._dynamo.export(
@@ -2934,7 +2950,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected a tuple of tensors",
         ):
             torch._dynamo.export(
@@ -2954,8 +2970,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "too many positional arguments",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_args_mismatch,
@@ -2970,8 +2986,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "HigherOrderOperator body's output must consist of tensors only",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_return_non_tensor,
@@ -2984,7 +3000,7 @@ def forward(self, x):
 
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(
@@ -3013,7 +3029,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(
