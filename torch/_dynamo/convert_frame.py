@@ -373,7 +373,8 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": str(cache_size),
+                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "accumulated_cache_size": cache_size.num_cache_entries,
             },
         )
 
@@ -608,7 +609,8 @@ def _compile(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                str(cache_size),
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
                 graph_node_count,
