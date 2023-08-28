@@ -5781,14 +5781,6 @@ class Wait(ExternKernelAlloc):
         return [self.inputs[0].codegen_reference()]
 
 
-def _wrapper_add_import_for_dist(wrapper):
-    wrapper.add_import_once("import torch.distributed as dist")
-    wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
-    wrapper.add_import_once(
-        "import torch.distributed._functional_collectives_impl as fun_col_impl"
-    )
-
-
 class CollectiveKernel(ExternKernel):
     """
     Each collective should follow the pattern:
@@ -5823,7 +5815,11 @@ class CollectiveKernel(ExternKernel):
         return list(map(wrap_input, inputs))
 
     def codegen(self, wrapper):
-        _wrapper_add_import_for_dist(wrapper)
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
+        wrapper.add_import_once(
+            "import torch.distributed._functional_collectives_impl as fun_col_impl"
+        )
         # extract references to our args in string form for codegen output
         input_names = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
