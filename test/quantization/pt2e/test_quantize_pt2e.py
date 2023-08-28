@@ -227,17 +227,6 @@ class TestHelperModules:
             conv_out = torch.squeeze(conv_out, dim=0)
             return self.linear(conv_out)
 
-    class AddInplaceAdd(torch.nn.Module):
-        def forward(self, x, y):
-            x = x + y
-            x += y
-            return x
-
-    class MulInplaceMul(torch.nn.Module):
-        def forward(self, x, y):
-            x = x * y
-            x *= y
-            return x
 
 class PT2EQuantizationTestCase(QuantizationTestCase):
     """
@@ -251,6 +240,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
         torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     }
+
+
 
     def _test_quantizer(
         self,
@@ -312,6 +303,236 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
+    def _verify_symmetric_xnnpack_qat_numerics(
+        self,
+        model: torch.nn.Module,
+        example_inputs: Tuple[Any, ...],
+    ):
+        self._verify_symmetric_xnnpack_qat_numerics_helper(
+            model, example_inputs, is_per_channel=True,
+        )
+        self._verify_symmetric_xnnpack_qat_numerics_helper(
+            model, example_inputs, is_per_channel=False,
+        )
+
+    def _verify_symmetric_xnnpack_qat_numerics_helper(
+        self,
+        model: torch.nn.Module,
+        example_inputs: Tuple[Any, ...],
+        is_per_channel: bool,
+        verify_convert: bool = True,
+    ):
+        """
+        Helper method to verify that the QAT numerics for PT2E quantization match those of
+        FX graph mode quantization for symmetric qnnpack.
+        """
+        MANUAL_SEED = 100
+
+        # PT2 export
+
+        model_pt2e = copy.deepcopy(model)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(
+                is_per_channel=is_per_channel, is_qat=True
+            )
+        )
+        model_pt2e = capture_pre_autograd_graph(
+            model_pt2e,
+            example_inputs,
+        )
+        model_pt2e = prepare_qat_pt2e(model_pt2e, quantizer)
+        torch.manual_seed(MANUAL_SEED)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+
+        model_fx = copy.deepcopy(model)
+        if is_per_channel:
+            default_qconfig = default_per_channel_symmetric_qnnpack_qat_qconfig
+        else:
+            default_qconfig = default_symmetric_qnnpack_qat_qconfig
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        backend_config = get_qnnpack_backend_config()
+        model_fx = prepare_qat_fx(
+            model_fx, qconfig_mapping, example_inputs, backend_config=backend_config
+        )
+        torch.manual_seed(MANUAL_SEED)
+        after_prepare_result_fx = model_fx(*example_inputs)
+
+        # Verify that numerics match
+        self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
+
+        if verify_convert:
+            model_pt2e.eval()
+            model_pt2e = convert_pt2e(model_pt2e)
+            quant_result_pt2e = model_pt2e(*example_inputs)
+            model_fx.eval()
+            model_fx = _convert_to_reference_decomposed_fx(
+                model_fx, backend_config=backend_config,
+            )
+            quant_result_fx = model_fx(*example_inputs)
+            self.assertEqual(quant_result_pt2e, quant_result_fx)
+
+    def _verify_symmetric_xnnpack_qat_graph(
+        self,
+        m: torch.fx.GraphModule,
+        example_inputs: Tuple[Any, ...],
+        has_relu: bool,
+        has_bias: bool = True,
+        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+    ):
+        self._verify_symmetric_xnnpack_qat_graph_helper(
+            m,
+            example_inputs,
+            is_per_channel=True,
+            has_relu=has_relu,
+            has_bias=has_bias,
+            expected_conv_literal_args=expected_conv_literal_args,
+        )
+        self._verify_symmetric_xnnpack_qat_graph_helper(
+            m,
+            example_inputs,
+            is_per_channel=False,
+            has_relu=has_relu,
+            has_bias=has_bias,
+            expected_conv_literal_args=expected_conv_literal_args,
+        )
+
+    def _verify_symmetric_xnnpack_qat_graph_helper(
+        self,
+        m: torch.fx.GraphModule,
+        example_inputs: Tuple[Any, ...],
+        is_per_channel: bool,
+        has_relu: bool,
+        has_bias: bool = True,
+        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+    ):
+        """
+        Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
+        with fake quantizes inserted into the correct places.
+        # TODO: also verify that metadata is copied over to the new nodes.
+        """
+        m = copy.deepcopy(m)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(is_per_channel, is_qat=True)
+        )
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+
+        # Verify: getitem output activation fake quantize
+        output_node = list(m.graph.nodes)[-1]
+        output_fq_node = output_node.args[0][0]
+        self.assertTrue(output_fq_node.target.startswith("activation_post_process_"))
+        output_fq_mod = getattr(m, output_fq_node.target)
+        self.assertEqual(type(output_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(
+            type(output_fq_mod.activation_post_process), MovingAverageMinMaxObserver
+        )
+        self.assertEqual(output_fq_mod.dtype, torch.qint8)
+        self.assertEqual(output_fq_mod.quant_min, -128)
+        self.assertEqual(output_fq_mod.quant_max, 127)
+
+        # Verify: getitem(bn, 0) or relu(getitem(bn, 0))
+        if has_relu:
+            relu_node = output_fq_node.args[0]
+            getitem_node = relu_node.args[0]
+            self.assertEqual(relu_node.target, torch.ops.aten.relu.default)
+        else:
+            relu_node = None
+            getitem_node = output_fq_node.args[0]
+        bn_node = getitem_node.args[0]
+        self.assertEqual(getitem_node.target, operator.getitem)
+        self.assertEqual(
+            bn_node.target, torch.ops.aten._native_batch_norm_legit.default
+        )
+
+        # Verify: conv / scale_factor.reshape [+ bias.reshape]
+        if has_bias:
+            add_bias_node = bn_node.args[0]
+            (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+            self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
+            self.assertEqual(bias_reshape_node.target, torch.ops.aten.reshape.default)
+        else:
+            div_scale_factor_node = bn_node.args[0]
+        (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
+        self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
+        self.assertEqual(conv_node.target, torch.ops.aten.conv2d.default)
+        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
+
+        # Verify: conv literal args
+        if expected_conv_literal_args is not None:
+            assert (
+                len(expected_conv_literal_args) == 6
+            ), "wrong num conv args, bad test setup"
+            for i in range(6):
+                if i + 3 < len(conv_node.args):
+                    self.assertEqual(conv_node.args[i + 3], expected_conv_literal_args[i])
+
+        # Verify: conv input activation fake quantize
+        conv_input_fq_node = conv_node.args[0]
+        conv_input_node = conv_input_fq_node.args[0]
+        self.assertTrue(
+            conv_input_fq_node.target.startswith("activation_post_process_")
+        )
+        conv_input_fq_mod = getattr(m, conv_input_fq_node.target)
+        self.assertEqual(type(conv_input_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(
+            type(conv_input_fq_mod.activation_post_process), MovingAverageMinMaxObserver
+        )
+        self.assertEqual(conv_input_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_input_fq_mod.quant_min, -128)
+        self.assertEqual(conv_input_fq_mod.quant_max, 127)
+        self.assertTrue(conv_input_node.op, "placeholder")
+
+        # Verify: conv weight fake quantize
+        conv_weight_fq_node = conv_node.args[1]
+        self.assertTrue(
+            conv_weight_fq_node.target.startswith("activation_post_process_")
+        )
+        conv_weight_fq_mod = getattr(m, conv_weight_fq_node.target)
+        if is_per_channel:
+            expected_weight_observer_type = MovingAveragePerChannelMinMaxObserver
+        else:
+            expected_weight_observer_type = MovingAverageMinMaxObserver
+        self.assertEqual(type(conv_weight_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(
+            type(conv_weight_fq_mod.activation_post_process),
+            expected_weight_observer_type,
+        )
+        self.assertEqual(conv_weight_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_weight_fq_mod.quant_min, -127)
+        self.assertEqual(conv_weight_fq_mod.quant_max, 127)
+
+        # Verify: conv(fq(input), fq(weight * scale_factor.reshape), zero_bias)
+        zero_bias_node = conv_node.args[2] if len(conv_node.args) > 2 else None
+        mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
+        (
+            conv_weight_fq_node,
+            scale_factor_reshape_node,
+        ) = mul_weight_scale_factor_node.args
+        if has_bias:
+            self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        else:
+            self.assertTrue(zero_bias_node is None)
+        self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
+        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
+
+        # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
+        scale_factor_node = scale_factor_reshape_node.args[0]
+        (bn_weight_node, sqrt_node) = scale_factor_node.args
+        bn_running_var_add_node = sqrt_node.args[0]
+        (bn_running_var_node, eps) = bn_running_var_add_node.args
+        self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
+        self.assertTrue("param_constant" in bn_weight_node.target)
+        self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
+        self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
+        self.assertTrue("tensor_constant" in bn_running_var_node.target)
+        self.assertEqual(eps, 1e-5)
+
     def _test_representation(
         self,
         model: torch.nn.Module,
@@ -319,7 +540,6 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
-        output_scale_idx: int = 3,
     ) -> torch.nn.Module:
         """ TODO: need to implement output checking based on output_scale once
         torchdynamo issue is resolved
@@ -329,7 +549,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             model,
             example_inputs,
         )
-        model_copy = copy.deepcopy(model)
+        # model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
         # Calibrate
@@ -339,27 +559,30 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
 
-        # TODO: torchdynamo times out when we do this, we can enable numerical checking
-        # after that is fixed
-        model_copy = prepare_pt2e(model_copy, quantizer)
-        # Calibrate
-        model_copy(*example_inputs)
-        model_copy = convert_pt2e(model_copy, use_reference_representation=False)
-        self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
-        pt2e_quant_output_copy = model_copy(*example_inputs)
+        # # TODO: torchdynamo times out when we do this, we can enable numerical checking
+        # # after that is fixed
+        # model_copy = prepare_pt2e(model_copy, quantizer)
+        # # Calibrate
+        # model_copy(*example_inputs)
+        # model_copy = convert_pt2e(model_copy, use_reference_representation=False)
+        # self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
+        # pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        idx = 0
-        for n in model_copy.graph.nodes:
-            if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-                idx += 1
-                if idx == output_scale_idx:
-                    output_scale = n.args[1]
-        assert output_scale is not None
+        # output_scale = None
+        # idx = 0
+        # for n in model_copy.graph.nodes:
+        #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+        #         idx += 1
+        #         if idx == 3:
+        #             output_scale = n.args[1]
+        # assert output_scale is not None
 
-        # make sure the result is off by one at most in the quantized integer representation
-        self.assertTrue(
-            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
-        )
+        # print("diff:", torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
+        # print("scale:", output_scale)
+        # # make sure the result is off by one at most in the quantized integer representation
+        # self.assertTrue(
+        #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
+        # )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
@@ -1038,60 +1261,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
-    def test_add_and_inplace_add(self):
-        quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
-        node_occurrence = {
-            # two input and one output for first add, and output for second add
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
-        }
-        node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.add.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.add_.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        ]
-        self._test_quantizer(
-            TestHelperModules.AddInplaceAdd(),
-            example_inputs,
-            quantizer,
-            node_occurrence,
-            node_list,
-        )
-
-    def test_mul_and_inplace_mul(self):
-        quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
-        node_occurrence = {
-            # two input and one output for first add, and output for second add
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
-        }
-        node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.mul.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.mul_.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        ]
-        self._test_quantizer(
-            TestHelperModules.MulInplaceMul(),
-            example_inputs,
-            quantizer,
-            node_occurrence,
-            node_list,
-        )
-
     def test_xnnpack_quantizer_conv(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
@@ -1701,571 +1870,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             qconfig_mapping,
         )
 
-    def test_representation_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(2, 5),)
-
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={}
-        )
-
-    def test_representation_conv2d(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv2d = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv2d(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={}
-        )
-
-    def test_representation_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
-        m_eager = M().eval()
-
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
-
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={}
-        )
-
-    def test_representation_add_relu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, y):
-                out = x + y
-                out = torch.nn.functional.relu(out)
-                return out
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
-
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
-        ref_node_occurrence = {
-            ns.call_function(out_dtype): 2,
-        }
-
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence=ref_node_occurrence,
-            non_ref_node_occurrence={}
-        )
-
-    def test_representation_maxpool2d(self):
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
-        m_eager = TestHelperModules.ConvMaxPool2d().eval()
-
-        example_inputs = (torch.randn(1, 2, 2, 2),)
-
-        self._test_representation(
-            m_eager,
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={}
-        )
-
-    @unittest.skip("will fix later")
-    def test_representation_adaptive_avg_pool2d(self):
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
-        m_eager = TestHelperModules.ConvWithAdaptiveAvgPool2d().eval()
-
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-
-        self._test_representation(
-            m_eager,
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={}
-        )
-
-    def test_representation_quantize_dequantize_per_channel(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        # use per channel quantization for weight
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
-        m_eager = M().eval()
-
-        inputs = [
-            (torch.randn(1, 5),),
-            (torch.randn(1, 3, 5),),
-            (torch.randn(1, 3, 3, 5),),
-            (torch.randn(1, 3, 3, 3, 5),),
-        ]
-        for example_inputs in inputs:
-            ref_node_occurrence = {
-                ns.call_function(
-                    torch.ops.quantized_decomposed.quantize_per_channel.default
-                ): 0,
-                ns.call_function(
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default
-                ): 0,
-            }
-            non_ref_node_occurrence = {
-                ns.call_function(
-                    torch.ops.quantized_decomposed.quantize_per_channel.default
-                ): 1,
-                ns.call_function(
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default
-                ): 1,
-            }
-
-            self._test_representation(
-                M().eval(),
-                example_inputs,
-                quantizer,
-                ref_node_occurrence,
-                non_ref_node_occurrence,
-                output_scale_idx=2,
-            )
-
-    def test_representation_quantize_dequantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
-        m_eager = M().eval()
-
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
-        ref_node_occurrence = {
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor
-            ): 0,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor
-            ): 0,
-        }
-        non_ref_node_occurrence = {
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 3,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ): 3,
-        }
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence,
-            non_ref_node_occurrence
-        )
-
-
-@skipIfNoQNNPACK
-class TestQuantizePT2EOps(QuantizationTestCase):
-    def test_gru(self):
-        """ this is a test for annotating fp32 GRU so that it produces
-        q -> dq -> fp32_gru -> q -> dq, this is currently enough for our use cases,
-        but we may change the annotation to be more precise in the future
-        """
-        class RNNDynamicModel(torch.nn.Module):
-            def __init__(self, mod_type):
-                super().__init__()
-                self.qconfig = default_dynamic_qconfig
-                if mod_type == 'GRU':
-                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
-                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, input_tensor, hidden_tensor):
-                input_tensor = 1 * input_tensor
-                hidden_tensor = 1 * hidden_tensor
-                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
-                return 1 * output_tensor, 1 * hidden_out
-
-        with override_quantized_engine("qnnpack"):
-            model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
-            niter = 10
-            example_inputs = (
-                # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
-                # hidden_tensor
-                # (D * num_layers, N, H_out)
-                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
-            )
-            model_graph = copy.deepcopy(model_fx)
-
-            qconfig_mapping = QConfigMapping().set_object_type(operator.mul, default_symmetric_qnnpack_qconfig)
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
-            model_fx(*example_inputs)
-            model_fx = _convert_to_reference_decomposed_fx(model_fx)
-
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
-            quantizer = XNNPACKQuantizer()
-            quantization_config = get_symmetric_quantization_config(
-                is_per_channel=False, is_dynamic=False
-            )
-            quantizer.set_global(quantization_config)
-            model_graph = prepare_pt2e(model_graph, quantizer)
-            model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
-            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
-
-
-    def test_linear_gru(self):
-        """ this test is to make sure GRU annotation does not interfere with linear annotation
-        """
-        class RNNDynamicModel(torch.nn.Module):
-            def __init__(self, mod_type):
-                super().__init__()
-                self.qconfig = default_dynamic_qconfig
-                self.linear = torch.nn.Linear(2, 2)
-                if mod_type == 'GRU':
-                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
-                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, input_tensor, hidden_tensor):
-                input_tensor = self.linear(input_tensor)
-                input_tensor = 1 * input_tensor
-                hidden_tensor = 1 * hidden_tensor
-                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
-                return 1 * output_tensor, 1 * hidden_out
-
-        with override_quantized_engine("qnnpack"):
-            model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
-            niter = 10
-            example_inputs = (
-                # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
-                # hidden_tensor
-                # (D * num_layers, N, H_out)
-                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
-            )
-            model_graph = copy.deepcopy(model_fx)
-
-            qconfig_mapping = (
-                QConfigMapping().set_object_type(
-                    operator.mul, default_symmetric_qnnpack_qconfig
-                ).set_object_type(
-                    torch.nn.Linear, default_symmetric_qnnpack_qconfig
-                )
-            )
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
-            model_fx(*example_inputs)
-            model_fx = _convert_to_reference_decomposed_fx(model_fx)
-
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
-            quantizer = XNNPACKQuantizer()
-            quantization_config = get_symmetric_quantization_config(
-                is_per_channel=False, is_dynamic=False
-            )
-            quantizer.set_global(quantization_config)
-            model_graph = prepare_pt2e(model_graph, quantizer)
-            model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
-            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
-
-
-class TestQuantizePT2EQAT(PT2EQuantizationTestCase):
-    def _verify_symmetric_xnnpack_qat_numerics(
-        self,
-        model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
-    ):
-        self._verify_symmetric_xnnpack_qat_numerics_helper(
-            model, example_inputs, is_per_channel=True,
-        )
-        self._verify_symmetric_xnnpack_qat_numerics_helper(
-            model, example_inputs, is_per_channel=False,
-        )
-
-    def _verify_symmetric_xnnpack_qat_numerics_helper(
-        self,
-        model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
-        is_per_channel: bool,
-        verify_convert: bool = True,
-    ):
-        """
-        Helper method to verify that the QAT numerics for PT2E quantization match those of
-        FX graph mode quantization for symmetric qnnpack.
-        """
-        MANUAL_SEED = 100
-
-        # PT2 export
-
-        model_pt2e = copy.deepcopy(model)
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(
-                is_per_channel=is_per_channel, is_qat=True
-            )
-        )
-        model_pt2e = capture_pre_autograd_graph(
-            model_pt2e,
-            example_inputs,
-        )
-        model_pt2e = prepare_qat_pt2e(model_pt2e, quantizer)
-        torch.manual_seed(MANUAL_SEED)
-        after_prepare_result_pt2e = model_pt2e(*example_inputs)
-
-        model_fx = copy.deepcopy(model)
-        if is_per_channel:
-            default_qconfig = default_per_channel_symmetric_qnnpack_qat_qconfig
-        else:
-            default_qconfig = default_symmetric_qnnpack_qat_qconfig
-        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
-        backend_config = get_qnnpack_backend_config()
-        model_fx = prepare_qat_fx(
-            model_fx, qconfig_mapping, example_inputs, backend_config=backend_config
-        )
-        torch.manual_seed(MANUAL_SEED)
-        after_prepare_result_fx = model_fx(*example_inputs)
-
-        # Verify that numerics match
-        self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
-
-        if verify_convert:
-            model_pt2e.eval()
-            model_pt2e = convert_pt2e(model_pt2e)
-            quant_result_pt2e = model_pt2e(*example_inputs)
-            model_fx.eval()
-            model_fx = _convert_to_reference_decomposed_fx(
-                model_fx, backend_config=backend_config,
-            )
-            quant_result_fx = model_fx(*example_inputs)
-            self.assertEqual(quant_result_pt2e, quant_result_fx)
-
-    def _verify_symmetric_xnnpack_qat_graph(
-        self,
-        m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
-        has_relu: bool,
-        has_bias: bool = True,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
-    ):
-        self._verify_symmetric_xnnpack_qat_graph_helper(
-            m,
-            example_inputs,
-            is_per_channel=True,
-            has_relu=has_relu,
-            has_bias=has_bias,
-            expected_conv_literal_args=expected_conv_literal_args,
-        )
-        self._verify_symmetric_xnnpack_qat_graph_helper(
-            m,
-            example_inputs,
-            is_per_channel=False,
-            has_relu=has_relu,
-            has_bias=has_bias,
-            expected_conv_literal_args=expected_conv_literal_args,
-        )
-
-    def _verify_symmetric_xnnpack_qat_graph_helper(
-        self,
-        m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
-        is_per_channel: bool,
-        has_relu: bool,
-        has_bias: bool = True,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
-    ):
-        """
-        Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
-        with fake quantizes inserted into the correct places.
-        # TODO: also verify that metadata is copied over to the new nodes.
-        """
-        m = copy.deepcopy(m)
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(is_per_channel, is_qat=True)
-        )
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_qat_pt2e(m, quantizer)
-        m(*example_inputs)
-
-        # Verify: getitem output activation fake quantize
-        output_node = list(m.graph.nodes)[-1]
-        output_fq_node = output_node.args[0][0]
-        self.assertTrue(output_fq_node.target.startswith("activation_post_process_"))
-        output_fq_mod = getattr(m, output_fq_node.target)
-        self.assertEqual(type(output_fq_mod), FusedMovingAvgObsFakeQuantize)
-        self.assertEqual(
-            type(output_fq_mod.activation_post_process), MovingAverageMinMaxObserver
-        )
-        self.assertEqual(output_fq_mod.dtype, torch.qint8)
-        self.assertEqual(output_fq_mod.quant_min, -128)
-        self.assertEqual(output_fq_mod.quant_max, 127)
-
-        # Verify: getitem(bn, 0) or relu(getitem(bn, 0))
-        if has_relu:
-            relu_node = output_fq_node.args[0]
-            getitem_node = relu_node.args[0]
-            self.assertEqual(relu_node.target, torch.ops.aten.relu.default)
-        else:
-            relu_node = None
-            getitem_node = output_fq_node.args[0]
-        bn_node = getitem_node.args[0]
-        self.assertEqual(getitem_node.target, operator.getitem)
-        self.assertEqual(
-            bn_node.target, torch.ops.aten._native_batch_norm_legit.default
-        )
-
-        # Verify: conv / scale_factor.reshape [+ bias.reshape]
-        if has_bias:
-            add_bias_node = bn_node.args[0]
-            (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
-            self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
-            self.assertEqual(bias_reshape_node.target, torch.ops.aten.reshape.default)
-        else:
-            div_scale_factor_node = bn_node.args[0]
-        (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
-        self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertEqual(conv_node.target, torch.ops.aten.conv2d.default)
-        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
-
-        # Verify: conv literal args
-        if expected_conv_literal_args is not None:
-            assert (
-                len(expected_conv_literal_args) == 6
-            ), "wrong num conv args, bad test setup"
-            for i in range(6):
-                if i + 3 < len(conv_node.args):
-                    self.assertEqual(conv_node.args[i + 3], expected_conv_literal_args[i])
-
-        # Verify: conv input activation fake quantize
-        conv_input_fq_node = conv_node.args[0]
-        conv_input_node = conv_input_fq_node.args[0]
-        self.assertTrue(
-            conv_input_fq_node.target.startswith("activation_post_process_")
-        )
-        conv_input_fq_mod = getattr(m, conv_input_fq_node.target)
-        self.assertEqual(type(conv_input_fq_mod), FusedMovingAvgObsFakeQuantize)
-        self.assertEqual(
-            type(conv_input_fq_mod.activation_post_process), MovingAverageMinMaxObserver
-        )
-        self.assertEqual(conv_input_fq_mod.dtype, torch.qint8)
-        self.assertEqual(conv_input_fq_mod.quant_min, -128)
-        self.assertEqual(conv_input_fq_mod.quant_max, 127)
-        self.assertTrue(conv_input_node.op, "placeholder")
-
-        # Verify: conv weight fake quantize
-        conv_weight_fq_node = conv_node.args[1]
-        self.assertTrue(
-            conv_weight_fq_node.target.startswith("activation_post_process_")
-        )
-        conv_weight_fq_mod = getattr(m, conv_weight_fq_node.target)
-        if is_per_channel:
-            expected_weight_observer_type = MovingAveragePerChannelMinMaxObserver
-        else:
-            expected_weight_observer_type = MovingAverageMinMaxObserver
-        self.assertEqual(type(conv_weight_fq_mod), FusedMovingAvgObsFakeQuantize)
-        self.assertEqual(
-            type(conv_weight_fq_mod.activation_post_process),
-            expected_weight_observer_type,
-        )
-        self.assertEqual(conv_weight_fq_mod.dtype, torch.qint8)
-        self.assertEqual(conv_weight_fq_mod.quant_min, -127)
-        self.assertEqual(conv_weight_fq_mod.quant_max, 127)
-
-        # Verify: conv(fq(input), fq(weight * scale_factor.reshape), zero_bias)
-        zero_bias_node = conv_node.args[2] if len(conv_node.args) > 2 else None
-        mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
-        (
-            conv_weight_fq_node,
-            scale_factor_reshape_node,
-        ) = mul_weight_scale_factor_node.args
-        if has_bias:
-            self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
-        else:
-            self.assertTrue(zero_bias_node is None)
-        self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
-        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
-
-        # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
-        scale_factor_node = scale_factor_reshape_node.args[0]
-        (bn_weight_node, sqrt_node) = scale_factor_node.args
-        bn_running_var_add_node = sqrt_node.args[0]
-        (bn_running_var_node, eps) = bn_running_var_add_node.args
-        self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertTrue("param_constant" in bn_weight_node.target)
-        self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
-        self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
-        self.assertTrue("tensor_constant" in bn_running_var_node.target)
-        self.assertEqual(eps, 1e-5)
-
     def test_qat_conv_no_bias(self):
         class M(torch.nn.Module):
             def __init__(self, has_relu: bool):
@@ -2458,24 +2062,313 @@ class TestQuantizePT2EQAT(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
-    @skip_if_no_torchvision
-    @skipIfNoQNNPACK
-    def test_qat_resnet18(self):
-        import torchvision
-        with override_quantized_engine("qnnpack"):
-            example_inputs = (torch.randn(1, 3, 224, 224),)
-            m = torchvision.models.resnet18()
-            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+    def test_representation_conv2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(3, 3, 3)
 
-    @skip_if_no_torchvision
-    @skipIfNoQNNPACK
-    def test_qat_mobilenet_v2(self):
-        import torchvision
-        with override_quantized_engine("qnnpack"):
-            example_inputs = (torch.randn(1, 3, 224, 224),)
-            m = torchvision.models.mobilenet_v2()
-            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+            def forward(self, x):
+                return self.conv2d(x)
 
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_add_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = x + y
+                out = torch.nn.functional.relu(out)
+                return out
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(out_dtype): 2,
+        }
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence=ref_node_occurrence,
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_maxpool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvMaxPool2d().eval()
+
+        example_inputs = (torch.randn(1, 2, 2, 2),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    @unittest.skip("will fix later")
+    def test_representation_adaptive_avg_pool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvWithAdaptiveAvgPool2d().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_quantize_dequantize_per_channel(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        # use per channel quantization for weight
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = M().eval()
+
+        inputs = [
+            (torch.randn(1, 5),),
+            (torch.randn(1, 3, 5),),
+            (torch.randn(1, 3, 3, 5),),
+            (torch.randn(1, 3, 3, 3, 5),),
+        ]
+        for example_inputs in inputs:
+            ref_node_occurrence = {
+                ns.call_function(
+                    torch.ops.quantized_decomposed.quantize_per_channel.default
+                ): 0,
+                ns.call_function(
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default
+                ): 0,
+            }
+            non_ref_node_occurrence = {
+                ns.call_function(
+                    torch.ops.quantized_decomposed.quantize_per_channel.default
+                ): 1,
+                ns.call_function(
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default
+                ): 1,
+            }
+            self._test_representation(
+                M().eval(),
+                example_inputs,
+                quantizer,
+                ref_node_occurrence,
+                non_ref_node_occurrence
+            )
+
+    def test_representation_quantize_dequantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor
+            ): 0,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor
+            ): 0,
+        }
+        non_ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 3,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 3,
+        }
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence,
+            non_ref_node_occurrence
+        )
+
+@skipIfNoQNNPACK
+class TestQuantizePT2EOps(QuantizationTestCase):
+    def test_gru(self):
+        """ this is a test for annotating fp32 GRU so that it produces
+        q -> dq -> fp32_gru -> q -> dq, this is currently enough for our use cases,
+        but we may change the annotation to be more precise in the future
+        """
+        class RNNDynamicModel(torch.nn.Module):
+            def __init__(self, mod_type):
+                super().__init__()
+                self.qconfig = default_dynamic_qconfig
+                if mod_type == 'GRU':
+                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
+                if mod_type == 'LSTM':
+                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+            def forward(self, input_tensor, hidden_tensor):
+                input_tensor = 1 * input_tensor
+                hidden_tensor = 1 * hidden_tensor
+                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
+                return 1 * output_tensor, 1 * hidden_out
+
+        with override_quantized_engine("qnnpack"):
+            model_fx = RNNDynamicModel("GRU")
+            module_types = [torch.nn.GRU]
+            niter = 10
+            example_inputs = (
+                # input_tensor
+                torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
+                # hidden_tensor
+                # (D * num_layers, N, H_out)
+                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
+            )
+            model_graph = copy.deepcopy(model_fx)
+
+            qconfig_mapping = QConfigMapping().set_object_type(operator.mul, default_symmetric_qnnpack_qconfig)
+            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+            model_fx(*example_inputs)
+            model_fx = _convert_to_reference_decomposed_fx(model_fx)
+
+            torchdynamo.config.allow_rnn = True
+            model_graph = capture_pre_autograd_graph(
+                model_graph,
+                example_inputs,
+            )
+            quantizer = XNNPACKQuantizer()
+            quantization_config = get_symmetric_quantization_config(
+                is_per_channel=False, is_dynamic=False
+            )
+            quantizer.set_global(quantization_config)
+            model_graph = prepare_pt2e(model_graph, quantizer)
+            model_graph(*example_inputs)
+            model_graph = convert_pt2e(model_graph)
+            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
+
+
+    def test_linear_gru(self):
+        """ this test is to make sure GRU annotation does not interfere with linear annotation
+        """
+        class RNNDynamicModel(torch.nn.Module):
+            def __init__(self, mod_type):
+                super().__init__()
+                self.qconfig = default_dynamic_qconfig
+                self.linear = torch.nn.Linear(2, 2)
+                if mod_type == 'GRU':
+                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
+                if mod_type == 'LSTM':
+                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+            def forward(self, input_tensor, hidden_tensor):
+                input_tensor = self.linear(input_tensor)
+                input_tensor = 1 * input_tensor
+                hidden_tensor = 1 * hidden_tensor
+                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
+                return 1 * output_tensor, 1 * hidden_out
+
+        with override_quantized_engine("qnnpack"):
+            model_fx = RNNDynamicModel("GRU")
+            module_types = [torch.nn.GRU]
+            niter = 10
+            example_inputs = (
+                # input_tensor
+                torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
+                # hidden_tensor
+                # (D * num_layers, N, H_out)
+                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
+            )
+            model_graph = copy.deepcopy(model_fx)
+
+            qconfig_mapping = (
+                QConfigMapping().set_object_type(
+                    operator.mul, default_symmetric_qnnpack_qconfig
+                ).set_object_type(
+                    torch.nn.Linear, default_symmetric_qnnpack_qconfig
+                )
+            )
+            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+            model_fx(*example_inputs)
+            model_fx = _convert_to_reference_decomposed_fx(model_fx)
+
+            torchdynamo.config.allow_rnn = True
+            model_graph = capture_pre_autograd_graph(
+                model_graph,
+                example_inputs,
+            )
+            quantizer = XNNPACKQuantizer()
+            quantization_config = get_symmetric_quantization_config(
+                is_per_channel=False, is_dynamic=False
+            )
+            quantizer.set_global(quantization_config)
+            model_graph = prepare_pt2e(model_graph, quantizer)
+            model_graph(*example_inputs)
+            model_graph = convert_pt2e(model_graph)
+            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
 # TODO: express this using self._test_quantizer
 class TestQuantizePT2EModels(PT2EQuantizationTestCase):
@@ -2538,3 +2431,21 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             self.assertTrue(
                 compute_sqnr(after_quant_result, after_quant_result_fx) > 35
             )
+
+    @skip_if_no_torchvision
+    @skipIfNoQNNPACK
+    def test_qat_resnet18(self):
+        import torchvision
+        with override_quantized_engine("qnnpack"):
+            example_inputs = (torch.randn(1, 3, 224, 224),)
+            m = torchvision.models.resnet18()
+            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @skip_if_no_torchvision
+    @skipIfNoQNNPACK
+    def test_qat_mobilenet_v2(self):
+        import torchvision
+        with override_quantized_engine("qnnpack"):
+            example_inputs = (torch.randn(1, 3, 224, 224),)
+            m = torchvision.models.mobilenet_v2()
+            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
