@@ -9,6 +9,8 @@ import unittest
 import itertools
 import weakref
 
+from torch import optim
+
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import \
@@ -22,7 +24,6 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types, complex_types,
     floating_types_and, floating_types, integral_types_and,
 )
-
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
@@ -1113,6 +1114,16 @@ class TestForeach(TestCase):
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
             torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+
+    @onlyCUDA
+    def test_ignore_stride_mismatch_when_dim_is_0(self):
+        w = torch.nn.Parameter(torch.zeros((2, 1, 100), device='cuda'))
+        x = torch.rand((10, 2, 100), device='cuda')
+        optimizer = optim.AdamW([w], lr=0.0001, fused=True)
+        y = torch.bmm(x.transpose(0, 1), w.transpose(1,2))
+        y.sum().backward()
+        self.assertNotEqual(w.stride(), w.grad.stride())
+        optimizer.step()
 
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))

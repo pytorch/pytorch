@@ -130,19 +130,29 @@ bool check_fast_path_restrictions(
   // strides.
   for (const auto& tensor_list : tensorLists) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
-      if (tensorLists[0][j].sizes() != tensor_list[j].sizes()) {
+      const auto& ref_size = tensorLists[0][j].sizes();
+      const auto& ref_stride = tensorLists[0][j].strides();
+      const auto& tensor_list_size = tensor_list[j].sizes();
+      const auto& tensor_list_stride = tensor_list[j].strides();
+
+      if (ref_size != tensor_list_size) {
         return false;
       }
-      if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
-        for (auto it1 = tensorLists[0][j].sizes().begin(),
-                  it2 = tensorLists[0][j].strides().begin(),
-                  it3 = tensor_list[j].strides().begin();
-             it1 != tensorLists[0][j].sizes().end() &&
-             it2 != tensorLists[0][j].strides().end() &&
-             it3 != tensor_list[j].strides().end();
-             ++it1, ++it2, ++it3) {
+
+      if (ref_stride != tensor_list_stride) {
+        if (ref_stride.size() != tensor_list_stride.size()) {
+          return false;
+        }
+
+        for (auto ref_size_it = ref_size.begin(),
+                  ref_stride_it = ref_stride.begin(),
+                  tensor_list_stride_it = tensor_list_stride.begin();
+             ref_size_it != ref_size.end() &&
+             ref_stride_it != ref_stride.end() &&
+             tensor_list_stride_it != tensor_list_stride.end();
+             ++ref_size_it, ++ref_stride_it, ++tensor_list_stride_it) {
           // if dim is of size 1, the stride doesn't matter
-          if (*it1 != 1 && *it2 != *it3) {
+          if (*ref_size_it != 1 && *ref_stride_it != *tensor_list_stride_it) {
             return false;
           }
         }
