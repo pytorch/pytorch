@@ -21,7 +21,7 @@ jobs:
     environment: upload-stats
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           fetch-depth: 1
           submodules: false
