@@ -574,12 +574,12 @@ class TestMkldnn(TestCase):
         x1 = x.clone().requires_grad_(True)
         x2 = x.clone().requires_grad_(True)
         y1 = m(x1).transpose(-1, -2)
-        loss1 =  torch.mean((y1 - y_target) ** 2.0)
+        loss1 = torch.mean((y1 - y_target) ** 2.0)
         loss1.backward()
 
         torch._C._set_mkldnn_enabled(False)
         y2 = m(x2).transpose(-1, -2)
-        loss2 =  torch.mean((y2 - y_target) ** 2.0)
+        loss2 = torch.mean((y2 - y_target) ** 2.0)
         loss2.backward()
 
         self.assertEqual(y1, y2)
