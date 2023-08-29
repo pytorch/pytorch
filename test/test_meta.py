@@ -1303,6 +1303,30 @@ class TestMeta(TestCase):
         self.assertEqual(r.dtype, t.dtype)
         self.assertEqual(r.storage().data_ptr(), 0)
 
+    def test_embedding_bag_byte_prepack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed + 8] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            weight = torch.randn(batch_size, num_embeddings, ed, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_prepack(weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
+    def test_embedding_bag_byte_unpack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            packed_weight = torch.randn(batch_size, num_embeddings, ed + 8, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_unpack(packed_weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):

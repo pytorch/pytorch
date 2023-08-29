@@ -19,7 +19,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint
+from torch.export import Constraint, _create_constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -79,7 +79,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
             f" but got {index}, which is out of bounds for the given tensor."
         )
 
-    return Constraint(
+    return _create_constraint(
         weakref.ref(t),
         id(t),
         index,
@@ -173,8 +173,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
-            if fake_val is not None:
-                assert isinstance(fake_val, torch.Tensor)
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
@@ -377,15 +376,16 @@ def export(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    # TODO: we should add runtime assertions for them
+    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    index = 0
+    total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and "val" in node.meta:
-            s = node.meta['val']
-            if (
-                isinstance(s, torch.SymInt) and
-                isinstance(fake_mode.shape_env.var_to_sources[s.node.expr][0], ConstantSource)
-            ):
-                node.meta['val'] = s.node.hint
+        if node.op == "placeholder":
+            if index >= total_param_buffers:
+                user_arg = flat_args[index - total_param_buffers]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
 
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -418,7 +418,6 @@ def export(
 
         node.meta["is_torch_exported"] = True
 
-    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
     range_constraints, equality_constraints = _process_constraints(
         gm,
         export_graph_signature,
@@ -434,14 +433,15 @@ def export(
         range_constraints,
         equality_constraints,
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        (args, {}),
     )
 
-    exported_program = exported_program.transform(
+    exported_program = exported_program._transform(
         _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
     )
     if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program.transform(CollectTracepointsPass(module_call_signatures))
-    return exported_program.transform(_ReplaceSymSizeOpPass())
+        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
