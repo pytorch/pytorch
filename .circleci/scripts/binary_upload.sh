@@ -82,15 +82,17 @@ pip install -q awscli
 case "${PACKAGE_TYPE}" in
   conda)
     conda_upload
-    # Fetch  platform (eg. win-64, linux-64, etc.) from index file
-    # Because there's no actual conda command to read this
-    subdir=$(\
-      tar -xOf ${PKG_DIR}/*.bz2 info/index.json \
-        | grep subdir  \
-        | cut -d ':' -f2 \
-        | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//' \
-    )
-    BACKUP_DIR="conda/${subdir}"
+    for conda_archive IN ${PKG_DIR}/*.tar.bz2; do
+      # Fetch  platform (eg. win-64, linux-64, etc.) from index file because
+      # there's no actual conda command to read this
+      subdir=$(\
+        tar -xOf "${conda_archive}" info/index.json \
+          | grep subdir  \
+          | cut -d ':' -f2 \
+          | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//' \
+      )
+      BACKUP_DIR="conda/${subdir}"
+    done
     ;;
   libtorch)
     s3_upload "zip" "libtorch"
