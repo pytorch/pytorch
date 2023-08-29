@@ -1448,6 +1448,7 @@ class Scan(Loops):
             scan_numel=scan_numel,
         )
         if num_splits > 1:
+            # TODO: Support splitting
             return None
 
         def reindex(index, scan_index):
