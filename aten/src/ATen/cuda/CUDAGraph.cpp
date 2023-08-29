@@ -9,7 +9,6 @@
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
-constexpr int64_t _busy_wait_millis = 10;
 
 MempoolId_t graph_pool_handle() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
@@ -119,13 +118,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
 #ifdef USE_C10D_NCCL
   // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
-  // the graph capture.
-  while (!c10d::ProcessGroupNCCL::watchDogsDone()) {
-    TORCH_WARN_ONCE("Attempting to start graph capture but NCCL ProcessGroup(s) have remaining enqueued work. Waiting for enqueued work to finish...");
-    // Yield
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(_busy_wait_millis));
-  }
+  // the graph capture, so we wait for all pending work to be completed.
+  c10d::ProcessGroupNCCL::waitForAllPendingWorks();
 #endif
 
   // cudaStreamCaptureModeGlobal is the most conservative option to

@@ -346,10 +346,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
-  // Check that all watchdogs are done (no enqueued work).
+  // Check that all work is done (no enqueued work).
   // We use this to avoid uwittingly having watchdogs query work during
   // CUDA graph captures.
-  static bool watchDogsDone();
+  static void waitForAllPendingWorks();
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;

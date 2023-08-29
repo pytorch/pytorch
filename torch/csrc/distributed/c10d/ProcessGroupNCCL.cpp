@@ -1101,17 +1101,13 @@ void ProcessGroupNCCL::runHookLoop() {
   }
 }
 
-bool ProcessGroupNCCL::watchDogsDone() {
+void ProcessGroupNCCL::waitForAllPendingWorks() {
   std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
   for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin();
        it != ProcessGroupNCCL::all_nccl_process_groups.end();
        it++) {
-    std::unique_lock<std::mutex> lock((*it)->workMetaListMutex_);
-    if (!(*it)->workMetaList_.empty()) {
-      return false;
-    }
+    (*it)->waitForPendingWorks();
   }
-  return true;
 }
 
 std::exception_ptr ProcessGroupNCCL::WorkNCCL::checkForNCCLErrors(
