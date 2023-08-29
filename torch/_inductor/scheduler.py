@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
-from .ir import ComputedBuffer
+from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -406,6 +406,10 @@ class BaseSchedulerNode:
         """
         if isinstance(self, NopKernelSchedulerNode):
             return 0
+        if isinstance(self, ExternKernelSchedulerNode) and isinstance(
+            self.node, MultiOutput
+        ):
+            return 0
 
         if isinstance(self, SchedulerNode):
             node_numel = sympy_product(self.get_ranges()[0]) * sympy_product(
@@ -439,7 +443,18 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            buf_elems = V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
+            def get_buf_elems(buf):
+                return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
+
+            # Kind of a lazy way to get the MultiOutput nodes corresponding to
+            # a MultiOutputLayout
+            if isinstance(buf.layout, MultiOutputLayout):
+                buf_elems = sum(
+                    get_buf_elems(user.node.node)
+                    for user in self.scheduler.name_to_node[buf.name].users
+                )
+            else:
+                buf_elems = get_buf_elems(buf)
 
             node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
                 buf.get_dtype()
