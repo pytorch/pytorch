@@ -1,3 +1,4 @@
+import sys
 from abc import abstractmethod
 from enum import Enum
 from itertools import chain
@@ -14,6 +15,13 @@ class Relevance(Enum):
     UNRANKED = 2
     UNLIKELY = 3  # Not yet supported. Needs more infra to be usable
     NONE = 4  # Not yet supported. Needs more infra to be usable
+
+
+METRIC_RELEVANCE_GROUP = "relevance_group"
+METRIC_ORDER_WITHIN_RELEVANCE_GROUP = "order_within_relevance_group"
+METRIC_NUM_TESTS_IN_RELEVANCE_GROUP = "num_tests_in_relevance_group"
+METRIC_ORDER_OVERALL = "order_overall"
+METRIC_HEURISTIC_NAME = "heuristic_name"
 
 
 class TestPrioritizations:
@@ -153,6 +161,131 @@ class TestPrioritizations:
 
         for relevance_group, tests in enumerate(self._test_priorities):
             _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
+
+    def _get_test_relevance_group(self, test_name: str) -> Relevance:
+        """Returns the priority of a test."""
+        for relevance_group, tests in enumerate(self._test_priorities):
+            if test_name in tests:
+                return Relevance(relevance_group)
+
+        raise ValueError(f"Test {test_name} not found in any relevance group")
+
+    def _get_test_order(self, test_name: str) -> int:
+        """Returns the rank of the test specified by this heuristic."""
+        base_rank = 0
+
+        for relevance_group_tests in self._test_priorities:
+            if test_name in relevance_group_tests:
+                return base_rank + relevance_group_tests.index(test_name)
+            base_rank += len(relevance_group_tests)
+
+        raise ValueError(f"Test {test_name} not found in any relevance group")
+
+    def _get_test_order_within_relevance_group(self, test_name: str) -> int:
+        for relevance_group_tests in self._test_priorities:
+            if test_name not in relevance_group_tests:
+                continue
+
+            return relevance_group_tests.index(test_name)
+
+        raise ValueError(f"Test {test_name} not found in any relevance group")
+
+    def get_priority_info_for_test(self, test_name: str) -> Dict[str, Any]:
+        """Given a failing test, returns information about it's prioritization that we want to emit in our metrics."""
+        return {
+            METRIC_RELEVANCE_GROUP: self._get_test_relevance_group(test_name).name,
+            METRIC_ORDER_WITHIN_RELEVANCE_GROUP: self._get_test_order_within_relevance_group(
+                test_name
+            ),
+            METRIC_NUM_TESTS_IN_RELEVANCE_GROUP: len(
+                self._test_priorities[self._get_test_relevance_group(test_name).value]
+            ),
+            METRIC_ORDER_OVERALL: self._get_test_order(test_name),
+        }
+
+
+class AggregatedHeuristics:
+    """
+    Aggregates the results across all heuristics.
+
+    It saves the individual results from each heuristic and exposes an aggregated view.
+    """
+
+    _heuristic_results: Dict[
+        str, TestPrioritizations
+    ]  # Key is the Heuristic's name. Dicts will preserve the order of insertion, which is important for sharding
+
+    unranked_tests: Tuple[str, ...]
+
+    def __init__(self, unranked_tests: List[str]) -> None:
+        self.unranked_tests = tuple(unranked_tests)
+        self._heuristic_results = {}
+
+    def add_heuristic_results(
+        self, heuristic_name: str, heuristic_results: TestPrioritizations
+    ) -> None:
+        if heuristic_name in self._heuristic_results:
+            raise ValueError(f"We already have heuristics for {heuristic_name}")
+
+        self._heuristic_results[heuristic_name] = heuristic_results
+
+    def get_aggregated_priorities(self) -> TestPrioritizations:
+        """
+        Returns the aggregated priorities across all heuristics.
+        """
+        aggregated_priorities = TestPrioritizations(
+            tests_being_ranked=self.unranked_tests
+        )
+
+        for heuristic_results in self._heuristic_results.values():
+            aggregated_priorities.integrate_priorities(heuristic_results)
+
+        return aggregated_priorities
+
+    def get_test_stats(self, test: str) -> Dict[str, Any]:
+        """
+        Returns the aggregated statistics for a given test.
+        """
+        stats: Dict[str, Any] = {
+            "test_name": test,
+        }
+        heuristics = []
+
+        # Figure out which heuristic prioritizes this test the most
+        highest_ranking_heuristic = None
+        highest_ranking_heuristic_order: int = sys.maxsize
+
+        # And figure out how many heuristics suggested prioritizing this test
+        num_heuristics_prioritized_by = 0
+
+        for heuristic_name, heuristic_results in self._heuristic_results.items():
+            metrics = heuristic_results.get_priority_info_for_test(test)
+            metrics["heuristic_name"] = heuristic_name
+            heuristics.append(metrics)
+
+            if metrics[METRIC_ORDER_OVERALL] > highest_ranking_heuristic_order:
+                highest_ranking_heuristic = heuristic_name
+                highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
+
+            if heuristic_results._get_test_relevance_group(test) in [
+                Relevance.HIGH,
+                Relevance.PROBABLE,
+            ]:
+                num_heuristics_prioritized_by += 1
+
+        stats["heuristics"] = heuristics
+
+        # Easier to compute here than in rockset
+        stats["num_heuristics_prioritized_by"] = num_heuristics_prioritized_by
+
+        stats[
+            "aggregated"
+        ] = self.get_aggregated_priorities().get_priority_info_for_test(test)
+
+        if highest_ranking_heuristic:
+            stats["highest_ranking_heuristic"] = highest_ranking_heuristic
+
+        return stats
 
 
 class HeuristicInterface:

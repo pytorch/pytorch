@@ -80,12 +80,7 @@ class TestParsePrevTests(unittest.TestCase):
         "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests",
         return_value=["test1"],
     )
-    def test_get_reordered_tests(
-        self,
-        mock_get_prev_failing_tests: Any,
-        mock_get_modified_tests: Any,
-        mock_get_file_rating_tests: Any,
-    ) -> None:
+    def test_get_reordered_tests(self, *args: Any) -> None:
         tests = ["test1", "test2", "test3", "test4", "test5"]
 
         expected_prioritizations = TestPrioritizations(
@@ -95,7 +90,9 @@ class TestParsePrevTests(unittest.TestCase):
             unranked_relevance=["test3", "test5"],
         )
 
-        test_prioritizations = get_test_prioritizations(tests)
+        test_prioritizations = get_test_prioritizations(
+            tests
+        ).get_aggregated_priorities()
 
         self.assertTupleEqual(
             expected_prioritizations.get_high_relevance_tests(),
