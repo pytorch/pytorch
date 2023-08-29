@@ -7,7 +7,7 @@
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <iostream>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <vector>
