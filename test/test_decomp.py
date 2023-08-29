@@ -38,13 +38,19 @@ aten = torch.ops.aten
 
 
 # TODO: this isn't going to work with non-aten namespaces
-def overload_to_aten_name(overload):
-    return overload._schema.name.split("::")[1]
+def overload_to_aten_name(op):
+    return op._schema.name.split("::")[1]
 
 
 # All operators that can have decomp tests
-decomposition_names = {overload_to_aten_name(k) for k in decomposition_table}
-core_decomposition_names = {overload_to_aten_name(k) for k in core_aten_decompositions()}
+decomposition_names = {
+    overload_to_aten_name(k) for k in decomposition_table
+    if isinstance(k, torch._ops.OpOverload)
+}
+core_decomposition_names = {
+    overload_to_aten_name(k) for k in core_aten_decompositions()
+    if isinstance(k, torch._ops.OpOverload)
+}
 _decomp_test_ops = [
     op
     for op in op_db
