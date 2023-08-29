@@ -909,26 +909,23 @@ void check_arguments(
       "embedding_bag", weight_arg, {kHalf, kBFloat16, kFloat, kDouble});
   checkDim("embedding_bag", weight_arg, 2);
 
-  if (offsets.data_ptr() != 0) {
+  if (offsets.has_storage() && offsets.data_ptr() != 0) {
     AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "embedding_bag", [&]() {
-      if (offsets.size(0) > 0) {
-        index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
-        index_t offset_n =
-            offsets.const_data_ptr<index_t>()[offsets.numel() - 1];
-        TORCH_CHECK(
-            offset_0 == 0,
-            "offsets[0] has to be 0, i.e., the first sequence "
-            "in the mini-batch has to start from position 0. "
-            "However, got ",
-            offsets[0]);
-        TORCH_CHECK(
-            offset_n <= indices.size(0),
-            "offsets[-1] can not "
-            "be greater than input's length ",
-            indices.size(0),
-            " but got offsets[-1] of ",
-            offset_n);
-      }
+      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
+      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.numel() - 1];
+      TORCH_CHECK(
+          offset_0 == 0,
+          "offsets[0] has to be 0, i.e., the first sequence "
+          "in the mini-batch has to start from position 0. "
+          "However, got ",
+          offsets[0]);
+      TORCH_CHECK(
+          offset_n <= indices.size(0),
+          "offsets[-1] can not "
+          "be greater than input's length ",
+          indices.size(0),
+          " but got offsets[-1] of ",
+          offset_n);
     });
   }
 
