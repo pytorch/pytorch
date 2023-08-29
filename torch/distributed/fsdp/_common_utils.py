@@ -541,9 +541,8 @@ def _override_module_mixed_precision(
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
     # FIXME record_stream doesn't work with non-cuda tensors
-    # if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
-        # return
     return
+
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
         # Don't no dispatch under torch compile like this
         with no_dispatch():
