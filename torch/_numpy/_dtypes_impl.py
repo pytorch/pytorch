@@ -82,6 +82,7 @@ def python_type_for_torch(dtyp):
 
 _SCALAR_TYPES = {int, bool, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool}
 
+
 def is_scalar(x):
     return isinstance(x, _SCALAR_TYPES)
 
