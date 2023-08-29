@@ -106,8 +106,20 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
             tensor.strides().vec()},
             tensor.template data_ptr<Half>()};
   }
+  else if (tensor.scalar_type() == ScalarType::Byte) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::u8,
+            tensor.strides().vec()},
+            tensor.data_ptr()};
+  }
+  else if (tensor.scalar_type() == ScalarType::Char) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::s8,
+            tensor.strides().vec()},
+            tensor.data_ptr()};
+  }
   else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half tensor input");
+    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8 tensor input");
   }
 }
 

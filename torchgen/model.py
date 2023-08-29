@@ -205,6 +205,11 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
+class _TorchDispatchModeKey(Enum):
+    FAKE = auto()
+    PROXY = auto()
+
+
 def codegen_per_backend_entries() -> str:
     r = []
     for fk in FUNCTIONALITY_KEYS:
@@ -1803,6 +1808,7 @@ class BaseTy(Enum):
     bool = auto()
     Layout = auto()
     Device = auto()
+    DeviceIndex = auto()
     Scalar = auto()
     MemoryFormat = auto()
     QScheme = auto()
