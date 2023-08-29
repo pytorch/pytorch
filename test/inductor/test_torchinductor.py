@@ -6029,6 +6029,23 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_zero_element_mutation(self):
+
+        class CustomModel(nn.Module):
+            def __init__(self):
+                super(CustomModel, self).__init__()
+                self.layer1 = nn.LeakyReLU(negative_slope=5.2955089, inplace=True)
+
+            def forward(self, inputs):
+                return self.layer1(inputs)
+
+        ip_size = [0]
+        input_tensor = torch.randn(ip_size)
+
+        mymodel = CustomModel()
+        self.common(mymodel, (input_tensor,))
+
+
     def test_lerp(self):
         # non-contiguous inputs for lerp
         def fn0(i0, i1):
