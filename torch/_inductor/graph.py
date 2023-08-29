@@ -899,8 +899,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.init_wrapper_code()
 
-        self.scheduler = Scheduler(self.buffers, self.orig_gm)
+        self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
+        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()

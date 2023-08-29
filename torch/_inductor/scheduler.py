@@ -939,13 +939,12 @@ class NodeUser:
 
 class Scheduler:
     @dynamo_timed
-    def __init__(self, nodes, orig_gm=None):
+    def __init__(self, nodes):
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}
 
         self.nodes = []
-        self.orig_gm = orig_gm
         self.available_buffer_names = {
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
@@ -984,7 +983,6 @@ class Scheduler:
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
-        V.debug.draw_orig_fx_graph(orig_gm, self.nodes)
         self.debug_draw_graph()
 
         # used during codegen:
