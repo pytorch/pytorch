@@ -1620,7 +1620,7 @@ def main():
         shell(["coverage", "erase"])
 
     test_prioritization: TestPrioritizations = TestPrioritizations(
-        unranked_relevance=selected_tests
+        tests_being_ranked=selected_tests
     )
     metrics_dict = {}
     if IS_CI:

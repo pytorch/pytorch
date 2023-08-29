@@ -9,7 +9,7 @@ from tools.testing.target_determination.heuristics import (
 
 
 def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
-    rankings = TestPrioritizations(tests_being_ranked=tests, unranked_relevance=tests)
+    rankings = TestPrioritizations(tests_being_ranked=tests)
     print(f"Received {len(tests)} tests to prioritize")
     for test in tests:
         print(f"  {test}")
