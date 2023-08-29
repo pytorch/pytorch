@@ -3719,26 +3719,14 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
-        if isinstance(example_output, torch.Tensor):
-            layout = FixedLayout(
-                example_output.device,
-                example_output.dtype,
-                convert_shape_to_inductor(example_output.size()),
-                convert_shape_to_inductor(example_output.stride()),
-            )
-        else:
-            layout = MultiOutputLayout(device)
-
         packed = FallbackKernel(
-            layout,
+            MultiOutputLayout(device),
             kernel,
             tensor_args,
             non_tensor_args,
             unflatten_args,
             schema=schema,
         )
-        if isinstance(example_output, torch.Tensor):
-            return packed
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
