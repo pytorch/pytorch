@@ -452,7 +452,7 @@ class ndarray:
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
 
-        if type(value) not in _dtypes_impl.SCALAR_TYPES:
+        if not _dtypes_impl.is_scalar(value):
             value = normalize_array_like(value)
             value = _util.cast_if_needed(value, self.tensor.dtype)
 

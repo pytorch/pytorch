@@ -80,7 +80,10 @@ def python_type_for_torch(dtyp):
 
 # ### NEP 50 helpers ###
 
-SCALAR_TYPES = {int, bool, float, complex}
+_SCALAR_TYPES = {int, bool, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool}
+
+def is_scalar(x):
+    return isinstance(x, _SCALAR_TYPES)
 
 
 def _dtype_for_scalar(py_type):

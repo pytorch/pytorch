@@ -47,9 +47,15 @@ def normalize_array_like(x, parm=None):
 
 
 def normalize_array_like_or_scalar(x, parm=None):
-    if type(x) in _dtypes_impl.SCALAR_TYPES:
+    if _dtypes_impl.is_scalar(x):
         return x
     return normalize_array_like(x, parm)
+
+
+def normalize_optional_array_like_or_scalar(x, parm=None):
+    if x is None:
+        return None
+    return normalize_array_like_or_scalar(x, parm)
 
 
 def normalize_optional_array_like(x, parm=None):
@@ -118,9 +124,10 @@ def normalize_casting(arg, parm=None):
 
 normalizers = {
     "ArrayLike": normalize_array_like,
-    "Union[ArrayLike, Scalar]": normalize_array_like_or_scalar,
+    "ArrayLikeOrScalar": normalize_array_like_or_scalar,
     "Optional[ArrayLike]": normalize_optional_array_like,
     "Sequence[ArrayLike]": normalize_seq_array_like,
+    "Optional[ArrayLikeOrScalar]": normalize_optional_array_like_or_scalar,
     "Optional[NDArray]": normalize_ndarray,
     "Optional[OutArray]": normalize_outarray,
     "NDArray": normalize_ndarray,

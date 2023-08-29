@@ -17,6 +17,7 @@ import torch
 from . import _dtypes_impl, _util
 from ._normalizations import (
     ArrayLike,
+    ArrayLikeOrScalar,
     CastingModes,
     DTypeLike,
     NDArray,
@@ -626,8 +627,8 @@ def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
 
 def where(
     condition: ArrayLike,
-    x: Optional[ArrayLike] = None,
-    y: Optional[ArrayLike] = None,
+    x: Optional[ArrayLikeOrScalar] = None,
+    y: Optional[ArrayLikeOrScalar] = None,
     /,
 ):
     if (x is None) != (y is None):
@@ -994,8 +995,7 @@ def clip(
     return torch.clamp(a, min, max)
 
 
-def repeat(a: ArrayLike, repeats: ArrayLike, axis=None):
-    # XXX: scalar repeats; ArrayLikeOrScalar ?
+def repeat(a: ArrayLike, repeats: ArrayLikeOrScalar, axis=None):
     return torch.repeat_interleave(a, repeats, axis)
 
 
@@ -1563,9 +1563,7 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
     if n == 0:
         # no spacing argument - use 1 in all axes
         dx = [1.0] * len_axes
-    elif n == 1 and (
-        type(varargs[0]) in _dtypes_impl.SCALAR_TYPES or varargs[0].ndim == 0
-    ):
+    elif n == 1 and (_dtypes_impl.is_scalar(varargs[0]) or varargs[0].ndim == 0):
         # single scalar or 0D tensor for all axes (np.ndim(varargs[0]) == 0)
         dx = varargs * len_axes
     elif n == len_axes:
@@ -1626,7 +1624,7 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
         out = torch.empty_like(f, dtype=otype)
 
         # spacing for the current axis (NB: np.ndim(ax_dx) == 0)
-        uniform_spacing = type(ax_dx) in _dtypes_impl.SCALAR_TYPES or ax_dx.ndim == 0
+        uniform_spacing = _dtypes_impl.is_scalar(ax_dx) or ax_dx.ndim == 0
 
         # Numerical differentiation: 2nd order interior
         slice1[axis] = slice(1, -1)
