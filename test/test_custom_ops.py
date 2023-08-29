@@ -1707,6 +1707,11 @@ class MiniOpTest(CustomOpTestCaseBase):
         class Op(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
+                import ctypes
+
+                c_float_p = ctypes.POINTER(ctypes.c_float)
+                contents = ctypes.cast(x.data_ptr(), c_float_p).contents
+                print(contents)
                 with torch._C._AutoDispatchBelowAutograd():
                     return op(x)
 

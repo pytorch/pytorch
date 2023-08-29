@@ -8,9 +8,10 @@ import torch._inductor.decomposition
 import torch._export
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM80OrLater, _get_torch_cuda_version
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -155,6 +156,12 @@ class TestOutDtypeOp(TestCase):
             loss = out - torch.ones(out.shape)
             loss.backward()
 
+    @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
+    @unittest.skipIf(TEST_WITH_ROCM, "_int_mm unavailable")
+    @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
+    @unittest.skipIf(not TEST_CUDA, "_int_mm unavailable")
     @skipIfNoDynamoSupport
     def test_out_dtype_inductor_decomp(self) -> None:
         def func(x, w):
@@ -170,6 +177,7 @@ class TestOutDtypeOp(TestCase):
         self.assertTrue(torch.allclose(ref, test_out))
         self.assertTrue(torch.allclose(ref, test_out_c))
 
+    @unittest.skipIf(not TEST_CUDA, "cuda only")
     def test_out_dtype_inductor_decomp_trace(self) -> None:
         def func(x, w):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
@@ -185,7 +193,8 @@ def forward(self, x_1, w_1):
     _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
     return _int_mm""")
 
-    def test_out_dtype_default_trace(self) -> None:
+    @unittest.skipIf(not TEST_CUDA, "cuda only")
+    def test_out_dtype_int_mm_default_trace(self) -> None:
         def func(x, w):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
 
