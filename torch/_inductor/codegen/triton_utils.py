@@ -35,8 +35,6 @@ def signature_to_meta(signature, *, size_dtype: str):
 
 
 def config_of(args):
-    from ..compile_fx import ALIGNMENT
-
     def is_aligned(x, alignment, include_tensor):
         """
         Roughly follow triton code here:
@@ -60,7 +58,7 @@ def config_of(args):
         divisible_by_16 = tuple(
             i
             for i, arg in enumerate(args)
-            if is_aligned(arg, alignment=ALIGNMENT, include_tensor=True)
+            if is_aligned(arg, alignment=16, include_tensor=True)
         )
     else:
         divisible_by_16 = ()
