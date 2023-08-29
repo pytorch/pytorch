@@ -443,6 +443,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   const auto& result = maybe_get_output();
 
   if (result.defined()) {
+    TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+                "index_out: self (", self.scalar_type(), ") and result (", result.scalar_type(),
+                ") must have the same scalar type"); 
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     for (const at::OptionalTensorRef& index : materialized) {
