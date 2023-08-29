@@ -805,21 +805,12 @@ struct AttentionBackwardKernel {
         grad_bias_ptr += batch_id * gB_strideB + head_id * gB_strideH;
       }
 
-      scale = warp_uniform(scale);
-      head_dim = warp_uniform(head_dim);
-      head_dim_value = warp_uniform(head_dim_value);
+      // Some values are modified above
+      // Signal to the compiler that they are the same in all threads
+      // and can be stored in warp-uniform registers (Sm75+)
       num_queries = warp_uniform(num_queries);
       num_keys = warp_uniform(num_keys);
-      num_heads = warp_uniform(num_heads);
       custom_mask_type = warp_uniform(custom_mask_type);
-
-      q_strideM = warp_uniform(q_strideM);
-      k_strideM = warp_uniform(k_strideM);
-      v_strideM = warp_uniform(v_strideM);
-      bias_strideM = warp_uniform(bias_strideM);
-      gO_strideM = warp_uniform(gO_strideM);
-      gB_strideM = warp_uniform(gB_strideM);
-      gQKV_strideM_multiplier = warp_uniform(gQKV_strideM_multiplier);
 
       query_ptr = warp_uniform(query_ptr);
       key_ptr = warp_uniform(key_ptr);
