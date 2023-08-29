@@ -3295,6 +3295,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
+    @set_default_dtype(torch.double)
     def test_transformerdecoderlayer_gelu(self):
         # this is a deterministic test for TransformerDecoderLayer with gelu activation
         d_model = 4
@@ -5959,8 +5960,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg="groundtruth comparison failed for mode={}, "
-                                     "padding_mode={}".format(mode, padding_mode))
+                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     f"padding_mode={padding_mode}")
 
                     # See NOTE [ grid_sample CPU fallback ]
                     output = torch._grid_sampler_2d_cpu_fallback(
@@ -6047,8 +6048,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                       align_corners=align_corners).sum().backward()
                         self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
-                                         msg="gradient groundtruth comparison failed for mode={}, "
-                                         "padding_mode={}, input_requires_grad={}".format(mode, padding_mode, input_requires_grad))
+                                         msg=f"gradient groundtruth comparison failed for mode={mode}, "
+                                         f"padding_mode={padding_mode}, input_requires_grad={input_requires_grad}")
                         grid.grad.zero_()
 
                     # See NOTE [ grid_sample CPU fallback ]
@@ -11216,7 +11217,7 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
-    @skipCUDAIfRocm
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
