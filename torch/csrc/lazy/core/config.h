@@ -8,7 +8,6 @@ C10_DECLARE_bool(torch_lazy_all_numbers_special_scalars);
 C10_DECLARE_bool(torch_lazy_param_aliasing);
 C10_DECLARE_bool(torch_lazy_reuse_ir);
 C10_DECLARE_bool(torch_lazy_use_thread_pool);
-C10_DECLARE_bool(torch_lazy_enable_compilation_cache);
 C10_DECLARE_bool(torch_lazy_enable_device_data_cache);
 
 C10_DECLARE_int(torch_lazy_compilation_cache_size);
