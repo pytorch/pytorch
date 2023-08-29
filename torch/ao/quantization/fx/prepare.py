@@ -189,7 +189,7 @@ def _create_obs_or_fq_from_qspec(
         edge_or_node = quantization_spec.edge_or_node
         assert edge_or_node in obs_or_fq_map, \
             "please make sure only refer to edge or node that has " \
-            "observer/fake_quant inserted: '{}' not in\n{}".format(edge_or_node, obs_or_fq_map.keys())
+            f"observer/fake_quant inserted: '{edge_or_node}' not in\n{obs_or_fq_map.keys()}"
         return obs_or_fq_map[edge_or_node]
     elif isinstance(quantization_spec, DerivedQuantizationSpec):
         # can't use asdict, so not calling get_observer_kwargs here
@@ -199,6 +199,7 @@ def _create_obs_or_fq_from_qspec(
             "quant_min": quantization_spec.quant_min,
             "quant_max": quantization_spec.quant_max,
             "qscheme": quantization_spec.qscheme,
+            "ch_axis": quantization_spec.ch_axis,
         }
         edge_or_nodes = quantization_spec.derived_from
         obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]

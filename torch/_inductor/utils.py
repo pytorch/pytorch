@@ -431,10 +431,11 @@ def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
-        "run_with_rng_state",
         "run_and_save_rng_state",
+        "run_with_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -459,7 +460,9 @@ def has_incompatible_cudagraph_ops(gm):
 
 
 instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+    "instance_descriptor",
+    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+    defaults=[tuple(), tuple(), tuple(), tuple()],
 )
 
 
@@ -1022,3 +1025,11 @@ def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
+
+
+def is_welford_reduction(reduction_type):
+    return reduction_type.startswith("welford")
+
+
+def reduction_num_outputs(reduction_type):
+    return 3 if is_welford_reduction(reduction_type) else 1

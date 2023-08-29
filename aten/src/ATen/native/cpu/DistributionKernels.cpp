@@ -241,13 +241,7 @@ REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-#ifdef CPU_CAPABILITY_AVX512
-// normal_stub isn't being dispatched to AVX512 because it exposes
-// flakiness in test_sgd of test/optim/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub);
-#else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
-#endif
 REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
