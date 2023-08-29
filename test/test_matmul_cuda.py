@@ -238,6 +238,38 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(amaxb_fp8.item(), 3.0)
 
 
+@unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+@unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability(0)[0] != 8, "mixed dtypes MM only supported on SM 8.x")
+class TestMatmulMixedDtypes(TestCase):
+    def test_fp16_int8_mm(self, device: str = "cuda"):
+        def run_test(m, n, k, device):
+            fp16_low, fp16_high = 0.5, 1.5
+            ui8_low, ui8_high = 129, 130  # FIXME: make this range broader
+            a = make_tensor(
+                m, k, low=fp16_low, high=fp16_high, dtype=torch.float16, device=device
+            )
+            b = make_tensor(
+                k, n, low=ui8_low, high=ui8_high, dtype=torch.uint8, device=device
+            )
+            scale = make_tensor(
+                (1, n), low=fp16_low, high=fp16_high, dtype=a.dtype, device=device
+            )
+            bias = make_tensor(
+                (1, n), low=fp16_low, high=fp16_high, dtype=a.dtype, device=device
+            )
+
+            weights = (b.to(a.dtype) - 128) * scale.expand((k, n))
+
+            c_ref = torch.addmm(bias, a, weights)
+
+            c = torch.ops.aten._fp16_uint8_mm(a, b, scale, bias)
+
+            torch.testing.assert_close(c, c_ref, rtol=1e-3, atol=0)
+
+        shapes = [[32, 32, 128], [32, 64, 128], [64, 32, 128], [64, 64, 128]]
+        for m, n, k in shapes:
+            run_test(m, n, k, device)
+        
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
 
