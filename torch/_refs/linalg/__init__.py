@@ -26,9 +26,6 @@ from torch._prims_common.wrappers import (
 )
 
 
-aten = torch._ops.ops.aten
-
-
 __all__ = ["diagonal", "matrix_norm", "norm", "svd", "svdvals", "vector_norm", "vecdot"]
 
 

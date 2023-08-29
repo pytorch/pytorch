@@ -269,7 +269,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.leaky_relu_backward,
             aten.lerp,
             aten.lerp_,
-            aten.linalg_vecdot,
             aten.linspace,
             aten.logaddexp,
             aten.logaddexp2,
