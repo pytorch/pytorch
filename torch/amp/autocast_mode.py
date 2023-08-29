@@ -309,9 +309,7 @@ class autocast:
             supported_dtype = [torch.bfloat16, torch.float16]
             if self.fast_dtype not in supported_dtype:
                 error_message = "In XLA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += (
-                    "XLA Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
-                )
+                error_message += "XLA Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
                 warnings.warn(error_message)
                 enabled = False
         self._enabled = enabled
