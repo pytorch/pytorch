@@ -2029,6 +2029,53 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
 
+    def test_custom_size_policy_dynamic_shapes(self):
+        data = torch.randn(6, 2)
+
+        class CustomSizeDynamicShapesTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                    # Calling the overload that has kwargs causes us to go down the first overload path,
+                    # which will **always** specialize sizes.
+                    # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                    cls,
+                    inner.size(),
+                    inner.stride(),
+                    None,
+                    None,
+                    inner.dtype,
+                    inner.layout,
+                    inner.device,
+                    False,
+                    inner.requires_grad,
+                    "sizes",
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func == torch.ops.aten.sym_size.default:
+                    return args[0].inner.shape
+                if func == torch.ops.aten.sym_stride.default:
+                    return args[0].inner.shape
+                return NotImplemented
+
+        x = torch.ones(2, 2)
+
+        def trace_fn(x):
+            x_wrapper = CustomSizeDynamicShapesTensor(x)
+            return x_wrapper.size(), x_wrapper.stride()
+        fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
+    return ((sym_size, sym_size_1), (sym_size, sym_size_1))""")
+
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
 
