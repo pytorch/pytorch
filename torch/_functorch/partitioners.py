@@ -911,10 +911,10 @@ def draw_graph(
     traced: torch.fx.GraphModule,
     fname: str,
     figname: str = "fx_graph",
-    clear_meta=True,
-    prog=None,
-    parse_stack_trace=False,
-):
+    clear_meta: bool = True,
+    prog: str = None,
+    parse_stack_trace: bool = False,
+) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)

@@ -175,12 +175,17 @@ if HAS_PYDOT:
             # which triggers `Error: bad label format (...)` from dot
             return ret.replace("{", r"\{").replace("}", r"\}")
 
-
-        def _shorten_file_name(self, full_file_name: str) -> str:
+        # shorten path to avoid drawing long boxes
+        # for full path = '/home/weif/pytorch/test.py'
+        # return short path = 'pytorch/test.py'
+        def _shorten_file_name(
+            self,
+            full_file_name: str,
+            truncate_to_last_n: int = 2,
+        ):
             splits = full_file_name.split('/')
-            # TODO: move 2 to config
-            if len(splits) >= 2:
-                return '/'.join(splits[-2:])
+            if len(splits) >= truncate_to_last_n:
+                return '/'.join(splits[-truncate_to_last_n:])
             return full_file_name
 
 
@@ -235,6 +240,8 @@ if HAS_PYDOT:
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
 
+            # for ir_post_fusion
+            # print origin_0=sin file:lineno code
             fusion_meta = node.meta.get('fusion_meta', None)
             if fusion_meta is not None and fusion_meta.snode.node is not None:
                 for idx, origin in enumerate(fusion_meta.snode.node.origins):
@@ -247,12 +254,15 @@ if HAS_PYDOT:
                         code = parsed_stack_trace.code
                         label += f"|origin_{idx}={origin.name} file={fname}:{lineno} {code}" + r"\n"
 
-            buff_meta = node.meta.get('buff_meta', None)
-            if buff_meta is not None:
-                label += f"|buff={buff_meta.name}" + r"\n"
-                label += f"|n_origin={buff_meta.n_origin}" + r"\n"
+            # for original fx graph
+            # print buf=buf0, n_origin=6
+            buf_meta = node.meta.get('buf_meta', None)
+            if buf_meta is not None:
+                label += f"|buf={buf_meta.name}" + r"\n"
+                label += f"|n_origin={buf_meta.n_origin}" + r"\n"
 
-
+            # for original fx graph
+            # print file:lineno code
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
                 fname = self._shorten_file_name(parsed_stack_trace.file)
@@ -318,6 +328,8 @@ if HAS_PYDOT:
         def _get_tensor_label(self, t: torch.Tensor) -> str:
             return str(t.dtype) + str(list(t.shape)) + r"\n"
 
+        # when parse_stack_trace=True
+        # print file:lineno code
         def _to_dot(
             self,
             graph_module: torch.fx.GraphModule,
@@ -337,7 +349,7 @@ if HAS_PYDOT:
             dot_graph = pydot.Dot(name, rankdir="TB")
 
 
-            buff_name_to_subgraph = {}
+            buf_name_to_subgraph = {}
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
@@ -350,12 +362,12 @@ if HAS_PYDOT:
 
                 current_graph = dot_graph
 
-                buff_meta = node.meta.get('buff_meta', None)
-                if buff_meta is not None and buff_meta.n_origin > 1:
-                    buff_name = buff_meta.name
-                    if buff_name not in buff_name_to_subgraph:
-                        buff_name_to_subgraph[buff_name] = pydot.Cluster(buff_name)
-                    current_graph = buff_name_to_subgraph.get(buff_name)
+                buf_meta = node.meta.get('buf_meta', None)
+                if buf_meta is not None and buf_meta.n_origin > 1:
+                    buf_name = buf_meta.name
+                    if buf_name not in buf_name_to_subgraph:
+                        buf_name_to_subgraph[buf_name] = pydot.Cluster(buf_name)
+                    current_graph = buf_name_to_subgraph.get(buf_name)
 
                 current_graph.add_node(dot_node)
 
@@ -383,7 +395,7 @@ if HAS_PYDOT:
                     if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
 
-            for subgraph in buff_name_to_subgraph.values():
+            for subgraph in buf_name_to_subgraph.values():
                 dot_graph.add_subgraph(subgraph)
 
             for node in graph_module.graph.nodes:

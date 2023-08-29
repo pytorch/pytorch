@@ -39,7 +39,8 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 SchedulerNodeList = List[Any]
-BuffMeta = collections.namedtuple("BuffMeta", ["name", "n_origin"])
+BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
+GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
 
 @functools.lru_cache(None)
@@ -178,14 +179,14 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
-def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
-    node_name_to_buff_meta = {}
+def get_orig_fx_node_name_to_buf_meta(nodes: SchedulerNodeList) -> dict[str, BufMeta]:
+    node_name_to_buf_meta = {}
     for node in nodes:
         ir_node = node.node
         if ir_node is None or ir_node.origins is None:
             continue
-        buff_name = ir_node.name
-        buff_meta = BuffMeta(buff_name, len(ir_node.origins))
+        buf_name = ir_node.name
+        buf_meta = BufMeta(buf_name, len(ir_node.origins))
         for origin in ir_node.origins:
             # investigate which origin.stack_trace is none
             # and why one orig fx node belongs to multiple buffers
@@ -193,10 +194,10 @@ def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
                 continue
             node_name = origin.name
             assert (
-                node_name not in node_name_to_buff_meta
-            ), f"node_name={node_name} should not be in {node_name_to_buff_meta}"
-            node_name_to_buff_meta[node_name] = buff_meta
-    return node_name_to_buff_meta
+                node_name not in node_name_to_buf_meta
+            ), f"node_name={node_name} should not be in {node_name_to_buf_meta}"
+            node_name_to_buf_meta[node_name] = buf_meta
+    return node_name_to_buf_meta
 
 
 def annotate_orig_fx_with_snodes(
@@ -205,13 +206,13 @@ def annotate_orig_fx_with_snodes(
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
-    BuffMeta = collections.namedtuple("BuffMeta", ["name", "n_origin"])
-    node_name_to_buff_meta = get_orig_fx_node_name_to_buff_meta(snodes)
-    if node_name_to_buff_meta is None:
+    BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
+    node_name_to_buf_meta = get_orig_fx_node_name_to_buf_meta(snodes)
+    if node_name_to_buf_meta is None:
         return
     for node in gm.graph.nodes:
-        if node.name in node_name_to_buff_meta:
-            node.meta["buff_meta"] = node_name_to_buff_meta.get(node.name)
+        if node.name in node_name_to_buf_meta:
+            node.meta["buf_meta"] = node_name_to_buf_meta.get(node.name)
 
 
 @contextlib.contextmanager
@@ -427,12 +428,11 @@ class DebugFormatter:
 
     def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
         annotate_orig_fx_with_snodes(gm, nodes)
-        prog = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
         draw_graph(
             gm,
             fname=self.filename("orig_fx_graph_diagram.svg"),
             clear_meta=False,
-            prog=prog,
+            prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
         )
 
