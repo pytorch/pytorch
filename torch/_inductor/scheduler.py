@@ -134,9 +134,7 @@ class BaseSchedulerNode:
         result: Dict[int, NodeUser] = {}
         for use in users:
             if id(use.node) in result:
-                result[id(use.node)] = NodeUser(
-                    use.node, result[id(use.node)].can_inplace and use.can_inplace
-                )
+                result[id(use.node)] = use.merge(result[id(use.node)])
             else:
                 result[id(use.node)] = use
         self.users = list(result.values())
@@ -189,6 +187,14 @@ class BaseSchedulerNode:
             for dep in self.unmet_dependencies
             if dep.name not in self.scheduler.available_buffer_names
         }
+
+    def prune_weak_deps(self):
+        # Prune weak dependencies on buffers that have been removed
+        def should_prune(dep):
+            return isinstance(dep, WeakDep) and dep.name in V.graph.removed_buffers
+
+        to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
+        self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(self, name_to_fused_node):
         """
@@ -587,7 +593,9 @@ class SchedulerNode(BaseSchedulerNode):
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.get_aliases() or self.is_template():
             return False
-        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+        if len(self.read_writes.writes) == 1 and isinstance(
+            read_dep, dependencies.MemoryDep
+        ):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -931,8 +939,20 @@ class NodeUser:
     node: BaseSchedulerNode
     can_inplace: bool = False
 
+    # A weak user must be scheduled after a given node, but doesn't actually
+    # use the result
+    is_weak: bool = False
+
     def get_name(self):
         return self.node.get_name()
+
+    def merge(self, other: "NodeUser") -> "NodeUser":
+        assert self.node is other.node
+        return NodeUser(
+            self.node,
+            self.can_inplace and other.can_inplace,
+            self.is_weak and other.is_weak,
+        )
 
 
 class Scheduler:
@@ -968,8 +988,8 @@ class Scheduler:
 
         self.compute_dependencies()
         self.topological_sort_schedule()
-        self.compute_predecessors()
         self.dead_node_elimination()
+        self.compute_predecessors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1024,11 +1044,18 @@ class Scheduler:
     def create_foreach_nodes(self):
         removed_node_names = set()
         fe_nodes = []
+        kept_node_names = self.name_to_fused_node.keys()
+
         for names in V.graph.lists.values():
             removed_node_names.update(names)
-            fe_node = ForeachKernelSchedulerNode(
-                self, [self.name_to_node[name] for name in names]
-            )
+
+            names = [name for name in names if name in kept_node_names]
+            if not names:
+                # All nodes eliminated
+                continue
+
+            snodes = [self.name_to_node[name] for name in names]
+            fe_node = ForeachKernelSchedulerNode(self, snodes)
 
             fe_nodes.append(fe_node)
 
@@ -1077,14 +1104,18 @@ class Scheduler:
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
+                    and isinstance(read_dep, dependencies.MemoryDep)
+                    and isinstance(write_dep, dependencies.MemoryDep)
                     and read_dep.index == write_dep.index
                     and read_dep.size == write_dep.size
                 ):
                     reachable_names.update(dep_closure(read_dep.name))
             return reachable_names
 
-        def add_user(used_by_name, user_node, can_inplace=False):
-            name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
+        def add_user(used_by_name, user_node, can_inplace=False, is_weak=False):
+            name_to_users[rename(used_by_name)].append(
+                NodeUser(user_node, can_inplace, is_weak)
+            )
 
         for node in self.nodes:
             # a node will mutate either 0 or 1 buffers
@@ -1101,11 +1132,12 @@ class Scheduler:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
                         node.add_mutation_dep(WeakDep(other_name))
-                        add_user(other_name, node)
+                        add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
-                add_user(read.name, node, node.can_inplace(read))
+                is_weak = isinstance(read, WeakDep)
+                add_user(read.name, node, node.can_inplace(read), is_weak)
 
             node.update_mutated_names(self.mutation_renames)
 
@@ -1151,10 +1183,15 @@ class Scheduler:
         while again:
             updated_nodes = []
             for node in self.nodes:
-                if (
-                    any(n.get_name() not in V.graph.removed_buffers for n in node.users)
-                    or node.has_side_effects()
-                ):
+
+                def can_eliminate_user(user: NodeUser):
+                    return user.is_weak or user.get_name() in V.graph.removed_buffers
+
+                can_eliminate = not node.has_side_effects() and all(
+                    can_eliminate_user(u) for u in node.users
+                )
+
+                if not can_eliminate:
                     updated_nodes.append(node)
                 else:
                     # dead code
@@ -1163,6 +1200,10 @@ class Scheduler:
 
             again = len(self.nodes) > len(updated_nodes)
             self.nodes = updated_nodes
+
+        # Prune any WeakDeps no longer needed
+        for node in self.nodes:
+            node.prune_weak_deps()
 
     def topological_sort_schedule(self):
         """
