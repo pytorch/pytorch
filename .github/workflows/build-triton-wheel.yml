@@ -145,6 +145,7 @@ jobs:
       # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
       - name: Upload binaries
         env:
+          PACKAGE_TYPE: wheel
           PKG_DIR: ${{ runner.temp }}/artifacts
           # When running these on pull_request events these should be blank
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -242,6 +243,7 @@ jobs:
       # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
       - name: Upload binaries to Anaconda
         env:
+          PACKAGE_TYPE: conda
           PKG_DIR: ${{ runner.temp }}/artifacts
           # When running these on pull_request events these should be blank
           CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
