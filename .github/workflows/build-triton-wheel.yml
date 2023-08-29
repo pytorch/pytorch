@@ -121,6 +121,8 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
+      - uses: actions/checkout@v3
+
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
@@ -216,6 +218,8 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
+      - uses: actions/checkout@v3
+
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
