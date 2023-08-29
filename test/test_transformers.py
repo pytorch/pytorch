@@ -1198,6 +1198,18 @@ class TestTransformers(NNTestCase):
 
         torch.jit.script(mha)
 
+    @onlyCPU
+    def test_transformer_encoder_cpu_autocast(self):
+        # make sure cpu autocast runs without error #107663
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=128, nhead=8, batch_first=True)
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True)
+        model.eval()
+
+        src_rand = torch.rand(16, 8, 128)
+        mask_rand = torch.zeros(16, 8)
+        with torch.no_grad(), torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            out = model(src_rand, src_key_padding_mask=mask_rand)
+
 
 class TestSDPAFailureModes(NNTestCase):
     """ Used to test the failure modes of scaled_dot_product_attention
