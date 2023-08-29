@@ -11,6 +11,7 @@ import torch
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
@@ -230,6 +231,16 @@ class TestInductorDynamic(TestCase):
         b = torch.randn(2, 16, device=device)
         expect = fn(a, b)
         actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    @onlyCPU
+    def test_full(self, device):
+        def fn(a):
+            return torch.full((3,), a)
+
+        cfn = self.compile_fn(fn)
+        expect = fn(5)
+        actual = cfn(5)
         self.assertEqual(expect, actual)
 
 
