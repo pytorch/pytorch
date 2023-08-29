@@ -1620,7 +1620,7 @@ def main():
         shell(["coverage", "erase"])
 
     test_prioritization: TestPrioritizations = TestPrioritizations(
-        unranked_relevance=selected_tests.copy()
+        unranked_relevance=selected_tests
     )
     metrics_dict = {}
     if IS_CI:
@@ -1629,9 +1629,9 @@ def main():
         test_prioritization = get_test_prioritizations(selected_tests)
 
         metrics_dict = {
-            "highly_relevant_tests": test_prioritization.highly_relevant,
-            "probably_relevant_tests": test_prioritization.probably_relevant,
-            "unranked_relevance_tests": test_prioritization.unranked_relevance,
+            "high_relevance_tests": test_prioritization.get_high_relevance_tests(),
+            "probable_relevance_tests": test_prioritization.get_probable_relevance_tests(),
+            "unranked_relevance_tests": test_prioritization.get_unranked_relevance_tests(),
             "cpp": options.cpp,
         }
 
@@ -1654,9 +1654,19 @@ def main():
 
     # Each batch will be run sequentially
     test_batches = [
-        TestBatch("highly_relevant", test_prioritization.highly_relevant, False),
-        TestBatch("probably_relevant", test_prioritization.probably_relevant, False),
-        TestBatch("unranked_relevance", test_prioritization.unranked_relevance, True),
+        TestBatch(
+            "high_relevance", test_prioritization.get_high_relevance_tests(), False
+        ),
+        TestBatch(
+            "probable_relevance",
+            test_prioritization.get_probable_relevance_tests(),
+            False,
+        ),
+        TestBatch(
+            "unranked_relevance",
+            test_prioritization.get_unranked_relevance_tests(),
+            True,
+        ),
     ]
 
     if options.dry_run:
