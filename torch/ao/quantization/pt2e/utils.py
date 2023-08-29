@@ -188,17 +188,15 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
         if n.target in _MAP:
             n.target = _MAP[n.target]
 
-def _replace_dropout(m: GraphModule, move_to_eval: bool):
+def _replace_dropout_for_eval(m: GraphModule):
     """
-    When moving an exported model to eval mode, replace all dropout ops with
-    `train=True`, if any, to dropout ops with `train=False`.
+    Replace the aten training dropout pattern with a noop, intended for eval.
 
-    When moving an exported model to train mode, do the reverse (not supported yet).
-
-    This is needed because once a model is exported, calling model.train()
-    and model.eval() no longer automatically switches the behavior of dropout,
-    since these are now aten ops, not torch ops. Here we rewrite these dropout
-    ops manually to mimic the behavior of model.train() and model.eval().
+    For models with dropout torch ops (nn.Dropout, F.dropout), calling model.eval()
+    effectively turns these dropout ops into noops. For exported models, however,
+    this is not done automatically, since the aten dropout patterns previously generated
+    for training remain in the graph. Here we rewrite these dropout patterns with noops
+    to avoid incorrectly applying further dropout during eval.
 
     See https://github.com/pytorch/pytorch/issues/103681.
     """
@@ -209,10 +207,6 @@ def _replace_dropout(m: GraphModule, move_to_eval: bool):
         return F.dropout(x, p=0.5, training=False)
 
     example_inputs = (torch.randn(1),)
-
-    if not move_to_eval:
-        raise NotImplementedError("Moving to train mode is not supported yet")
-
     match_pattern = get_aten_graph_module(dropout_train, example_inputs)
     replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
@@ -220,6 +214,7 @@ def _replace_dropout(m: GraphModule, move_to_eval: bool):
         m,
         match_pattern,
         replacement_pattern,
+        match_filters=[],
         ignore_literals=True,
     )
     m.recompile()
@@ -404,5 +399,5 @@ def move_model_to_eval(m: GraphModule):
     This is equivalent to model.eval() but only for certain special ops like dropout.
     QAT users should call this before performing inference on the model.
     """
-    _replace_dropout(m, move_to_eval=True)
+    _replace_dropout_for_eval(m)
     return m
