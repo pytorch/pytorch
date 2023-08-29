@@ -43,8 +43,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-// #include <torch/nn/functional/padding.h>
-// #include <torch/nn/options/padding.h>
 
 #include <cutlass/numeric_types.h>
 
@@ -276,6 +274,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
+    TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
@@ -284,16 +283,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size_og);
 
     at::Tensor q_padded, k_padded, v_padded;
-    if (head_size_og % 8 != 0) {
-        TORCH_CHECK(false, "head_size must be a multiple of 8 by now!")
-        q_padded = at::pad(q, {0, 8 - head_size_og % 8});
-        k_padded = at::pad(k, {0, 8 - head_size_og % 8});
-        v_padded = at::pad(v, {0, 8 - head_size_og % 8});
-    } else {
-        q_padded = q;
-        k_padded = k;
-        v_padded = v;
-    }
+    q_padded = q;
+    k_padded = k;
+    v_padded = v;
 
     at::Tensor out;
     if (out_.has_value()) {
@@ -382,13 +374,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     run_mha_fwd(params, stream);
 
-    at::Tensor out_padded = out;
-    if (head_size_og % 8 != 0) {
-         TORCH_CHECK(false, "head_size must be a multiple of 8 by now!")
-        out = out.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        if (out_.has_value()) { out_.value().copy_(out); }
-    }
-
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 
@@ -450,6 +435,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+    TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!")
 
     CHECK_SHAPE(q, total_q, num_heads, head_size_og);
     CHECK_SHAPE(k, total_k, num_heads_k, head_size_og);
@@ -458,15 +444,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
 
     at::Tensor q_padded, k_padded, v_padded;
-    if (head_size_og % 8 != 0) {
-        q_padded = at::pad(q, {0, 8 - head_size_og % 8});
-        k_padded = at::pad(k, {0, 8 - head_size_og % 8});
-        v_padded = at::pad(v, {0, 8 - head_size_og % 8});
-    } else {
-        q_padded = q;
-        k_padded = k;
-        v_padded = v;
-    }
+    q_padded = q;
+    k_padded = k;
+    v_padded = v;
 
     at::Tensor out;
     if (out_.has_value()) {
@@ -561,11 +541,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     run_mha_fwd(params, stream);
 
     at::Tensor out_padded = out;
-    if (head_size_og % 8 != 0) {
-        out = out.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        if (out_.has_value()) { out_.value().copy_(out); }
-    }
-
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 
@@ -653,6 +628,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     const int num_heads_k = k.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
+    TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
     if (head_size > 192) {
         TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
@@ -701,12 +677,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         dv = at::empty_like(k);
     }
 
-    at::Tensor dout_padded;
-    if (head_size_og % 8 != 0) {
-        dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
-    } else {
-        dout_padded = dout;
-    }
+    const at::Tensor& dout_padded = dout;
 
     // bool loop = seqlen_k > blocksize_c;
     // TODO: change later, for now set to true for simplicity
@@ -781,12 +752,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         at::sum_out(dk, at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
         at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
     }
-    if (head_size_og % 8 != 0) {
-        dq = dq.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        dk = dk.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-    }
-
     return { dq, dk, dv, softmax_d };
 }
 
@@ -863,6 +828,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     const int num_heads_k = k.size(1);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
+    TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
     if (head_size > 192) {
         TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
@@ -913,12 +879,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         dv = at::empty_like(k);
     }
 
-    at::Tensor dout_padded;
-    if (head_size_og % 8 != 0) {
-        dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
-    } else {
-        dout_padded = dout;
-    }
+    const at::Tensor& dout_padded = dout;
 
     // bool loop = max_seqlen_k > blocksize_c;
     // TODO: change later, for now set to true for simplicity
@@ -994,11 +955,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if (num_heads_k != num_heads) {
         at::sum_out(dk, at::reshape(dk_expanded, {total_k, num_heads_k, num_heads / num_heads_k, head_size}), {2});
         at::sum_out(dv, at::reshape(dv_expanded, {total_k, num_heads_k, num_heads / num_heads_k, head_size}), {2});
-    }
-    if (head_size_og % 8 != 0) {
-        dq = dq.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        dk = dk.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
-        dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
     }
 
     return { dq, dk, dv, softmax_d };

@@ -689,7 +689,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Ten
               return_debug_mask,
               scale);
   // Reshape output to convert nnz to batch_size and seq_len
-  auto attention = output.transpose(1,2);
+  Tensor attention = output.transpose(1,2);
 
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }

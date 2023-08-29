@@ -31,7 +31,6 @@ namespace at {
 
 namespace native {
 
-// Expect inputs in format [ B, Seqlen, head_dims E]
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
     const Tensor& query,
@@ -66,7 +65,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   if (cumulative_sequence_length_q.defined()) {
     // Varlen forward
     TORCH_CHECK(false, "Dont go down this path yet");
-    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_varlen_bwd(
+    auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_varlen_bwd(
         contiguous_grad_out,
         query,
         key,
@@ -89,7 +88,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     return std::make_tuple(dQuery, dKey, dValue);
   } else {
     // Dense forward
-    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_bwd(
+    auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_bwd(
         contiguous_grad_out,
         query,
         key,
@@ -521,8 +520,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  auto grad_out_t = grad_out_.transpose(1,2);
-  auto out_t = out.transpose(1,2);
+  Tensor grad_out_t = grad_out_.transpose(1,2);
+  Tensor out_t = out.transpose(1,2);
 
   Tensor grad_q, grad_k, grad_v;
   std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
