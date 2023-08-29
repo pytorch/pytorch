@@ -74,7 +74,6 @@ std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
     const Tensor& offsets) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
-  checkDim("embedding_bag", indices_arg, 1);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
   checkScalarTypes("embedding_bag", offsets_arg, {kLong, kInt});
   bool use_long =
@@ -1264,7 +1263,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     out = at::_embedding_bag_forward_only(
         weight,
         indices_.contiguous(),
-        indices_,
+        offsets_.contiguous(),
         scale_grad_by_freq,
         mode,
         sparse,
@@ -1274,8 +1273,8 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
   } else {
     out = at::_embedding_bag(
         weight,
+        indices_.contiguous(),
         offsets_.contiguous(),
-        offsets_,
         scale_grad_by_freq,
         mode,
         sparse,

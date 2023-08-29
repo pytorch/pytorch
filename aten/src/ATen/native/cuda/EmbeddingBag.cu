@@ -48,18 +48,6 @@ constexpr int MODE_SUM = 0;
 constexpr int MODE_MEAN = 1;
 constexpr int MODE_MAX = 2;
 
-std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
-    const Tensor& indices,
-    const Tensor& offsets) {
-  const auto commonType =
-      promoteTypes(offsets.scalar_type(), indices.scalar_type());
-  return {
-      indices.scalar_type() == commonType ? indices
-                                          : indices.toType(commonType),
-      offsets.scalar_type() == commonType ? offsets
-                                          : offsets.toType(commonType)};
-}
-
 // This kernel assumes that all input tensors except `weight` and
 // per_sample_weights are contiguous.
 template <typename scalar_t, typename index_t>
