@@ -214,6 +214,8 @@ __all__ = [
     "cumsum",
     "cumprod",
     "mean",
+    "dot",
+    "vdot",
     "std",
     "std_mean",
     "sum",
@@ -330,6 +332,7 @@ __all__ = [
     #
     # Misc
     #
+    "is_complex",
     "renorm",
     "stft",
     "istft",
@@ -554,6 +557,11 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@register_decomposition(aten.is_complex)
+def is_complex(input: TensorLikeType):
+    return utils.is_complex_dtype(input.dtype)
 
 
 @register_decomposition(aten.conj_physical)
@@ -5858,6 +5866,64 @@ def deg2rad(self: TensorLikeType):
 @register_decomposition(aten.count_nonzero)
 def count_nonzero(self, dim: Optional[DimsType] = None):
     return (self != 0).sum(dim)
+
+
+def _dot_check(self, other):
+    torch._check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    torch._check(self.numel() == other.numel(), numel_error)
+
+
+@register_decomposition(aten.dot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    _dot_check(self, other)
+    return (self * other).sum()
+
+
+@register_decomposition(aten.vdot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def vdot(self, other):
+    if not self.is_complex():
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    _dot_check(self, other)
+    # The decomposition fails if you do self.conj()... not sure why
+    return (self.conj_physical() * other).sum()
 
 
 # inplace
