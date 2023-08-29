@@ -2879,10 +2879,13 @@ class ConcatKernel(NopKernel):
             )
 
             kernel.data.inputs.append(input_buffer)
-            if inputs[i].data.is_input_buffer():
+            if (
+                inputs[i].data.is_input_buffer()
+                and inputs[i].get_device().type == "cuda"
+            ):
                 buffer_names.append(input_buffer.get_name())
 
-        if buffer_names:
+        if len(buffer_names) > 1:
             V.graph.register_list(buffer_names)
 
         kernel.data.name = V.graph.register_buffer(kernel.data)
