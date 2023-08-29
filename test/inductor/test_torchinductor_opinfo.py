@@ -10,6 +10,8 @@ from functools import partial
 from unittest.mock import patch
 
 import torch
+import contextlib
+import itertools
 
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.test_case import run_tests
@@ -18,6 +20,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     FakeTensorMode,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -220,10 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
@@ -271,10 +270,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "outer": {f16},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     ("round", "decimals_3"): {f16},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
@@ -343,13 +338,10 @@ test_skips_or_fails = (
 )
 
 
+
 def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
-
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
-    wrapper_noop_set_seed
-)
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
@@ -365,7 +357,6 @@ inductor_override_kwargs = {
     "new_empty": {"assert_equal": False},
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
-    "randn": {"assert_equal": False},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
@@ -449,7 +440,8 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
-    @collection_decorator
+    @patch("torch.testing._internal.common_methods_invocations.wrapper_set_seed", wrapper_noop_set_seed)
+    # @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
@@ -513,7 +505,20 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-        def do_nopython(fn, args, kwargs):
+
+        class HasRngOp(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.has_rng_op = False
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                if torch.Tag.nondeterministic_seeded in func.tags:
+                    self.has_rng_op = True
+
+                return func(*args, **kwargs)
+
+        def do_nopython_and_has_rng(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
 
@@ -524,62 +529,91 @@ class TestInductorOpInfo(TestCase):
                         return e
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
-                with mode:
+                with HasRngOp() as rng_mode, mode:
                     with enable_python_dispatcher():
                         fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
-                return False
+                return False, rng_mode.has_rng_op
 
-            return True
+            return True, rng_mode.has_rng_op
+
+
+        def get_contexts(has_rng_op):
+            if has_rng_op:
+                return (
+                    (
+                        lambda: torch._inductor.config.patch({"fallback_random": True}),
+                        {"assert_equal": True}
+                    ),
+                    (
+                        contextlib.nullcontext,
+                        {"assert_equal": False},
+                    )
+                )
+            return (
+                (
+                    lambda: contextlib.nullcontext,
+                    {}
+                )
+            )
 
         try:
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-                # UNCOMMENT TO DEBUG SEGFAULTS
+
+
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
+
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
 
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "copy_to_cuda": False,
-                        "reference_in_float": False,
-                        "check_gradient": requires_grad,
-                        "check_has_compiled": no_python,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
-                    self.check_model_cuda(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "copy_to_cuda": False,
+                                "reference_in_float": False,
+                                "check_gradient": requires_grad,
+                                "check_has_compiled": no_python,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
+                            self.check_model_cuda(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
                 elif device_type == "cpu":
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "check_has_compiled": no_python,
-                        # skip checking gradient on CPU for now
-                        "check_gradient": False,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "check_has_compiled": no_python,
+                                # skip checking gradient on CPU for now
+                                "check_gradient": False,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
 
-                    self.check_model(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                            self.check_model(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
 
         except Exception as e:
+            raise
             known_failure = False
             if dtype in inductor_should_fail_with_exception[device_type].get(
                 op_name, set()
