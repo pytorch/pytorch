@@ -395,6 +395,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    def test_qconv2d(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        # Totally pattern_matcher_count 4,
+        # pattern_matcher_nodes 17
+        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. dequant-conv pattern matched in quantization weight prepack
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+        # 4. Quantization fusion in post-grad fusion pass
+        #    [qconv2d_pointwise_default, div_1, round_2, add_1,
+        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            4,
+            17,
+            check_quantization=True,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.unary_fn = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.unary_fn(self.conv(x))
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        # Totally pattern_matcher_count 4,
+        # pattern_matcher_nodes 18
+        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. dequant-conv pattern matched in quantization weight prepack
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+        # 4. Quantization fusion in post-grad fusion pass
+        #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1,
+        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            4,
+            18,
+            check_quantization=True,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_qconv2d_add(self):
         class M(torch.nn.Module):
             def __init__(
@@ -488,83 +563,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d(self):
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-
-        # Totally pattern_matcher_count 4,
-        # pattern_matcher_nodes 17
-        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        # 2. dequant-conv pattern matched in quantization weight prepack
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-        # 4. Quantization fusion in post-grad fusion pass
-        #    [qconv2d_pointwise_default, div_1, round_2, add_1,
-        #     clamp_min_1, clamp_max_1, convert_element_type_2]
-        self._test_common(
-            mod,
-            (v,),
-            4,
-            17,
-            check_quantization=True,
-        )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qconv2d_relu(self):
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
-                self.unary_fn = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.unary_fn(self.conv(x))
-
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-
-        # Totally pattern_matcher_count 4,
-        # pattern_matcher_nodes 18
-        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        # 2. dequant-conv pattern matched in quantization weight prepack
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-        # 4. Quantization fusion in post-grad fusion pass
-        #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1,
-        #     clamp_min_1, clamp_max_1, convert_element_type_2]
-        self._test_common(
-            mod,
-            (v,),
-            4,
-            18,
-            check_quantization=True,
-        )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_dequant_promotion(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
+                **kwargs,
             ):
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
@@ -676,6 +679,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(
                 self,
+                **kwargs,
             ):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(4, 4)
