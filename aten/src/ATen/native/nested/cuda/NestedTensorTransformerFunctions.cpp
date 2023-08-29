@@ -720,7 +720,6 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           return_debug_mask,
           scale);
   // Reshape output to convert nnz to batch_size and seq_len
-  // Don't reshape {q,k,v}_padded since they are only used for backwards
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
       attention,

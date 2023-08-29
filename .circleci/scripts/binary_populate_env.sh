@@ -155,7 +155,7 @@ EOL
 
 # nproc doesn't exist on darwin
 if [[ "$(uname)" != Darwin ]]; then
-  # Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
+  # This was lowered from 18 to 12 to avoid OOMs when compiling FlashAttentionV2
   MEMORY_LIMIT_MAX_JOBS=12
   NUM_CPUS=$(( $(nproc) - 2 ))
 

@@ -81,8 +81,26 @@ bool check_head_dim_size_flash(sdp_params params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last && query_size_last <= max_size)) {
+  bool same_head_dim_size =
+      query_size_last == key_size_last && query_size_last == value_size_last;
+  if (has_for_nested_inputs(params)) {
+    if (!(same_head_dim_size && (query_size_last % 8 == 0) &&
+          (query_size_last <= max_size))) {
+      if (debug) {
+        TORCH_WARN(
+            "For NestedTensor inputs, Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
+            " Got Query.size(-1): ",
+            query_size_last,
+            ", Key.size(-1): ",
+            params.key.sym_size(-1),
+            ", Value.size(-1): ",
+            params.value.sym_size(-1),
+            " instead.");
+      }
+      return false;
+    }
+  }
+  if (!(same_head_dim_size && (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
           "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",

@@ -1463,6 +1463,20 @@ class TestSDPAFailureModes(NNTestCase):
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Fused SDPA was not built for this system")
+    def test_nested_fails_on_padding_head_dim(self, device):
+        dtype = torch.bfloat16
+        seq_len_list = [2, 4, 5, 6, 7]
+        shape = (5, seq_len_list, 8, 57)
+        make_tensor = partial(rand_sdpa_tensor, shape=shape, type="nested", device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+            with self.assertWarnsRegex(UserWarning, "For NestedTensor inputs, Flash attention requires"):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
+
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM5xDevice, "Does not support fused SDPA or not SM50 hardware")
     def test_mem_efficient_fail_bfloat16_sm50(self, device):
         dtype = torch.bfloat16
