@@ -8,7 +8,8 @@ from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_to_meta
+from .triton_utils import config_of, signature_to_meta, signature_of
+from typing import List, Any, Dict
 
 
 @dataclass
@@ -19,7 +20,7 @@ class PartitionState:
 
     def finalize(self):
         if self.cur_partition:
-            self.partitions.append(self.cur_partition)
+            self.partitions.append(self.cur_partition) # type: ignore[arg-type]
 
 
 class ForeachKernel(Kernel):
@@ -43,7 +44,7 @@ class ForeachKernel(Kernel):
         assert len(subkernel_nodes) >= 1
 
         partition_state_1d = PartitionState([], [], 0)
-        yelem_to_partition_state_2d = defaultdict(lambda: PartitionState([], [], 0))
+        yelem_to_partition_state_2d: Dict[List[int], PartitionState] = defaultdict(lambda: PartitionState([], [], 0))
 
         for node in subkernel_nodes:
             fused_nodes = node.get_nodes()
