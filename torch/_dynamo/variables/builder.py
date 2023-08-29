@@ -187,6 +187,9 @@ class GraphArg:
     def erase(self):
         self._example = None
 
+    def __eq__(self, other):
+        return self.source.name() == other.source.name()
+
 
 @dataclasses.dataclass
 class FrameStateSizeEntry:
