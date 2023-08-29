@@ -258,7 +258,7 @@ The output is something like the following:
            ):
            return False
        return True
-   
+
    compiled code:
    def toy_example(a, b):
        __temp_1 = __compiled_fn_0(a, b)
@@ -301,14 +301,14 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
        sum_1 = l_b_.sum();  l_b_ = None
        lt = sum_1 < 0;  sum_1 = None
        return (truediv, lt)
-   
+
    source code of __resume_at_30_1:
    def ignore_this_function_name(a, b):
        x = a / (torch.abs(a) + 1)
        if b.sum() < 0:
            b = b * -1
        return x * b
-   
+
    source code of __resume_at_38_2:
    def ignore_this_function_name(a, b):
        x = a / (torch.abs(a) + 1)
