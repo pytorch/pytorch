@@ -5,8 +5,8 @@ import copy
 import dataclasses
 import dis
 import enum
-import itertools
 import functools
+import itertools
 import logging
 import math
 import operator

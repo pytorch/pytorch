@@ -144,7 +144,7 @@ try:
     # Python. Therefore, in order to get it right, we need to implement
     # the (Python) semantics we are relying on in Z3.
     @dataclass
-    class Z3Ops:
+    class _Z3Ops:
         # Validator used for adding assertions as needed.
         # e.g. div(a, b) requires b != 0.
         validator: "TranslationValidator"
@@ -165,20 +165,20 @@ try:
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
-            return Z3Ops.to_real(numerator) / Z3Ops.to_real(denominator)
+            return _Z3Ops.to_real(numerator) / _Z3Ops.to_real(denominator)
 
         def floor(self, number: z3.ArithRef) -> z3.ArithRef:
             # Z3 ToInt function rounds a real number towards negative infinity.
-            return Z3Ops.to_int(number)
+            return _Z3Ops.to_int(number)
 
         # Python semantics for 'FloorDiv' states that before applying the floor
         # function, the operands are converted to their common type.
         def floordiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             cast_result_to_real = numerator.is_real() or denominator.is_real()
-            result = Z3Ops.to_int(self.div(numerator, denominator))
+            result = _Z3Ops.to_int(self.div(numerator, denominator))
             # Since the 'result' is already an integer, we just have to check
             # whether we should cast it to real.
-            return Z3Ops.to_real(result) if cast_result_to_real else result
+            return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.If(
@@ -206,7 +206,7 @@ try:
         def sqrt(self, number: z3.ArithRef) -> z3.ArithRef:
             # Square-root:
             # 1. Only work with reals
-            number = Z3Ops.to_real(number)
+            number = _Z3Ops.to_real(number)
             # 2. The number should be positive or zero.
             #    Otherwise, Z3 returns 'unknown'.
             self.validator.add_assertion(number >= 0)
@@ -254,7 +254,7 @@ try:
 
             return wrapper
 
-        ops = Z3Ops(validator)
+        ops = _Z3Ops(validator)
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
@@ -325,7 +325,7 @@ try:
                 validator: "TranslationValidator",
         ) -> None:
             self._validator = validator
-            self._ops = Z3Ops(self._validator)
+            self._ops = _Z3Ops(self._validator)
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
             if dtype is torch.int64:
@@ -526,15 +526,27 @@ try:
 
 except ImportError:
     _HAS_Z3 = False
+
+    __all__ = [
+        "translation_validation_enabled", "translation_validation_timeout",
+        "ValidationException", "BisectValidationException",
+    ]
+
 else:
     _HAS_Z3 = True
+
+    __all__ = [
+        "z3str", "z3op", "PopulateValidator", "SympyToZ3", "TranslationValidator",
+        "translation_validation_enabled", "translation_validation_timeout",
+        "ValidationException", "BisectValidationException",
+    ]
 
 from torch._dynamo import config
 
 def translation_validation_enabled() -> bool:
     # Checks everytime this function is called, in case the Dynamo
     # option is set, but Z3 is not installed.
-    assert_z3_installed_if_tv_set()
+    _assert_z3_installed_if_tv_set()
     return _HAS_Z3 and config.translation_validation
 
 
@@ -542,7 +554,7 @@ def translation_validation_timeout() -> int:
     return config.translation_validation_timeout
 
 
-def assert_z3_installed_if_tv_set():
+def _assert_z3_installed_if_tv_set():
     assert _HAS_Z3 or not config.translation_validation, (
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
@@ -595,4 +607,4 @@ Failure ocurred while running node:
         return f"{self.msg}\n\n{self.details}"
 
 # Checks when this module is loaded.
-assert_z3_installed_if_tv_set()
+_assert_z3_installed_if_tv_set()

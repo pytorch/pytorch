@@ -18,7 +18,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
 )
-from torch.fx.experimental.validator import BisectValidationException
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
@@ -431,6 +430,7 @@ def _compile(
     from torch.fx.experimental.validator import (
         translation_validation_enabled,
         ValidationException,
+        BisectValidationException,
     )
 
     output: Optional[OutputGraph] = None

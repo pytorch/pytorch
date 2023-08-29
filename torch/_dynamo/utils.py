@@ -1378,16 +1378,15 @@ def get_fake_value(node, tx):
 
 
 _current_node = threading.local()
-_current_node.value = None
 
 
 def get_current_node():
-    return _current_node.value
+    return getattr(_current_node, "value", None)
 
 
 @contextmanager
 def set_current_node(node):
-    old = _current_node.value
+    old = get_current_node()
     _current_node.value = node
     try:
         yield
