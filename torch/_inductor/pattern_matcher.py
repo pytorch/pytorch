@@ -413,10 +413,8 @@ class _TargetArgsExpr(_TargetExpr):
         if len(_kwargs) < len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
 
-            arg_types = [type(node.args[i]) for i in range(len(node.args))]
-            kwarg_types = {k: type(node.kwargs[k]) for k in node.kwargs.keys()}
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs, arg_types, kwarg_types
+                node.target, node.args, node.kwargs
             )
 
             if normalized_args_and_kwargs is None:
