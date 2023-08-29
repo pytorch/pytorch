@@ -7515,7 +7515,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             model.weight = weight
             out = model(input)
 
-    @torch.compile
     def test_apply(self):
         x = torch.arange(1, 6)
         res = x.clone().apply_(lambda k: k + k)
