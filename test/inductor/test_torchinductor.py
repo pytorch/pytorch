@@ -31,7 +31,6 @@ from torch._dynamo.testing import (
     expectedFailureCodegenDynamic,
     rand_strided,
     same,
-    skip_if_consumer_card,
 )
 from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
@@ -7544,7 +7543,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
-        @skip_if_consumer_card
         @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -7563,6 +7561,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
                 )
                 stderr = proc.communicate()[1]
                 self.assertTrue(
@@ -7576,8 +7575,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 [sys.executable, test_path, "first_arg", "2", "False", "True"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
             )
             stderr = proc.communicate()[1]
+
             self.assertTrue(
                 any(
                     "index out of bounds" in err.decode("utf-8")
