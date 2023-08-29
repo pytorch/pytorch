@@ -138,6 +138,7 @@ def build_triton(
 
         if build_rocm:
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
+            print("ROCm libraries setup for triton installation...")
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
@@ -147,7 +148,7 @@ def build_triton(
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
-            check_call(".github/scripts/fix_so.sh", cwd=triton_basedir, shell=True)
+            check_call("scripts/amd/fix_so.sh", cwd=triton_basedir, shell=True)
 
         return Path.cwd() / whl_path.name
 

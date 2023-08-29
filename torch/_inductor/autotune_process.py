@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import os
 import pickle
@@ -38,7 +40,7 @@ class Pong:
 @dataclasses.dataclass
 class TuningProcess:
     device: int
-    process: Optional["subprocess.Popen[bytes]"] = None
+    process: Optional[subprocess.Popen[bytes]] = None
 
     @staticmethod
     def process_main() -> None:
@@ -128,7 +130,7 @@ class TuningProcess:
 
 @dataclasses.dataclass
 class TuningProcessPool:
-    processes: Optional[Queue["TuningProcess"]] = None
+    processes: Optional[Queue[TuningProcess]] = None
     executor: Optional[ThreadPoolExecutor] = None
 
     def initialize(self) -> None:
@@ -183,7 +185,7 @@ class TuningProcessPool:
                 p.wait()
             self.processes = None
 
-    def target(self, choice: "TritonTemplateCaller") -> float:
+    def target(self, choice: TritonTemplateCaller) -> float:
         """
         Entry point for the thread-pool helper threads: Wait for an open TuningProcess,
         remove it from the queue, execute the benchmark in that subprocess, and return
@@ -208,8 +210,8 @@ class TuningProcessPool:
 
     def benchmark(
         self,
-        choices: List["TritonTemplateCaller"],
-    ) -> Dict["TritonTemplateCaller", float]:
+        choices: List[TritonTemplateCaller],
+    ) -> Dict[TritonTemplateCaller, float]:
         """
         Benchmark each choice in a separate process.
         """
@@ -243,7 +245,7 @@ class TensorMeta:
     @classmethod
     def from_irnodes(
         cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
-    ) -> Union["TensorMeta", List["TensorMeta"]]:
+    ) -> Union[TensorMeta, List[TensorMeta]]:
         if isinstance(irnodes, (tuple, list)):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
@@ -289,8 +291,8 @@ class BenchmarkRequest:
     num_stages: int
     num_warps: int
 
-    input_tensors: Union["TensorMeta", List["TensorMeta"]]
-    output_tensor: Union["TensorMeta", List["TensorMeta"]]
+    input_tensors: Union[TensorMeta, List[TensorMeta]]
+    output_tensor: Union[TensorMeta, List[TensorMeta]]
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
@@ -349,8 +351,8 @@ class BenchmarkRequest:
 
 
 def benchmark_in_sub_process(
-    choices: List["TritonTemplateCaller"],
-) -> Dict["TritonTemplateCaller", float]:
+    choices: List[TritonTemplateCaller],
+) -> Dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """

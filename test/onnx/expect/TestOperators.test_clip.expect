@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -71,5 +71,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }
