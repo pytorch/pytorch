@@ -2386,13 +2386,13 @@ class TritonScheduling(BaseScheduling):
             ):
                 # We probablly should look what are the nodes inside a foreach
                 # schedule node
-                node_ids = [
-                    n.node_idx
+                node_names = [
+                    n.get_name()
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
                 wrapper.writeline(
-                    f"{wrapper.comment} Fused node idx list: {', '.join(map(str, node_ids))}"
+                    f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
@@ -2445,7 +2445,6 @@ class TritonScheduling(BaseScheduling):
             return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
 
         with kernel:
-            kernel.node_schedule = node_schedule
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
             for node in node_schedule:
@@ -2513,7 +2512,6 @@ class TritonScheduling(BaseScheduling):
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
-        kernel.node_schedule = [template_node, *epilogue_nodes]
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()

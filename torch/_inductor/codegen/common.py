@@ -825,8 +825,6 @@ class Kernel(CodeGen):
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
-        self.node_schedule = None
-
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
