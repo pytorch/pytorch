@@ -271,7 +271,6 @@ class IRNode:
     @staticmethod
     @contextlib.contextmanager
     def current_origins(origins: Set[torch.fx.Node]):
-        # breakpoint()
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
         try:

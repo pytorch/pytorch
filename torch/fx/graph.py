@@ -472,25 +472,23 @@ class CodeGen:
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
             """
-            # breakpoint()
             nonlocal prev_stacktrace
 
             if node.op not in {'placeholder', 'output'}:
                 if node.stack_trace:
-                    # breakpoint()
-                    # if node.stack_trace != prev_stacktrace:
-                    prev_stacktrace = node.stack_trace
-                    summary_str = ""
+                    if node.stack_trace != prev_stacktrace:
+                        prev_stacktrace = node.stack_trace
+                        summary_str = ""
 
-                    parsed_stack_trace = _parse_stack_trace(node.stack_trace)
+                        parsed_stack_trace = _parse_stack_trace(node.stack_trace)
 
-                    if parsed_stack_trace is not None:
-                        summary_str = f'File: {parsed_stack_trace.file}:{parsed_stack_trace.lineno}, code: {parsed_stack_trace.code}'
+                        if parsed_stack_trace is not None:
+                            summary_str = f'File: {parsed_stack_trace.file}:{parsed_stack_trace.lineno}, code: {parsed_stack_trace.code}'
 
-                    body.append(f'\n# {summary_str}\n')
-                # elif prev_stacktrace != "":
-                #     prev_stacktrace = ""
-                #     body.append('\n# No stacktrace found for following nodes\n')
+                        body.append(f'\n# {summary_str}\n')
+                elif prev_stacktrace != "":
+                    prev_stacktrace = ""
+                    body.append('\n# No stacktrace found for following nodes\n')
 
         def stringify_shape(shape : torch.Size) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"

@@ -69,7 +69,6 @@ if HAS_PYDOT:
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
         ):
-            # breakpoint()
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
@@ -78,8 +77,6 @@ if HAS_PYDOT:
             }
 
             for node in graph_module.graph.nodes:
-                # print(f"node.name={node.name} node.op={node.op}")
-                # breakpoint()
                 if node.op != "call_module":
                     continue
 

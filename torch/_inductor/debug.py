@@ -196,8 +196,6 @@ def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
         if ir_node is None or ir_node.origins is None:
             continue
         buff_name = ir_node.name
-        # if len(ir_node.origins) == 2:
-        #     breakpoint()
         buff_meta = BuffMeta(buff_name, len(ir_node.origins))
         for origin in ir_node.origins:
             # investigate which origin.stack_trace is none
@@ -207,9 +205,6 @@ def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
             node_name = origin.name
             assert node_name not in node_name_to_buff_meta, f"node_name={node_name} should not be in {node_name_to_buff_meta}"
             node_name_to_buff_meta[node_name] = buff_meta
-            # parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
-            # fname = self._shorten_file_name(parsed_stack_trace.file)
-            # label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
     return node_name_to_buff_meta
 
 def annotate_orig_fx_with_snodes(gm: torch.fx.GraphModule, snodes: SchedulerNodeList) -> None:
@@ -311,9 +306,9 @@ class DebugContext:
             )
             pass
 
-    def fopen(self, filename, mode="w"):
+    def fopen(self, filename):
         assert self._path
-        return open(os.path.join(self._path, filename), mode)
+        return open(os.path.join(self._path, filename), "w")
 
     def filename(self, suffix):
         return os.path.join(self._path, suffix)
@@ -418,9 +413,6 @@ class DebugFormatter:
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
-        with self.fopen("fx_graph_original.pkl", mode="wb") as fd:
-            pickle.dump(gm, fd)
-
     def fx_graph_transformed(
         self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
     ):
@@ -443,12 +435,8 @@ class DebugFormatter:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
     def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
-        # if gm is None:
-        #     with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
-        #         gm = pickle.load(fd)
-
         annotate_orig_fx_with_snodes(gm, nodes)
-        prog = ['dot', '-Gnslimit=2', '-Gnslimit1=2', '-Gmaxiter=5000', '-v5']
+        prog = ['dot', '-Gnslimit=2', '-Gnslimit1=2', '-Gmaxiter=5000']
         draw_graph(gm, fname=self.filename("orig_fx_graph_diagram.svg"), clear_meta=False, prog=prog, parse_stack_trace=True)
 
 
@@ -492,7 +480,6 @@ def save_args_for_compile_fx_inner(*args, **kwargs):
 
     fn_name = "compile_fx_inner"
     path = f"{folder}/{fn_name}_{next(save_args_cnt)}.pkl"
-    breakpoint()
     with open(path, "wb") as f:
         pickle.dump((args_to_save, kwargs_to_save), f)
 
