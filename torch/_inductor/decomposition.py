@@ -211,6 +211,11 @@ def bmm(self, batch2):
 
 @register_decomposition([aten.mm])
 def mm(self, input2):
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if self.shape[0] == 1 or input2.shape[1] == 1:
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device == "cpu":
         if (
             self.size(-1) == 1
