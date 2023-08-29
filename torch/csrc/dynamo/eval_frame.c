@@ -275,7 +275,13 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #else
   if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
     // First call
+    #if IS_PYTHON_3_11_PLUS
+    // Note: the default in CPython for this value is NULL, not
+    // a function pointer!
+    tstate->interp->eval_frame = NULL;
+    #else
     tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+    #endif
   }
 #endif
 }
@@ -724,6 +730,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   return lookup(e->next, frame, e, index + 1);
 }
 
+static int active_dynamo_threads = 0;
+
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -848,7 +856,25 @@ inline static PyObject* eval_custom_code(
 
   #endif
 
+  // In CPython 3.11 and above, a custom evaluation frame
+  // means certain optimizations are disabled.
+  // As after this point we are practically evaluating
+  // CPython bytecode using the standard interpreter,
+  // unset the eval frame to let CPython know that it can
+  // perform its optimizations. 
+  #if IS_PYTHON_3_11_PLUS
+  void *prev = tstate->interp->eval_frame;
+  // We are the only one executing this.
+  if (active_dynamo_threads <= 1) {
+    tstate->interp->eval_frame = NULL;
+  }
+  #endif
+
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
+
+  #if IS_PYTHON_3_11_PLUS
+  tstate->interp->eval_frame = prev;
+  #endif
 
   #if IS_PYTHON_3_11_PLUS
 
@@ -904,14 +930,6 @@ static PyObject* _custom_eval_frame(
       frame->f_lasti,
       frame->f_iblock);
   #endif
-
-  // In CPython 3.11 and above, a custom evaluation frame
-  // means certain optimizations are disabled.
-  // As after this point we are practically evaluating
-  // CPython bytecode using the standard interpreter,
-  // unset the eval frame to let CPython know that it can
-  // perform its optimizations. 
-  tstate->interp->eval_frame = NULL;
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -1043,8 +1061,6 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
-
-static int active_dynamo_threads = 0;
 
 static PyObject* increment_working_threads(PyThreadState* tstate) {
   active_dynamo_threads = active_dynamo_threads + 1;
