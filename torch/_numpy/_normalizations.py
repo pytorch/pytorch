@@ -219,7 +219,7 @@ def normalizer(_func=None, *, promote_scalar_result=False):
                     name: maybe_normalize(arg, params[name]) if name in params else arg
                     for name, arg in kwds.items()
                 }
-            except NotImplementedError:
+            except (NotImplementedError, RuntimeError, ValueError):
                 # help torch.dynamo fall back to eagery
                 return NotImplemented
 
