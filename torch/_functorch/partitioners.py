@@ -498,6 +498,29 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
                 random_nodes[node.name] = node
         return random_nodes
 
+    def get_device(node):
+        """
+        Check the example value of the node outputs to find the device type.
+        """
+        if "val" not in node.meta:
+            return None
+
+        candidates = node.meta["val"]
+        if not isinstance(candidates, tuple):
+            candidates = (candidates,)
+
+        for candidate in candidates:
+            if isinstance(candidate, torch.Tensor):
+                if candidate.device.type == "cuda":
+                    return "cuda"
+
+        return "cpu"
+
+    def get_sample_rng_state(device):
+        if device == "cuda":
+            return torch.cuda.get_rng_state()
+        return torch.get_rng_state()
+
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
@@ -521,6 +544,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
         if node.op == "placeholder" and "tangent" in node.name:
             bw_tangent_start_node = node
             break
+
 
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
@@ -547,7 +571,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
         with bw_graph.inserting_before(bw_tangent_start_node):
             state_name = f"rng_state_output_{next(uid)}"
             bw_rng_state_node = bw_graph.placeholder(state_name)
-            bw_rng_state_node.meta["val"] = torch.cuda.get_rng_state()
+            bw_rng_state_node.meta["val"] = get_sample_rng_state(get_device(fw_node))
 
         with bw_graph.inserting_before(bw_node):
             rng_output = bw_graph.create_node(
