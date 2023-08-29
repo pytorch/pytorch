@@ -10,7 +10,6 @@ import re
 import sys
 import threading
 import traceback
-import types
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
