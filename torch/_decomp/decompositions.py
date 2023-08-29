@@ -20,6 +20,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
+from torch._refs import broadcast_to
 from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
 from torch.utils._pytree import tree_flatten, tree_map
 
