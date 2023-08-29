@@ -23,7 +23,6 @@ from torch.distributed._tensor.random import (
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.utils._pytree import tree_flatten
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -217,13 +216,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return self._local_tensor, self._spec
+        return ["_local_tensor"], self._spec
 
     @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
+    def __tensor_unflatten__(inner_tensors, spec):
         assert (
             spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        local_tensor = inner_tensors["_local_tensor"]
         return DTensor(
             local_tensor,
             spec.mesh,
@@ -238,21 +238,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # check that we are not getting mixed vanilla and Distributed tensors
-        arg_list, _ = tree_flatten(args)
-        for arg in arg_list:
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                raise RuntimeError(
-                    f"{func}: got mixed distributed and non-distributed tensors."
-                )
-
-        if kwargs is None:
-            kwargs = {}
-
         return op_dispatch.operator_dispatch(
             func,
             args,
-            kwargs,
+            kwargs or {},
             DTensor._propagator,
         )
 
@@ -469,12 +458,7 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
-            output = placement._shard_tensor(local_tensor, device_mesh, idx)
-            # scatter call could not return a tensor with correct requires_grad
-            # field, as ProcessGroupNCCL refuse to take a tensor with requires_grad
-            # to do inplace update! So we manually set it here
-            output.requires_grad_(tensor.requires_grad)
-            local_tensor = output
+            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
@@ -487,7 +471,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach(),
+        local_tensor.detach().requires_grad_(tensor.requires_grad),
         device_mesh,
         tuple(placements),
         shape=tensor.size(),

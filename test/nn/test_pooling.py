@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
-    TEST_WITH_ROCM, expectedFailureCUDA
+    TEST_WITH_ROCM
 from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
@@ -552,12 +552,10 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True),
             name='case1',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True),
             name='case2',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False),
@@ -566,7 +564,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True),
             name='case4',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False),
@@ -575,11 +572,10 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True),
             name='case6',
-            decorators=[expectedFailureCUDA]),
+        ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True),
             name='case7',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False),
@@ -588,7 +584,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True),
             name='case9',
-            decorators=[expectedFailureCUDA]
         ),
         subtest(
             ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False),
@@ -877,7 +872,7 @@ torch.cuda.synchronize()
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
@@ -914,8 +909,8 @@ torch.cuda.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.half, torch.float, torch.double)
-    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, h, w, d, kernel_size, stride=None):
@@ -980,11 +975,14 @@ torch.cuda.synchronize()
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
     @onlyCPU
-    def test_max_pool2d_bfloat16(self, device):
-        def helper(n, c, h, w, kernel_size, stride, memory_format):
-            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+    def test_max_pool_bfloat16(self, device):
+        def helper(shape, kernel_size, stride, memory_format):
+            input = torch.randn(shape, dtype=torch.float32, device=device).bfloat16()
             input = input.to(memory_format=memory_format).requires_grad_()
-            pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            if len(shape) == 4:
+                pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            else:
+                pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
 
             input2 = input.detach().clone().float().requires_grad_(True)
 
@@ -1000,10 +998,16 @@ torch.cuda.synchronize()
             self.assertEqual(ind, ind2)
             self.assertEqual(input.grad, input2.grad.bfloat16())
 
-        helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
-        helper(4, 65, 8, 8, 7, 1, torch.channels_last)
-        helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
-        helper(1, 19, 20, 10, 8, 2, torch.channels_last)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
+        helper((1, 19, 20, 10), 8, 2, torch.contiguous_format)
+        helper((1, 19, 20, 10), 8, 2, torch.channels_last)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
+        helper((1, 19, 10, 10, 10), 8, 2, torch.contiguous_format)
+        helper((1, 19, 10, 9, 14), 8, 2, torch.channels_last_3d)
+        helper((4, 10, 3, 8, 8), 3, 1, torch.contiguous_format)
+        helper((4, 10, 8, 8, 8), 7, 1, torch.channels_last_3d)
 
     @onlyCUDA
     @gcIfJetson
