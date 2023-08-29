@@ -487,6 +487,29 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @requires_cuda()
+    def test_fuse_concat(self):
+        def fn(x1, x2, x3, w1, w2, w3):
+            x = torch.stack([x1, x2, x3])
+            w = torch.stack([w1, w2, w3])
+
+            y = torch.bmm(x, w)
+
+            return y
+
+        x1 = torch.randn(5, 4).cuda()
+        x2 = x1 + 1
+        x3 = x1 + 2
+        w1 = torch.randn(4, 3).cuda()
+        w2 = w1 + 1
+        w3 = w1 + 2
+
+        args = (x1, x2, x3, w1, w2, w3)
+
+        self.check_model_cuda(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
