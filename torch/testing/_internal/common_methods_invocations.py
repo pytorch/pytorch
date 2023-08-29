@@ -13704,9 +13704,9 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
-            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=4e-02, rtol=1e-0),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
                                             torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                         'TestUnaryUfuncs', device_type='cuda'),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -19705,8 +19705,8 @@ python_ref_db = [
         torch_opinfo_name="tan",
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.complex64: tol(atol=2e-04, rtol=1.2e-05)}),
-                'TestUnaryUfuncs', device_type='cuda'),
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -19733,8 +19733,8 @@ python_ref_db = [
         torch_opinfo_name="tanh",
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=2e-05)}),
-                'TestUnaryUfuncs', device_type='cuda'),
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -20009,9 +20009,9 @@ python_ref_db = [
                          'test_reference_numerics_normal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-04, rtol=1.6e-02),
-                                   torch.complex64: tol(atol=1e-04, rtol=1.9e-05)}),
-                'TestUnaryUfuncs',),
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
+                                   torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
