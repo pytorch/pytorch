@@ -1120,7 +1120,7 @@ class TestForeach(TestCase):
         w = torch.nn.Parameter(torch.zeros((2, 1, 100), device='cuda'))
         x = torch.rand((10, 2, 100), device='cuda')
         optimizer = optim.AdamW([w], lr=0.0001, fused=True)
-        y = torch.bmm(x.transpose(0, 1), w.transpose(1,2))
+        y = torch.bmm(x.transpose(0, 1), w.transpose(1, 2))
         y.sum().backward()
         self.assertNotEqual(w.stride(), w.grad.stride())
         optimizer.step()
