@@ -28,7 +28,6 @@
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
-#include <iostream>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -1388,7 +1387,13 @@ PyObject* initModule() {
         if (incref) {
           Py_INCREF(v);
         }
-        return PyModule_AddObject(module, name, v) == 0;
+
+        int ret = PyModule_AddObject(module, name, v);
+        if (ret != 0) {
+          Py_DECREF(v);
+        }
+
+        return ret == 0;
       };
 
 #if defined(USE_CUDNN) || defined(USE_ROCM)
