@@ -3863,6 +3863,39 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
+# scaled_dot_product_attention used to be decomposed in pre-autograd, given that
+# it calls _scaled_dot_product_attention_math and
+# _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
+# kernel. As a result it's decomposed into ops with finer granularity.
+# However recent PRs (#103826 #105131) added new logic in
+# scaled_dot_product_attention and now it calls
+# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
+# in _scaled_dot_product_flash_attention showing up in torch.export().
+# This decomposition ensures scaled_dot_product_attention is still decomposed
+# the same way as before, i.e., going through
+# _scaled_dot_product_attention_math. Notice that this decomp rule should be
+# excluded by inductor.
+@register_decomposition(aten.scaled_dot_product_attention.default)
+@aten.scaled_dot_product_attention.default.py_impl(
+    DispatchKey.CompositeImplicitAutograd
+)
+@out_wrapper()
+def scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tensor:
+    output, _ = aten._scaled_dot_product_attention_math.default(
+        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+    )
+    return output
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
