@@ -2865,13 +2865,20 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        buffer_names = []
         for i in range(len(inputs)):
-            kernel.data.inputs.append(
-                cls.realize_into(
-                    inputs[i],
-                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
-                )
+            input_buffer = cls.realize_into(
+                inputs[i],
+                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
+
+            kernel.data.inputs.append(input_buffer)
+            if inputs[i].data.is_input_buffer():
+                buffer_names.append(input_buffer.get_name())
+
+        if buffer_names:
+            V.graph.register_list(buffer_names)
+
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
