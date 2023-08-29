@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .codegen.common import get_scheduling_for_device
+from .codegen.common import get_scheduling_for_device, Kernel
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer
 from .sizevars import SimplifyIndexing
@@ -1608,7 +1608,13 @@ class Scheduler:
 
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
-        scheduler_node.allocate()
+        # 'decide_inplace_update' stores the inplace update decisions in
+        # the current kernel from where 'allocate' retrieve those decisions.
+        # We have to make sure there is a non-NULL kernel handler to store
+        # those inplace update decisions.
+        with V.set_kernel_handler(Kernel()):
+            scheduler_node.decide_inplace_update()
+            scheduler_node.allocate()
         node = scheduler_node.node
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
