@@ -1042,6 +1042,16 @@ def logit_backward(
         )
 
 
+@register_decomposition(aten.dropout)
+@aten.dropout.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.dropout.default.py_impl(DispatchKey.Autograd)
+def dropout(input: Tensor, p: float, train: Optional[bool]):
+    if train and p != 0:
+        return aten.native_dropout(input, p, train)[0]
+    else:
+        return input.clone()
+
+
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train and p != 0:
@@ -1206,6 +1216,31 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     split_sizes = [split_size for i in range(chunks)]
     split_sizes[-1] = split_size - (split_size * chunks - dim_size)
     return torch.split(self, split_sizes, dim)
+
+
+@aten.tensor_split.tensor_indices_or_sections.py_impl(
+    DispatchKey.CompositeImplicitAutograd
+)
+def tensor_split_tensor_indices_or_sections_py_impl(
+    self: Tensor,
+    tensor_indices_or_sections: Tensor,
+    dim: int = 0,
+) -> List[Tensor]:
+    assert tensor_indices_or_sections.device.type == "cpu"
+    assert tensor_indices_or_sections.dtype == torch.int64
+    split_dim = tensor_indices_or_sections.dim()
+    torch._check(
+        split_dim == 1 or split_dim == 0,
+        lambda: "tensor_split expected tensor_indices_or_sections to be a zero-dimensional "
+        f"or one-dimensional tensor, but got a tensor with {split_dim} dims",
+    )
+    if split_dim == 0:
+        sections = tensor_indices_or_sections.item()
+        assert isinstance(sections, IntLike)
+        return self.tensor_split(sections, dim)
+    else:
+        indices = [i.item() for i in tensor_indices_or_sections]
+        return self.tensor_split(indices, dim)
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
@@ -1544,6 +1579,7 @@ def native_batch_norm(
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
 @aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+@aten.native_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def native_batch_norm_decomposition(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1679,6 +1715,26 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+def device_hint(tensor):
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device
+    else:
+        return None
+
+
+def wrap_output_with_input_device_(x, common_device):
+    # wrap meta tensor
+    if common_device is not None and x.device.type == "meta":
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode()
+        fake_mode.in_kernel_invocation = True
+        converter = fake_mode.fake_tensor_converter
+        return converter.from_meta_and_device(fake_mode, x, common_device)
+
+    return x
+
+
 @register_decomposition(aten._to_copy)
 def _to_copy(
     x: Tensor,
@@ -1695,6 +1751,7 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
+    common_device = device_hint(x)
     if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
@@ -1703,6 +1760,11 @@ def _to_copy(
         x = torch._prims.device_put(x, device)
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
+        dtype_converted = True
+    # In case of dtype promotion, faketensor converted into tensor.
+    # Need to convert into faketensor if input was a faketensor.
+    if dtype_converted:
+        x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
@@ -3233,15 +3295,21 @@ def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
         return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
 
 
-@register_decomposition(aten.grid_sampler_2d)
-@pw_cast_for_opmath
-def grid_sampler_2d(
+def _grid_sampler_2d(
     a: Tensor,
     grid: Tensor,
     interpolation_mode: int = 0,
     padding_mode: int = 0,
     align_corners: bool = False,
+    _expand_grid: bool = True,
 ) -> Tensor:
+    # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
+    # optionaly expand the input grid for performance reasons.
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+
     torch._check(
         interpolation_mode in (0, 1, 2),
         lambda: f"Invalid interpolation mode {interpolation_mode}",
@@ -3290,7 +3358,16 @@ def grid_sampler_2d(
         return compute_coordinates(coords_un, size)
 
     N, C, iH, iW = a.shape
-    _, oH, oW, _ = grid.shape
+    _, oH, oW, two = grid.shape
+    assert two == 2
+
+    if _expand_grid:
+        # Let's expand grid to [N, C, oH, oW, 2]
+        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
+        # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
+        # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
+        grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, 2)
 
     def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
         return torch.logical_and(
@@ -3306,8 +3383,9 @@ def grid_sampler_2d(
         # to (x, y) = (0, 0) and also set the weight to 0
         # We also change the shape of the tensor to the appropriate one for
         # broadcasting with N_idx, C_idx for the purposes of advanced indexing
+        c = C if _expand_grid else 1
         return tuple(
-            torch.where(cond, t, 0).view(N, 1, oH, oW)
+            torch.where(cond, t, 0).view(N, c, oH, oW)
             for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
         )
 
@@ -3360,6 +3438,10 @@ def grid_sampler_2d(
         tx = ix - ix_nw
         ty = iy - iy_nw
 
+        if not _expand_grid:
+            tx = tx.unsqueeze(1)
+            ty = ty.unsqueeze(1)
+
         def get_value_bounded(ix: Tensor, iy: Tensor) -> Tensor:
             x = compute_coordinates(ix, iW)
             y = compute_coordinates(iy, iH)
@@ -3373,10 +3455,28 @@ def grid_sampler_2d(
                 get_value_bounded(ix_nw + 1, iy_ofs),
                 get_value_bounded(ix_nw + 2, iy_ofs),
             )
-            return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
+            return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple(get_coeff(ofs) for ofs in range(4))
-        return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
+        return _upsample_cubic_interp1d(coeffs, ty)
+
+
+@register_decomposition(aten.grid_sampler_2d)
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: Tensor,
+    grid: Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> Tensor:
+    return _grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+    )
 
 
 @register_decomposition(aten.mv)
