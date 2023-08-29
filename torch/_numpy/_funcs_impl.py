@@ -1862,7 +1862,7 @@ def common_type(*tensors: ArrayLike):
 
 def histogram(
     a: ArrayLike,
-    bins: ArrayLike = 10,
+    bins: ArrayLikeOrScalar = 10,
     range=None,
     normed=None,
     weights: Optional[ArrayLike] = None,
@@ -2022,7 +2022,7 @@ def min_scalar_type(a: ArrayLike, /):
     return DType(dtype)
 
 
-def pad(array: ArrayLike, pad_width: ArrayLike, mode="constant", **kwargs):
+def pad(array: ArrayLike, pad_width: ArrayLikeOrScalar, mode="constant", **kwargs):
     if mode != "constant":
         raise NotImplementedError
     value = kwargs.get("constant_values", 0)
@@ -2030,6 +2030,8 @@ def pad(array: ArrayLike, pad_width: ArrayLike, mode="constant", **kwargs):
     typ = _dtypes_impl.python_type_for_torch(array.dtype)
     value = typ(value)
 
+    if not isinstance(pad_width, torch.Tensor):
+        pad_width = torch.as_tensor(pad_width)
     pad_width = torch.broadcast_to(pad_width, (array.ndim, 2))
     pad_width = torch.flip(pad_width, (0,)).flatten()
 

@@ -555,3 +555,7 @@ class TestConstant:
         arr = np.zeros((3, 0, 2))
         result = np.pad(arr, [(0,), (2,), (1,)], mode="constant")
         assert result.shape == (3, 4, 4)
+
+    def test_pad_scalar_width(self):
+        result = np.pad([1, 2, 3], 4)
+        assert_array_equal(result, [0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0])

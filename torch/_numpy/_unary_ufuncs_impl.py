@@ -24,6 +24,7 @@ from torch import (  # noqa: F401
     exp2,  # noqa: F401
     expm1,  # noqa: F401
     floor,  # noqa: F401
+    i0,  # noqa: F401
     isfinite,  # noqa: F401
     isinf,  # noqa: F401
     isnan,  # noqa: F401
@@ -41,14 +42,13 @@ from torch import (  # noqa: F401
     sign,  # noqa: F401
     signbit,  # noqa: F401
     sin,  # noqa: F401
+    sinc,  # noqa: F401
     sinh,  # noqa: F401
     sqrt,  # noqa: F401
     square,  # noqa: F401
     tan,  # noqa: F401
     tanh,  # noqa: F401
     trunc,  # noqa: F401
-    sinc,  # noqa: F401
-    i0,  # noqa: F401
 )
 
 
