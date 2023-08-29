@@ -82,7 +82,7 @@ pip install -q awscli
 case "${PACKAGE_TYPE}" in
   conda)
     conda_upload
-    for conda_archive IN ${PKG_DIR}/*.tar.bz2; do
+    for conda_archive in ${PKG_DIR}/*.tar.bz2; do
       # Fetch  platform (eg. win-64, linux-64, etc.) from index file because
       # there's no actual conda command to read this
       subdir=$(\
