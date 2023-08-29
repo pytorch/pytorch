@@ -6,6 +6,7 @@ import tempfile
 import onnx
 import pytorch_test_common
 import torch
+import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
@@ -406,14 +407,192 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     fake_model, real_x, export_options=export_options
                 )
 
-    def test_fake_tensor_mode_huggingface_bigscience__bloom_560m(self):
-        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+    # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
+    # 1. Pre-trained model is too big for CI
+    # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
+    def test_fake_tensor_mode_huggingface_gpt2(self):
+        config = transformers.GPT2Config(
+            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
+        )
+        batch, seq = 4, 256
 
-        model_name = "bigscience/bloom-560m"
         with torch.onnx.enable_fake_mode() as fake_context:
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = transformers.GPT2Model(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_bigscience_bloom(self):
+        config = transformers.BloomConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.BloomModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_open_llama(self):
+        config = transformers.OpenLlamaConfig(
+            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
+        )
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.OpenLlamaModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_google_t5(self):
+        config = transformers.T5Config(
+            vocab_size=8096, d_model=256, num_layers=2, num_heads=2
+        )
+        device = "cpu"
+        batch, seq = 4, 256
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.T5Model(config).to(device).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=decoder_input_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    def test_fake_tensor_mode_huggingface_openai_whisper(self):
+        config = transformers.WhisperConfig()
+        feature_extractor = transformers.WhisperFeatureExtractor()
+        device = "cpu"
+        batch = 4
+        with torch.onnx.enable_fake_mode() as fake_context:
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
+            )
+            decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
+            model = transformers.AutoModel.from_config(config).to(device).eval()
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_features,
+                decoder_input_ids=decoder_input_ids,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    # TODO: From Config/Model
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "SymFloat in OnnxFUnction attribute is not supported yet."
+    )
+    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
+        # TODO: Make this test work with config
+        # Dolly has no config on transformers
+        model_name = "databricks/dolly-v2-3b"
+        device = "cpu"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
             inputs = tokenizer("Hello world!", return_tensors="pt")
-            model = AutoModel.from_pretrained(model_name)
+            model = transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model, **inputs, export_options=export_options
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "AssertionError: Mutating module attribute seq_len_cached during export."
+        "self.seq_len_cached = seq_len"
+    )
+    def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
+        config = transformers.FalconConfig()
+        batch, seq = 4, 256
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            model = transformers.FalconModel(config).eval()
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+
+            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
+            export_output = torch.onnx.dynamo_export(
+                model,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                export_options=export_options,
+            )
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
+
+    @pytorch_test_common.skip_in_ci(
+        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
+        "torch._dynamo.exc.UserError: Dynamic control flow is not supported at the moment. "
+        "Please use functorch.experimental.control_flow.cond to explicitly capture the control flow"
+    )
+    def test_fake_tensor_mode_huggingface_mosaicml_mpt_7b(self):
+        # TODO: Make this test work with config
+        # mpt-7b has no config on transformers
+        model_name = "mosaicml/mpt-7b"
+        device = "cpu"
+        with torch.onnx.enable_fake_mode() as fake_context:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name, trust_remote_code=True
+            )
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+            model = (
+                transformers.AutoModelForCausalLM.from_pretrained(
+                    model_name, trust_remote_code=True
+                )
+                .to(device)
+                .eval()
+            )
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
             export_output = torch.onnx.dynamo_export(
