@@ -2114,6 +2114,9 @@ class Constant(BaseConstant):
     def realize(self):
         pass
 
+    def constant_to_device(self, device):
+        return Constant(self.value, self.dtype, device)
+
 
 @dataclasses.dataclass
 class IndexingConstant(BaseConstant):
@@ -2126,6 +2129,9 @@ class IndexingConstant(BaseConstant):
             return ops.index_expr(self.index, self.dtype)
 
         return loader
+
+    def constant_to_device(self, device):
+        return IndexingConstant(self.index, self.dtype, device)
 
 
 @dataclasses.dataclass
