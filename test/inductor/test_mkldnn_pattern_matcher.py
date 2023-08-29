@@ -602,6 +602,75 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    def test_qlinear(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, use_bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        bias_list = [True, False]
+        for bias in bias_list:
+            mod = M(bias).eval()
+            v = torch.randn((2, 4))
+
+            # Totally pattern_matcher_count 4, pattern_matcher_nodes 17
+            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. dequant-linear pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+            # 3. pair of to_int8 and to_fp32 at output matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            # 4. Quantization fusion in post-grad fusion pass
+            #    [qlinear_pointwise_default, div_1, round_2, add_1,
+            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            self._test_common(
+                mod,
+                (v,),
+                4,
+                17,
+                check_quantization=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qlinear_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, use_bias)
+                self.unary_fn = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.unary_fn(self.linear(x))
+
+        bias_list = [True, False]
+        for bias in bias_list:
+            mod = M(bias).eval()
+            v = torch.randn((2, 4))
+
+            # Totally pattern_matcher_count 4, pattern_matcher_nodes 18
+            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. dequant-linear pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+            # 3. pair of to_int8 and to_fp32 at output matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            # 4. Quantization fusion in post-grad fusion pass
+            #    [qlinear_pointwise_default, relu, div_1, round_2, add_1,
+            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            self._test_common(
+                mod,
+                (v,),
+                4,
+                18,
+                check_quantization=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear_dequant_promotion(self):
         class M(torch.nn.Module):
@@ -936,45 +1005,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    def test_qlinear_unary(self):
-        class M(torch.nn.Module):
-            def __init__(self, use_bias, unary_fn):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4, use_bias)
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.unary_fn(x) if self.unary_fn is not None else x
-
-        unary_fn_list = quantization_unary_list.keys()
-        bias_list = [True, False]
-        cases = itertools.product(unary_fn_list, bias_list)
-        for unary_fn, bias in cases:
-            mod = M(bias, unary_fn).eval()
-            v = torch.randn((2, 4))
-
-            # Totally pattern_matcher_count 4,
-            # pattern_matcher_nodes 17 + 1 for optional(unary_post_op)
-            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. dequant-linear pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-            # 3. pair of to_int8 and to_fp32 at output matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-            # 4. Quantization fusion in post-grad fusion pass
-            #    [qlinear_pointwise_default, optional(unary_post_op), div_1, round_2, add_1,
-            #     clamp_min_1, clamp_max_1, convert_element_type_2]
-            self._test_common(
-                mod,
-                (v,),
-                4,
-                17 + quantization_unary_list[unary_fn],
-                check_quantization=True,
-            )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
