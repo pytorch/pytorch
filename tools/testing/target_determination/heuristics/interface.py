@@ -251,7 +251,7 @@ class AggregatedHeuristics:
         }
         heuristics = []
 
-        # Figure out which heuristic prioritizes this test the most
+        # Figure out which heuristic gave this test the highest priority
         highest_ranking_heuristic = None
         highest_ranking_heuristic_order: int = sys.maxsize
 
