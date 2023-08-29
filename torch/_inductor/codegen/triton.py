@@ -20,7 +20,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
-from ..ir import IRNode, ReductionHint
+from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint

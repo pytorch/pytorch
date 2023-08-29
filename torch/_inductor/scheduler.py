@@ -1646,6 +1646,7 @@ class Scheduler:
                 node, *epilogue = node.get_nodes()
                 if isinstance(node.node, ir.CUDATemplateBuffer):
                     from .codegen.cuda.cuda_scheduling import CUDAScheduling
+
                     CUDAScheduling(self).codegen_template(node, epilogue)
                 else:
                     self.get_backend(device).codegen_template(node, epilogue)
