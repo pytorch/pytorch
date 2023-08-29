@@ -28,11 +28,6 @@ C10_DEFINE_bool(
     "Use thread pool to schedule backend execution");
 
 C10_DEFINE_bool(
-    torch_lazy_enable_compilation_cache,
-    true,
-    "Enable or disable compilation cache (turns cache on or off), does not change cache state");
-
-C10_DEFINE_bool(
     torch_lazy_enable_device_data_cache,
     true,
     "Enable or disable device data cache (turns cache on or off), does not change cache state");    
