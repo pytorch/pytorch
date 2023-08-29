@@ -4669,6 +4669,16 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_adding_tensor_offsets(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[16:32]
+
+        with torch.no_grad():
+            x = torch.randn(1024, device=self.device)
+            self.assertEqual(fn(x[0:]), x[16:][:16])
+            self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
+
     # from GPT2ForSequenceClassification
     def test_index_tensor(self):
         def fn(x, y):

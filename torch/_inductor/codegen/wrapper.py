@@ -331,12 +331,13 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
-                from torch import empty_strided, as_strided, device
+                from torch import empty_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
 
             """
@@ -788,7 +789,8 @@ class WrapperCodeGen(CodeGen):
             return f"{self.declare}{new.get_name()} = {old.get_name()}{del_line}  {self.comment} reuse"
 
         return (
-            f"{self.declare}{new.get_name()} = {self.namespace}as_strided({old.get_name()}, "
+            f"{self.declare}{new.get_name()} = reinterpret_tensor("
+            f"{old.get_name()}, "
             f"{self.codegen_shape_tuple(new.get_size())}, "
             f"{self.codegen_shape_tuple(new.get_stride())}){del_line}  {self.comment} reuse"
         )
@@ -945,6 +947,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.splice(
             """
             #include <torch/csrc/inductor/inductor_ops.h>
+            #define reinterpret_tensor torch::inductor::_reinterpret_tensor
             """
         )
 

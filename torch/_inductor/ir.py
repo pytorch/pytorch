@@ -1873,12 +1873,9 @@ class ReinterpretView(BaseView):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        namespace = V.graph.wrapper_code.namespace
         if offset != "0":
-            return (
-                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
-            )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+            return f"reinterpret_tensor({self.get_name()}, {size}, {stride}, {offset})"
+        return f"reinterpret_tensor({self.get_name()}, {size}, {stride})"
 
 
 class SliceView(View):
