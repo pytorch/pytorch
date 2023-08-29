@@ -12,6 +12,7 @@
 #include <c10/util/TypeTraits.h>
 #include <torch/custom_class_detail.h>
 #include <torch/library.h>
+#include <iostream>
 #include <sstream>
 
 namespace torch {
