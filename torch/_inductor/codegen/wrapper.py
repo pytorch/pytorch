@@ -14,6 +14,7 @@ import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
+
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -283,6 +284,7 @@ class WrapperCodeGen(CodeGen):
         self.comment = "#"
         self.namespace = ""
         self.none_str = "None"
+        self.optional_tensor_str = "None"
         self.size = "size()"
         self.stride = "stride()"
         self.first_device_guard = True
@@ -741,7 +743,7 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_str(self, s):
+    def val_to_arg_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
         elif isinstance(s, sympy.Expr):
@@ -755,7 +757,7 @@ class WrapperCodeGen(CodeGen):
                 def __repr__(self):
                     return self.ref
 
-            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
+            return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
         else:
@@ -896,6 +898,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def __init__(self):
         super().__init__()
+        from ..ir import OptionalTensor
+
         self.declare = "auto "
         self.ending = ";"
         self.open_bracket = "{"
@@ -903,6 +907,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "at::Tensor()"
+        self.optional_tensor_str = repr(OptionalTensor())
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -910,6 +915,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
+        self.resized_outputs = {}
 
         from .cpp import cexpr
 
@@ -1012,6 +1018,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 c10::optional<at::Scalar> optional_scalar;
                 c10::optional<c10::string_view> optional_string;
                 c10::optional<at::Layout> optional_layout;
+                c10::optional<at::Tensor> optional_tensor;
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
@@ -1046,6 +1053,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
                 self.prefix.writeline(f"""inputs_info_[{idx}].name = "{name}";""")
+                self.prefix.writeline(
+                    f"""inputs_info_[{idx}].dtype = "{V.graph.graph_inputs[name].get_dtype()}";"""
+                )
                 sizes = V.graph.graph_inputs[name].get_size()
                 self.prefix.writeline(
                     f"inputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1061,6 +1071,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
                 self.prefix.writeline(f"""outputs_info_[{idx}].name = "output{idx}";""")
+                self.prefix.writeline(
+                    f"""outputs_info_[{idx}].dtype = "{output.get_dtype()}";"""
+                )
                 sizes = output.get_size()
                 self.prefix.writeline(
                     f"outputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1089,14 +1102,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if (
-                    hasattr(output, "get_name")
-                    and output.get_name() in self.outputs_need_copy
-                ):
-                    output_as_strided = output.codegen_reference()
-                    self.wrapper_call.writeline(
-                        f"outputs[{idx}].copy_({output_as_strided});"
-                    )
+                if hasattr(output, "get_name"):
+                    name = output.get_name()
+                    if name in self.outputs_need_copy:
+                        output_as_strided = output.codegen_reference()
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].copy_({output_as_strided});"
+                        )
+                    resize_to = self.resized_outputs.get(name, None)
+                    if resize_to is not None:
+                        resize_to_args = ", ".join(
+                            self.expr_printer(d) for d in resize_to
+                        )
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].resize_({{{resize_to_args}}});"
+                        )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1177,7 +1197,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if fn == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_str(reduce)}"
+                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
                 assert (
                     reduce is None
@@ -1251,7 +1271,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.sizevars.statically_known_leq(
                 buffer.get_numel(), output_buffer.get_numel()
             ):
-                return f"auto {name} = outputs[{output_idx}];"
+                buf_str = f"auto {name} = outputs[{output_idx}];"
+                # avoid resize_output warning:
+                # "An output with one or more elements was resized since it had..."
+                if buffer.get_size() != output_buffer.get_size():
+                    resize_to_args = ", ".join(
+                        self.expr_printer(d) for d in buffer.get_size()
+                    )
+                    buf_str += f" {name}.resize_({{{resize_to_args}}});"
+                    assert name not in self.resized_outputs
+                    self.resized_outputs[name] = list(output_buffer.get_size())
+                return buf_str
             else:
                 self.outputs_need_copy.add(name)
 
@@ -1290,11 +1320,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
-    def val_to_str(self, val):
+    def val_to_arg_str(self, val):
         from .cpp import DTYPE_TO_ATEN
 
         if val is None:
-            return self.none_str
+            # When None is passed as an argument, it represents an optional that does not contain a value.
+            return self.optional_tensor_str
         elif isinstance(val, bool):
             return "true" if val else "false"
         elif isinstance(val, str):
@@ -1309,7 +1340,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
+            return f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
         else:
             return repr(val)
 
@@ -1342,12 +1373,21 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 }                                                               \\
             } while (0)
 
-            static inline CUfunction loadKernel(const std::string &filePath,
-                    const std::string &funcName) {
+            static inline CUfunction loadKernel(
+                    const std::string &filePath,
+                    const std::string &funcName,
+                    int sharedMemBytes) {
                 CUmodule mod;
                 CUfunction func;
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ));
+                }
                 return func;
             }
 
@@ -1356,12 +1396,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int gridX,
                     int gridY,
                     int gridZ,
-                    int numWraps,
+                    int numWarps,
                     int sharedMemBytes,
                     void* args[],
                     cudaStream_t stream) {
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
@@ -1394,9 +1434,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             cubin_path
         ), "cubin file should already exist at this moment"
 
+        shared_mem = params.get("shared_mem", 0)
         self.writeline(f"if ({name} == nullptr) {{")
         self.writeline(
-            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}");"""
+            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
         )
         self.writeline("}")
 

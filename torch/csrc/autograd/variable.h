@@ -186,6 +186,12 @@ TORCH_API void add_hook(
 TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
+TORCH_API void set_post_acc_grad_hooks(
+    const at::TensorBase&,
+    std::unique_ptr<PostAccumulateGradHook> dict);
+TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable&);
+
 TORCH_API void create_cpp_hook(
     const at::TensorBase&,
     bool is_retains_grad_hooks = false);
@@ -230,6 +236,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
+
+  // The post_acc_grad_hooks_ field stores only Python hooks
+  // (PyFunctionTensorPostAccGradHooks) that are called after the
+  // .grad field has been accumulated into. This is less complicated
+  // than the hooks_ field, which encapsulates a lot more.
+  std::unique_ptr<PostAccumulateGradHook> post_acc_grad_hooks_ = nullptr;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_{false};
