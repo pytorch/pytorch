@@ -85,7 +85,7 @@ def main(compiled):
                 }
                 for name, param in params.items():
                     print(f"Pre compile. {name} {param.size()}")
-            model = torch._dynamo.optimize("eager", nopython=True, dynamic=False)(model)
+            model = torch._dynamo.optimize("aot_eager", nopython=True, dynamic=False)(model)
             res = run(model, optim)
     else:
         res = run(model, optim)

@@ -1250,19 +1250,19 @@ class BuiltinVariable(VariableTracker):
                     # ),
                     # torch._C._set_grad_enabled(False)
 
-                    # with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx):
+                    with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
                         # val.as_proxy().requires_grad = False
-                    with torch.no_grad():
-                        out = wrap_fx_proxy(
-                            tx,
-                            tx.output.create_proxy(
-                                "call_function",
-                                # torch.ops.aten.set_,
-                                torch._set_data,
-                                *proxy_args_kwargs([obj, val], {}),
-                            ),
-                        )
-                        obj.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
+                        with torch.no_grad():
+                            out = wrap_fx_proxy(
+                                tx,
+                                tx.output.create_proxy(
+                                    "call_function",
+                                    torch.ops.aten._set_data,
+                                    # torch._set_data,
+                                    *proxy_args_kwargs([obj, val], {}),
+                                ),
+                            )
+                            obj.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
                     tx.replace_all(obj, out)
 
                         # val.as_proxy().requires_grad = False
