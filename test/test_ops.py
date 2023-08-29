@@ -1098,10 +1098,8 @@ class TestCommon(TestCase):
                             RuntimeError,
                             msg=(
                                 "inplace variant either incorrectly allowed "
-                                "resizing or you have marked the sample {}"
-                                " incorrectly with `broadcasts_self=True".format(
-                                    sample.summary()
-                                )
+                                f"resizing or you have marked the sample {sample.summary()}"
+                                " incorrectly with `broadcasts_self=True"
                             ),
                         ):
                             variant_forward = variant(
@@ -1836,6 +1834,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.dropout',
         '_refs.nn.functional.l1_loss',
         '_refs.nn.functional.smooth_l1_loss',
         '_refs.nn.functional.log_softmax',

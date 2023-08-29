@@ -254,6 +254,19 @@ class HigherOrderOperator(OperatorBase):
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
             return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
 
+        functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
+        if functionality_key in mode_stack_per_key():
+            curr_stack = mode_stack_per_key()[functionality_key]
+            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+            # calls inside of a mode.
+            if len(
+                curr_stack
+            ) > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+                DispatchKey.Python
+            ):
+                curr_mode = curr_stack[-1]
+                return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+
         final_key = resolve_key(self, dispatch_key)
 
         # This can current fail due to backend fallbacks.  You just have to
@@ -646,10 +659,8 @@ class OpOverloadPacket:
             # an object name different from the one the attribute
             # query was performed on.
             raise AttributeError(
-                "'{}' can't have an overload name beginning with '__' and the "
-                "underlying op {} has no attribute {} either.".format(
-                    str(self), str(self._op), key
-                )
+                f"'{str(self)}' can't have an overload name beginning with '__' and the "
+                f"underlying op {str(self._op)} has no attribute {key} either."
             ) from None
 
         try:

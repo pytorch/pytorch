@@ -10,7 +10,7 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
-from torchgen.model import DispatchKey, Variant
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -462,7 +462,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "pdist",
         "cosine_similarity",
     ]
-    imported_hints = ["from .. import {0} as {0}".format(_) for _ in torch_imports]
+    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
@@ -479,9 +479,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    imported_hints += [
-        "from .._C._nn import {0} as {0}".format(_) for _ in c_nn_imports
-    ]
+    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed
     imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
 
@@ -667,6 +665,7 @@ def gen_pyi(
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
+                            "is_coalesced: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -875,15 +874,13 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
-                binop
-            )
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1086,8 +1083,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
@@ -1096,9 +1093,9 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                "*, alpha: Optional[Number] = 1{})"
-                " -> Tensor: ...".format(binop, out_suffix)
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
@@ -1230,6 +1227,9 @@ def gen_pyi(
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [
+        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
+    ]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
@@ -1250,6 +1250,7 @@ def gen_pyi(
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
+        "torch_dispatch_mode_key_hints": torch_dispatch_mode_key_hints,
         "all_directive": all_directive,
         "tag_attributes": tag_attributes,
     }
