@@ -550,7 +550,7 @@ class TestInductorOpInfo(TestCase):
                         {"assert_equal": False},
                     ),
                 )
-            return (lambda: contextlib.nullcontext, {})
+            return ((contextlib.nullcontext, {}),)
 
         try:
             for sample_input in samples:
