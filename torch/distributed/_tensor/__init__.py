@@ -7,7 +7,11 @@ import torch.distributed._tensor.ops
 import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
-from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import (
+    DeviceMesh,
+    init_device_mesh,
+    mesh_resources,
+)
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 # All public APIs from dtensor package
@@ -16,6 +20,7 @@ __all__ = [
     "DeviceMesh",
     "distribute_tensor",
     "distribute_module",
+    "init_device_mesh,",
     "Shard",
     "Replicate",
 ]
