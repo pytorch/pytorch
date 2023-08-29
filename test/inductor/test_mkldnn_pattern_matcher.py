@@ -605,6 +605,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfRocm
     def test_qlinear(self):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
@@ -639,6 +640,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfRocm
     def test_qlinear_relu(self):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
