@@ -315,7 +315,7 @@ class GraphModule(torch.nn.Module):
 
         try:
             x = torch._to_functional_tensor(t_clone2)
-            torch._mirror_autograd_meta(t_clone2, x)
+            torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
             aot_f_out = f(x)
         finally:
