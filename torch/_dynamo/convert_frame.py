@@ -428,9 +428,9 @@ def _compile(
     compile_id=None,
 ) -> Optional[GuardedCode]:
     from torch.fx.experimental.validator import (
+        BisectValidationException,
         translation_validation_enabled,
         ValidationException,
-        BisectValidationException,
     )
 
     output: Optional[OutputGraph] = None
