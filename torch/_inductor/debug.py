@@ -38,6 +38,9 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+SchedulerNodeList = List[Any]
+BuffMeta = collections.namedtuple("BuffMeta", ["name", "n_origin"])
+
 
 @functools.lru_cache(None)
 def has_dot():
@@ -185,6 +188,41 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
     return graph
+
+def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
+    node_name_to_buff_meta = {}
+    for node in nodes:
+        ir_node = node.node
+        if ir_node is None or ir_node.origins is None:
+            continue
+        buff_name = ir_node.name
+        # if len(ir_node.origins) == 2:
+        #     breakpoint()
+        buff_meta = BuffMeta(buff_name, len(ir_node.origins))
+        for origin in ir_node.origins:
+            # investigate which origin.stack_trace is none
+            # and why one orig fx node belongs to multiple buffers
+            if origin.stack_trace is None:
+                continue
+            node_name = origin.name
+            assert node_name not in node_name_to_buff_meta, f"node_name={node_name} should not be in {node_name_to_buff_meta}"
+            node_name_to_buff_meta[node_name] = buff_meta
+            # parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
+            # fname = self._shorten_file_name(parsed_stack_trace.file)
+            # label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
+    return node_name_to_buff_meta
+
+def annotate_orig_fx_with_snodes(gm: torch.fx.GraphModule, snodes: SchedulerNodeList) -> None:
+    """
+    Creates a FX Graph from a list of SchedulerNode objects.
+    """
+    BuffMeta = collections.namedtuple("BuffMeta", ["name", "n_origin"])
+    node_name_to_buff_meta = get_orig_fx_node_name_to_buff_meta(snodes)
+    if node_name_to_buff_meta is None:
+        return
+    for node in gm.graph.nodes:
+        if node.name in node_name_to_buff_meta:
+            node.meta["buff_meta"] = node_name_to_buff_meta.get(node.name)
 
 
 @contextlib.contextmanager
@@ -364,7 +402,7 @@ class DebugContext:
             return ignored
 
 
-SchedulerNodeList = List[Any]
+
 
 
 class DebugFormatter:
@@ -404,49 +442,15 @@ class DebugFormatter:
     def graph_diagram(self, nodes: SchedulerNodeList):
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
-    def fx_graph_diagram(self, nodes: SchedulerNodeList, gm: torch.fx.GraphModule):
+    def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
         # if gm is None:
         #     with self.fopen("fx_graph_original.pkl", mode="rb") as fd:
         #         gm = pickle.load(fd)
 
-        # node_name_to_buff_name = self._get_fx_node_name_to_buffer(nodes)
-        node_name_to_buff_name = None
+        annotate_orig_fx_with_snodes(gm, nodes)
+        prog = ['dot', '-Gnslimit=2', '-Gnslimit1=2', '-Gmaxiter=5000', '-v5']
+        draw_graph(gm, fname=self.filename("orig_fx_graph_diagram.svg"), clear_meta=False, prog=prog, parse_stack_trace=True)
 
-        # breakpoint()
-
-
-
-        draw_graph(gm, fname=self.filename("fx_graph_diagram.svg"), clear_meta=False, node_name_to_group=node_name_to_buff_name)
-    
-    def _get_fx_node_name_to_buffer(self, nodes: SchedulerNodeList):
-        buff_name_to_node_count = {}
-        for node in nodes:
-            ir_node = node.node
-            if ir_node is None or ir_node.origins is None:
-                continue
-            buff_name = ir_node.name
-            buff_name_to_node_count[buff_name] = len(ir_node.origins)
-
-        node_name_to_buff_name = {}
-        
-        for node in nodes:
-            ir_node = node.node
-            if ir_node is None or ir_node.origins is None:
-                continue
-            buff_name = ir_node.name
-            for origin in ir_node.origins:
-                # if origin.stack_trace is None:
-                #     continue
-                node_name = origin.name
-                if node_name in node_name_to_buff_name:
-                    breakpoint()
-                assert node_name not in node_name_to_buff_name, f"node_name={node_name} should not be in {node_name_to_buff_name}"
-                node_name_to_buff_name[node_name] = buff_name
-                # parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
-                # fname = self._shorten_file_name(parsed_stack_trace.file)
-                # label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
-        return node_name_to_buff_name
-        
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))

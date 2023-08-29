@@ -430,7 +430,7 @@ class trace:
     graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
 
     # SVG figure showing fx with fusion
-    fx_graph_diagram = os.environ.get("INDUCTOR_FX_FUSION_SVG", "0") == "1"
+    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
