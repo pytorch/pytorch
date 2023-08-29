@@ -333,18 +333,15 @@ def _extract_shape_env_and_assert_equal(args, kwargs) -> "ShapeEnv":
 # ShapeEnv in some way that affects the resulting issued guards (i.e. when
 # ShapeEnv.produce_guards is called).
 def record_shapeenv_event(fn: Callable) -> Callable:
+    assert callable(fn)
     name = fn.__name__
-
-    # Only accept ShapeEnv methods or independent functions.
-    assert callable(fn) and (not isinstance(fn, types.MethodType) or hasattr(ShapeEnv, name))
-    is_shape_env_method = isinstance(fn, types.MethodType)
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         # Retrieve an instance of ShapeEnv.
-        self = args[0] \
-            if is_shape_env_method \
-            else _extract_shape_env_and_assert_equal(args, kwargs)
+        # Assumption: the collection of args and kwargs may not reference
+        # different ShapeEnv instances.
+        self = _extract_shape_env_and_assert_equal(args, kwargs)
 
         # If ShapeEnv is already recording an event, call the wrapped
         # function directly.
@@ -2756,9 +2753,9 @@ class ShapeEnv:
         ex_storage_offset = maybe_specialize_sym_int_with_hint(ex.storage_offset())
 
         return self._create_symbolic_sizes_strides_storage_offset(
-            ex.size(),
-            ex.stride(),
-            ex.storage_offset(),
+            ex_size,
+            ex_stride,
+            ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             dynamic_dims=dynamic_dims,
@@ -3089,6 +3086,20 @@ class ShapeEnv:
         ignore_static=True,
     ) -> List[str]:
         self.log.info("produce_guards")
+
+        # Check if we get to the same ShapeEnv state by replaying the recorded events.
+        # This will create a new ShapeEnv instance, and call all recorded function
+        # calls on this new instance. Finally, it will check whether this new instance
+        # has equal state.
+        #
+        # It's important that we do it in the begining of this function, since it modifies
+        # self.dim_constraints through its execution. Changes that happen in this method
+        # aren't interesting, since this is the function call we wish to reproduce at the
+        # end. If we wish to simply reproduce ShapeEnv instances even after this call,
+        # this method should also be recorded.
+        if self.check_recorded_events:
+            shape_env = replay_shape_env_events(self.events)
+            self.check_equal(shape_env)
 
         assert len(placeholders) == len(sources)
 
@@ -3495,15 +3506,6 @@ class ShapeEnv:
                 PopulateValidator(self.graph, self.validator).run()
 
         self._check_translation_validate()
-
-        # Check if we get to the same ShapeEnv state by replaying the recorded events.
-        # This will create a new ShapeEnv instance, and call all recorded function
-        # calls on this new instance. Finally, it will check whether this new instance
-        # has equal state.
-        if self.check_recorded_events:
-            shape_env = replay_shape_env_events(self.events)
-            self.check_equal(shape_env)
-
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
