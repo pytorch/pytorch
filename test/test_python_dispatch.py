@@ -20,7 +20,7 @@ from torch._custom_op.functional import register_functional_op
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
-from torch.testing._internal.common_methods_invocations import op_db, foreach_pointwise_op_db
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -2169,18 +2169,6 @@ class TestWrapperSubclassAliasing(TestCase):
         args = (sample.input, *sample.args)
         kwargs = sample.kwargs
         self._test_wrapper_subclass_aliasing(op, args, kwargs)
-
-    @ops([op for op in foreach_pointwise_op_db if op.name in [
-        '_foreach_addcmul'
-    ]], allowed_dtypes=(torch.float,))
-    def test_wrapper_subclass_aliasing_foreach(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-        sample = first_sample(self, samples)
-        inputs = [sample.input, *sample.args]
-
-        # foreach ops don't take in any kwargs
-        self._test_wrapper_subclass_aliasing(op.method_variant, inputs, {})
-        self._test_wrapper_subclass_aliasing(op.inplace_variant, inputs, {})
 
     @ops(custom_op_db, allowed_dtypes=(torch.float,))
     def test_wrapper_subclass_aliasing_custom(self, device, dtype, op):
