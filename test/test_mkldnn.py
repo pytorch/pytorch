@@ -308,8 +308,8 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y, y_lower, atol=1e-1, rtol=1e-3)
             else:
                 msg = {
-                    torch.bfloat16: r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
-                    torch.half: r"fp16 path needs the cpu support avx512_fp16",
+                    torch.bfloat16: r"bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq",
+                    torch.half: r"fp16 path needs the cpu support avx_ne_convert or avx512_fp16",
                 }
                 with self.assertRaisesRegex(RuntimeError, msg[dtype]):
                     mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
