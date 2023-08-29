@@ -1628,7 +1628,7 @@ def main():
         get_test_case_configs(dirpath=test_directory)
         aggregated_heuristics = get_test_prioritizations(selected_tests)
 
-    test_prioritizations = aggregated_heuristics.get_ranked_tests()
+    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
     if IS_CI:
         metrics_dict = {
