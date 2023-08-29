@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -198,18 +199,14 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f32, f64},
     "cauchy": {f16},
-    "chalf": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "exponential": {f16},
     "geometric": {f16},
-    "linalg.eigh": {f32, f64},
-    "linalg.eigvalsh": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
@@ -221,17 +218,14 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.rrelu": {f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
-    "normal": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
     "randint": {f16, f32, f64, i32, i64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
-    ("scatter_reduce", "prod"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "uniform": {f16},
     "view_as_complex": {f16},
@@ -239,7 +233,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
@@ -251,34 +244,14 @@ inductor_expected_failures_single_sample["cuda"] = {
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16, f32, f64},
-    "chalf": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "complex": {f16},
     "cumprod": {f16},
     "exponential": {f16, f32, f64},
-    "fft.fft": {f16},
-    "fft.fft2": {f16},
-    "fft.fftn": {f16},
-    "fft.hfft": {f16},
-    "fft.hfft2": {f16},
-    "fft.hfftn": {f16},
-    "fft.ifft": {f16},
-    "fft.ifft2": {f16},
-    "fft.ifftn": {f16},
-    "fft.ihfft": {f16},
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
-    "fft.irfft": {f16},
-    "fft.irfft2": {f16},
-    "fft.irfftn": {f16},
-    "fft.rfft": {f16},
-    "fft.rfft2": {f16},
-    "fft.rfftn": {f16},
     "geometric": {f16, f32, f64, i32, i64},
     "kron": {f16},
     "linalg.eig": {f32, f64},
-    "linalg.eigh": {f32, f64},
-    "linalg.eigvalsh": {f32, f64},
     "log_normal": {f16, f32, f64},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
@@ -296,7 +269,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.softsign": {f16},
     "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
-    "normal": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "outer": {f16},
@@ -305,11 +277,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     ("round", "decimals_3"): {f16},
-    ("scatter_reduce", "prod"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
-    "tanh": {f16},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
 }
@@ -335,14 +304,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
-else:
-    # aten.miopen_batch_norm is unsupported for lowering
-    inductor_expected_failures_single_sample["cuda"].update(
-        {
-            "nn.functional.batch_norm": {f16, f32},
-            "nn.functional.instance_norm": {f16, f32},
-        }
-    )
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update(
@@ -567,7 +528,8 @@ class TestInductorOpInfo(TestCase):
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
                 with mode:
-                    fn(*args, **kwargs)
+                    with enable_python_dispatcher():
+                        fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
                 return False
