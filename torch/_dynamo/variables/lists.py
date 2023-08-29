@@ -21,7 +21,7 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
-def _listlike_contains_helper(items, search, options):
+def _listlike_contains_helper(items, search, tx, options):
     if search.is_python_constant():
         result = any(
             x.as_python_constant() == search.as_python_constant() for x in items
@@ -135,7 +135,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return _listlike_contains_helper(self.items, args[0], options)
+            return _listlike_contains_helper(self.items, args[0], tx, options)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -902,7 +902,7 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return _listlike_contains_helper(self.items, args[0], options)
+            return _listlike_contains_helper(self.items, args[0], tx, options)
         else:
             return super().call_method(tx, name, args, kwargs)
 
