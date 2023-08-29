@@ -35,8 +35,7 @@ dead_code_elimination = True
 # controls the maximum number of cache entries with a guard on same ID_MATCH'd
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
-# TODO(janimesh) - Reduce this value to a smaller number once stability is reached.
-cache_size_limit = 64
+cache_size_limit = 8
 # controls the maximum number of entries for a code object.
 accumulated_cache_size_limit = 64
 
