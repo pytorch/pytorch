@@ -410,7 +410,7 @@ class _TargetArgsExpr(_TargetExpr):
 
         _args = node.args
         _kwargs = node.kwargs
-        if len(_kwargs) != len(self.kwargs):
+        if len(_kwargs) < len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
 
             arg_types = [type(node.args[i]) for i in range(len(node.args))]
@@ -423,6 +423,12 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
             else:
                 _args, _kwargs = normalized_args_and_kwargs
+                if len(_args) != len(self.args) or len(_kwargs) != len(self.kwargs):
+                    return FailedMatch(
+                        f"function_mismatch: node={node}, pattern={self}"
+                    )
+        elif len(_kwargs) > len(self.kwargs):
+            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
