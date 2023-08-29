@@ -505,6 +505,7 @@ class CompilationMetrics:
     co_filename: str
     co_firstlineno: int
     cache_size: int
+    accumulated_cache_size: int
     guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
