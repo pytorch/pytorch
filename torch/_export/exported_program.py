@@ -1,47 +1,46 @@
 import copy
-import dataclasses
 from collections import defaultdict
-from enum import auto, Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+import dataclasses
+from typing import Dict, List, Optional, Tuple
+import warnings
 
 import sympy
 
 import torch
 import torch.fx
-import torch.fx._pytree as fx_pytree
 
 import torch.utils._pytree as pytree
-from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx._compatibility import compatibility
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.passes.infra.pass_manager import PassManager
 
-from . import error
-from .pass_base import PassType
-from .passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForConstraintsPass,
+from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     InputDim,
     RangeConstraint,
 )
 
 
-__all__ = ["ExportedProgram"]
+# TODO(ycao): This is added to avoid breaking existing code temporarily.
+# Remove when migration is done.
+from torch.export import (
+    ArgumentKind,
+    ArgumentSpec,
+    ExportBackwardSignature,
+    ExportGraphSignature,
+    ExportedProgram,
+    ModuleCallEntry,
+    ModuleCallSignature,
+)
 
 
-LeafValue = Union[
-    None,
-    bool,
-    complex,
-    float,
-    int,
-    str,
-    torch.Tensor,
-    torch.device,
-    torch.dtype,
-    torch.layout,
-    torch.memory_format,
+__all__ = [
+    "ArgumentKind",
+    "ArgumentSpec",
+    "ExportBackwardSignature",
+    "ExportGraphSignature",
+    "ExportedProgram",
+    "ModuleCallEntry",
+    "ModuleCallSignature",
 ]
 
 
@@ -50,73 +49,6 @@ LeafValue = Union[
 class CallSpec:
     in_spec: Optional[pytree.TreeSpec]
     out_spec: Optional[pytree.TreeSpec]
-
-
-# Extra information for joint graphs
-@dataclasses.dataclass
-class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
-
-
-@dataclasses.dataclass
-class ExportGraphSignature:
-    parameters: List[FQN]
-    buffers: List[FQN]
-
-    user_inputs: List[GraphInputName]
-    user_outputs: List[GraphOutputName]
-    inputs_to_parameters: Dict[GraphInputName, FQN]
-    inputs_to_buffers: Dict[GraphInputName, FQN]
-
-    buffers_to_mutate: Dict[GraphOutputName, FQN]
-
-    backward_signature: Optional[ExportBackwardSignature]
-    # Map from assertion dependency token index to assertion dep token output
-    # name in output. The shape of output after aot_autograd will be like:
-    # (updated_inputs, user_outputs, dep_token).
-    assertion_dep_token: Optional[Dict[int, str]] = None
-
-    def __post_init__(self) -> None:
-        assertion_dep_token = self.assertion_dep_token
-        if assertion_dep_token is None:
-            return
-        assert len(assertion_dep_token) == 1
-        assertion_dep_token_index = list(assertion_dep_token.keys())[0]
-        assert (
-            len(self.user_outputs) + len(self.buffers_to_mutate)
-            == assertion_dep_token_index
-        )
-
-class ArgumentKind(Enum):
-    Tensor = auto()
-    SymInt = auto()
-    Constant = auto()
-
-
-@dataclasses.dataclass
-class ArgumentSpec:
-    kind: ArgumentKind
-    value: Any
-
-    def __post_init__(self):
-        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
-            assert isinstance(self.value, str)
-
-
-@dataclasses.dataclass
-class ModuleCallSignature:
-    inputs: List[ArgumentSpec]
-    outputs: List[ArgumentSpec]
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
-
-
-@dataclasses.dataclass
-class ModuleCallEntry:
-    fqn: str
-    signature: Optional[ModuleCallSignature] = None
 
 
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
@@ -240,7 +172,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
     return gm
 
 
-def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Module:
+def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
     new_gm = copy.deepcopy(ep.graph_module)
 
     # TODO Fix the period in params/buffers names later
@@ -295,217 +227,25 @@ def unlift_exported_program_lifted_states(ep: "ExportedProgram") -> torch.nn.Mod
     return new_gm
 
 
-class ExportedProgram:
-    def __init__(
-        self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
-        graph: torch.fx.Graph,
-        graph_signature: ExportGraphSignature,
-        call_spec: CallSpec,
-        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
-        range_constraints: Dict[sympy.Symbol, RangeConstraint],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
-        module_call_graph: List[ModuleCallEntry],
-    ):
-        # Remove codegen related things from the graph. It should just be a flat graph.
-        graph._codegen = torch.fx.graph.CodeGen()
-        self._graph_module = torch.fx.GraphModule(root, graph)
-        if isinstance(root, torch.fx.GraphModule):
-            self._graph_module.meta.update(root.meta)
-
-        self._graph_signature: ExportGraphSignature = graph_signature
-        self._call_spec: CallSpec = call_spec
-        self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self._equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
-        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
-
-    @property
-    @compatibility(is_backward_compatible=True)
-    def graph_module(self):
-        return self._graph_module
-
-    @property
-    @compatibility(is_backward_compatible=True)
-    def graph(self):
-        return self.graph_module.graph
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def graph_signature(self):
-        return self._graph_signature
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def state_dict(self):
-        return self._state_dict
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def call_spec(self):
-        return self._call_spec
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def range_constraints(self):
-        return self._range_constraints
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def equality_constraints(self):
-        return self._equality_constraints
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def module_call_graph(self):
-        return self._module_call_graph
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        if self.call_spec.in_spec is not None:
-            try:
-                user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
-            except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
-                    "Trying to flatten user inputs with exported input tree spec: \n"
-                    f"{self.call_spec.in_spec}\n"
-                    "but actually got inputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-
-        ordered_params = tuple(self.state_dict[name] for name in self.graph_signature.parameters)
-        ordered_buffers = tuple(self.state_dict[name] for name in self.graph_signature.buffers)
-        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
-
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params,
-                *ordered_buffers,
-                *args,
-                enable_io_processing=False
-            )
-
-        if self.call_spec.out_spec is not None:
-            mutation = self.graph_signature.buffers_to_mutate
-            num_mutated = len(mutation)
-            mutated_buffers = res[:num_mutated]
-
-            # Exclude dependency token from final result.
-            assertion_dep_token = self.graph_signature.assertion_dep_token
-            if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
-                res = res[:assertion_dep_token_index]
-
-            res = res[num_mutated:]
-            try:
-                res = pytree.tree_unflatten(res, self.call_spec.out_spec)
-            except Exception:
-                _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(
-                    "Trying to flatten user outputs with exported output tree spec: \n"
-                    f"{self.call_spec.out_spec}\n"
-                    "but actually got outputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-            finally:
-                ix = 0
-                for buffer in self.graph_signature.buffers_to_mutate.values():
-                    self.state_dict[buffer] = mutated_buffers[ix]
-                    ix += 1
-        return res
-
-    def __str__(self) -> str:
-        graph_module = self.graph_module.print_readable(print_output=False).replace("\n", "\n    ")
-        string = (
-            "ExportedProgram:\n"
-            f"    {graph_module}\n"
-            f"Graph Signature: {self.graph_signature}\n"
-            f"Symbol to range: {self.range_constraints}\n"
+def _create_graph_module_for_export(root, graph):
+    try:
+        gm = torch.fx.GraphModule(root, graph)
+    except SyntaxError:
+        # If custom objects stored in memory are being used in the graph,
+        # the generated python code will result in a syntax error on the custom
+        # object, since it is unable to parse the in-memory object. However
+        # we can still run the graph eagerly through torch.fx.Interpreter,
+        # so we will bypass this error.
+        warnings.warn(
+            "Unable to execute the generated python source code from "
+            "the graph. The graph module will no longer be directly callable, "
+            "but you can still run the ExportedProgram, and if needed, you can "
+            "run the graph module eagerly using torch.fx.Interpreter."
         )
-        return string
+        gm = torch.fx.GraphModule(root, torch.fx.Graph())
+        gm._graph = graph
 
-    def module(self) -> torch.nn.Module:
-        """
-        Returns a self contained GraphModule with all the states
-        flattened.
-        """
-        return unlift_exported_program_lifted_states(self)
-
-
-    def transform(self, *passes: PassType) -> "ExportedProgram":
-        pm = PassManager(list(passes))
-        res = pm(self.graph_module)
-        transformed_gm = res.graph_module if res is not None else self.graph_module
-        assert transformed_gm is not None
-
-        def _get_updated_range_constraints(
-            gm: torch.fx.GraphModule,
-        ) -> Dict[sympy.Symbol, RangeConstraint]:
-            def get_shape_env(gm):
-                vals = [
-                    node.meta["val"]
-                    for node in gm.graph.nodes
-                    if node.meta.get("val", None) is not None
-                ]
-                from torch._guards import detect_fake_mode
-                fake_mode = detect_fake_mode(vals)
-                if fake_mode is not None:
-                    return fake_mode.shape_env
-                for v in vals:
-                    if isinstance(v, torch.SymInt):
-                        return v.node.shape_env
-
-            shape_env = get_shape_env(gm)
-            if shape_env is None:
-                return {}
-            range_constraints = {
-                k: RangeConstraint(v.lower, v.upper) for k, v in shape_env.var_to_range.items()
-            }
-            return range_constraints
-
-        transformed_ep = ExportedProgram(
-            transformed_gm,
-            transformed_gm.graph,
-            copy.deepcopy(self.graph_signature),
-            copy.deepcopy(self.call_spec),
-            self.state_dict,
-            _get_updated_range_constraints(transformed_gm),
-            copy.deepcopy(self.equality_constraints),
-            copy.deepcopy(self._module_call_graph),
-        )
-        transformed_ep.graph_module.meta.update(self.graph_module.meta)
-        transformed_ep.graph_module.meta.update(res.graph_module.meta)
-        return transformed_ep
-
-    def _check_input_constraints(self, *args):
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
-
-    def validate(self):
-        # TODO(zhxchen17) check for get_attr
-        # TODO(zhxchen17) check for funcitonal ops
-        for gm in self.graph_module.modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            for node in gm.graph.nodes:
-                if node.op == "call_function":
-                    assert node.target != torch.ops.higher_order._export_tracepoint
+    return gm
 
 
 def _process_constraints(
