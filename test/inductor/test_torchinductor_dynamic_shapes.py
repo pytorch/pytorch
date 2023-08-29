@@ -243,14 +243,17 @@ class TestInductorDynamic(TestCase):
 
         def add(x):
             return x + torch.zeros(3)
+
         test(add)
 
         def mul(x):
             return x * torch.ones(3)
+
         test(mul)
 
         def div(x):
             return x / torch.ones(3)
+
         test(div)
 
     @onlyCPU
