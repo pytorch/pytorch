@@ -2547,22 +2547,22 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 for file in {k[0] for k in prof.stats}:
                     experiment.add(file)
 
-        with torch.profiler.profile(
-            with_stack=True, profile_memory=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True)
-        ) as prof:
-            with contextlib.ExitStack() as stack:
-                if TEST_WITH_CROSSREF:
-                    stack.enter_context(CrossRefMode())
-                num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-                self._run_with_retry(
-                    result=result,
-                    num_runs_left=num_runs,
-                    report_only=not OVERRIDE_FLAKY_SIGNAL,
-                    num_red=0,
-                    num_green=0)
-        for event in prof.events():
-            for s in event.stack:
-                experiment.add(s.split("(")[0])
+        # with torch.profiler.profile(
+        #     with_stack=True, profile_memory=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True)
+        # ) as prof:
+        #     with contextlib.ExitStack() as stack:
+        #         if TEST_WITH_CROSSREF:
+        #             stack.enter_context(CrossRefMode())
+        #         num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        #         self._run_with_retry(
+        #             result=result,
+        #             num_runs_left=num_runs,
+        #             report_only=not OVERRIDE_FLAKY_SIGNAL,
+        #             num_red=0,
+        #             num_green=0)
+        # for event in prof.events():
+        #     for s in event.stack:
+        #         experiment.add(s.split("(")[0])
 
     def setUp(self):
         check_if_enable(self)
