@@ -705,14 +705,13 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -722,14 +721,13 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -760,14 +758,13 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -781,14 +778,13 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -816,14 +812,13 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -837,14 +832,13 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     # device_type="cuda",
-            # ),
+            # TODO: internally promoted to complex64 so not rejected
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFFT",
+                "test_fft_half_and_bfloat16_errors",
+                dtypes=[torch.bfloat16],
+            ),
             # TODO: investigate failure
             DecorateInfo(
                 unittest.expectedFailure,

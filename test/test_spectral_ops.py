@@ -326,10 +326,9 @@ class TestFFT(TestCase):
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
         # TODO: the messages for primOps are inconsistent need to validate if ok
-        # expected scalar type \w+ but found
         default_msg = (
             r"(Unsupported dtype|"
-            r"MKL FFT doesn't support tensors of type)"
+            r"FFT doesn't support tensors* of type)"
         )
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
