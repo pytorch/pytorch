@@ -1261,6 +1261,19 @@ class FlatParamHandle:
             )
             self._use_unsharded_flat_param(unsharded_flat_param)
             return
+
+        if self._limit_all_gathers:
+            # Current stream is unshard stream as we call handle.unshard in
+            # its with-stream context
+            unshard_stream = self._device_handle.current_stream()
+            event_with_tensor = self._free_event_queue.dequeue_if_needed()
+            if event_with_tensor:
+                unshard_stream.wait_event(event_with_tensor.event)
+                _free_storage(event_with_tensor.tensor)
+                # Caching allocator would recycle the stashed unshard buffer's
+                # storage into the unshard stream's pool, and potentially reuse
+                # it for the current unshard
+
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
         padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
@@ -1287,16 +1300,6 @@ class FlatParamHandle:
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_freed(unsharded_flat_param)
-        if self._limit_all_gathers:
-            # Current stream is unshard stream as we call handle.unshard in
-            # its with-stream context
-            unshard_stream = self._device_handle.current_stream()
-            event_with_tensor = self._free_event_queue.dequeue_if_needed()
-            if event_with_tensor:
-                unshard_stream.wait_event(event_with_tensor.event)
-            # Life of the tensor stashed would end here (since there is no more
-            # reference). Caching allocator would reclaim its storage into the
-            # unshard stream's pool
         _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
@@ -1668,8 +1671,26 @@ class FlatParamHandle:
         # `use_orig_params=True`, the `param` does not point to valid memory
         # when setting `param.data = ...` in `_use_sharded_views()`.
         self._use_sharded_flat_param()
+
         if free_unsharded_flat_param:
-            self._free_unsharded_flat_param()
+            # In the new rate limiter, we stash an all-gather buffer to keep it from
+            # being freed by the caching allocator until two all-gathers later. So
+            # that the caching allocator would try to reuse its storage for the next
+            # next all-gather.
+            # We also do not call `record_stream` to hand over the ownership to
+            # the compute stream (i.e. the ownership is still with the unshard
+            # stream)
+            if self._limit_all_gathers:
+                comp_done_event = self._device_handle.Event()
+                comp_done_event.record()
+                unsharded_flat_param = self._get_padded_unsharded_flat_param()
+                event_with_tensor = EventWithTensor(
+                    comp_done_event,
+                    unsharded_flat_param,
+                )
+                self._free_event_queue.enqueue(event_with_tensor)
+            else:
+                self._free_unsharded_flat_param()
 
     def post_reshard(self):
         """
@@ -1700,21 +1721,10 @@ class FlatParamHandle:
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
-        if self._limit_all_gathers:
-            # In the new rate limiter, we stash an all-gather buffer to keep it from
-            # being freed by the caching allocator until two all-gathers later. So
-            # that the caching allocator would try to reuse its storage for the next
-            # next all-gather.
-            # We also do not call `record_stream` to hand over the ownership to
-            # the compute stream (i.e. the ownership is still with the unshard
-            # stream)
-            comp_done_event = self._device_handle.Event()
-            comp_done_event.record()
-            event_with_tensor = EventWithTensor(
-                comp_done_event,
-                unsharded_flat_param,
-            )
-            self._free_event_queue.enqueue(event_with_tensor)
+        _no_dispatch_record_stream(
+            unsharded_flat_param, self._device_handle.current_stream()
+        )
+        _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""
