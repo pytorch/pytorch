@@ -1627,14 +1627,16 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
         aggregated_heuristics = get_test_prioritizations(selected_tests)
+
+    test_prioritizations = aggregated_heuristics.get_ranked_tests()
+
+    if IS_CI:
         metrics_dict = {
             "high_relevance_tests": test_prioritizations.get_high_relevance_tests(),
             "probable_relevance_tests": test_prioritizations.get_probable_relevance_tests(),
             "unranked_relevance_tests": test_prioritizations.get_unranked_relevance_tests(),
             "cpp": options.cpp,
         }
-
-    test_prioritizations = aggregated_heuristics.get_ranked_tests()
 
     class TestBatch:
         """Defines a set of tests with similar priority that should be run together on the current shard"""
