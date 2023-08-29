@@ -797,6 +797,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_contains1(a, b):
+        vals = set(["a", "b", "c"])
+        if "a" in vals:
+            return a + b
+        else:
+            return a - b
+
+    @make_test
+    def test_set_contains2(a, b):
+        m1 = torch.nn.Linear(8, 8)
+        m2 = torch.nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+        m3 = torch.nn.ReLU()
+        vals = set([m1, m2, m3])
+        if m1 in vals:
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
         output += (a + b, a - b)
