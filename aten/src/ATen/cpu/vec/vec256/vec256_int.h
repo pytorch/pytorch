@@ -7,6 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace vec {
