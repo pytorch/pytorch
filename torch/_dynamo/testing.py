@@ -46,6 +46,18 @@ def skip_if_pytest(fn):
     return wrapped
 
 
+def skip_if_consumer_card(fn):
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        if torch.cuda.is_available() and re.search(
+            r"GeForce [GR]TX", torch.cuda.get_device_name()
+        ):
+            raise unittest.SkipTest("does not work on consumer cards")
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters

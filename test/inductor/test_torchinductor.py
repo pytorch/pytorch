@@ -31,6 +31,7 @@ from torch._dynamo.testing import (
     expectedFailureCodegenDynamic,
     rand_strided,
     same,
+    skip_if_consumer_card,
 )
 from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
@@ -7543,6 +7544,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
+        @skip_if_consumer_card
         @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
