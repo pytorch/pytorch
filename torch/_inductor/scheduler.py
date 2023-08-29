@@ -89,7 +89,6 @@ class BaseSchedulerNode:
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
         self.written = False
-        self.node_idx = None
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -241,9 +240,6 @@ class BaseSchedulerNode:
 
     def get_nodes(self) -> List["BaseSchedulerNode"]:
         return [self]
-
-    def get_node_indices(self) -> List[int]:
-        return [node.node_idx for node in self.get_nodes()]
 
     def get_device(self):
         return self.node.get_device()
@@ -998,8 +994,6 @@ class Scheduler:
         }
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        for idx, node in enumerate(self.nodes):
-            node.node_idx = idx
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -1589,14 +1583,16 @@ class Scheduler:
         same kernel can be removed.
         """
 
-        fused_node_names = {
-            node.get_name()
-            for node in V.kernel.node_schedule
-            if isinstance(node, BaseSchedulerNode)
-        }
+        # V.kernel.store_buffer_names should represent the set of nodes
+        # get fused
+        fused_node_names = V.kernel.store_buffer_names
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
-            users = {user.get_name() for user in self.name_to_node[out_buf].users}
+            users = {
+                user.get_name()
+                for user in self.name_to_node[out_buf].users
+                if not user.is_weak
+            }
             if users.issubset(fused_node_names):
                 names_to_remove.append(out_buf)
 

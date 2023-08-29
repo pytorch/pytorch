@@ -2606,7 +2606,6 @@ class CppKernelProxy(CppKernel):
 
         def codegen_kernel(cls, *args):
             with kernel_group.new_kernel(cls, *args) as kernel:
-                kernel.node_schedule = nodes
                 run(kernel)
 
                 # Ugly hack to maintain the metrics kernel count since
@@ -3049,22 +3048,6 @@ class LoopLevel:
             assert len(self.inner) == 1
             return self.inner[0].split_with_tiling(depth - 1, factor)
 
-    def deepcopy_kernel(self):
-        """
-        node_schedule can not be deepcopied. Deepcopy a kernel with non None
-        node_schedule cause: https://gist.github.com/shunting314/ed1710ea724ac7a4552465927a076d56
-
-        Do shallow copy for this part.
-        """
-        k = self.kernel
-        if k is None:
-            return k
-        node_schedule = k.node_schedule
-        k.node_schedule = None
-        k = deepcopy(k)
-        k.node_schedule = node_schedule
-        return k
-
     def clone(self):
         loop = copy(self)
         loop.inner = []
@@ -3073,7 +3056,7 @@ class LoopLevel:
                 inner_loop_clone = inner_loop.clone()
                 inner_loop_clone.parent = loop
                 loop.inner.append(inner_loop_clone)
-        loop.kernel = self.deepcopy_kernel()
+        loop.kernel = deepcopy(self.kernel)
         return loop
 
     def lines(self):

@@ -831,7 +831,6 @@ class Kernel(CodeGen):
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
-        self.node_schedule = None
         self.removed_buffers = set()
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
