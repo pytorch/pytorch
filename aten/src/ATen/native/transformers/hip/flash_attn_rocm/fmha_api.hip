@@ -16,6 +16,8 @@
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
+namespace fmha {
+
 void run_flash_fwd(LaunchParams<FlashFwdParams> &launch_params) {
   HEADDIM_SWITCH(launch_params.params.d, [&] {
     BF16_SWITCH(launch_params.params.is_bf16, [&] {
@@ -1396,5 +1398,6 @@ int main(){
     }
     return pass ? 0 : 1;
 }
-
+} // namespace fmha
+  
 #endif
