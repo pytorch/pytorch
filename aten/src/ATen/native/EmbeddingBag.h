@@ -16,10 +16,6 @@ void check_arguments(
     const c10::optional<Tensor>& per_sample_weights,
     bool include_last_offset);
 
-std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
-    const Tensor& indices,
-    const Tensor& offsets);
-
 void make_bag_size_out(
     Tensor& bag_size_out,
     const Tensor& offsets,

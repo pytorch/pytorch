@@ -69,6 +69,8 @@ static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag = offset2bag.cumsum(0, offset2bag.scalar_type());     // offset2bag = [0 0 1 1 2]
 }
 
+namespace {
+
 std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
     const Tensor& indices,
     const Tensor& offsets) {
@@ -85,8 +87,6 @@ std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
       offsets.scalar_type() == commonType ? offsets
                                           : offsets.toType(commonType)};
 }
-
-namespace {
 
 // Determines if we can use a fast implementation for index_select_add, which
 // is only applicable if special conditions are met
