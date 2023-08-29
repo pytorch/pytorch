@@ -13,12 +13,15 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cpp_extension = functools.partial(
+    unittest.skipIf, IS_FBCODE, "cpp_extension N/A in fbcode"
+)
 
 
 class AOTInductorModelRunner:
@@ -76,6 +79,7 @@ class AOTInductorModelRunner:
 
 
 class AotInductorTests(TestCase):
+    @requires_cpp_extension()
     def test_simple(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -94,6 +98,7 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -114,6 +119,7 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -194,6 +200,7 @@ class AotInductorTests(TestCase):
 
         self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
+    @requires_cpp_extension()
     def test_dynamic_smem_above_default_limit(self):
         class Repro(torch.nn.Module):
             def forward(self, x, y):
@@ -217,6 +224,28 @@ class AotInductorTests(TestCase):
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
+    def test_addmm(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k):
+                super().__init__()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
 
