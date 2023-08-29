@@ -510,6 +510,64 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking(self, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 40, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(40, 10, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking_partitioning(self, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(40, 30, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(30, 40, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking_partitioning_elems(self, op):
+        """2D blocking should be grouped by number of yelems"""
+
+        def fn(a0, a1, a2, b0, b1, b2):
+            return op([a0, a1, a2], [b0, b1, b2])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 20, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(20, 10, device="cuda:0").t(),
+                torch.rand(20, 30, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

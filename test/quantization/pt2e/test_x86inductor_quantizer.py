@@ -20,7 +20,8 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-
+import operator
+from torch.ao.quantization import ObserverBase
 
 class Conv2DType(Enum):
     left = 1
@@ -127,6 +128,17 @@ class TestHelperModules:
                 else:
                     return self.relu2(self.conv(x) + self.conv2(x))
 
+    class Conv2dMaxpoolPowModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(2, 2, 1)
+            self.pool = nn.MaxPool2d(1, 1)
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.pool(x)
+            return torch.pow(x, 2)
+
     class SerialsConv2dAddReLUModule(torch.nn.Module):
         """ Serials of 2 Conv2d -> Add -> ReLU Pattern.
         """
@@ -153,6 +165,72 @@ class TestHelperModules:
             res2 = self.relu2(self.conv4(res1) + res1)
             return res2
 
+    class Conv2dCatMaxpool2d(torch.nn.Module):
+        def __init__(self,):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv2 = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.relu = torch.nn.ReLU()
+            self.maxpool = torch.nn.MaxPool2d(3, stride=2, padding=1)
+            self.conv3 = torch.nn.Conv2d(32, 32, 7, bias=True, stride=2, padding=3, dilation=1)
+
+        def forward(self, x):
+            temp1 = self.relu(self.conv(x))
+            temp2 = self.conv2(x + 1)
+            temp3 = torch.cat((temp1, temp2), 1)
+            temp4 = self.maxpool(temp3)
+            temp5 = self.conv3(temp4)
+            return temp5
+
+    class Conv2dAvgPool2d(torch.nn.Module):
+        def __init__(self,):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.avgpool = torch.nn.AvgPool2d(3, stride=2, padding=1)
+
+        def forward(self, x):
+            temp1 = self.avgpool(self.conv(x))
+            return temp1
+
+    class Conv2dCatSameInputs(torch.nn.Module):
+        def __init__(self,):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            temp1 = self.relu(self.conv(x))
+            temp3 = torch.cat((temp1, temp1), 1)
+            return temp3
+
+    class Conv2dCatSingleInput(torch.nn.Module):
+        def __init__(self,):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            temp1 = self.relu(self.conv(x))
+            temp3 = torch.cat((temp1,), 1)
+            return temp3
+
+    class SingleLinearModule(torch.nn.Module):
+        def __init__(self, use_bias) -> None:
+            super().__init__()
+            self.linear = nn.Linear(4, 4, bias=use_bias)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    class LinearUnaryModule(torch.nn.Module):
+        def __init__(self, use_bias, postop, inplace_postop) -> None:
+            super().__init__()
+            self.linear = nn.Linear(4, 4, bias=use_bias)
+            self.postop = postop(inplace=inplace_postop)
+
+        def forward(self, x):
+            return self.postop(self.linear(x))
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -171,10 +249,13 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
+        export_model = copy.deepcopy(m)
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
+        prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m)
+        convert_model = copy.deepcopy(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -185,6 +266,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
+        return export_model, prepare_model, convert_model
 
 @skipIfNoDynamoSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
@@ -400,3 +482,383 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_occurrence,
                 node_list,
             )
+
+    @skipIfNoX86
+    def test_maxpool2d_recipe(self):
+        r"""
+        Test pattern: int8_in_int8_out_ops(maxpool) - non_quantizable op(pow)
+        Since maxpool is a int8_in_int8_out_op, there is obs between maxpool and pow.
+        """
+        m = TestHelperModules.Conv2dMaxpoolPowModule().eval()
+        x = torch.rand(1, 2, 14, 14)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            # one for input and weight of the conv, two for input/output for the maxpool2d
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.convolution.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.max_pool2d_with_indices.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Maxpool2d has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.max_pool2d_with_indices.default
+            ):
+                maxpool_node = node
+                input_obs_of_maxpool = getattr(
+                    prepare_model, maxpool_node.args[0].target
+                )
+            elif node.op == "call_function" and node.target is operator.getitem:
+                output_obs_of_maxpool = getattr(
+                    prepare_model, list(node.users)[0].target
+                )
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.convolution.default
+            ):
+                conv_node = node
+                input_obs_of_conv = getattr(prepare_model, conv_node.args[0].target)
+        self.assertTrue(isinstance(input_obs_of_maxpool, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_maxpool, ObserverBase))
+        self.assertTrue(isinstance(input_obs_of_conv, ObserverBase))
+        self.assertTrue(input_obs_of_maxpool is output_obs_of_maxpool)
+        self.assertTrue(input_obs_of_maxpool is not input_obs_of_conv)
+
+    @skipIfNoX86
+    def test_cat_recipe(self):
+        r"""
+        Test pattern: conv -> cat -> maxpool2d
+        Since cat, maxpool is a int8_in_int8_out_op, the inputs and outputs should with same observer.
+        """
+        m = TestHelperModules.Conv2dCatMaxpool2d().eval()
+        x = torch.randn(16, 3, 16, 16).contiguous(memory_format=torch.channels_last)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 7,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.convolution.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.max_pool2d_with_indices.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Cat/Maxpool2d has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.cat.default
+            ):
+                cat_act_obs0 = getattr(
+                    prepare_model, node.all_input_nodes[0].target
+                )
+                cat_act_obs1 = getattr(
+                    prepare_model, node.all_input_nodes[1].target
+                )
+                cat_out_obs = getattr(
+                    prepare_model, list(node.users)[0].target
+                )
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.max_pool2d_with_indices.default
+            ):
+                maxpool_node = node
+                input_obs_of_maxpool = getattr(
+                    prepare_model, maxpool_node.args[0].target
+                )
+            elif node.op == "call_function" and node.target is operator.getitem:
+                output_obs_of_maxpool = getattr(
+                    prepare_model, list(node.users)[0].target
+                )
+        self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
+        self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
+        self.assertTrue(isinstance(cat_out_obs, ObserverBase))
+        self.assertTrue(isinstance(input_obs_of_maxpool, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_maxpool, ObserverBase))
+        self.assertTrue(cat_act_obs0 is cat_act_obs1)
+        self.assertTrue(cat_act_obs0 is cat_out_obs)
+        self.assertTrue(cat_out_obs is input_obs_of_maxpool)
+        self.assertTrue(input_obs_of_maxpool is output_obs_of_maxpool)
+
+    @skipIfNoX86
+    def test_cat_recipe_same_inputs(self):
+        r"""
+        Test pattern: conv -> cat([input0, input0])
+        Since cat has 2 input node of same tensor, they should also be with same observer.
+        """
+        m = TestHelperModules.Conv2dCatSameInputs().eval()
+        x = torch.randn(16, 3, 16, 16).contiguous(memory_format=torch.channels_last)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.convolution.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Cat has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.cat.default
+            ):
+                cat_act_obs0 = getattr(
+                    prepare_model, node.args[0][0].target
+                )
+                cat_act_obs1 = getattr(
+                    prepare_model, node.args[0][1].target
+                )
+                cat_out_obs = getattr(
+                    prepare_model, list(node.users)[0].target
+                )
+        self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
+        self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
+        self.assertTrue(isinstance(cat_out_obs, ObserverBase))
+        self.assertTrue(cat_act_obs0 is cat_act_obs1)
+        self.assertTrue(cat_act_obs0 is cat_out_obs)
+
+    @skipIfNoX86
+    def test_cat_recipe_single_input(self):
+        r"""
+        Test pattern: conv -> cat([input0,])
+        Since cat has 1 input node, they should also be with same observer.
+        """
+        m = TestHelperModules.Conv2dCatSingleInput().eval()
+        x = torch.randn(16, 3, 16, 16).contiguous(memory_format=torch.channels_last)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.convolution.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Cat has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.cat.default
+            ):
+                cat_act_obs0 = getattr(
+                    prepare_model, node.args[0][0].target
+                )
+                cat_out_obs = getattr(
+                    prepare_model, list(node.users)[0].target
+                )
+        self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
+        self.assertTrue(isinstance(cat_out_obs, ObserverBase))
+        self.assertTrue(cat_act_obs0 is cat_out_obs)
+
+    @skipIfNoX86
+    def test_avg_pool2d_recipe(self):
+        r"""
+        Test pattern: conv -> AvgPool2d
+        Since AvgPool2d is a int8_in_int8_out_op, the inputs and outputs should with same observer.
+        """
+        m = TestHelperModules.Conv2dAvgPool2d().eval()
+        x = torch.randn(16, 3, 16, 16).contiguous(memory_format=torch.channels_last)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.convolution.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.avg_pool2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.avg_pool2d.default
+            ):
+                avgpool_node = node
+                input_obs_of_avgpool = getattr(
+                    prepare_model, avgpool_node.args[0].target
+                )
+                output_obs_of_avgpool = getattr(
+                    prepare_model, list(avgpool_node.users)[0].target
+                )
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.convolution.default
+            ):
+                conv_node = node
+                output_obs_of_conv = getattr(prepare_model, list(conv_node.users)[0].target)
+        self.assertTrue(isinstance(input_obs_of_avgpool, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_avgpool, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_conv, ObserverBase))
+        self.assertTrue(input_obs_of_avgpool is output_obs_of_avgpool)
+        self.assertTrue(input_obs_of_avgpool is output_obs_of_conv)
+
+    @skipIfNoX86
+    def test_linear(self):
+        """
+        Test pattern of single linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias in [True, False]:
+                m = TestHelperModules.SingleLinearModule(use_bias).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight, one for output
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.addmm.default if use_bias else torch.ops.aten.mm.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+    @skipIfNoX86
+    def test_linear_unary(self):
+        """
+        Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
+        """
+        use_bias_list = [True, False]
+        inplace_list = [True, False]
+        postop_list = [nn.ReLU, nn.LeakyReLU]  # only test two to save time
+        cases = itertools.product(use_bias_list, inplace_list, postop_list)
+        post_op_map = {
+            nn.ReLU: [torch.ops.aten.relu_.default, torch.ops.aten.relu.default],
+            nn.LeakyReLU: [torch.ops.aten.leaky_relu_.default, torch.ops.aten.leaky_relu.default],
+        }
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias, inplace, postop in cases:
+                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, inplace_postop=inplace).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the relu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.addmm.default if use_bias else torch.ops.aten.mm.default,
+                    post_op_map[postop][0 if inplace else 1],
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )

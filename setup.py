@@ -106,6 +106,9 @@
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
+#   USE_MEM_EFF_ATTENTION=0
+#    disables building memory efficient attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #

@@ -246,7 +246,7 @@ def _annotate_conv2d(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -299,7 +299,7 @@ def _annotate_conv2d_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -408,7 +408,7 @@ def _annotate_conv2d_bn_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
