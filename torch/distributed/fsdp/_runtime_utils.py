@@ -34,6 +34,7 @@ from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.utils import (
     _apply_to_tensors,
     _cast_forward_inputs,
+    _free_storage,
     _p_assert,
     _to_kwargs,
 )
@@ -1092,9 +1093,9 @@ def _post_backward_final_callback(
             handle._training_state = HandleTrainingState.IDLE
             handle._prefetched = False
 
-    # If there are all-gather buffers left in the event queue, free them (by
-    # deleting reference)
-    root_state._free_event_queue.clear()
+    # If there are all-gather buffers left in the event queue, free them
+    while event_with_tensor := root_state._free_event_queue.dequeue():
+        _free_storage(event_with_tensor.tensor)
 
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
