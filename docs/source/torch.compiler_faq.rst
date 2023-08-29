@@ -318,7 +318,7 @@ CUDA graphs with Triton are enabled by default in inductor but removing
 them may alleviate some OOM issues: ``torch._inductor.config.triton.cudagraphs = False``.
 
 ``torch.func`` works with ``torch.compile`` (for `grad` and `vmap` transforms)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Applying a ``torch.func`` transform to a function that uses ``torch.compile``
 does not work:
@@ -369,6 +369,7 @@ Compiling ``torch.func.grad`` with ``torch.compile``
 ----------------------------------------------------
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
@@ -383,6 +384,7 @@ Compiling ``torch.vmap`` with ``torch.compile``
 -----------------------------------------------
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
@@ -400,10 +402,11 @@ There are currently a few cases which are not supported and lead to graph breaks
 (that is, torch.compile falls back to eager-mode PyTorch on these). We are working
 on improving the situation for the next release (PyTorch 2.2)
 
-1. The inputs and outputs of the function being transformed over must be tensors. 
+1. The inputs and outputs of the function being transformed over must be tensors.
 We do not yet support things like tuple of Tensors.
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
@@ -423,6 +426,7 @@ We do not yet support things like tuple of Tensors.
 2. Keyword arguments are not supported.
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
@@ -442,6 +446,7 @@ We do not yet support things like tuple of Tensors.
 but not OK to mutate a list created outside of the function.
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
@@ -470,6 +475,7 @@ but not OK to mutate a list created outside of the function.
     'is_signed', 'is_sparse', 'is_sparse_csr', 'is_vulkan', 'is_xla', 'is_xpu'
 
 .. code-block:: python
+
     import torch
 
     torch._dynamo.config.capture_func_transforms=True
