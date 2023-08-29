@@ -18,7 +18,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import code_hash, get_path
+from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
@@ -36,6 +36,7 @@ from ..utils import (
     sympy_symbol,
     unique,
     yellow_text,
+    do_bench,
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -2721,6 +2722,37 @@ class TritonScheduling(BaseScheduling):
 
     def flush(self):
         pass
+
+
+    def benchmark_fused_nodes(self, nodes):
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+            node_schedule, numel, rnumel
+        )
+
+        kernel = TritonKernel(
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype
+        )
+
+        # empty last_usage. Force more aggressive 'evict_last'. Should be fine.
+        for n in nodes:
+            n.last_usage = set()
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+        mod = PyCodeCache.load(src_code)
+        log.debug("kernel src code for %s written to: %s", {n.get_name() for n in nodes}, mod.__file__)
+        args = mod.get_args()
+        call = mod.call
+        ms = do_bench(lambda: call(args))
+        log.debug("The fused kernel for %s took %.3fms to run", {n.get_name() for n in nodes}, ms)
+        return ms
 
 
 @dataclasses.dataclass
