@@ -2,6 +2,7 @@ import copy
 import dataclasses
 import io
 import pathlib
+import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -238,6 +239,7 @@ class ExportedProgram:
         range_constraints: Dict[sympy.Symbol, Any],
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
+        example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -262,6 +264,7 @@ class ExportedProgram:
             Tuple[InputDim, InputDim]
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._example_inputs = example_inputs
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -302,6 +305,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def example_inputs(self):
+        return self._example_inputs
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -383,15 +391,6 @@ class ExportedProgram:
         from torch._export.exported_program import unlift_exported_program_lifted_states
 
         return unlift_exported_program_lifted_states(self)
-
-    # TODO(ycao): Remove this after migration.
-    def transform(self, *passes: PassType) -> "ExportedProgram":
-        """
-        .. warning::
-            Do not use.
-
-        """
-        return self._transform(*passes)
 
     def _transform(self, *passes: PassType) -> "ExportedProgram":
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
@@ -532,6 +531,7 @@ class ExportedProgram:
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
+            self.example_inputs,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -558,12 +558,7 @@ class ExportedProgram:
         _assertion_graph = _assertion_graph_res.graph_module
         _assertion_graph(*args)
 
-    def validate(self):
-        """
-        .. warning::
-            Do not use.
-
-        """
+    def _validate(self):
         # TODO(zhxchen17) check for get_attr
         # TODO(zhxchen17) check for funcitonal ops
         for gm in self.graph_module.modules():
@@ -587,10 +582,27 @@ class _ConstraintTarget:
     dim: int
 
 
-# TODO(ycao): Disable constructor of Constraint so that it can only be constructed
-# with dynamic_dim
+class _ConstraintFactory(type):
+    """
+    Metaclass that ensures a private constructor for Constraint
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+            f"Please use torch.export.dynamic_dim() to create one"
+        )
+
+    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None):
+        return super().__call__(w_tensor, t_id, dim, constraint_range, shared)
+
+
+def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None):
+    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared)
+
+
 @dataclasses.dataclass
-class Constraint(_ConstraintTarget):
+class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     .. warning::
@@ -614,7 +626,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(
+        return _create_constraint(
             self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
         )
 
@@ -675,7 +687,7 @@ class Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
-        return Constraint(
+        return _create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,
