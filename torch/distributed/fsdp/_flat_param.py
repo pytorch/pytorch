@@ -1227,7 +1227,6 @@ class FlatParamHandle:
             )
         )
         # Invariant: `_mp_shard` is always on the compute device.
-        # with torch.no_grad():
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
     def unshard(self):
@@ -1362,7 +1361,6 @@ class FlatParamHandle:
         flat_param_part_view = flat_param_part.view(
             unsharded_size
         )  # this `.view()` is not autograd visible
-        # with torch.no_grad():
         self.flat_param.data = flat_param_part
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
@@ -1523,9 +1521,7 @@ class FlatParamHandle:
                     self._keep_low_precision_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
-                    x = sharded_grad.to(local_shard_dtype)
-                    # with torch.no_grad():
-                    sharded_grad.data = x
+                    sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 _p_assert(
@@ -1547,9 +1543,7 @@ class FlatParamHandle:
             if not self._force_full_precision and self._keep_low_precision_grads:
                 _p_assert(flat_param.grad is not None, "Unexpected None grad!")
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
-                    x = flat_param.grad.to(self._fwd_bwd_param_dtype)
-                    # with torch.no_grad():
-                    flat_param.grad.data = x
+                    flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
                     if self._use_orig_params:
                         self._use_sharded_grad_views()
 
@@ -1702,7 +1696,6 @@ class FlatParamHandle:
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
-        # with torch.no_grad():    
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             if skip_use_sharded_views:
@@ -1825,7 +1818,6 @@ class FlatParamHandle:
                     continue
                 param = self.flat_param._params[i]
                 self._setattr_param(module, param_name, param)
-                # with torch.no_grad():
                 param.data = view
             elif as_params:
                 self._setattr_param(
@@ -1844,7 +1836,6 @@ class FlatParamHandle:
                         # preserve the autograd graph so that the post-backward
                         # hook fires (e.g. for reentrant AC)
                         tensor = self.flat_param._tensors[i]
-                        # with torch.no_grad():
                         tensor.data = view
                         param_var = tensor
                 self._setattr_tensor(module, param_name, param_var)
@@ -1871,7 +1862,6 @@ class FlatParamHandle:
             if self._use_orig_params and as_params:
                 shared_param = self.flat_param._shared_params[i]
                 self._setattr_param(module, param_name, shared_param)
-                # with torch.no_grad():
                 shared_param.data = prim_param
             elif as_params:
                 self._setattr_param(module, param_name, prim_param)
@@ -1921,7 +1911,6 @@ class FlatParamHandle:
                 # 3. `view` can be on GPU.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
-                # with torch.no_grad():
                 param.grad.data = view
             else:
                 param.grad = view
@@ -1948,7 +1937,6 @@ class FlatParamHandle:
                 # size check.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
-                # with torch.no_grad():
                 param.grad.data = prim_param.grad
             else:
                 param.grad = prim_param.grad
@@ -2002,12 +1990,10 @@ class FlatParamHandle:
             self._setattr_param(module, param_name, param)
             if not shard_param_info.in_shard:
                 # Allow the original data to be freed via garbage collection
-                # with torch.no_grad():
                 param.data = size_0_empty_tensor
             else:
                 offset = shard_param_info.offset_in_shard
                 numel_in_shard = shard_param_info.numel_in_shard
-                # with torch.no_grad():
                 param.data = flat_param[offset : offset + numel_in_shard]
         assert self.flat_param._shared_params is not None
         for i, (
@@ -2064,11 +2050,9 @@ class FlatParamHandle:
                         if param.grad is None:
                             # `.grad` must have the same shape as `param`
                             param.grad = torch.empty_like(param)
-                        x = grad[
-                                offset : offset + numel_in_shard
-                            ].reshape(param.shape)
-                        # with torch.no_grad():
-                        param.grad.data = x
+                        param.grad.data = grad[
+                            offset : offset + numel_in_shard
+                        ].reshape(param.shape)
                     else:
                         param.grad = grad[offset : offset + numel_in_shard].reshape(
                             param.shape
@@ -2325,9 +2309,7 @@ class FlatParamHandle:
     ###########
     def flat_param_to(self, *args, **kwargs):
         """Wraps an in-place call to ``.to()`` for ``self.flat_param``."""
-        x = self.flat_param.to(*args, **kwargs)
-        # with torch.no_grad():
-        self.flat_param.data = x
+        self.flat_param.data = self.flat_param.to(*args, **kwargs)
         if self._use_orig_params:
             # Refresh the views because their storage may have changed
             if self.is_sharded(self.flat_param):

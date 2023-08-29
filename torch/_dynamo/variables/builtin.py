@@ -1250,18 +1250,21 @@ class BuiltinVariable(VariableTracker):
                     # ),
                     # torch._C._set_grad_enabled(False)
 
-                    # with torch._dynamo.variables.higher_order_ops.dynamo_enable_grad(tx), torch.no_grad():
+                    with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx):
                         # val.as_proxy().requires_grad = False
-                    with torch.no_grad():
-                        out = wrap_fx_proxy(
-                            tx,
-                            tx.output.create_proxy(
-                                "call_function",
-                                # torch.Tensor.set_,
-                                torch._set_data,
-                                *proxy_args_kwargs([obj, val], {}),
-                            ),
-                        )
+                        with torch.no_grad():
+                            out = wrap_fx_proxy(
+                                tx,
+                                tx.output.create_proxy(
+                                    "call_function",
+                                    # torch.ops.aten.set_,
+                                    torch._set_data,
+                                    *proxy_args_kwargs([obj, val], {}),
+                                ),
+                            )
+                            obj.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
+                    tx.replace_all(obj, out)
+
                         # val.as_proxy().requires_grad = False
                         # setattr(out.as_proxy(), 'grad_fn', val.as_proxy().grad_fn)
                         # obj.as_proxy().set_(val.as_proxy())
@@ -1275,9 +1278,9 @@ class BuiltinVariable(VariableTracker):
                         #     torch.ops.aten._set_data,
                         #     *proxy_args_kwargs([obj, val], {}),
                         # )
-                    # torch.ops.aten.set_data(obj.as_proxy().node.meta['example_value'], val.as_proxy().node.meta['example_value'])
-                    # out.as_proxy().node.meta['example_value'].data = val.as_proxy().node.meta['example_value']
-                    tx.replace_all(obj, out)
+                    # torch._set_data(obj.as_proxy().node.meta['example_value'], val.as_proxy().node.meta['example_value'])
+
+                    # tx.replace_all(obj, val)
             
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):

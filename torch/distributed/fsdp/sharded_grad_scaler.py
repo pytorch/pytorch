@@ -183,7 +183,6 @@ class ShardedGradScaler(GradScaler):
                 torch.isinf(grad).any().item() is True
                 or torch.isnan(grad).any().item() is True
             ):
-                # with torch.no_grad():
                 found_inf.data = torch.tensor([1.0])
                 break
             else:
