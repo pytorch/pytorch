@@ -347,6 +347,23 @@ class CudaReproTests(TestCase):
         actual = torch.compile(forward, fullgraph=True)(x)
         self.assertEqual(actual, correct)
 
+    def test_full_copy(self):
+        def forward(x):
+            full_10 = torch.ops.aten.full.default(
+                [204, 204, 28],
+                0,
+                dtype=torch.float64,
+                layout=torch.strided,
+                device="cuda",
+                pin_memory=False,
+            )
+            return x + full_10.to("cpu")
+
+        o = torch.randn([204, 204, 28], dtype=torch.float64)
+        correct = forward(o)
+        actual = torch.compile(forward, fullgraph=True)(o)
+        self.assertEqual(actual, correct)
+
     def test_autotune_inplace_kernel(self):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
