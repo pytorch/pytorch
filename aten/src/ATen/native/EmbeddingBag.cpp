@@ -909,18 +909,28 @@ void check_arguments(
       "embedding_bag", weight_arg, {kHalf, kBFloat16, kFloat, kDouble});
   checkDim("embedding_bag", weight_arg, 2);
 
-  AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "embedding_bag", [&]() {
-    if (offsets.size(0) > 0) {
-      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
-      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
-      TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
-                                "in the mini-batch has to start from position 0. "
-                                "However, got ", offsets[0]);
-      TORCH_CHECK(offset_n <= indices.size(0), "offsets[-1] can not "
-                  "be greater than input's length ", indices.size(0), " but got offsets[-1] of ",
-                  offset_n);
-    }
-  });
+  if (offsets.data_ptr() != 0) {
+    AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "embedding_bag", [&]() {
+      if (offsets.size(0) > 0) {
+        index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
+        index_t offset_n =
+            offsets.const_data_ptr<index_t>()[offsets.numel() - 1];
+        TORCH_CHECK(
+            offset_0 == 0,
+            "offsets[0] has to be 0, i.e., the first sequence "
+            "in the mini-batch has to start from position 0. "
+            "However, got ",
+            offsets[0]);
+        TORCH_CHECK(
+            offset_n <= indices.size(0),
+            "offsets[-1] can not "
+            "be greater than input's length ",
+            indices.size(0),
+            " but got offsets[-1] of ",
+            offset_n);
+      }
+    });
+  }
 
   if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
     TORCH_CHECK(mode == MODE_SUM,
@@ -1229,11 +1239,16 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
 // embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
 // This is created to save extra `.contiguous()` call in backward.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-embedding_bag(const Tensor &weight, const Tensor &indices,
-              const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
-              bool include_last_offset, c10::optional<int64_t> padding_idx_opt) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag(
+    const Tensor& weight,
+    const Tensor& indices_,
+    const Tensor& offsets_,
+    const bool scale_grad_by_freq,
+    const int64_t mode,
+    bool sparse,
+    const c10::optional<Tensor>& per_sample_weights_opt,
+    bool include_last_offset,
+    c10::optional<int64_t> padding_idx_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
@@ -1248,22 +1263,18 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
       " through ", num_embeddings - 1, ", but got ", padding_idx);
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
-  Tensor indices_, offsets_;
-  std::tie(indices_, offsets_) = promoteIndicesAndOffsets(indices, offsets);
+  Tensor indices, offsets;
+  std::tie(indices, offsets) =
+      promoteIndicesAndOffsets(indices_.contiguous(), offsets_.contiguous());
   check_arguments(
-      weight,
-      indices_,
-      offsets_,
-      mode,
-      per_sample_weights,
-      include_last_offset);
+      weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
   if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
     out = at::_embedding_bag_forward_only(
         weight,
-        indices_.contiguous(),
-        offsets_.contiguous(),
+        indices.contiguous(),
+        offsets.contiguous(),
         scale_grad_by_freq,
         mode,
         sparse,
@@ -1273,8 +1284,8 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
   } else {
     out = at::_embedding_bag(
         weight,
-        indices_.contiguous(),
-        offsets_.contiguous(),
+        indices.contiguous(),
+        offsets.contiguous(),
         scale_grad_by_freq,
         mode,
         sparse,
