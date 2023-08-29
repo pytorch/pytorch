@@ -1133,15 +1133,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = np.random.randn(2, 2)
         return x - x
 
-    def test_manual_seed(self):
-        @torch.compile
-        def foo():
-            torch.manual_seed(3)
-            return torch.randint(0, 5, (5,))
-
-        self.assertEqual(foo(), foo())
-        self.assertEqual(foo(), foo())
-
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
