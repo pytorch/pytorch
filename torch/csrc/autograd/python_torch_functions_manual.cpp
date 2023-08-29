@@ -380,13 +380,13 @@ static PyObject* THPVariable__to_functional_tensor(
 //   (If src has a grad_fn, we install an error grad_fn on dest to avoid
 //   difficult bugs.
 //    The main purpose is to ensure that dst.is_leaf == src.is_leaf)
-static PyObject* THPVariable__mirror_autograd_meta(
+static PyObject* THPVariable__mirror_autograd_meta_to(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_mirror_autograd_meta(Tensor source, Tensor dest)"},
+      {"_mirror_autograd_meta_to(Tensor source, Tensor dest)"},
       /*traceable=*/true);
 
   ParsedArgs<2> parsed_args;
@@ -521,12 +521,17 @@ static PyObject* THPVariable__functionalize_enable_reapply_views(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   const auto reapply_views = r.toBool(0);
+  auto old = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   if (reapply_views) {
     at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
   } else {
     at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
   }
-  Py_RETURN_NONE;
+  if (old) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -585,8 +590,8 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__to_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_mirror_autograd_meta",
-     castPyCFunctionWithKeywords(THPVariable__mirror_autograd_meta),
+    {"_mirror_autograd_meta_to",
+     castPyCFunctionWithKeywords(THPVariable__mirror_autograd_meta_to),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_from_functional_tensor",
