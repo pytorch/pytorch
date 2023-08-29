@@ -914,7 +914,8 @@ class HasDecompTest(TestCase):
         # Some decompositions are registered for CompositeImplicitAutograd
         # operators, which never appear in AOTAutograd's graph so are never used.
         useful_decomps = {op for op in decomposition_table.keys()
-                          if self._can_appear_in_trace(op)}
+                          if isinstance(op, torch._ops.OpOverload) and
+                          self._can_appear_in_trace(op)}
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
