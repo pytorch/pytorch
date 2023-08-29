@@ -89,18 +89,6 @@ def draw_buffers(nodes, print_graph=False, fname=None):
     draw_graph(gm, fname, clear_meta=False)
 
 
-def draw_fx_graph(gm, print_graph=False, fname=None):
-    """
-    Draw a graph in fname.svg.
-    nodes is a list of SchedulerNode objects.
-    """
-    if not has_dot():
-        log.warning("draw_buffers() requires `graphviz` package")
-        return
-
-    draw_graph(gm, fname, clear_meta=False)
-
-
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
@@ -189,6 +177,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
     return graph
 
+
 def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
     node_name_to_buff_meta = {}
     for node in nodes:
@@ -203,11 +192,16 @@ def get_orig_fx_node_name_to_buff_meta(nodes: SchedulerNodeList) -> BuffMeta:
             if origin.stack_trace is None:
                 continue
             node_name = origin.name
-            assert node_name not in node_name_to_buff_meta, f"node_name={node_name} should not be in {node_name_to_buff_meta}"
+            assert (
+                node_name not in node_name_to_buff_meta
+            ), f"node_name={node_name} should not be in {node_name_to_buff_meta}"
             node_name_to_buff_meta[node_name] = buff_meta
     return node_name_to_buff_meta
 
-def annotate_orig_fx_with_snodes(gm: torch.fx.GraphModule, snodes: SchedulerNodeList) -> None:
+
+def annotate_orig_fx_with_snodes(
+    gm: torch.fx.GraphModule, snodes: SchedulerNodeList
+) -> None:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
@@ -397,9 +391,6 @@ class DebugContext:
             return ignored
 
 
-
-
-
 class DebugFormatter:
     def __init__(self, handler):
         self.fopen = handler.fopen
@@ -436,9 +427,14 @@ class DebugFormatter:
 
     def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
         annotate_orig_fx_with_snodes(gm, nodes)
-        prog = ['dot', '-Gnslimit=2', '-Gnslimit1=2', '-Gmaxiter=5000']
-        draw_graph(gm, fname=self.filename("orig_fx_graph_diagram.svg"), clear_meta=False, prog=prog, parse_stack_trace=True)
-
+        prog = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+        draw_graph(
+            gm,
+            fname=self.filename("orig_fx_graph_diagram.svg"),
+            clear_meta=False,
+            prog=prog,
+            parse_stack_trace=True,
+        )
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))

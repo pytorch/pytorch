@@ -883,7 +883,14 @@ def min_cut_rematerialization_partition(
     return fw_module, bw_module
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True, prog=None, parse_stack_trace=False):
+def draw_graph(
+    traced: torch.fx.GraphModule,
+    fname: str,
+    figname: str = "fx_graph",
+    clear_meta=True,
+    prog=None,
+    parse_stack_trace=False,
+):
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)

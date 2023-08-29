@@ -483,7 +483,9 @@ class CodeGen:
                         parsed_stack_trace = _parse_stack_trace(node.stack_trace)
 
                         if parsed_stack_trace is not None:
-                            summary_str = f'File: {parsed_stack_trace.file}:{parsed_stack_trace.lineno}, code: {parsed_stack_trace.code}'
+                            lineno = parsed_stack_trace.lineno
+                            code = parsed_stack_trace.code
+                            summary_str = f'File: {parsed_stack_trace.file}:{lineno}, code: {code}'
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":

@@ -243,14 +243,16 @@ if HAS_PYDOT:
                     else:
                         parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
                         fname = self._shorten_file_name(parsed_stack_trace.file)
-                        label += f"|origin_{idx}={origin.name} file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
-            
+                        lineno = parsed_stack_trace.lineno
+                        code = parsed_stack_trace.code
+                        label += f"|origin_{idx}={origin.name} file={fname}:{lineno} {code}" + r"\n"
+
             buff_meta = node.meta.get('buff_meta', None)
             if buff_meta is not None:
                 label += f"|buff={buff_meta.name}" + r"\n"
                 label += f"|n_origin={buff_meta.n_origin}" + r"\n"
 
-            
+
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
                 fname = self._shorten_file_name(parsed_stack_trace.file)
@@ -334,7 +336,7 @@ if HAS_PYDOT:
             # "TB" means top-to-bottom rank direction in layout
             dot_graph = pydot.Dot(name, rankdir="TB")
 
-            
+
             buff_name_to_subgraph = {}
 
             for node in graph_module.graph.nodes:
@@ -354,7 +356,7 @@ if HAS_PYDOT:
                     if buff_name not in buff_name_to_subgraph:
                         buff_name_to_subgraph[buff_name] = pydot.Cluster(buff_name)
                     current_graph = buff_name_to_subgraph.get(buff_name)
-                
+
                 current_graph.add_node(dot_node)
 
                 def get_module_params_or_buffers():
@@ -380,7 +382,7 @@ if HAS_PYDOT:
 
                     if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
-            
+
             for subgraph in buff_name_to_subgraph.values():
                 dot_graph.add_subgraph(subgraph)
 
