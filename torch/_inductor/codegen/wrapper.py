@@ -331,7 +331,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
-                from torch import empty_strided, device
+                from torch import empty, empty_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
 
@@ -770,12 +770,24 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        return (
-            f"{buffer.get_name()} = empty_strided("
-            f"{self.codegen_shape_tuple(shape)}, "
-            f"{self.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
-        )
+        name = buffer.get_name()
+        try:
+            expected = tuple(ir.make_contiguous_strides_for(shape))
+        except Exception:  # cannot determine truth value of Relational
+            expected = None
+        if stride == expected:
+            return (
+                f"{name} = empty("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+        else:
+            return (
+                f"{name} = empty_strided("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
 
     def make_buffer_free(self, buffer):
         return f"del {buffer.get_name()}"
