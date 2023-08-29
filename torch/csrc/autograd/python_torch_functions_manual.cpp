@@ -500,12 +500,17 @@ static PyObject* THPVariable__functionalize_enable_reapply_views(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   const auto reapply_views = r.toBool(0);
+  auto old = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   if (reapply_views) {
     at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
   } else {
     at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
   }
-  Py_RETURN_NONE;
+  if (old) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 

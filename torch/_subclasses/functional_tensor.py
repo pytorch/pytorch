@@ -7,18 +7,6 @@ from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispa
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
-class _ToFunctionalTensor(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        return FunctionalTensor(x)
-
-    @staticmethod
-    def backward(ctx, grad_outputs):
-        raise RuntimeError(
-            "Attempted to backprop from a functional wrapper to its original tensor. This is unsupported behavior."
-        )
-
-
 class FunctionalTensor(torch.Tensor):
     """
     Functional tensors represent tensors that will remove mutations
@@ -28,8 +16,8 @@ class FunctionalTensor(torch.Tensor):
     Historically, functionalization is implemented in C++ in the dispatcher.
     This class is a lightweight python shim around the C++ functionalization logic.
 
-    FunctionalTensor is required to be used with a corresponding FunctionalTensorMode active.
-    It doesn't bother defining a __torch_dispatch__, because it relies
+    FunctionalTensor is required to be used with a corresponding
+    FunctionalTensormode active, because it relies
     on using the mode for dispatch (which can properly handle factory functions).
     """
 
@@ -40,7 +28,7 @@ class FunctionalTensor(torch.Tensor):
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
-        out = torch.Tensor._make_wrapper_subclass(
+        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.
@@ -69,8 +57,7 @@ class FunctionalTensor(torch.Tensor):
         unrecognized_types = [
             t
             for t in types
-            if not issubclass(t, torch._subclasses.FakeTensor)
-            and t not in [torch.Tensor, FunctionalTensor]
+            if t not in [torch.Tensor, torch._subclasses.FakeTensor, FunctionalTensor]
         ]
         if unrecognized_types:
             not_implemented_log.debug(
@@ -103,23 +90,25 @@ class FunctionalTensor(torch.Tensor):
             def unwrap(x):
                 return x.elem
 
-            args_unwrapped = pytree.tree_map_only(FunctionalTensor, unwrap, args)
+            assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
+            assert len(kwargs) == 0
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
             # about the problem of keeping metadata in sync between the wrapper and inner tensor.
             # This also alleviates us from having to manually handle metadata mutations on the wrapper.
-            return func(*args_unwrapped, **kwargs)
+            return func(args[0].elem)
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
         # - If we want to use _make_subclass(), we have a problem: the subclass will share a TensorImpl with the inner tensor,
         #   which is of type FunctionalTensorWrapper! We explicitly do not want our wrapper to be a FunctionalTensorWrapper.
         # - If we use the default tensor.__new__(), we have another problem: it returns inner_tensor.alias(),
-        #   which causes every subclass created above autograd to have autograd view metadata (in addition to also being a FunctionalTensorWrapper).
+        #   which causes every subclass created above autograd to have autograd view metadata
+        #   (in addition to also being a FunctionalTensorWrapper).
         raise RuntimeError(
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
 
     def __repr__(self):
-        return f"FunctionalTensor({str(self.elem)})"
+        return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
     def to_functional(x):
@@ -129,16 +118,9 @@ class FunctionalTensor(torch.Tensor):
         # - requires_grad (so autograd runs)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
-        x_functional = torch._to_functional_tensor(x, mirror_autograd_meta=True)
-
-        torch._functionalize_enable_reapply_views(True)
-        if x.requires_grad and not x.is_leaf:
-            out = _ToFunctionalTensor.apply(x_functional)
-            return out
-        else:
-            out = FunctionalTensor(x_functional)
-            out.requires_grad = x_functional.requires_grad
-            return out
+        x_functional = torch._to_functional_tensor(x)
+        out = FunctionalTensor(x_functional)
+        return out
 
     def from_functional(self):
         torch._sync(self)
@@ -147,7 +129,6 @@ class FunctionalTensor(torch.Tensor):
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
-        self.is_active = True
         self.is_on_stack = False
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
@@ -203,10 +184,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
-        if not self.is_active:
-            assert not any_functional_inputs
-            return func(*args_unwrapped, **kwargs)
-
         # Expectation: functionalization should not **already** be enabled above our mode.
         # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
         # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
@@ -224,13 +201,14 @@ class FunctionalTensorMode(TorchDispatchMode):
         ), torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Functionalize):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
-                torch._functionalize_enable_reapply_views(True)
+                old_apply_views = torch._functionalize_enable_reapply_views(True)
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                 pytree.tree_map_only(torch.Tensor, assert_is_functional, outs_unwrapped)
 
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
             finally:
                 torch._disable_functionalization()
+                torch._functionalize_enable_reapply_views(old_apply_views)
 
         is_included = torch._C._dispatch_tls_is_dispatch_key_included(
             torch._C.DispatchKey.Functionalize
