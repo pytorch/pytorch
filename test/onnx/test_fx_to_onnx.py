@@ -411,7 +411,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     # 1. Pre-trained model is too big for CI
     # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
     def test_fake_tensor_mode_huggingface_gpt2(self):
-        config = transformers.GPT2Config()
+        config = transformers.GPT2Config(
+            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
+        )
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
@@ -452,7 +454,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     def test_fake_tensor_mode_huggingface_open_llama(self):
-        config = transformers.OpenLlamaConfig()
+        config = transformers.OpenLlamaConfig(
+            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
+        )
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
@@ -474,7 +478,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(export_output.model_proto)
 
     def test_fake_tensor_mode_huggingface_google_t5(self):
-        config = transformers.T5Config()
+        config = transformers.T5Config(
+            vocab_size=8096, d_model=256, num_layers=2, num_heads=2
+        )
         device = "cpu"
         batch, seq = 4, 256
         with torch.onnx.enable_fake_mode() as fake_context:
