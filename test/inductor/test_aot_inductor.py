@@ -226,6 +226,28 @@ class AotInductorTests(TestCase):
         )
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
+    def test_addmm(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k):
+                super().__init__()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
