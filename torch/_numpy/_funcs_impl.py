@@ -1533,10 +1533,6 @@ def angle(z: ArrayLike, deg=False):
     return result
 
 
-def sinc(x: ArrayLike):
-    return torch.sinc(x)
-
-
 # NB: have to normalize *varargs manually
 def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
     N = f.ndim  # number of dimensions
@@ -1782,10 +1778,6 @@ def isneginf(x: ArrayLike, out: Optional[OutArray] = None):
 
 def isposinf(x: ArrayLike, out: Optional[OutArray] = None):
     return torch.isposinf(x)
-
-
-def i0(x: ArrayLike):
-    return torch.special.i0(x)
 
 
 def isscalar(a):

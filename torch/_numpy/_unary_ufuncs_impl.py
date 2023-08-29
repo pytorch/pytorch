@@ -47,6 +47,8 @@ from torch import (  # noqa: F401
     tan,  # noqa: F401
     tanh,  # noqa: F401
     trunc,  # noqa: F401
+    sinc,  # noqa: F401
+    i0,  # noqa: F401
 )
 
 
