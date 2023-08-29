@@ -9,11 +9,11 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
-from torch._export import capture_pre_autograd_graph
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
+    "move_model_to_eval",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -156,6 +156,8 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    # Avoid circular dependencies
+    from torch._export import capture_pre_autograd_graph
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,
