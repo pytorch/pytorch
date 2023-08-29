@@ -528,7 +528,6 @@ def fx_codegen_and_compile(
     #
     # Also this has to be done before FakeTensorProp below to avoid the failed
     # .view() call.
-    gm_original = gm.__copy__()
     view_to_reshape(gm)
 
     fake_mode = fake_tensor_prop(gm, example_inputs)
@@ -568,7 +567,7 @@ def fx_codegen_and_compile(
                         )
                     else:
                         context.output_strides.append(None)
-            compiled_fn = graph.compile_to_fn(gm_original)
+            compiled_fn = graph.compile_to_fn()
 
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
