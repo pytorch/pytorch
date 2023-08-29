@@ -360,11 +360,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             else:
                 num_2x_ops += 1
         log.debug(
-            "Got cutlass configs: total number of ops: %s, "
-            "total number of 3x ops: %s, total number of 2x ops: %s",
-            str(len(res)),
-            str(num_3x_ops),
-            str(num_2x_ops),
+            "Got cutlass configs: total number of ops: %d, "
+            "total number of 3x ops: %d, total number of 2x ops: %d",
+            len(res),
+            num_3x_ops,
+            num_2x_ops,
         )
         return list(res.values())
 

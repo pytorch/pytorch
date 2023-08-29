@@ -16,14 +16,11 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-)
-from torch.testing._internal.common_cuda import (
-    SM75OrLater,
-    SM90OrLater,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -300,7 +297,9 @@ class TestDoBench(TestCase):
         def addmm(x, a, b, alpha, beta):
             return torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-        def compare_results(m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]) -> None:
+        def compare_results(
+            m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]
+        ) -> None:
             x = torch.randn(x_shape).cuda().half()
             a = torch.randn(m, k).cuda().half()
             b = torch.randn(k, n).cuda().half()
@@ -310,11 +309,13 @@ class TestDoBench(TestCase):
             y = compiled_fn(x, a, b, alpha, beta)
             torch.testing.assert_close(y, y_expected)
 
-        with config.patch({
-            "max_autotune": True,
-            "autotune_in_subproc": False,
-            "max_autotune_gemm_backends": max_autotune_gemm_backends,
-        }):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+            }
+        ):
             # No broadcast
             compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 2048])
             # Broadcast first dim.

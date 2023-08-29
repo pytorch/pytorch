@@ -131,7 +131,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 choices,
                 op=op,
             )
-        log.debug("Added %s cutlass gemm configs.", str(len(ops)))
+        log.debug("Added %d cutlass gemm configs.", len(ops))
 
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
@@ -215,7 +215,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 choices,
                 op=op,
             )
-        log.debug("Added %s cutlass gemm configs.", str(len(ops)))
+        log.debug("Added %d cutlass gemm configs.", len(ops))
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout

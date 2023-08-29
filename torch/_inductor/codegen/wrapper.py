@@ -722,7 +722,13 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True,
+        self,
+        name,
+        call_args,
+        grid=None,
+        device_index=None,
+        cuda=True,
+        triton=True,
     ):
         """
         Generates kernel call code.
@@ -745,9 +751,7 @@ class WrapperCodeGen(CodeGen):
                 )
             else:
                 stream_ptr = f"c_void_p({stream_name})"
-                self.writeline(
-                    f"{name}.{name}({call_args_str}, {stream_ptr})"
-                )
+                self.writeline(f"{name}.{name}({call_args_str}, {stream_ptr})")
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
 
@@ -824,7 +828,9 @@ class WrapperCodeGen(CodeGen):
         )
 
     def codegen_allocation(self, buffer):
-        assert buffer.get_workspace_size() == 0, "Only support zero size workspace size for now!"
+        assert (
+            buffer.get_workspace_size() == 0
+        ), "Only support zero size workspace size for now!"
 
         name = buffer.get_name()
 
@@ -859,7 +865,9 @@ class WrapperCodeGen(CodeGen):
         )
 
     def codegen_free(self, buffer):
-        assert buffer.get_workspace_size() == 0, "Only support zero size workspace size for now!"
+        assert (
+            buffer.get_workspace_size() == 0
+        ), "Only support zero size workspace size for now!"
 
         name = buffer.get_name()
 

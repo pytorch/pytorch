@@ -20,7 +20,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
-from ..ir import IRNode, ReductionHint
+from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
@@ -2509,7 +2509,9 @@ class TritonScheduling(BaseScheduling):
 
         # finalize must be called after adding epilogue above
         # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
-        src_code = partial_code if isinstance(partial_code, str) else partial_code.finalize()
+        src_code = (
+            partial_code if isinstance(partial_code, str) else partial_code.finalize()
+        )
         node_schedule = [template_node, *epilogue_nodes]
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
