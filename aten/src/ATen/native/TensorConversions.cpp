@@ -999,11 +999,10 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
 }
 
 template<Layout target_layout>
-static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+static Tensor dense_to_sparse_compressed(const Tensor& self, const Tensor& self_mask, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   static_assert(target_layout == Layout::SparseCsr || target_layout == Layout::SparseCsc
                 || target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
                 "invalid layout template parameter for dense_to_sparse_compressed");
-
   constexpr auto compressed_rows_layout = target_layout == Layout::SparseCsr || target_layout == Layout::SparseBsr;
   constexpr auto blocked_layout = target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc;
 
@@ -1016,7 +1015,7 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   auto n_batch_dim = self.dim() - 2 - dense_dim;
   auto is_batched = n_batch_dim > 0;
   auto values = blocked_layout ? _batch_tile_tensor(self, blocksize, dense_dim) :  self;
-  auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self != 0, blocksize, dense_dim) : self != 0;
+  auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self_mask, blocksize, dense_dim) : self_mask;
   if (blocked_layout || dense_dim > 0) {
     std::vector<int64_t> reduce_dim((blocked_layout ? 2 : 0) + dense_dim);
     std::iota(reduce_dim.begin(), reduce_dim.end(), n_batch_dim + 2);
@@ -1075,32 +1074,60 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
         values.device());
 }
 
+Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = layout.value_or(kSparse);
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "dense_to_sparse: unexpected same input and output layout");
+  TORCH_INTERNAL_ASSERT(self.layout() == mask.layout(),
+                        "dense_to_sparse_with_mask: expected mask layout ", self.layout(), ", got ", mask.layout());
+  TORCH_INTERNAL_ASSERT(self.sizes() == mask.sizes(),
+                        "dense_to_sparse_with_mask: expected mask size ", self.sizes(), ", got ", mask.sizes());
+  _to_sparse_check_arguments("dense_to_sparse_with_mask", self, layout, blocksize, dense_dim_opt);
+
+  switch (layout_to) {
+  case kSparse:
+    return self.sparse_mask(mask.to_sparse(self.dim() - dense_dim_opt.value_or(0)));
+  case kSparseCsr:
+    return dense_to_sparse_compressed<Layout::SparseCsr>(self, mask, {}, dense_dim_opt);
+  case kSparseCsc:
+    return dense_to_sparse_compressed<Layout::SparseCsc>(self, mask, {}, dense_dim_opt);
+  case kSparseBsr:
+    return dense_to_sparse_compressed<Layout::SparseBsr>(self, mask, *blocksize, dense_dim_opt);
+  case kSparseBsc:
+    return dense_to_sparse_compressed<Layout::SparseBsc>(self, mask, *blocksize, dense_dim_opt);
+  default:
+    break;
+  }
+
+  AT_ERROR("dense_to_sparse_with_mask: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
+}
+
 Tensor dense_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
   auto layout_to = kSparseCsr;
   _to_sparse_check_arguments("dense_to_sparse_csr", self, layout_to, {}, dense_dim_opt);
 
-  return dense_to_sparse_compressed<Layout::SparseCsr>(self, {}, dense_dim_opt);
+  return dense_to_sparse_compressed<Layout::SparseCsr>(self, self != 0, {}, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
   auto layout_to = kSparseCsc;
   _to_sparse_check_arguments("dense_to_sparse_csc", self, layout_to, {}, dense_dim_opt);
 
-  return dense_to_sparse_compressed<Layout::SparseCsc>(self, {}, dense_dim_opt);
+  return dense_to_sparse_compressed<Layout::SparseCsc>(self, self != 0, {}, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   auto layout_to = kSparseBsr;
   _to_sparse_check_arguments("dense_to_sparse_bsr", self, layout_to, blocksize, dense_dim_opt);
 
-  return dense_to_sparse_compressed<Layout::SparseBsr>(self, blocksize, dense_dim_opt);
+  return dense_to_sparse_compressed<Layout::SparseBsr>(self, self != 0, blocksize, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   auto layout_to = kSparseBsc;
   _to_sparse_check_arguments("dense_to_sparse_bsc", self, layout_to, blocksize, dense_dim_opt);
 
-  return dense_to_sparse_compressed<Layout::SparseBsc>(self, blocksize, dense_dim_opt);
+  return dense_to_sparse_compressed<Layout::SparseBsc>(self, self != 0, blocksize, dense_dim_opt);
 }
 
 Tensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
