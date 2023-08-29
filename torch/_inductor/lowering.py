@@ -938,6 +938,15 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    if all(input.get_dtype() is torch.uint8 for input in inputs):
+        # TODO <leslie> Remove this fallback when we support vectorization
+        # code gen with uint8 data type directly.
+        for input in inputs:
+            input.realize()
+        if all(len(input.layout.size) == 4 for input in inputs):
+            inputs, _ = require_channels_last(aten.cat, *inputs)
+        return fallback_handler(aten.cat)(inputs, dim)
+
     if len(inputs) == 1:
         return clone(inputs[0])
 
@@ -1116,6 +1125,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._convolution_transpose_pointwise,
             torch.ops.mkldnn._linear_pointwise,
             aten.mkldnn_rnn_layer.default,
+            torch.ops.onednn.qconv2d_pointwise,
         ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
@@ -1295,6 +1305,136 @@ def register_onednn_fusion_ops():
                     batch_first,
                     train,
                 ),
+            )
+
+        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        def qconvolution_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
+        )
+        def qconvolution_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            accum: TensorBox,
+            accum_scale,
+            accum_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    accum,
+                    accum_scale,
+                    accum_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
+        @register_lowering(torch.ops.onednn.qlinear_pointwise, type_promotion_kind=None)
+        def qlinear_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QLinearPointwisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
             )
 
         if torch._C.has_mkl:
@@ -1682,6 +1822,13 @@ def require_dense(_, *args, **kwargs):
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_channels_last(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
     )
     return args, kwargs
 
@@ -4347,8 +4494,6 @@ def cumsum(x, axis=None, dtype=None):
 
 @register_lowering(aten.cumprod)
 def cumprod(x, axis=None, dtype=None):
-    if x.get_device().type != "cuda":
-        return fallback_cumprod(x, dim=axis, dtype=dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
@@ -4357,7 +4502,7 @@ def cumprod(x, axis=None, dtype=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, scan_op="prod")
     if result is None:
-        return fallback_cumsum(x, dim=axis, dtype=dtype)
+        return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
 
 
@@ -4665,3 +4810,7 @@ except ImportError:
 from . import kernel
 
 import_submodule(kernel)
+
+from . import quantized_lowerings
+
+quantized_lowerings.register_quantized_ops()
