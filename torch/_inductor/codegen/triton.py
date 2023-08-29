@@ -26,6 +26,7 @@ from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
+    do_bench,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -36,7 +37,6 @@ from ..utils import (
     sympy_symbol,
     unique,
     yellow_text,
-    do_bench,
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -2723,7 +2723,6 @@ class TritonScheduling(BaseScheduling):
     def flush(self):
         pass
 
-
     def benchmark_fused_nodes(self, nodes):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2736,10 +2735,10 @@ class TritonScheduling(BaseScheduling):
             *tiled_groups,
             reduction_hint=reduction_hint_val,
             mutations=mutations,
-            index_dtype=index_dtype
+            index_dtype=index_dtype,
         )
 
-        # empty last_usage. Force more aggressive 'evict_last'. Should be fine.
+        # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = set()
 
@@ -2747,11 +2746,19 @@ class TritonScheduling(BaseScheduling):
         with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
         mod = PyCodeCache.load(src_code)
-        log.debug("kernel src code for %s written to: %s", {n.get_name() for n in nodes}, mod.__file__)
+        log.debug(
+            "kernel src code for %s written to: %s",
+            {n.get_name() for n in nodes},
+            mod.__file__,
+        )
         args = mod.get_args()
         call = mod.call
         ms = do_bench(lambda: call(args))
-        log.debug("The fused kernel for %s took %.3fms to run", {n.get_name() for n in nodes}, ms)
+        log.debug(
+            "The fused kernel for %s took %.3fms to run",
+            {n.get_name() for n in nodes},
+            ms,
+        )
         return ms
 
 

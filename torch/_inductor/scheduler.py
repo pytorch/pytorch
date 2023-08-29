@@ -25,10 +25,10 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    has_triton,
-    sympy_product,
-    red_text,
     green_text,
+    has_triton,
+    red_text,
+    sympy_product,
 )
 from .virtualized import V
 
@@ -1286,7 +1286,7 @@ class Scheduler:
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
         """
-        assert(len(nodes) > 0)
+        assert len(nodes) > 0
         device = nodes[0].get_device()
         V.graph.scheduler = self
         self.current_device = device
@@ -1310,9 +1310,19 @@ class Scheduler:
 
         if log.isEnabledFor(logging.DEBUG):
             if ms_fused < ms1 + ms2:
-                log.debug("Fusing %s with %s cause %sx speedup", node1.get_names(), node2.get_names(), green_text(f"{(ms1 + ms2) / ms_fused:.3f}"))
+                log.debug(
+                    "Fusing %s with %s cause %sx speedup",
+                    node1.get_names(),
+                    node2.get_names(),
+                    green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                )
             else:
-                log.debug("Fusing %s with %s cause %sx slowdown", node1.get_names(), node2.get_names(), red_text(f"{ms_fused / (ms1 + ms2):.3f}"))
+                log.debug(
+                    "Fusing %s with %s cause %sx slowdown",
+                    node1.get_names(),
+                    node2.get_names(),
+                    red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                )
 
         return ms_fused < ms1 + ms2
 
