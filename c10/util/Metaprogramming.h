@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Array.h>
 #include <c10/util/TypeList.h>
 #include <functional>
 #include <type_traits>
