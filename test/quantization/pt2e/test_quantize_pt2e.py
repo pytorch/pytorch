@@ -374,7 +374,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
-            model_pt2e.eval()
+            torch.ao.quantization.move_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
@@ -2367,6 +2367,39 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             ref_node_occurrence,
             non_ref_node_occurrence
         )
+
+    def test_move_model_to_eval(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        example_inputs = (torch.randn(1),)
+        m = M().train()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m.graph.eliminate_dead_code()
+        m.recompile()
+
+        # Assert that dropout op exists and is in train mode
+        dropout_node = None
+        for n in m.graph.nodes:
+            if n.target == torch.ops.aten.native_dropout.default:
+                dropout_node = n
+                break
+        self.assertTrue(dropout_node is not None)
+        self.assertTrue(dropout_node.args[2])
+
+        # Do the subgraph rewriting
+        torch.ao.quantization.move_model_to_eval(m)
+
+        # Assert that dropout op is now replaced with a clone op
+        targets = [n.target for n in m.graph.nodes]
+        self.assertTrue(torch.ops.aten.clone.default in targets)
+        self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):

@@ -9,11 +9,11 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
-from torch._export import capture_pre_autograd_graph
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
+    "move_model_to_eval",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -156,6 +156,8 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    # Avoid circular dependencies
+    from torch._export import capture_pre_autograd_graph
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,
@@ -387,3 +389,15 @@ def _replace_literals_with_existing_placeholders(
         new_args = tuple(new_args)
         node.args = new_args
     return gm
+
+# TODO: also support move_model_to_train
+# TODO: also support standalone batchnorm
+def move_model_to_eval(m: GraphModule):
+    """
+    Move an exported GraphModule to eval mode.
+
+    This is equivalent to model.eval() but only for certain special ops like dropout.
+    QAT users should call this before performing inference on the model.
+    """
+    _replace_dropout_for_eval(m)
+    return m
