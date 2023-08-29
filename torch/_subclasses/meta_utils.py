@@ -601,7 +601,7 @@ class MetaConverter:
                                 constraint_dims=constraint_dims,
                             )
                         out = torch._to_functional_tensor(fake_t)
-                        torch._mirror_autograd_meta(fake_t, out)
+                        torch._mirror_autograd_meta_to(fake_t, out)
                         return out
                     else:
                         # torch.func.functionalize

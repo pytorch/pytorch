@@ -1520,8 +1520,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # and is not really advertised as a user API).
             # We need to explicitly disable functionalization when using python FunctionalTensor and FunctionalTensorMode.
             # Why? FunctionalTensor is a wrapper tensor that holds an inner FunctionalTensorWrapper.
-            # Since the inner tensor has `DispatchKey.Functionalize` in its keyset, then by default, our FunctionalTensor will inherit the same keyset.
-            # We don't have an easy way of directly mutating a tensor's keyset from python, so globally disabling functionalization here is easier.
+            # Since the inner tensor has `DispatchKey.Functionalize` in its keyset, then by default,
+            # our FunctionalTensor will inherit the same keyset.
+            # We don't have an easy way of directly mutating a tensor's keyset from python,
+            # so globally disabling functionalization here is easier.
             maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
             with maybe_disable, FunctionalTensorMode():
                 out_wrapped = f(x_wrapped)
