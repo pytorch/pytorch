@@ -176,6 +176,7 @@ jobs:
         ]}
 
   linux-focal-rocm5_6-py3_8-build:
+    if: github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')
     name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
