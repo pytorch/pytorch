@@ -816,9 +816,10 @@ class Kernel(CodeGen):
     load_format = None
     store_format = None
 
-    def __init__(self, args=None):
+    def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
-        metrics.generated_kernel_count += 1
+        if increase_kernel_count:
+            metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()

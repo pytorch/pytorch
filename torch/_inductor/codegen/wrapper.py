@@ -14,6 +14,7 @@ import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
+
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -912,6 +913,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
+        self.resized_outputs = {}
 
         from .cpp import cexpr
 
@@ -1049,6 +1051,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
                 self.prefix.writeline(f"""inputs_info_[{idx}].name = "{name}";""")
+                self.prefix.writeline(
+                    f"""inputs_info_[{idx}].dtype = "{V.graph.graph_inputs[name].get_dtype()}";"""
+                )
                 sizes = V.graph.graph_inputs[name].get_size()
                 self.prefix.writeline(
                     f"inputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1064,6 +1069,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
                 self.prefix.writeline(f"""outputs_info_[{idx}].name = "output{idx}";""")
+                self.prefix.writeline(
+                    f"""outputs_info_[{idx}].dtype = "{output.get_dtype()}";"""
+                )
                 sizes = output.get_size()
                 self.prefix.writeline(
                     f"outputs_info_[{idx}].shape.reserve({len(sizes)});"
@@ -1092,14 +1100,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if (
-                    hasattr(output, "get_name")
-                    and output.get_name() in self.outputs_need_copy
-                ):
-                    output_as_strided = output.codegen_reference()
-                    self.wrapper_call.writeline(
-                        f"outputs[{idx}].copy_({output_as_strided});"
-                    )
+                if hasattr(output, "get_name"):
+                    name = output.get_name()
+                    if name in self.outputs_need_copy:
+                        output_as_strided = output.codegen_reference()
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].copy_({output_as_strided});"
+                        )
+                    resize_to = self.resized_outputs.get(name, None)
+                    if resize_to is not None:
+                        resize_to_args = ", ".join(
+                            self.expr_printer(d) for d in resize_to
+                        )
+                        self.wrapper_call.writeline(
+                            f"outputs[{idx}].resize_({{{resize_to_args}}});"
+                        )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1254,7 +1269,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.sizevars.statically_known_leq(
                 buffer.get_numel(), output_buffer.get_numel()
             ):
-                return f"auto {name} = outputs[{output_idx}];"
+                buf_str = f"auto {name} = outputs[{output_idx}];"
+                # avoid resize_output warning:
+                # "An output with one or more elements was resized since it had..."
+                if buffer.get_size() != output_buffer.get_size():
+                    resize_to_args = ", ".join(
+                        self.expr_printer(d) for d in buffer.get_size()
+                    )
+                    buf_str += f" {name}.resize_({{{resize_to_args}}});"
+                    assert name not in self.resized_outputs
+                    self.resized_outputs[name] = list(output_buffer.get_size())
+                return buf_str
             else:
                 self.outputs_need_copy.add(name)
 
@@ -1346,12 +1371,21 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 }                                                               \\
             } while (0)
 
-            static inline CUfunction loadKernel(const std::string &filePath,
-                    const std::string &funcName) {
+            static inline CUfunction loadKernel(
+                    const std::string &filePath,
+                    const std::string &funcName,
+                    int sharedMemBytes) {
                 CUmodule mod;
                 CUfunction func;
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ));
+                }
                 return func;
             }
 
@@ -1360,12 +1394,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int gridX,
                     int gridY,
                     int gridZ,
-                    int numWraps,
+                    int numWarps,
                     int sharedMemBytes,
                     void* args[],
                     cudaStream_t stream) {
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
@@ -1398,9 +1432,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             cubin_path
         ), "cubin file should already exist at this moment"
 
+        shared_mem = params.get("shared_mem", 0)
         self.writeline(f"if ({name} == nullptr) {{")
         self.writeline(
-            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}");"""
+            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
         )
         self.writeline("}")
 
