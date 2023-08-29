@@ -1,6 +1,7 @@
 import functools
 import operator
 from functools import reduce
+from typing import Any, Tuple
 
 import torch
 
@@ -1015,12 +1016,12 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs = [input, packed_weight_node]
+                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if is_bf16_weight:
-                    packed_linear_inputs += [bias, "none", [], ""]
+                    packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
-                    packed_linear_inputs += [transpose_weight_node, bias, batch_size]
+                    packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                     packed_linear_op = torch.ops.mkl._mkl_linear
                 packed_linear_node = graph.create_node(
                     "call_function", packed_linear_op, packed_linear_inputs
