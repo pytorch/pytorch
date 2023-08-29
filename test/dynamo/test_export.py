@@ -21,6 +21,7 @@ from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
@@ -1680,6 +1681,25 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         test_x = torch.randn(3, 2)
         self.assertEqual(out_graph(test_x), mod(test_x))
 
+    def test_export_with_cond_dynamic_shape_pred_tuple_operands(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x[:2]
+
+                return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
+
+        mod = Module()
+        x = torch.randn(2, 2)
+        out_graph, _ = torch._dynamo.export(mod)(x)
+        test_x = torch.randn(3, 2)
+        self.assertEqual(out_graph(test_x), mod(test_x))
+
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
 
@@ -2156,6 +2176,35 @@ def forward(self, x):
             inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
         )
 
+    def test_dataclass_input(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Tensors:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        def f(t):
+            return t.x + t.y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "graph-captured input #0.*Tensor.*not among original args.*Tensors",
+        ):
+            torch._dynamo.export(
+                f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
+            )
+
+    def test_none_out(self):
+        def f(x, y):
+            _ = x + y
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "traced result #0.*NoneType.*not among graph-captured outputs.*or original args.*Tensor.*Tensor",
+        ):
+            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2311,6 +2360,23 @@ def forward(self, x):
             torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
         constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+
+    def test_remove_redundant_dynamic_dim_in_error_message(self):
+        def foo(x, y):
+            if x.shape[0] == y["k"].shape[0]:
+                return x + 1
+            else:
+                return x - 1
+
+        a = torch.randn(3)
+        b = torch.randn(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
+        ):
+            torch._export.export(
+                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+            )
 
     @config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -2852,7 +2918,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list but got",
+            "Expected a tuple but got",
         ):
             torch._dynamo.export(
                 f_non_list_operands,
@@ -2869,7 +2935,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list of tensors",
+            "Expected a tuple of tensors",
         ):
             torch._dynamo.export(
                 f_non_tensor_operands,
@@ -3630,6 +3696,97 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
         for name, buffer in gm.named_buffers():
             self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
+
+    def test_predispatch_with_higher_order(self):
+        def f(x):
+            return cond(x.shape[0] > 4, lambda x: x + 5, lambda x: x - 3, [x])
+
+        gm, _ = torch._dynamo.export(f, aten_graph=True, pre_dispatch=True)(
+            torch.randn(4, 4)
+        )
+        inp1 = torch.randn(4, 4)
+        inp2 = torch.randn(6, 4)
+        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
+        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
+
+    def test_predispatch_with_higher_order_nested(self):
+        def f(x):
+            def true_fn(x):
+                return cond(x.shape[0] > 6, lambda x: x + 10, lambda x: x - 10, [x])
+
+            return cond(x.shape[0] > 4, true_fn, lambda x: x - 3, [x])
+
+        gm, _ = torch._dynamo.export(f, aten_graph=True, pre_dispatch=True)(
+            torch.randn(4, 4)
+        )
+        inp1 = torch.randn(4, 4)
+        inp2 = torch.randn(6, 4)
+        inp3 = torch.randn(8, 4)
+        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
+        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
+        self.assertTrue(torch.allclose(f(inp3), gm(inp3)))
+
+    def test_predispatch_with_for_out_dtype(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return out_dtype(torch.ops.aten.mm.default, torch.int32, x, self.weight)
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        m = M(weight)
+        x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
+
+        self.assertTrue(torch.allclose(m(x), gm(x)))
+
+    def test_predispatch_with_for_out_dtype_nested(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def true_fn(self, x):
+                return out_dtype(
+                    torch.ops.aten.mm.default, torch.int32, x, self.weight
+                ).sum()
+
+            def false_fn(self, x):
+                return out_dtype(
+                    torch.ops.aten.mul.Tensor, torch.int32, x, self.weight
+                ).sum()
+
+            def forward(self, x):
+                return cond(x.sum() != 0, self.true_fn, self.false_fn, [x])
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        m = M(weight)
+        x = torch.ones((5, 5), dtype=torch.int8)
+        gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
+
+        self.assertTrue(torch.allclose(m(x), gm(x)))
+        y = torch.zeros((5, 5), dtype=torch.int8)
+        self.assertTrue(torch.allclose(m(y), gm(y)))
+
+        self.assertExpectedInline(
+            gm.true_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+    sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
+    return sum_1""",
+        )
+
+        self.assertExpectedInline(
+            gm.false_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+    sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
+    return sum_1""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
