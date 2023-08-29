@@ -216,11 +216,10 @@ def _replace_dropout(m: GraphModule, move_to_eval: bool):
     match_pattern = get_aten_graph_module(dropout_train, example_inputs)
     replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
-    r = replace_pattern_with_filters(
+    replace_pattern_with_filters(
         m,
         match_pattern,
         replacement_pattern,
-        match_filters=[],
         ignore_literals=True,
     )
     m.recompile()
