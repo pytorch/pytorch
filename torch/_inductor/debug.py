@@ -179,7 +179,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
-def get_orig_fx_node_name_to_buf_meta(nodes: SchedulerNodeList) -> dict[str, BufMeta]:
+def get_orig_fx_node_name_to_buf_meta(nodes: SchedulerNodeList):
     node_name_to_buf_meta = {}
     for node in nodes:
         ir_node = node.node
