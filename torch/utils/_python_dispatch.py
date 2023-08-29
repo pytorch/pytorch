@@ -345,7 +345,8 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
         # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
         # so we don't actually need to update the metadata (and attempting to do so causes errors)
-        if not isinstance(mutated_args[0], torch._subclasses.functional_tensor.FunctionalTensor):
+        from torch._subclasses.functional_tensor import FunctionalTensor
+        if not isinstance(mutated_args[0], FunctionalTensor):
             with torch.utils._mode_utils.no_dispatch():
                 # See Note: [Fake Tensor Dispatch Keys]
                 # we're borrowing the way it modifies dispatch key TLS.
