@@ -457,13 +457,13 @@ class SubclassCreationMeta:
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[self.flat_tensor_start_idx:self.flat_tensor_start_idx + self.arg_count]
         assert len(curr_args) == len(self.inner_keys), f'inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}'
-        out = type(self.original_subclass).__tensor_unflatten__({k: v for (k, v) in zip(self.inner_keys, curr_args)}, self.meta)
+        out = type(self.original_subclass).__tensor_unflatten__(dict(zip(self.inner_keys, curr_args)), self.meta)
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
-            torch._mirror_autograd_meta(self.original_subclass, out)
+            torch._mirror_autograd_meta_to(self.original_subclass, out)
 
         # We can't rely on the user's `__tensor_unflatten__()` to return a subclass with the same tensor metadata
         # as the initial subclass (say, if the initial subclass got a metadata mutation like t_(), so its strides are no longer contiguous).
@@ -766,7 +766,7 @@ def to_fun(t):
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
-            torch._mirror_autograd_meta(t, out)
+            torch._mirror_autograd_meta_to(t, out)
             return out
         else:
             return FunctionalTensor.to_functional(t)
@@ -790,7 +790,7 @@ def from_fun(t):
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
         out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
-        torch._mirror_autograd_meta(t, out)
+        torch._mirror_autograd_meta_to(t, out)
         return out
 
     if not isinstance(t, FunctionalTensor):
