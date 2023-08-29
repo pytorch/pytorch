@@ -1083,7 +1083,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].dtype = {DTYPE_TO_ATEN[tensor.dtype]};"
                 )
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].offset = {tensor.storage_offset() * tensor.element_size()};"
+                    f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"

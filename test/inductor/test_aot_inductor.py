@@ -97,6 +97,30 @@ class AotInductorTests(TestCase):
         self.assertTrue(same(actual, expected))
 
     @requires_cpp_extension()
+    def test_with_offset(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
+                self.tensor = self.orig_tensor[5:, :]
+
+            def forward(self, x, y):
+                return (
+                    x
+                    + torch.nn.functional.linear(y, self.orig_tensor[:10, :])
+                    + self.tensor
+                )
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
