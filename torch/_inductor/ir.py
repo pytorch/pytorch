@@ -2879,8 +2879,13 @@ class ConcatKernel(NopKernel):
             )
 
             kernel.data.inputs.append(input_buffer)
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
+
             if (
-                inputs[i].data.is_input_buffer()
+                input_unwrapped.is_input_buffer()
                 and inputs[i].get_device().type == "cuda"
             ):
                 buffer_names.append(input_buffer.get_name())
