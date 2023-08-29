@@ -565,7 +565,7 @@ class RendezvousTCPTest(TestCase):
                 timeout=timedelta(seconds=1),
             )
             next(gen)
-            self.assertTrue(isinstance(manager.exception, DistError))
+        self.assertTrue(isinstance(manager.exception, DistError))
 
     @retry_on_connect_failures
     def test_nominal(self):

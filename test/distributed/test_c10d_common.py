@@ -155,7 +155,8 @@ class TimeoutTest(TestCase):
                         timeout=timeout,
                         logging_interval=timeout / 2
                     )
-            except RuntimeError as e:
+            except torch.distributed.DistStoreError as e:
+                self.assertTrue(isinstance(e, torch.distributed.DistError))
                 error_list.append(e)
 
         world_size = 4
