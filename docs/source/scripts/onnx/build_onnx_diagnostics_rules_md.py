@@ -12,6 +12,10 @@ def gen_docs(out_dir: str):
         rule = getattr(diagnostics.rules, field.name)
         if not isinstance(rule, infra.Rule):
             continue
+        if not rule.id.startswith("FXE"):
+            # Only generate docs for `dynamo_export` rules. Excluding rules for TorchScript
+            # ONNX exporter.
+            continue
         title = f"{rule.id}:{rule.name}"
         full_description_markdown = rule.full_description_markdown
         assert (

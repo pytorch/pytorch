@@ -47,7 +47,6 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
-    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -147,7 +146,12 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
+        torch.export.constrain_as_size,
+        torch.export.constrain_as_value,
+        torch.export.dynamic_dim,
         torch.export.export,
+        torch.export.load,
+        torch.export.save,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
@@ -1202,6 +1206,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.mT.__get__: lambda self: -1,
         Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._post_accumulate_grad_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,
@@ -1279,6 +1284,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
         Tensor.dim: lambda self: -1,
+        Tensor.dim_order: lambda self: -1,
         Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cdouble: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.element_size: lambda self: -1,
@@ -1325,6 +1331,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.record_stream: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
+        Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
@@ -1902,13 +1909,3 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
-
-def get_buffer(tensor_subclass, data, prefix):
-    import ctypes
-    assert prefix in {"stride", "size", "sym_size"}
-    buffer_name = f"_{prefix}_buffer"
-    if not hasattr(tensor_subclass, buffer_name):
-        SizeType = ctypes.c_longlong * len(data)
-        setattr(tensor_subclass, buffer_name, SizeType(*data))
-    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
-    return (ptr, len(data))
