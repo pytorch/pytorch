@@ -155,7 +155,6 @@ std::vector<Tensor> split_with_sizes_nested(
     auto new_offsets = at::native::empty_like(offsets);
     int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
     int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
-
     // Get start val for each split
     for (int64_t i : c10::irange(n_tensors)) {
       const int64_t index = i * tensor_dim + dim;
