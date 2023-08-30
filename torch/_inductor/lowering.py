@@ -45,7 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -419,13 +419,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):

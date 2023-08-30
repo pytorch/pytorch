@@ -1029,3 +1029,22 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if any(s.free_symbols for s in t.data.get_size()):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size")
+            if any(s.free_symbols for s in t.get_size()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise ValueError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
