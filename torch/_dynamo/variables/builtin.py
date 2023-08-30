@@ -1367,6 +1367,8 @@ class BuiltinVariable(VariableTracker):
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
+            if op is operator.eq and left.size != right.size:
+                return ConstantVariable(False)
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,
