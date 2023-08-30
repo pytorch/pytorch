@@ -10,8 +10,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
 )
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -213,14 +212,10 @@ def einop_rule(
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
     assert input_specs[0].tensor_meta is not None
-    tensor_meta = TensorMetadata(
+    tensor_meta = TensorMeta(
         torch.Size(output_shape),
-        input_specs[0].tensor_meta.dtype,
-        input_specs[0].tensor_meta.requires_grad,
         input_specs[0].tensor_meta.stride,
-        input_specs[0].tensor_meta.memory_format,
-        input_specs[0].tensor_meta.is_quantized,
-        input_specs[0].tensor_meta.qparams,
+        input_specs[0].tensor_meta.dtype,
     )
     return OutputSharding(
         DTensorSpec.from_dim_map(

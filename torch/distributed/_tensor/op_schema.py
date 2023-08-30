@@ -23,7 +23,6 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
-        requires_grad=arg.tensor_meta.requires_grad,
     )
 
 

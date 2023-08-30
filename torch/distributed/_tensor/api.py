@@ -15,6 +15,7 @@ from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
 from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
@@ -22,7 +23,6 @@ from torch.distributed._tensor.random import (
 )
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.fx.passes.shape_prop import TensorMetadata
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -195,11 +195,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
-        # TODO: populate all tensor meta fields properly
-        # NOTE: memory_format is non-pickable so we intentionally skip it
-        tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, None, False, {}
-        )
+        tensor_meta = TensorMeta(shape, stride, dtype)
         # deepcopy and set spec
         r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         r._local_tensor = local_tensor
@@ -216,21 +212,22 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], self._spec
+        return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, spec):
+    def __tensor_unflatten__(inner_tensors, flatten_spec):
         assert (
-            spec is not None
+            flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         local_tensor = inner_tensors["_local_tensor"]
+        spec, requires_grad = flatten_spec
         return DTensor(
             local_tensor,
             spec.mesh,
             spec.placements,
             shape=spec.tensor_meta.shape,
             dtype=spec.tensor_meta.dtype,
-            requires_grad=spec.tensor_meta.requires_grad,
+            requires_grad=requires_grad,
             stride=spec.tensor_meta.stride,
         )
 
