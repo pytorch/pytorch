@@ -18,10 +18,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
 
-#ifndef NDEBUG
-#include <iostream>
-#endif
-
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();

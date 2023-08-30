@@ -9,7 +9,7 @@ import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map
 from torch import Tensor
 from torch.export import Constraint
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export, capture_pre_autograd_graph
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
     get_buffer,
@@ -1022,6 +1022,23 @@ class TestExport(TestCase):
             "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
+
+    def test_train_eval_on_exported_preautograd_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
+            graph_module.train()
+
+        with self.assertRaisesRegex(NotImplementedError, r"Calling eval\(\) is not supported yet."):
+            graph_module.eval()
 
 
 if __name__ == '__main__':

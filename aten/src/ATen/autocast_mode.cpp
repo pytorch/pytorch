@@ -1,5 +1,6 @@
 #include <ATen/autocast_mode.h>
 
+#include <iostream>
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
@@ -272,6 +273,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_CUDA(einsum, lower_precision_fp)
   KERNEL_CUDA(mm, lower_precision_fp)
   KERNEL_CUDA(mv, lower_precision_fp)
+  KERNEL_CUDA(linalg_vecdot, lower_precision_fp)
   KERNEL_CUDA(linear, lower_precision_fp)
   KERNEL_CUDA(addbmm, lower_precision_fp)
   KERNEL_CUDA(baddbmm, lower_precision_fp)
@@ -394,6 +396,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(conv3d, padding, lower_precision_fp)
   KERNEL_CPU(bmm, lower_precision_fp)
   KERNEL_CPU(mm, lower_precision_fp)
+  KERNEL_CPU(linalg_vecdot, lower_precision_fp)
   KERNEL_CPU(baddbmm, lower_precision_fp)
   KERNEL_CPU(addmm, lower_precision_fp)
   KERNEL_CPU(addbmm, lower_precision_fp)

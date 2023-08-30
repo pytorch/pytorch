@@ -553,6 +553,12 @@ class SizeVariable(TupleVariable):
             assert not kwargs and len(args) == 1
             out = self.get_item_dyn(tx, args[0])
             return out
+        elif name == "numel":
+            result = 1
+            for v in self.items:
+                assert isinstance(v, ConstantVariable)
+                result = result * v.value
+            return ConstantVariable(result).add_options(self)
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):

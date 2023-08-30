@@ -1720,6 +1720,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: cos.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: cos_nested
   tags: [core, pointwise]
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
@@ -5076,6 +5078,7 @@
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr
     SparseCPU, SparseCUDA: sin_sparse
+    NestedTensorCPU, NestedTensorCUDA: sin_nested
   tags: [core, pointwise]
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
@@ -8504,6 +8507,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: eq_scalar_nested
   tags: [core, pointwise]
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8540,6 +8544,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ge_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: ge_scalar_nested
   tags: [core, pointwise]
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
