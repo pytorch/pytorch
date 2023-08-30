@@ -1,4 +1,5 @@
 import inspect
+import logging
 from typing import Dict, List
 
 import torch._C
@@ -17,6 +18,8 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+
+log = logging.getLogger(__name__)
 
 
 class ContextWrappingVariable(VariableTracker):
@@ -78,30 +81,42 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(tx, [], {})
+        try:
+            return variables.UserMethodVariable(
+                self.cm_obj.__enter__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(tx, [], {})
+        except Exception as e:
+            log.exception(e)
+            unimplemented(
+                f"Context manager `{self.cm_obj}`'s `__enter__` method is not supported"
+            )
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-            ],
-            {},
-        )
+        try:
+            x = variables.UserMethodVariable(
+                self.cm_obj.__exit__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(
+                tx,
+                [
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                ],
+                {},
+            )
+        except Exception as e:
+            log.exception(e)
+            unimplemented(
+                f"Context manager `{self.cm_obj}`'s `__exit__` method is not supported"
+            )
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
