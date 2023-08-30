@@ -11,7 +11,7 @@ PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
 # currently set within `designate_upload_channel`
 UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 # Designates what subfolder to put packages into
-UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-cpu}
+UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
 BUILD_NAME=${BUILD_NAME:-}
