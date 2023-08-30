@@ -107,7 +107,7 @@ class TuningProcess:
             return pickle.load(self.process.stdout)
         except EOFError:
             # Child crashed; recreate it
-            self.process = None
+            self.close()
             self.initialize()
             raise
         except pickle.UnpicklingError:
@@ -116,6 +116,19 @@ class TuningProcess:
                 "Is the benchmark code path writing to stdout?"
             )
 
+    def close(self) -> None:
+        """
+        Close the communication pipes from the child process.
+        """
+        if self.process is not None:
+            assert self.process.stdin is not None
+            assert self.process.stdout is not None
+            assert self.process.stderr is not None
+            self.process.stdin.close()
+            self.process.stdout.close()
+            self.process.stderr.close()
+            self.process = None
+
     def terminate(self) -> None:
         """
         Signal the child process to terminate and wait for it to exit.
@@ -123,7 +136,7 @@ class TuningProcess:
         if self.process is not None:
             self.put(None)
             self.process.wait()
-            self.process = None
+            self.close()
 
 
 tuning_process = TuningProcess()
