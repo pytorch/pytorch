@@ -285,14 +285,14 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
    print("source code of __compiled_fn_0:")
    print(inspect.getsource(__compiled_fn_0))
    print("source code of __resume_at_30_1:")
-   print(inspect.getsource(__resume_at_30_1))
+   print(decompile(__resume_at_30_1))
    print("source code of __resume_at_38_2:")
-   print(inspect.getsource(__resume_at_38_2))
+   print(decompile(__resume_at_38_2))
 
 ::
 
    source code of __compiled_fn_0:
-   def ignore_this_function_name(self, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
+   def forward(self, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
        l_a_ = L_a_
        l_b_ = L_b_
        abs_1 = torch.abs(l_a_)
@@ -303,17 +303,12 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
        return (truediv, lt)
 
    source code of __resume_at_30_1:
-   def ignore_this_function_name(a, b):
-       x = a / (torch.abs(a) + 1)
-       if b.sum() < 0:
-           b = b * -1
+   def <resume in toy_example>(b, x):
+       b = b * -1
        return x * b
 
    source code of __resume_at_38_2:
-   def ignore_this_function_name(a, b):
-       x = a / (torch.abs(a) + 1)
-       if b.sum() < 0:
-           b = b * -1
+   def <resume in toy_example>(b, x):
        return x * b
 
 However, keep in mind that, if we use other backends like the built-in `inductor`, the subgraph code will be compiled CUDA kernels for GPU or C++ code for CPU.
