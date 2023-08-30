@@ -655,6 +655,8 @@ class TorchVariable(VariableTracker):
                     return v
 
             return torch.utils._pytree.tree_map(map_fn, tree)
+        elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
+            unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
             unimplemented("TypeError(\"'module' object is not callable\")")
         else:

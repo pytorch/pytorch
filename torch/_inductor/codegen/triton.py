@@ -1940,9 +1940,6 @@ class TritonKernel(Kernel):
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark())
 
-        if name is not None:
-            return code.getvalue()
-
         return code.getvalue()
 
     def codegen_static_numels(self, code):
@@ -2265,8 +2262,7 @@ class TritonScheduling(BaseScheduling):
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("Schedule:\n %s", node_schedule)
+        schedule_log.debug("Schedule:\n %s", node_schedule)
 
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -2298,7 +2294,14 @@ class TritonScheduling(BaseScheduling):
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        buf_sizes = [
+            buf.get_layout().storage_size()
+            for buf in buffers
+            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+        ]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
@@ -2378,6 +2381,26 @@ class TritonScheduling(BaseScheduling):
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
             wrapper.writeline(origins)
+
+        if config.debug_fusion:
+            from torch._inductor.scheduler import (
+                BaseSchedulerNode,
+                ForeachKernelSchedulerNode,
+            )
+
+            if not any(
+                isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
+            ):
+                # We probablly should look what are the nodes inside a foreach
+                # schedule node
+                node_names = [
+                    n.get_name()
+                    for n in node_schedule
+                    if isinstance(n, BaseSchedulerNode)
+                ]
+                wrapper.writeline(
+                    f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
+                )
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)

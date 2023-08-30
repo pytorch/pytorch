@@ -52,7 +52,7 @@ class Dataset(Generic[T_co]):
     list of samples.
 
     .. note::
-      :class:`~torch.utils.data.DataLoader` by default constructs a index
+      :class:`~torch.utils.data.DataLoader` by default constructs an index
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
