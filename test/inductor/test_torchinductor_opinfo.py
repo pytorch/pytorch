@@ -204,7 +204,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f32, f64},
-    "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
     "exponential": {f16},
@@ -241,7 +240,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "atanh": {f16, f32},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
-    "cauchy": {f16, f32, f64},
     "cholesky": {f32, f64},
     "cumprod": {f16},
     "exponential": {f16, f32, f64},
@@ -273,7 +271,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16, f32, f64},
 }
 
 
@@ -542,7 +539,9 @@ class TestInductorOpInfo(TestCase):
             if has_rng_op:
                 return (
                     (
-                        lambda: torch._inductor.config.patch({"fallback_random": True}),
+                        lambda: torch._inductor.config.patch(
+                            {"fallback_random": True, "implicit_fallbacks": True}
+                        ),
                         {"assert_equal": True},
                     ),
                     (
