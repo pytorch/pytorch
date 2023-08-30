@@ -19,19 +19,15 @@ NUM_ITERS = 2
 PROFILE_SAVE_DIR = "./profiles"
 DEEPSPEED_CONFIG_FILE = "ds_config_{rank}.json"
 
-# deep speed configs
-# https://www.deepspeed.ai/docs/config-json/#zero-optimizations-for-fp16-training
-# zero stage 0: disabled
-# zero stage 1: optimizer state partitioning
-# zero stage 2: optimizer+gradient state partitioning
-# zero stage 3: optimizer+gradient+parameter partitioning
-# overlap_comm: overlap the reduction of the gradients with backward computation
+# deep speed config
+# zero: https://fburl.com/l4xf72nu
+# activation checkpoint: https://fburl.com/ziih3fpd
 DEEPSPEED_CONFIG_JSON = """
 {
   "train_batch_size": 8,
   "fp16": {
     "enabled": true,
-    "auto_cast": false
+    "auto_cast": true
   },
   "optimizer": {
     "type": "Adam",
@@ -39,12 +35,17 @@ DEEPSPEED_CONFIG_JSON = """
       "lr": 0.00015
     }
   },
-  "session_params": {
     "zero_optimization": {
-      "stage": 3
+      "stage": 3,
+      "allgather_partitions": true,
+      "reduce_scatter": true,
+      "overlap_comm": true
     },
-    "overlap_comm": true
-  }
+    "activation_checkpointing": {
+        "partition_activations": true,
+        "number_checkpoints": 100,
+        "cpu_checkpointing": false
+    }
 }
 """
 
@@ -81,7 +82,7 @@ def init() -> Tuple[nn.Module, torch.optim.Optimizer]:
         model=model, model_parameters=model.parameters(), config=config_file_name
     )
 
-    # print model
+    # print wrapped model for debug
     if rank == 0:
         print("wrapped model:\n", wrapped_model)
 
@@ -90,12 +91,10 @@ def init() -> Tuple[nn.Module, torch.optim.Optimizer]:
 
 def run():
     wrapped_model, optim = init()
-    # if dist.get_rank() == 0:
-    #     ForkedPdb().set_trace()
 
     torch.manual_seed(dist.get_rank() + 1)
-    src = torch.randn((10, 1, 1024), device="cuda", dtype=torch.half)
-    tgt = torch.randn((20, 1, 1024), device="cuda", dtype=torch.half)
+    src = torch.randn((10, 1, 1024), device="cuda")
+    tgt = torch.randn((20, 1, 1024), device="cuda")
 
     def inner():
         for _ in range(NUM_ITERS):
