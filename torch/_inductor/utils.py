@@ -1030,3 +1030,13 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    return any(
+        isinstance(t, ir.TensorBox)
+        and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
+        for t in args
+    )

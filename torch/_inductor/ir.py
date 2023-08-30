@@ -54,6 +54,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -2887,6 +2888,7 @@ class ConcatKernel(NopKernel):
             if (
                 input_unwrapped.is_input_buffer()
                 and inputs[i].get_device().type == "cuda"
+                and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
 
