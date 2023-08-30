@@ -67,6 +67,19 @@ class PlacementStrategy:
         output_spec_str = self.pretty_print_placements(self.output_spec.placements)
         return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
+    def shardable_shape(self, shape: Tuple[int,...]) -> bool:
+        """
+        Returns True if any of this PlacementStrategy can shard the input shape.
+        """
+        ndim = len(shape)
+        dim_shards_map = self.output_spec.dim_shards_map(shape)
+        for dim_len, dim_shards in zip(shape, dim_shards_map):
+            # we can't shard on this tensor dim with the placements
+            # if dim length greater than dim shards
+            if dim_len < dim_shards:
+                return False
+
+        return True
 
 class StrategyType:
     """
@@ -101,9 +114,19 @@ class OpStrategy(StrategyType):
         return self.strategies[0].output_spec.shape
 
     @property
+    def output_stride(self):
+        return self.strategies[0].output_spec.stride
+
+    @property
     def output_ndim(self):
         return self.strategies[0].output_spec.ndim
 
+    def shardable_shape(self, shape: Tuple[int,...]) -> bool:
+        """
+        Returns True if any of PlacementStrategy of this OpStrategy
+        can shard the input shape.
+        """
+        return any(strategy.shardable_shape(shape) for strategy in self.strategies)
 
 class TupleStrategy(StrategyType):
     """

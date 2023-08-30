@@ -533,3 +533,20 @@ class DTensorSpec:
                 placements[m] = Shard(i)
 
         return cls(mesh, tuple(placements), tensor_meta=tensor_meta)
+
+    def dim_shards_map(self, shape: Optional[Tuple[int, ...]]=None) -> List[int]:
+        """
+        dim_shards calculates the number of shards for each tensor dim.
+        """
+        if shape is not None and self.shape is not None:
+            assert len(self.shape) == len(shape), f"dim_shards_map expect same rank shape with DTensorSpec, found {self.shape}, shape: {shape}"
+            ndim = len(shape)
+        else:
+            ndim = len(shape) if shape is not None else self.ndim
+
+        r = [1] * self.ndim
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                shard_dim = cast(Shard, placement).dim
+                r[shard_dim] *= self.mesh.size(i)
+        return r

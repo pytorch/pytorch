@@ -162,6 +162,10 @@ class ShardingPropagator:
                     if output_strategy.input_specs is None
                     else output_strategy.input_specs[idx]
                 )
+                # the desired spec of the input_spec need to have
+                # the same shape meta as the input spec
+                # desired_spec.shape = input_spec.shape
+                # desired_spec.stride = input_spec.stride
                 expected_input_specs.append(desired_spec)
                 if input_spec != desired_spec:
                     needs_redistribute = True

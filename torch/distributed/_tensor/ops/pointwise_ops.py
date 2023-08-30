@@ -1,12 +1,28 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
+from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpSchema,
+    OpStrategy,
+    PlacementStrategy,
+    StrategyType,
+)
 
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.ops.common_rules import (
     linear_pointwise_rule,
     pointwise_rule,
 )
-from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.ops.utils import register_op_strategy, register_prop_rule
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -370,5 +386,104 @@ for op in linear_pointwise_ops:
     register_prop_rule(op)(linear_pointwise_rule)
 
 
+# for op in pointwise_ops:
+#     register_prop_rule(op)(pointwise_rule)
+
+def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    follow_placement_strategy_indices = []
+    followed_strategy: Optional[OpStrategy] = None
+    if _is_inplace_op(op_schema.op):
+        # inplace op should follow the first arg strategy
+        followed_strategy = op_schema.args_schema[0]
+    elif _is_out_variant_op(op_schema.op):
+        # out variant op should follow the last kwarg strategy
+        followed_strategy = op_schema.kwargs_schema[-1]
+    else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        # args_max_num_shards = [
+        #     arg_strategy.max_num_shards()
+        #     for arg_strategy in op_schema.args_schema
+        #     if isinstance(arg_strategy, OpStrategy)
+        # ]
+        # max_shards_index = args_max_num_shards.index(max(args_max_num_shards))
+        # followed_strategy = op_schema.args_schema[max_shards_index]
+
+        max_shards_strategy_index = -1
+        max_shards = -1
+
+        for idx, arg_strategy in enumerate(op_schema.args_schema):
+            if not isinstance(arg_strategy, OpStrategy):
+                continue
+
+            arg_max_shards = arg_strategy.max_num_shards()
+            if arg_max_shards > max_shards:
+                # since pointwise op can have broadcasting semantics,
+                # we need to ensure the strategy to follow can shard
+                # all the input args
+                follow_indices_for_current_strategy = []
+                strategy_shardable = False
+                for strat_idx, placement_strategy in enumerate(arg_strategy.strategies):
+                    all_args_shardable = all(placement_strategy.shardable_shape(arg.output_shape) for arg in op_schema.args_schema if isinstance(arg, OpStrategy))
+                    follow_indices_for_current_strategy.append(strat_idx)
+                    if all_args_shardable and not strategy_shardable:
+                        # if there's a placement strategy can shard all args
+                        # this op strategy can be selected as the candidate to follow
+                        max_shards_strategy_index = idx
+                        max_shards = arg_max_shards
+                        strategy_shardable = True
+                if strategy_shardable:
+                    # record the indices of strategies need to follow
+                    follow_placement_strategy_indices = follow_indices_for_current_strategy
+
+        if max_shards_strategy_index < 0:
+            # there's no strategy from inputs can be followed, we fallback and generate
+            # a default replicate strategy
+            followed_strategy = OpStrategy([
+                PlacementStrategy(
+                    output_spec= DTensorSpec(mesh=mesh, placements=[Replicate()]),
+                )
+            ])
+            print(f">>>> falling back to default replication strategy")
+        else:
+            followed_strategy = op_schema.args_schema[max_shards_strategy_index]
+        if mesh.get_rank() == 0:
+            print(f">>>>>> op op: {op_schema.op}, chose {max_shards_strategy_index} as select, strategy to follow: {followed_strategy}")
+            for arg in op_schema.args_schema:
+                if isinstance(arg, OpStrategy):
+                    print(f" arg: {arg}, shape: {arg.strategies[0].output_spec.shape}")
+
+    assert isinstance(followed_strategy, OpStrategy)
+    if not follow_placement_strategy_indices:
+        follow_placement_strategy_indices = list(range(len(followed_strategy.strategies)))
+    pointwise_strategy = OpStrategy([])
+
+    for placement_strategy_idx in follow_placement_strategy_indices:
+        placement_strategy_to_follow = followed_strategy.strategies[placement_strategy_idx]
+        placements_to_follow = placement_strategy_to_follow.output_spec.placements
+        input_specs = []
+        for input_arg in op_schema.args_schema:
+            if isinstance(input_arg, OpStrategy):
+                input_specs.append(
+                    DTensorSpec(
+                        mesh=mesh,
+                        placements=placements_to_follow,
+                        shape=input_arg.output_shape,
+                        stride=input_arg.output_stride
+                    )
+                )
+        pointwise_strategy.strategies.append(
+            PlacementStrategy(
+                output_spec=DTensorSpec(
+                    mesh=mesh,
+                    placements=placements_to_follow,
+                ),
+                input_specs=input_specs
+            )
+        )
+    print(f">>>>>>> final pointwise strategy generated: {pointwise_strategy}.")
+    return pointwise_strategy
+
+
 for op in pointwise_ops:
-    register_prop_rule(op)(pointwise_rule)
+    register_op_strategy(op)(pointwise_strategy)
