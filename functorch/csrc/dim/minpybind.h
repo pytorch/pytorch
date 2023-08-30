@@ -8,7 +8,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <utility>
-#include <iostream>
+#include <ostream>
 #include <memory>
 
 #define PY_BEGIN try {

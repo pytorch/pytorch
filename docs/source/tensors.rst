@@ -339,6 +339,7 @@ Tensor class reference
     Tensor.digamma
     Tensor.digamma_
     Tensor.dim
+    Tensor.dim_order
     Tensor.dist
     Tensor.div
     Tensor.div_

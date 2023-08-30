@@ -31,9 +31,14 @@ jobs:
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
         device: ["cuda", "rocm"]
+        include:
+          - device: "rocm"
+            rocm_version: "5.6"
+          - device: "cuda"
+            rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -159,6 +164,7 @@ jobs:
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
+    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'conda-aws-upload' || '' }}
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}

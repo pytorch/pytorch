@@ -1,4 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
@@ -10,6 +12,8 @@
 #else
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
+#include <ATen/ops/polar_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -124,6 +128,32 @@ REGISTER_COPYSIGN_INTEGRAL_OP(short);
 REGISTER_COPYSIGN_INTEGRAL_OP(char);
 REGISTER_COPYSIGN_INTEGRAL_OP(uchar);
 REGISTER_COPYSIGN_INTEGRAL_OP(bool);
+
+template<typename T>
+kernel void polar(constant void  * abs_         [[buffer(0)]],
+                  constant void  * angle_       [[buffer(1)]],
+                  device   void  * out_         [[buffer(2)]],
+                  constant uint3 * offsets      [[buffer(3)]],
+                  uint tid [[thread_position_in_grid]]) {
+  device   T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* angle = (constant T*)((constant uint8_t*)angle_ + offsets[tid].z);
+  constant T* abs = (constant T*)((constant uint8_t*)abs_ + offsets[tid].y);
+  out[0] = abs[0] * cos(angle[0]);
+  out[1] = abs[0] * sin(angle[0]);
+}
+
+#define REGISTER_POLAR_OP(DTYPE)       \
+template                               \
+[[host_name("polar_" #DTYPE)]]         \
+kernel void polar<DTYPE>(              \
+  constant void    * abs,              \
+  constant void    * angle,            \
+  device   void    * out,              \
+  constant uint3   * offsets,          \
+  uint tid)
+
+REGISTER_POLAR_OP(float);
+REGISTER_POLAR_OP(half);
 
 )BINARY_METAL";
 
@@ -264,4 +294,19 @@ REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel);
 
+Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
+  auto new_size = at::infer_size(abs.sizes(), angle.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return output;
+  }
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
+  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
+
+  mps::binary_mps_impl(iter, "polar");
+  return output;
+}
 } // namespace at::native

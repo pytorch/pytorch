@@ -59,7 +59,7 @@ on:
       github-token:
         required: true
         description: Github Token
-      aws-access-key-id:
+      aws-pytorch-uploader-access-key-id:
         required: true
         description: AWS access key id
       aws-pytorch-uploader-secret-access-key:
@@ -71,6 +71,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     container:
       image: continuumio/miniconda3:4.12.0
     env:
@@ -130,7 +131,7 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.aws-pytorch-uploader-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
           BUILD_NAME: ${{ inputs.build_name }}
