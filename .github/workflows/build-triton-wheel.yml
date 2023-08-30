@@ -132,7 +132,6 @@ jobs:
     container:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
-    shell: bash
     steps:
       - uses: actions/checkout@v3
 
@@ -144,6 +143,7 @@ jobs:
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
@@ -171,7 +171,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
-          set -ex
+          set -eux
           bash .circleci/scripts/binary_upload.sh
 
   build-conda:
@@ -245,7 +245,6 @@ jobs:
     container:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
-    shell: bash
     steps:
       - uses: actions/checkout@v3
 
@@ -257,11 +256,13 @@ jobs:
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         # if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
         run: |
           set -eux
 
@@ -278,8 +279,9 @@ jobs:
           # When running these on pull_request events these should be blank
           CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
           CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+        shell: bash
         run: |
-          set -ex
+          set -eux
 
           if [[ "${UPLOAD_CHANNEL}" = "nightly" ]]; then
             export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
