@@ -3,10 +3,7 @@ import logging
 import torch
 from torch._export.pass_base import _ExportPassBase
 
-from torch.ao.quantization.pt2e.utils import (
-    _filter_sym_size_users,
-    _is_valid_annotation,
-)
+from torch.ao.quantization.pt2e.utils import filter_sym_size_users, is_valid_annotation
 
 from torch.fx.node import map_arg
 from torch.fx.passes.infra.pass_base import PassResult
@@ -53,7 +50,7 @@ def _maybe_duplicate_dq(
     gm: torch.fx.GraphModule, producer: torch.fx.Node, user: torch.fx.Node
 ):
     annotation = user.meta.get("quantization_annotation", None)
-    if not _is_valid_annotation(annotation):
+    if not is_valid_annotation(annotation):
         return
     _copy_and_replace_use(gm, producer, user)
 
@@ -66,7 +63,7 @@ class DuplicateDQPass(_ExportPassBase):
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             if node.op == "call_function" and node.target in _DEQUANTIZE_OPS:
-                dq_users = _filter_sym_size_users(node)
+                dq_users = filter_sym_size_users(node)
                 if len(dq_users) <= 1:
                     continue
                 for user in dq_users:

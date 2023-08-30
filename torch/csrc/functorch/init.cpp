@@ -156,9 +156,7 @@ Tensor _remove_batch_dim(
   const auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
 
-  Tensor self_without_bdim;
-  int64_t newly_exposed_logical_dim;
-  std::tie(self_without_bdim, newly_exposed_logical_dim) =
+  auto [self_without_bdim, newly_exposed_logical_dim] =
       remove_existing_batch_dim(batched, level);
   auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
   return result;
@@ -488,6 +486,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
   });
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DynamicLayer>(m, "DynamicLayer");
 
   py::enum_<TransformType>(m, "TransformType")
