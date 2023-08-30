@@ -132,7 +132,6 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
-    @requires_cpp_extension()
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
             def __init__(self):
