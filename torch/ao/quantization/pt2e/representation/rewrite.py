@@ -12,9 +12,144 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from typing import Optional, Callable, Tuple, Any
 from dataclasses import dataclass
 
+from functools import partial
+
 __all__ = [
     "reference_representation_rewrite",
 ]
+
+
+_QUANTIZED_LINEAR_EXAMPLE_INPUTS = (
+    torch.randint(-128, 127, (2, 5), dtype=torch.int8),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-127], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+    torch.randn(1, dtype=torch.float),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+)
+
+def _qdq_quantized_linear(
+    x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+    out_scale, out_zero_point, out_quant_min, out_quant_max
+):
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    weight_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    out_fp32 = torch.ops.aten.linear.default(x_fp32, weight_fp32, bias_fp32)
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+        out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
+    return out_i8
+
+def _reference_quantized_linear(
+    x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+    out_scale, out_zero_point, out_quant_min, out_quant_max
+):
+    # without using quant_min/max in clamp, the traced graph will not have quant_mi/max args.
+    # This results in failure to match the pattern.
+    # Therefore, we call a torch.ops.aten.clamp here
+    x_i8 = torch.ops.aten.clamp(x_i8, x_quant_min, x_quant_max)
+    weight_i8 = torch.ops.aten.clamp(weight_i8, weight_quant_min, weight_quant_max)
+
+    x_i16 = x_i8.to(torch.int16)
+    weight_i16 = weight_i8.to(torch.int16)
+    # always set bias to None so that the same representation can work for the case
+    # no matter if bias_scale == x_scale * weight_scale or not
+    acc_i32 = out_dtype(
+        torch.ops.aten.linear.default,
+        torch.int32,
+        x_i16 - x_zero_point,
+        weight_i16 - weight_zero_point,
+        None)
+    # TODO: change to mul.Scalar
+    # Note: we are quantizing bias with these scales without signal from user, but it might be OK
+    bias_scale = x_scale * weight_scale
+    bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
+    acc_i32 = acc_i32 + bias_i32
+    # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
+    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
+    out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
+    return out_i8
+
+
+_DYNAMIC_QUANTIZED_LINEAR_EXAMPLE_INPUTS = (
+    torch.randn((2, 5), dtype=torch.float),
+    -128,
+    127,
+    torch.finfo(torch.float32).eps,
+    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-127], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+    torch.randn(1, dtype=torch.float),
+)
+
+
+def _qdq_dynamic_quantized_linear(
+    x_fp32, x_quant_min, x_quant_max, x_eps,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+):
+    x_scale, x_zero_point = torch.ops.quantized_decomposed.choose_qparams(x_fp32, x_quant_min, x_quant_max, x_eps, torch.int8)
+    x_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+        x_fp32, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    weight_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    out_fp32 = torch.ops.aten.linear.default(x_fp32, weight_fp32, bias_fp32)
+    return out_fp32
+
+def _reference_dynamic_quantized_linear(
+    x_fp32, x_quant_min, x_quant_max, x_eps,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+):
+    x_scale, x_zero_point = torch.ops.quantized_decomposed.choose_qparams(x_fp32, x_quant_min, x_quant_max, x_eps, torch.int8)
+    # decomposed representation for quantize_per_tensor
+    # TODO: use out_dtype(mul, ...) here when the op is ready
+    x_fp32 = x_fp32 / x_scale  # fp32
+    # round modes might be different here
+    # pytorch is rounding to even, which is also common for most of the backends
+    x_fp32 = torch.round(x_fp32)  # fp32
+    x_i32 = x_fp32.to(dtype=torch.int32)  # int32
+    x_i32 = x_i32 + x_zero_point  # int32
+    # clamp works for fp32, int32 and int8 dtypes
+    x_i32 = torch.clamp(x_i32, x_quant_min, x_quant_max)  # int32
+    x_i8 = x_i32.to(dtype=torch.int8)
+
+    weight_i8 = torch.ops.aten.clamp(weight_i8, weight_quant_min, weight_quant_max)
+
+    x_i16 = x_i8.to(torch.int16)
+    weight_i16 = weight_i8.to(torch.int16)
+    # always set bias to None so that the same representation can work for the case
+    # no matter if bias_scale == x_scale * weight_scale or not
+    acc_i32 = out_dtype(
+        torch.ops.aten.linear.default,
+        torch.int32,
+        x_i16 - x_zero_point,
+        weight_i16 - weight_zero_point,
+        None)
+    bias_scale = x_scale * weight_scale
+    bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
+    acc_i32 = acc_i32 + bias_i32
+    out_fp32 = acc_i32 * (x_scale * weight_scale)
+    return out_fp32
+
 
 _QUANTIZED_CONV2d_EXAMPLE_INPUTS = (
     torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
@@ -84,13 +219,31 @@ def _reference_quantized_conv2d(
         x_i16 - x_zero_point,
         weight_i16 - weight_zero_point,
         None, stride, padding, dilation, transposed, output_padding, groups)
-    # TODO: change to mul.Scalar
     # Note: we are quantizing bias with these scales without signal from user, but it might be OK
     bias_scale = x_scale * weight_scale
-    bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale / out_scale)
+    # bias quantization to int32 uses bias_scale = x_scale * weight_scale due to:
+    # Take linear calculation for example
+    # Out_(i, j)_fp32 = Sum_(over k)[X_(i, k)_fp32 * W_(i, k)_fp32] + bias_(i)_fp32
+    # Represent X, W fp32 as their dequant transforms
+    # A_fp32 = (A_q - A_zero_point)/A_scale
+    # Out_(i, j)_fp32 = Sum_(over k)[(X_(i, k)_fp32 - X_zp) * X_scale * (W_(i, k)_fp32 - W_zp) * W_scale] + bias_(i)_fp32
+    # Factor out X_scale and W_scale
+    # Out_(i, j)_fp32 = ((X_scale * W_scale) * Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)]) + bias_(i)_fp32
+    # In order to addition of bias_(i)_fp32 inside, we must do
+    # Out_(i, j)_fp32 = (X_scale * W_scale) * (Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)] + (1 / (X_scale * W_scale)) * bias_(i)_fp32)W_scale  # noqa: B950
+    # Note we had to multiply bias_fp32 qith X_scale * W_scale = bias_scale
+    # Thus bias quantization to int32 must be with X_scale * W_scale
+
+    bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
+    # Unsqueeze to match broadcast dims
+    # Unfortnuately I cannot do bias_i32.unsqueeze(0) due to literal matching nightmare
+    # in graph pattern replacement
+    bias_i32 = bias_i32.unsqueeze(-1)
+    bias_i32 = bias_i32.unsqueeze(-1)
     acc_i32 = acc_i32 + bias_i32
     # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
-    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
+    acc_i32 = out_dtype(
+        torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
@@ -255,9 +408,9 @@ def _reference_quantized_adaptive_avg_pool2d(
     x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
     x_i32 = x_i8.to(torch.int32)
     out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
-    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
-    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
-    out_i8 = out_fp32.to(torch.int8)
+    out_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, out_i32, (x_scale / out_scale)) + out_zero_point
+    out_i32 = torch.clamp(out_i32, out_quant_min, out_quant_max)
+    out_i8 = out_i32.to(torch.int8)
     return out_i8
 
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
@@ -362,6 +515,7 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
         literal_to_ph_idx={1: 3, -128: 4, 127: 5}
     )
 
+
 @dataclass
 class _RewriteInfo:
     """Data needed for rewrite, this includes example inputs, pattern and replacement functions
@@ -378,11 +532,39 @@ class _RewriteInfo:
 
 _REWRITE_INFO_LIST = [
     _RewriteInfo(
+        _DYNAMIC_QUANTIZED_LINEAR_EXAMPLE_INPUTS,
+        _qdq_dynamic_quantized_linear,
+        _reference_dynamic_quantized_linear,
+        partial(
+            _replace_literals_with_existing_placeholders,
+            literal_to_ph_idx={
+                -128: 1,
+                127: 2,
+                torch.finfo(torch.float32).eps: 3
+            }
+        ),
+        partial(
+            _replace_literals_with_existing_placeholders,
+            literal_to_ph_idx={
+                -128: 1,
+                127: 2,
+                torch.finfo(torch.float32).eps: 3
+            }
+        ),
+    ),
+    _RewriteInfo(
+        _QUANTIZED_LINEAR_EXAMPLE_INPUTS,
+        _qdq_quantized_linear,
+        _reference_quantized_linear,
+        _replace_literals_with_new_placeholders,
+        _replace_literals_with_new_placeholders,
+    ),
+    _RewriteInfo(
         _QUANTIZED_CONV2d_EXAMPLE_INPUTS,
         _qdq_quantized_conv2d,
         _reference_quantized_conv2d,
-        _replace_literals_with_new_placeholders,
-        _replace_literals_with_new_placeholders
+        partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
+        partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,

@@ -244,7 +244,7 @@ def _annotate_conv2d(
         conv_node = conv_partition.output_nodes[0]
         if (
             conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
+            or conv_node.target != torch.ops.aten.conv2d.default
         ):
             raise ValueError(f"{conv_node} is not an aten conv2d operator")
         # skip annotation if it is already annotated
@@ -260,7 +260,7 @@ def _annotate_conv2d(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -292,7 +292,7 @@ def _annotate_conv2d_relu(
             raise ValueError(f"{conv_node} is not a Node")
         if (
             conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
+            or conv_node.target != torch.ops.aten.conv2d.default
         ):
             raise ValueError(f"{conv_node} is not an aten conv2d operator")
         if relu_node.op != "call_function" or relu_node.target not in [
@@ -313,7 +313,7 @@ def _annotate_conv2d_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -364,7 +364,7 @@ def _annotate_conv2d_bn(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -422,7 +422,7 @@ def _annotate_conv2d_bn_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
-        bias = conv_node.args[2]
+        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
 
@@ -501,8 +501,12 @@ def _annotate_max_pool2d(
         output_node = maxpool_partition.output_nodes[0]
         maxpool_node = None
         for n in maxpool_partition.nodes:
-            if n.target == torch.ops.aten.max_pool2d_with_indices.default:
+            if n.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = n
+        assert (
+            maxpool_node is not None
+        ), "XNNPACKQuantizer only works with torch.ops.aten.max_pool2d.default, "
+        "please make sure you are exporting the model correctly"
         if _is_annotated([output_node, maxpool_node]):  # type: ignore[list-item]
             continue
 
@@ -531,20 +535,28 @@ def _annotate_max_pool2d(
         )
 
 
-def _annotate_input_out_obs_sharing_op(
-    op: Callable,
+def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
-    module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
+    """Always annotate adaptive_avg_pool2d op"""
+    module_partitions = get_source_partitions(
+        gm.graph, [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d], filter_fn
+    )
     partitions = list(itertools.chain(*module_partitions.values()))
     for partition in partitions:
-        io_obs_sharing_node = partition.output_nodes[0]
-        if _is_annotated([io_obs_sharing_node]):
+        pool_node = partition.output_nodes[0]
+        if (
+            pool_node.op != "call_function"
+            or pool_node.target != torch.ops.aten.adaptive_avg_pool2d.default
+        ):
+            raise ValueError(f"{pool_node} is not an aten adaptive_avg_pool2d operator")
+
+        if _is_annotated([pool_node]):
             continue
 
-        input_act = io_obs_sharing_node.args[0]
+        input_act = pool_node.args[0]
         assert isinstance(input_act, Node)
 
         # only annotate input output sharing operator
@@ -554,29 +566,19 @@ def _annotate_input_out_obs_sharing_op(
             or not input_act.meta["quantization_annotation"]._annotated
             or input_act.meta["quantization_annotation"].output_qspec is None
         ):
-            continue
+            input_act_qspec = get_input_act_qspec(quantization_config)
+        else:
+            input_act_qspec = SharedQuantizationSpec(input_act)
 
-        act_qspec = SharedQuantizationSpec(input_act)
-        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
+        # output sharing with input
+        output_act_qspec = SharedQuantizationSpec((input_act, pool_node))
+        pool_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
-                input_act: act_qspec,
+                input_act: input_act_qspec,
             },
-            output_qspec=act_qspec,
+            output_qspec=output_act_qspec,
             _annotated=True,
         )
-
-
-def _annotate_adaptive_avg_pool2d(
-    gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> None:
-    _annotate_input_out_obs_sharing_op(
-        torch.nn.AdaptiveAvgPool2d, gm, quantization_config, filter_fn
-    )
-    _annotate_input_out_obs_sharing_op(
-        F.adaptive_avg_pool2d, gm, quantization_config, filter_fn
-    )
 
 
 def _annotate_add_relu(
@@ -627,7 +629,7 @@ def _annotate_add(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
     add_partitions = get_source_partitions(
-        gm.graph, [operator.add, torch.add], filter_fn
+        gm.graph, [operator.add, torch.add, operator.iadd], filter_fn
     )
     add_partitions = list(itertools.chain(*add_partitions.values()))
     for add_partition in add_partitions:
@@ -654,6 +656,81 @@ def _annotate_add(
         )
 
 
+def _annotate_mul_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    fused_partitions = find_sequential_partitions(
+        gm, [torch.mul, torch.nn.ReLU], filter_fn
+    )
+    for fused_partition in fused_partitions:
+        mul_partition, relu_partition = fused_partition
+        if len(relu_partition.output_nodes) > 1:
+            raise ValueError("Relu partition has more than one output node")
+        relu_node = relu_partition.output_nodes[0]
+        if len(mul_partition.output_nodes) > 1:
+            raise ValueError("mul partition has more than one output node")
+        mul_node = mul_partition.output_nodes[0]
+
+        if _is_annotated([relu_node, mul_node]):
+            continue
+
+        input_act_qspec = get_input_act_qspec(quantization_config)
+        output_act_qspec = get_output_act_qspec(quantization_config)
+
+        input_qspec_map = {}
+        input_act0 = mul_node.args[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = input_act_qspec
+
+        input_act1 = mul_node.args[1]
+        if isinstance(input_act1, Node):
+            input_qspec_map[input_act1] = input_act_qspec
+
+        mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True,
+        )
+        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=output_act_qspec,
+            _annotated=True,
+        )
+
+
+def _annotate_mul(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> None:
+    mul_partitions = get_source_partitions(
+        gm.graph, [operator.mul, torch.mul, operator.imul], filter_fn
+    )
+    mul_partitions = list(itertools.chain(*mul_partitions.values()))
+    for mul_partition in mul_partitions:
+        mul_node = mul_partition.output_nodes[0]
+        if _is_annotated([mul_node]):
+            continue
+
+        input_act_qspec = get_input_act_qspec(quantization_config)
+        output_act_qspec = get_output_act_qspec(quantization_config)
+
+        input_qspec_map = {}
+        input_act0 = mul_node.args[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = input_act_qspec
+
+        input_act1 = mul_node.args[1]
+        if isinstance(input_act1, Node):
+            input_qspec_map[input_act1] = input_act_qspec
+
+        mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=output_act_qspec,
+            _annotated=True,
+        )
+
+
 OP_TO_ANNOTATOR = {
     "linear": _annotate_linear,
     "conv2d": _annotate_conv2d,
@@ -663,6 +740,8 @@ OP_TO_ANNOTATOR = {
     "max_pool2d": _annotate_max_pool2d,
     "add": _annotate_add,
     "add_relu": _annotate_add_relu,
+    "mul": _annotate_mul,
+    "mul_relu": _annotate_mul_relu,
     "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,

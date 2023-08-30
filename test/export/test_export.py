@@ -8,13 +8,27 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
+from torch.export import Constraint
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export, capture_pre_autograd_graph
 from torch._export.constraints import constrain_as_size, constrain_as_value
-from torch._export.utils import register_dataclass_as_pytree_node, is_param, get_param
+from torch._export.utils import (
+    get_buffer,
+    get_param,
+    is_buffer,
+    is_param,
+    register_dataclass_as_pytree_node,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._pytree import LeafSpec, tree_flatten, tree_unflatten, TreeSpec
+from torch.utils._pytree import (
+    LeafSpec,
+    tree_flatten,
+    tree_unflatten,
+    TreeSpec,
+    treespec_loads,
+    treespec_dumps
+)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -137,7 +151,7 @@ class TestExport(TestCase):
             {},
             preserve_module_call_signature=("foo.nested", "foo"),
         )
-        ep.validate()
+        ep._validate()
         self.assertEqual(len(ep.module_call_graph), 2)
         # TODO(zhxchen17) unflattener
         # unflattened = unflatten(export_module)
@@ -387,6 +401,9 @@ class TestExport(TestCase):
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)
 
+        roundtrip_spec = treespec_loads(treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec, spec)
+
         # Override the registration with keep none fields
         register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True)
 
@@ -410,6 +427,9 @@ class TestExport(TestCase):
         self.assertEqual(orig_dt.x, 3)
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)
+
+        roundtrip_spec = treespec_loads(treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec, spec)
 
     def test_pytree_regster_nested_data_class(self):
 
@@ -437,6 +457,9 @@ class TestExport(TestCase):
         unflat = tree_unflatten(flat, spec)
         self.assertEqual(unflat, inp)
 
+        roundtrip_spec = treespec_loads(treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec, spec)
+
     def test_param_util(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -456,6 +479,21 @@ class TestExport(TestCase):
         self.assertEqual(num_params, 2)
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
+
+    def test_buffer_util(self):
+        ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45), ))
+        num_buffer = 0
+        buffer = []
+
+        for node in ep.graph.nodes:
+            if is_buffer(ep, node):
+                num_buffer += 1
+                buffer.append(get_buffer(ep, node))
+        self.assertEqual(num_buffer, 3)
+
+        self.assertEqual(buffer[0].shape, torch.Size([100]))  # running_mean
+        self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
+        self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
 
     def test_export_dynamo_config(self):
@@ -823,6 +861,32 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
+    def test_runtime_assert_for_prim(self):
+
+        def f(x, y):
+            return x + y
+
+        tensor_inp = torch.ones(7, 5)
+        exported = torch._export.export(f, (tensor_inp, 5), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        self.assertTrue(torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5)))
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"):
+            _ = exported(torch.ones(8, 5), 6)
+
+        exported = torch._export.export(f, (tensor_inp, 5.0), constraints=[dynamic_dim(tensor_inp, 0) > 5])
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"):
+            _ = exported(torch.ones(7, 5), 6.0)
+
+    def test_runtime_assert_for_prm_str(self):
+
+        def g(a, b, mode):
+            return torch.div(a, b, rounding_mode=mode)
+
+        inps = (torch.randn(4, 4), torch.randn(4), "trunc")
+        exported = torch._export.export(g, inps)
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
+            _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
+        self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
+
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
@@ -939,6 +1003,42 @@ class TestExport(TestCase):
         re_exported_v2 = torch._export.export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
+
+    def test_constrain_as_size_error(self):
+
+        def f(x):
+            a = x.item()
+            return torch.full((a, 4), 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Tried to use data-dependent value in the subsequent computation"
+        ):
+            _ = export(f, (torch.tensor(6),))
+
+    def test_constraint_directly_construct(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+        ):
+            _ = Constraint()
+
+    def test_train_eval_on_exported_preautograd_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
+            graph_module.train()
+
+        with self.assertRaisesRegex(NotImplementedError, r"Calling eval\(\) is not supported yet."):
+            graph_module.eval()
 
 
 if __name__ == '__main__':
