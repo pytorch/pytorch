@@ -78,30 +78,36 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(tx, [], {})
+        try:
+            return variables.UserMethodVariable(
+                self.cm_obj.__enter__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(tx, [], {})
+        except Exception:
+            unimplemented(f"context manager `{self.cm_obj}`")
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-            ],
-            {},
-        )
+        try:
+            x = variables.UserMethodVariable(
+                self.cm_obj.__exit__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(
+                tx,
+                [
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                ],
+                {},
+            )
+        except Exception:
+            unimplemented(f"context manager `{self.cm_obj}`")
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
