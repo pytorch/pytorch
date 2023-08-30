@@ -1,6 +1,6 @@
 import dataclasses
 
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple
 
 import torch
 
@@ -9,32 +9,25 @@ from torch._export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
-    DumpableContext,
     FlattenFunc,
-    FromDumpableContextFn,
-    ToDumpableContextFn,
+    MaybeFromStrFunc,
+    ToStrFunc,
     UnflattenFunc,
 )
-
-
-SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
 def register_dataclass_as_pytree_node(
     typ: Any,
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
+    to_str_fn: Optional[ToStrFunc] = None,
+    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
     *,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
     assert dataclasses.is_dataclass(
         typ
     ), f"Only dataclasses can be registered with this function: {typ}"
-
-    serialized_type = f"{typ.__module__}.{typ.__name__}"
-    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = typ
 
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
         flattened = []
@@ -53,42 +46,15 @@ def register_dataclass_as_pytree_node(
         typ, flat_names, none_names = context
         return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
 
-    def default_to_dumpable_context(context: Context) -> DumpableContext:
-        return (serialized_type, context[1], context[2])
-
-    def default_from_dumpable_context(dumpable_context: DumpableContext) -> Context:
-        return (
-            SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[dumpable_context[0]],
-            dumpable_context[1],
-            dumpable_context[2],
-        )
-
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
-
-    if (to_dumpable_context is None) ^ (from_dumpable_context is None):
-        raise ValueError(
-            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
-            "be None or registered."
-        )
-
-    to_dumpable_context = (
-        to_dumpable_context
-        if to_dumpable_context is not None
-        else default_to_dumpable_context
-    )
-    from_dumpable_context = (
-        from_dumpable_context
-        if from_dumpable_context is not None
-        else default_from_dumpable_context
-    )
 
     _register_pytree_node(
         typ,
         flatten_fn,
         unflatten_fn,
-        to_dumpable_context=to_dumpable_context,
-        from_dumpable_context=from_dumpable_context,
+        None,
+        None,
     )
 
 
