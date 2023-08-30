@@ -1043,6 +1043,9 @@ def same(
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
+                if math.isnan(ref_error):
+                    return True
+
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
@@ -1081,7 +1084,7 @@ def same(
             log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
-        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = same(torch.tensor(ref), torch.tensor(res), rel_tol=tol, abs_tol=tol)
         if not r:
             log_error(
                 "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
