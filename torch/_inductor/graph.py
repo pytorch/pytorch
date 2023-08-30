@@ -49,13 +49,7 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import (
-    convert_shape_to_inductor,
-    gather_origins,
-    get_dtype_size,
-    get_sympy_Expr_dtype,
-    sympy_product,
-)
+from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -248,6 +242,15 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # Currently on ROCm we are seeing some slow downs in gcnArch that do not
+        # have optimal NHWC implementations. On ROCm MI200 series we will
+        # default to the enforced last channels behavior, but on non-MI200 series
+        # we will disable the forced layout.
+        if torch.version.hip and torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            if not re.search(r"MI2\d\d", gpu_name):
+                return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
         if (
@@ -785,6 +788,9 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
                                 torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.onednn.qconv2d_pointwise.default,
+                                torch.ops.onednn.qconv2d_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -911,45 +917,19 @@ class GraphLowering(torch.fx.Interpreter):
         return self.wrapper_code.generate()
 
     def count_bytes(self):
-        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+        from .scheduler import Scheduler
 
         scheduler = Scheduler(self.buffers)
 
-        def get_read_write_buffers_sizes(node):
-            if isinstance(node, NopKernelSchedulerNode):
-                return 0
-            reads = {dep.name for dep in node.read_writes.reads}
-            writes = {dep.name for dep in node.read_writes.writes}
-
-            def is_materialized(buf):
-                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
-                return len(buf_uses - set(node.snodes)) > 0
-
-            if isinstance(node, FusedSchedulerNode):
-                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
-                writes = writes - removed_buffers
-                reads = reads - removed_buffers
-            node_bytes = 0
-            for buf in reads | writes:
-                if buf in self.name_to_buffer:
-                    buf = self.name_to_buffer[buf]
-                elif buf in self.graph_inputs:
-                    buf = self.graph_inputs[buf]
-                else:
-                    continue
-
-                node_bytes += V.graph.sizevars.size_hint(
-                    sympy_product(buf.get_size())
-                ) * get_dtype_size(buf.get_dtype())
-            return node_bytes
-
         total_bytes = 0
         node_counts = []
+        node_runtimes = []
         for node in scheduler.nodes:
-            num_bytes = get_read_write_buffers_sizes(node)
-            node_counts.append((node, num_bytes // 4))
+            num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
-        return total_bytes, node_counts
+            node_counts.append((node, num_bytes // 4))
+            node_runtimes.append((node, node.get_estimated_runtime()))
+        return total_bytes, node_counts, node_runtimes
 
     @dynamo_timed
     def compile_to_module(self):

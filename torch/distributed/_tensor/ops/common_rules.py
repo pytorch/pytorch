@@ -7,7 +7,7 @@ from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
     OpSchema,
-    OutputSharding
+    OutputSharding,
 )
 from torch.distributed._tensor.ops.utils import prod
 from torch.distributed._tensor.placement_types import DTensorSpec

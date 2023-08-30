@@ -54,9 +54,7 @@ def mm_rules(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.addmm.default)
 def addmm_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec, mat1_spec, mat2_spec = op_schema.args_spec
-    mm_out_sharding = mm_rules(
-        OpSchema(op_schema.op, (mat1_spec, mat2_spec), {})
-    )
+    mm_out_sharding = mm_rules(OpSchema(op_schema.op, (mat1_spec, mat2_spec), {}))
     if mm_out_sharding.output_spec is None:
         # non-eligible input, suggest addmm input specs
         if mm_out_sharding.schema_suggestions is not None:
@@ -98,9 +96,7 @@ def bmm_rules(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.baddbmm.default)
 def baddbmm_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec, mat1_spec, mat2_spec = op_schema.args_spec
-    bmm_output_sharding = bmm_rules(
-        OpSchema(op_schema.op, (mat1_spec, mat2_spec), {})
-    )
+    bmm_output_sharding = bmm_rules(OpSchema(op_schema.op, (mat1_spec, mat2_spec), {}))
     if bmm_output_sharding.output_spec is None:
         # TODO: add more suggestions
         if bmm_output_sharding.schema_suggestions is not None:

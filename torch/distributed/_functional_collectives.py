@@ -6,7 +6,7 @@ import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_wait_tensor
+from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
@@ -329,12 +329,26 @@ class AsyncCollectiveTensor(torch.Tensor):
         r.elem = elem
         return r
 
+    def __tensor_flatten__(self):
+        return ["elem"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta):
+        assert meta is None
+        elem = inner_tensors["elem"]
+        return AsyncCollectiveTensor(elem)
+
     def __repr__(self):
+        wait_tensor(self.elem)
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
         wait_tensor(self.elem)
         return self
+
+    def _get_acs_underlying_tensor(self):
+        """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
+        return self.elem
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -349,7 +363,9 @@ class AsyncCollectiveTensor(torch.Tensor):
         def wrap(e: torch.Tensor):
             # wait_tensor is idepotent and will do stream sync only once
             assert not isinstance(e, AsyncCollectiveTensor)
-            return AsyncCollectiveTensor(e)
+            res = AsyncCollectiveTensor(e)
+            _register_tensor_wrapper(res)
+            return res
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
@@ -447,7 +463,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_wait_tensor(self)
+    _register_tensor_wrapper(res)
     return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):

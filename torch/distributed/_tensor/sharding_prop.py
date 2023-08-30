@@ -120,9 +120,7 @@ class ShardingPropagator:
 
             suggestion_schema = None
             if needs_redistribute:
-                reshard_schema = OpSchema(
-                    op_schema.op, tuple(expected_input_specs), {}
-                )
+                reshard_schema = OpSchema(op_schema.op, tuple(expected_input_specs), {})
                 reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                 suggestion_schema = [reshard_schema]
 
@@ -153,8 +151,7 @@ class ShardingPropagator:
                 raise e
             except Exception as e:
                 raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}.\n"
-                    f"Error: {e}"
+                    f"Sharding propagation failed on op {op_schema}.\n" f"Error: {e}"
                 ) from e
 
             # step 2. if can't get output_spec from sharding

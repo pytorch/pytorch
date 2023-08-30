@@ -26,11 +26,13 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         requires_grad=arg.tensor_meta.requires_grad,
     )
 
+
 def _is_inplace_op(op: torch._ops.OpOverload):
     # simple analysis of function schema to determine
     # if this is an inplace variant, it might not
     # be entirely correct, but it's good enough for now.
     return op._schema.name[-1] == "_"
+
 
 def _is_out_variant_op(op: torch._ops.OpOverload):
     # simple analysis of function schema to determine
@@ -238,6 +240,7 @@ class OpInfo:
     """
     All Runtime Op execution info are packed here
     """
+
     schema: OpSchema
     flat_args_schema: List[object]
     flat_kwargs_schema: List[object]

@@ -4,7 +4,10 @@ import unittest
 from typing import Any, Dict
 from unittest import mock
 
-from tools.stats.upload_stats_lib import BATCH_SIZE, emit_metric, upload_to_rockset
+from tools.stats.upload_metrics import emit_metric
+
+from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
+
 
 # default values
 REPO = "some/repo"

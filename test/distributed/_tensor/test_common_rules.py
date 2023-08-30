@@ -20,6 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 aten = torch.ops.aten
 
+
 class CommonRulesTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -355,9 +356,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(add_call, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
         self.assertEqual(output_spec.dim_map, [-1, 0])
@@ -372,9 +371,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(add_call, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNone(output_spec)
         self.assertIsNotNone(output_sharding.schema_suggestions)
@@ -405,9 +402,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(add_call, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNone(output_spec)
         self.assertIsNotNone(output_sharding.schema_suggestions)

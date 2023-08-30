@@ -196,7 +196,7 @@ def _operator_dispatch(
         #   2. if the return type is Tensor or List[Tensor], return empty
         #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
-        ret_list = op_info.schema.func_schema.returns
+        ret_list = op_info.schema.op._schema.returns
 
         if spec is None:
             # For a scalar return type, the non-participating device has None
