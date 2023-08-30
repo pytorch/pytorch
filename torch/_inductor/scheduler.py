@@ -1316,9 +1316,18 @@ class Scheduler:
         ):
             return True
 
-        ms1 = self.benchmark_fused_nodes(node_list_1)
-        ms2 = self.benchmark_fused_nodes(node_list_2)
-        ms_fused = self.benchmark_fused_nodes(node_list_fused)
+        from triton.compiler.errors import CompilationError
+
+        try:
+            ms1 = self.benchmark_fused_nodes(node_list_1)
+            ms2 = self.benchmark_fused_nodes(node_list_2)
+            ms_fused = self.benchmark_fused_nodes(node_list_fused)
+        except CompilationError as e:
+            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            if "Loop-carried variable" in str(e):
+                return True  # allow fusion
+            else:
+                raise
 
         if log.isEnabledFor(logging.DEBUG):
             if ms_fused < ms1 + ms2:
