@@ -1323,8 +1323,6 @@ aten::upsample_trilinear3d_backward.grad_input
 aten::values
 aten::values_copy
 aten::values_copy.out
-aten::vdot
-aten::vdot.out
 aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
