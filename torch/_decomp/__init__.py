@@ -167,6 +167,25 @@ def get_decompositions(
     return decompositions
 
 
+def remove_decompositions(
+    decompositions: Dict[OpOverload, Callable],
+    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+) -> None:
+    """
+    Given a dictionary of decompositions obtained from get_decompositions(), removes
+    operators associated with a list of operator overloads and overload packets passed
+    as input. If the decomposition dictionary does not contain a decomposition that is
+    specified to be removed, it is silently ignored.
+    """
+    for op in aten_ops:
+        if isinstance(op, OpOverloadPacket):
+            for overload_name in op.overloads():
+                opo = getattr(op, overload_name)
+                decompositions.pop(opo, None)
+        elif isinstance(op, OpOverload):
+            decompositions.pop(op, None)
+
+
 # populate the table
 import torch._decomp.decompositions
 import torch._refs
@@ -223,9 +242,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.gelu_,
             aten.gelu_backward,
             aten.glu_backward,
-            aten.grid_sampler_2d,
             aten.hardshrink,
-            aten.hardshrink_backward,
             aten.hardsigmoid,
             aten.hardsigmoid_,
             aten.hardsigmoid_backward,
@@ -303,6 +320,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.rrelu_with_noise_,
             aten.rsub.Scalar,
             aten.rsub.Tensor,
+            aten._scaled_dot_product_flash_attention.default,
             aten.select_backward,
             aten.select_scatter,
             aten.sgn,
@@ -322,7 +340,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.softplus,
             aten.softplus_backward,
             aten.softshrink,
-            aten.softshrink_backward,
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,

@@ -33,7 +33,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
 
 __all__ = [
@@ -55,6 +55,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'export',
 ]
 
 ################################################################################
@@ -882,16 +883,36 @@ def set_float32_matmul_precision(precision: str) -> None:
 
     Supports three settings:
 
-        * "highest", float32 matrix multiplications use the float32 datatype for
-          internal computations.
-        * "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
-          datatypes for internal computations, if fast matrix multiplication algorithms
-          using those datatypes internally are available. Otherwise float32
-          matrix multiplications are computed as if the precision is "highest".
-        * "medium", float32 matrix multiplications use the bfloat16 datatype for
-          internal computations, if a fast matrix multiplication algorithm
+        * "highest", float32 matrix multiplications use the float32 datatype (24 mantissa
+          bits) for internal computations.
+        * "high", float32 matrix multiplications either use the TensorFloat32 datatype (10
+          mantissa bits) or treat each float32 number as the sum of two bfloat16 numbers
+          (approximately 16 mantissa bits), if the appropriate fast matrix multiplication
+          algorithms are available.  Otherwise float32 matrix multiplications are computed
+          as if the precision is "highest".  See below for more information on the bfloat16
+          approach.
+        * "medium", float32 matrix multiplications use the bfloat16 datatype (8 mantissa
+          bits) for internal computations, if a fast matrix multiplication algorithm
           using that datatype internally is available. Otherwise float32
           matrix multiplications are computed as if the precision is "high".
+
+    When using "high" precision, float32 multiplications may use a bfloat16-based algorithm
+    that is more complicated than simply truncating to some smaller number mantissa bits
+    (e.g. 10 for TensorFloat32, 8 for bfloat16).  Refer to [Henry2019]_ for a complete
+    description of this algorithm.  To briefly explain here, the first step is to realize
+    that we can perfectly encode a single float32 number as the sum of three bfloat16
+    numbers (because float32 has 24 mantissa bits while bfloat16 has 8, and both have the
+    same number of exponent bits).  This means that the product of two float32 numbers can
+    be exactly given by the sum of nine products of bfloat16 numbers.  We can then trade
+    accuracy for speed by dropping some of these products.  The "high" precision algorithm
+    specifically keeps only the three most significant products, which conveniently excludes
+    all of the products involving the last 8 mantissa bits of either input.  This means that
+    we can represent our inputs as the sum of two bfloat16 numbers rather than three.
+    Because bfloat16 fused-multiply-add (FMA) instructions are typically >10x faster than
+    float32 ones, it's faster to do three multiplications and 2 additions with bfloat16
+    precision than it is to do a single multiplication with float32 precision.
+
+    .. [Henry2019] http://arxiv.org/abs/1904.06376
 
     .. note::
 
@@ -948,7 +969,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if cond:
+    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -1282,6 +1303,17 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
+
+################################################################################
+# Import miscelaneous torch functions
+################################################################################
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -1345,13 +1377,6 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
-
-################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
-################################################################################
-
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python
@@ -1618,11 +1643,16 @@ def compile(model: Optional[Callable] = None, *,
         By default (None), we automatically detect if dynamism has occurred and compile a more
         dynamic kernel upon recompile.
        backend (str or Callable): backend to be used
+
         - "inductor" is the default backend, which is a good balance between performance and overhead
+
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+
         - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
+
         - "default" is the default mode, which is a good balance between performance and overhead
 
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
@@ -1641,13 +1671,21 @@ def compile(model: Optional[Callable] = None, *,
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+
         - `max_autotune` which will profile to pick the best matmul configuration
+
         - `fallback_random` which is useful when debugging accuracy issues
+
         - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+
         - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+
         - `trace.enabled` which is the most useful debugging flag to turn on
+
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
@@ -1659,6 +1697,10 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
+    # Temporary until we get proper support for python 3.12
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+
     # Decorator mode
     if model is None:
         def fn(model: Callable):
@@ -1685,6 +1727,9 @@ def compile(model: Optional[Callable] = None, *,
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
+from torch import export as export
+
+
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
     supported by torch.
@@ -1696,8 +1741,8 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError("The runtime module of '{}' has already "
-                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+        raise RuntimeError(f"The runtime module of '{device_type}' has already "
+                           f"been registered with '{getattr(m, device_type)}'")
     setattr(m, device_type, module)
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module
@@ -1771,6 +1816,7 @@ if TYPE_CHECKING:
 _lazy_modules = {
     "_dynamo",
     "_inductor",
+    "_export",
     # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
     "onnx",
 }

@@ -116,6 +116,7 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -339,6 +340,7 @@ class TritonTemplateKernel(TritonKernel):
     def call_kernel(self, name: str):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
+        call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -353,7 +355,7 @@ class TritonTemplateKernel(TritonKernel):
                 device_index=V.graph.scheduler.current_device.index,
             )
         else:
-            call_args = ", ".join(call_args)
+            call_args = ", ".join(call_args)  # type: ignore[assignment]
             stream_name = wrapper.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )

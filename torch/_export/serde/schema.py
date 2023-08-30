@@ -1,9 +1,14 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields
-from enum import Enum
+from dataclasses import dataclass, fields, field
+from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
+
+
+# NOTE: Please update this value if any modifications are made to the schema
+SCHEMA_VERSION = 1
+TREESPEC_VERSION = 1
 
 # TODO (zhxchen17) Move to a separate file.
 class _Union:
@@ -27,8 +32,14 @@ class _Union:
         assert val_type is not None
         return val_type
 
+    def __str__(self):
+        return self.__repr__()
 
-class ScalarType(Enum):
+    def __repr__(self):
+        return f"{type(self).__name__}({self.type}={self.value})"
+
+
+class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
     CHAR = 2
@@ -45,7 +56,7 @@ class ScalarType(Enum):
     BFLOAT16 = 13
 
 
-class Layout(Enum):
+class Layout(IntEnum):
     Unknown = 0
     SparseCoo = 1
     SparseCsr = 2
@@ -56,7 +67,7 @@ class Layout(Enum):
     Strided = 7
 
 
-class MemoryFormat(Enum):
+class MemoryFormat(IntEnum):
     Unknown = 0
     ContiguousFormat = 1
     ChannelsLast = 2
@@ -76,13 +87,13 @@ class SymExpr:
     hint: Optional[int]
 
 
-@dataclass
+@dataclass(repr=False)
 class SymInt(_Union):
     as_expr: SymExpr
     as_int: int
 
 
-@dataclass
+@dataclass(repr=False)
 class SymBool(_Union):
     as_expr: str
     as_bool: bool
@@ -99,13 +110,13 @@ class TensorMeta:
     layout: Layout
 
 
-@dataclass
+@dataclass(repr=False)
 class SymIntArgument(_Union):
     as_name: str
     as_int: int
 
 
-@dataclass
+@dataclass(repr=False)
 class SymBoolArgument(_Union):
     as_name: str
     as_bool: bool
@@ -116,7 +127,7 @@ class TensorArgument:
     name: str
 
 
-@dataclass
+@dataclass(repr=False)
 class OptionalTensorArgument(_Union):
     as_tensor: str
     as_none: Tuple[()]
@@ -128,8 +139,13 @@ class GraphArgument:
     graph: 'Graph'
 
 
-# This is actually a union type
 @dataclass
+class CustomObjArgument:
+    blob: bytes
+
+
+# This is actually a union type
+@dataclass(repr=False)
 class Argument(_Union):
     as_none: Tuple[()]
     as_tensor: TensorArgument
@@ -139,6 +155,7 @@ class Argument(_Union):
     as_float: float
     as_floats: List[float]
     as_string: str
+    as_strings: List[str]
     as_sym_int: SymIntArgument
     as_sym_ints: List[SymIntArgument]
     as_scalar_type: ScalarType
@@ -151,6 +168,7 @@ class Argument(_Union):
     as_sym_bools: List[SymBoolArgument]
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
+    as_custom_obj: CustomObjArgument
 
 
 @dataclass
@@ -180,6 +198,8 @@ class Graph:
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
+    is_single_tensor_return: bool = False
+    constants: Dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -240,3 +260,5 @@ class ExportedProgram:
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
+    schema_version: int
+    example_inputs: Optional[Tuple[List[bytes], Dict[str, bytes]]]

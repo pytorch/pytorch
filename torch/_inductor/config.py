@@ -74,6 +74,9 @@ force_mixed_mm = False
 # If not specified, a temp directory will be created under the default caching path
 aot_inductor_output_path = ""
 
+# TODO: capture whether the graph is from export
+from_export = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -138,6 +141,10 @@ implicit_fallbacks = True
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -188,19 +195,20 @@ def decide_compile_threads():
     elif sys.platform == "win32" or is_fbcode():
         return 1
     else:
-        return min(
-            32,
+        cpu_count = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")
-            else os.cpu_count(),
+            else os.cpu_count()
         )
+        assert cpu_count
+        return min(32, cpu_count)
 
 
 compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
+    from libfb.py import parutil  # type: ignore[import]
 
     try:
         if __package__:

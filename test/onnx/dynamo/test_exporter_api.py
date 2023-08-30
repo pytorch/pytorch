@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 import io
-import logging
 import os
 
 import onnx
@@ -10,6 +9,7 @@ from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.exporter import (
     ExportOutputSerializer,
+    LargeProtobufExportOutputSerializer,
     ProtobufExportOutputSerializer,
     ResolvedExportOptions,
 )
@@ -25,13 +25,23 @@ class SampleModel(torch.nn.Module):
         return (y, z)
 
 
+class _LargeModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(2**28))  # 1GB
+        self.param2 = torch.nn.Parameter(torch.randn(2**28))  # 1GB
+
+    def forward(self, x):
+        return self.param + self.param2 + x
+
+
 class TestExportOptionsAPI(common_utils.TestCase):
     def test_raise_on_invalid_argument_type(self):
         expected_exception_type = roar.BeartypeException
         with self.assertRaises(expected_exception_type):
             ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
-            ExportOptions(logger="DEBUG")  # type: ignore[arg-type]
+            ExportOptions(diagnostic_options="DEBUG")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
@@ -47,15 +57,6 @@ class TestExportOptionsAPI(common_utils.TestCase):
         options = ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
         self.assertFalse(options.dynamic_shapes)
 
-    def test_logger_default(self):
-        options = ResolvedExportOptions(None)
-        self.assertEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
-    def test_logger_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
-        self.assertEqual(options.logger, logging.getLogger())
-        self.assertNotEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
 
 class TestDynamoExportAPI(common_utils.TestCase):
     def test_default_export(self):
@@ -69,7 +70,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 SampleModel(),
                 torch.randn(1, 1, 2),
                 export_options=ExportOptions(
-                    logger=logging.getLogger(),
                     dynamic_shapes=True,
                 ),
             ),
@@ -121,11 +121,20 @@ class TestDynamoExportAPI(common_utils.TestCase):
             with open(path) as fp:
                 self.assertEqual(fp.read(), expected_buffer)
 
-    def test_save_sarif_log_to_file_with_successful_export(self):
+    def test_save_succeeds_when_model_greater_than_2gb_and_destination_is_str(self):
         with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(
-                path
-            )
+            dynamo_export(_LargeModel(), torch.randn(1)).save(path)
+
+    def test_save_raises_when_model_greater_than_2gb_and_destination_is_not_str(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "'destination' should be provided as a path-like string when saving a model larger than 2GB. ",
+        ):
+            dynamo_export(_LargeModel(), torch.randn(1)).save(io.BytesIO())
+
+    def test_save_sarif_log_to_file_with_successful_export(self):
+        with common_utils.TemporaryFileName(suffix=".sarif") as path:
+            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save_diagnostics(path)
             self.assertTrue(os.path.exists(path))
 
     def test_save_sarif_log_to_file_with_failed_export(self):
@@ -136,6 +145,43 @@ class TestDynamoExportAPI(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
         self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+
+    def test_export_output_accessible_from_exception_when_export_failed(self):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        self.assertIsInstance(cm.exception, torch.onnx.OnnxExporterError)
+        self.assertIsInstance(cm.exception.export_output, ExportOutput)
+
+    def test_access_export_output_model_proto_raises_when_export_output_is_emitted_from_failed_export(
+        self,
+    ):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        export_output = cm.exception.export_output
+        with self.assertRaises(RuntimeError):
+            export_output.model_proto
+
+    def test_raise_from_diagnostic_warning_when_diagnostic_option_warning_as_error_is_true(
+        self,
+    ):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
+            dynamo_export(
+                SampleModel(),
+                torch.randn(1, 1, 2),
+                export_options=ExportOptions(
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        warnings_as_errors=True
+                    )
+                ),
+            )
 
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
@@ -157,6 +203,21 @@ class TestProtobufExportOutputSerializerAPI(common_utils.TestCase):
         with self.assertRaises(roar.BeartypeException):
             serializer = ProtobufExportOutputSerializer()
             serializer.serialize(None, None)  # type: ignore[arg-type]
+
+    def test_serialize_raises_when_model_greater_than_2gb(self):
+        export_output = torch.onnx.dynamo_export(_LargeModel(), torch.randn(1))
+        serializer = ProtobufExportOutputSerializer()
+        with self.assertRaisesRegex(ValueError, "exceeds maximum protobuf size of 2GB"):
+            serializer.serialize(export_output, io.BytesIO())
+
+
+class TestLargeProtobufExportOutputSerializerAPI(common_utils.TestCase):
+    def test_serialize_succeeds_when_model_greater_than_2gb(self):
+        export_output = torch.onnx.dynamo_export(_LargeModel(), torch.randn(1))
+        with common_utils.TemporaryFileName() as path:
+            serializer = LargeProtobufExportOutputSerializer(path)
+            # `io.BytesIO()` is unused, but required by the Protocol interface.
+            serializer.serialize(export_output, io.BytesIO())
 
 
 if __name__ == "__main__":

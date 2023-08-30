@@ -18,7 +18,7 @@ from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import (
@@ -317,41 +317,12 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-
-    def test_conv_bn_with_conv_multi_users(self):
-        class Model(torch.nn.Module):
-            def __init__(self, in_channels, out_channels, bias=False, **kwargs):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels, out_channels, bias=bias, **kwargs
-                )
-                self.bn = torch.nn.BatchNorm2d(
-                    out_channels, eps=0.001, dtype=torch.float
-                )
-
-            def forward(self, x):
-                x = self.conv(x)
-                return self.bn(x), x.relu()
-
-        mod = Model(3, 32, bias=False, kernel_size=3, stride=2).eval().to(self.device)
-
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = mod(x)
-            out_compiled = foo(mod, x)
-
-            self.assertEqual(out_eager, out_compiled)
 
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16

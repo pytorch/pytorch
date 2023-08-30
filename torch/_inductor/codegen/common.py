@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import re
 from collections import namedtuple
 from itertools import chain
@@ -196,6 +197,9 @@ class DataTypePropagation:
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
+        if node.target == operator.getitem:
+            return self.deduce_node_dtype(node.args[0])
+
         assert isinstance(node.target, str)
 
         if node.target == "reduction":
@@ -309,6 +313,12 @@ class ExprPrinter(Printer):
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
+
+    def _print_GreaterThan(self, expr):
+        # GreaterThan:          >=
+        # StrictlyGreaterThan:  >
+        # Go figure...
+        return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
 
 class PythonPrinter(ExprPrinter):
@@ -984,6 +994,10 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Note that V.graph.scheduler can be None when codegening triton template
+        kernels.
+        """
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)

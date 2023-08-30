@@ -22,12 +22,14 @@ from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
+    is_welford_reduction,
     next_power_of_2,
     sympy_product,
     sympy_subs,
@@ -37,7 +39,6 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
-
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -63,6 +64,12 @@ class TritonPrinter(PythonPrinter):
 
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+
+    def _print_Where(self, expr):
+        c = self.doprint(expr.args[0])
+        p = self.doprint(expr.args[1])
+        q = self.doprint(expr.args[2])
+        return f"tl.where({c}, {p}, {q})"
 
     def _print_Min(self, expr):
         nargs = len(expr.args)
@@ -258,11 +265,14 @@ class TritonOverrides(OpOverrides):
     def libdevice_sin(x):
         return f"tl.math.sin({x})"
 
-    @staticmethod
-    def index_expr(expr, dtype):
+    @classmethod
+    def index_expr(cls, expr, dtype):
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
         # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
+
+        if dtype not in {torch.int32, torch.int64}:
+            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
         var.mask_vars = mask_vars
         return var
 
@@ -474,8 +484,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        left = ops.where(ops.lt("0", x), 1, 0)
-        right = ops.where(ops.lt(x, "0"), 1, 0)
+        def to_int(s):
+            return f"{s}.to(tl.int8)"
+
+        left = to_int(ops.lt("0", x))
+        right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 
@@ -1179,6 +1192,8 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def indirect_indexing(self, var, size, check=True):
+        # TODO(lezcano) This code should be lifted to codegen/common.py.
+        # This should be easy, as now CSE variables carry bounds info
         class IndirectAssertLine(DeferredLineBase):
             def __init__(self, line, var, mask, size_map):
                 self.var = var
@@ -1215,6 +1230,28 @@ class TritonKernel(Kernel):
 
             def _new_line(self, line):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+
+        if var.bounds.lower < 0:
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg = var.bounds & ValueRanges(-sympy.oo, -1)
+                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:
+                    pos = var.bounds & ValueRanges(0, sympy.oo)
+                    new_bounds = new_bounds | pos
+
+            stm = f"{var} + {self.index_to_str(size)}"
+            # Mixed negative and non-negative
+            if var.bounds.upper >= 0:
+                stm = f"tl.where({var} < 0, {stm}, {var})"
+            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+            new_var.update_on_args("index_wrap", (var,), {})
+            var = new_var
 
         generate_assert = (
             (check or config.debug_index_asserts)
@@ -1395,9 +1432,14 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
+    @staticmethod
+    def _map_tuple_or_scalar(fn, value):
+        if isinstance(value, tuple):
+            return tuple(map(fn, value))
+        return fn(value)
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1406,6 +1448,20 @@ class TritonKernel(Kernel):
         reduction_range_prefix = self.range_trees[-1].prefix
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
+
+        # Say we have
+        #     tmp0 = ops.constant(1, torch.int64)
+        #     tmp1 = ops.reduction(torch.int64, torch.int64, "sum", tmp0)
+        # tmp0 in the triton code is either a scalar, or single-element tensor
+        # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
+        # To avoid this, we broadcast to the expected shape first.
+        dense_size_str = self.dense_size_str()
+        value = self._map_tuple_or_scalar(
+            lambda v: self.cse.generate(
+                self.compute, f"tl.broadcast_to({v}, {dense_size_str})"
+            ),
+            value,
+        )
 
         def final_reduction(value):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
@@ -1424,6 +1480,10 @@ class TritonKernel(Kernel):
                 """
             )
 
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(src_dtype)
         result_var = self.cse.newvar()
@@ -1431,50 +1491,64 @@ class TritonKernel(Kernel):
         cond = " & ".join(masks)
 
         if self.persistent_reduction:
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
-            )
+            default = ir.Reduction.default_value(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
+
+            def _mask_value(value, default):
+                return self.cse.generate(
+                    self.compute, f"tl.where({cond}, {value}, {default})"
+                )
+
+            if isinstance(value, tuple):
+                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+            else:
+                masked_value = _mask_value(value, default)
+
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = self.cse.generate(
                     self.compute,
                     f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
                 )
-                result_var = self.cse.newvar()
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
-            elif reduction_type == "var_unnormalized":
+            elif reduction_type == "welford_reduce":
                 # For persistent reductions, don't bother with
                 # welford's algorithm since it uses more registers, and
                 # taking two reductions doesn't increase memory usage.
-                sum_ = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
-                )
-                rnumel = ops.index_expr(self.numels[-1], self.index_dtype)
-                rnumel = self.cse.generate(self.compute, f"{rnumel}.to({acc_type})")
+                sum_ = ops.reduction(dtype, dtype, "sum", value)
+                self.inside_reduction = False
+                rnumel = ops.index_expr(self.numels[-1], dtype)
                 mean = ops.div(sum_, rnumel)
 
-                dx = ops.sub(masked_value, mean)
+                self.inside_reduction = True
+                dx = ops.sub(value, mean)
                 dx2 = ops.mul(dx, dx)
-                dx2_masked = self.cse.generate(
-                    self.compute, f"tl.where({cond}, {dx2}, 0.0)"
-                )
-                result_var = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(f"tl.sum({dx2_masked}, {dim})"),
+                m2 = ops.reduction(dtype, dtype, "sum", dx2)
+                result_var = (mean, m2, rnumel)
+            elif reduction_type == "welford_combine":
+                mean, m2, weight = masked_value
+                welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
+                mean, m2, weight = (self.cse.newvar() for _ in range(3))
+                self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
+
+                result_var = tuple(
+                    self.cse.generate(self.compute, self.reduction_resize(var_name))
+                    for var_name in (mean, m2, weight)
                 )
             else:
                 result_var = self.cse.generate(
                     self.compute, final_reduction(masked_value)
                 )
-        elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
+        else:
             accumulator = f"_{result_var}"
-            self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
-            )
+            default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
+            if not isinstance(default, tuple):
+                self.body.writeline(
+                    f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
+                )
 
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
@@ -1494,9 +1568,13 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
-            elif reduction_type == "var_unnormalized":
-                accumulator_m2 = f"_{result_var}_m2"
-                accumulator_weight = f"_{result_var}_weight"
+            elif is_welford_reduction(reduction_type):
+                accumulator = f"{result_var}_mean"
+                accumulator_m2 = f"{result_var}_m2"
+                accumulator_weight = f"{result_var}_weight"
+                self.body.writeline(
+                    f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
                 self.body.writeline(
                     f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
@@ -1504,26 +1582,48 @@ class TritonKernel(Kernel):
                     f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
 
+                if reduction_type == "welford_combine":
+                    mean, m2, weight = value
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
+                        {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {mean}, {m2}, {weight}
+                    )
+                    """
+                    )
+                else:
+                    assert reduction_type == "welford_reduce"
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                    )
+                    """
+                    )
+
                 self.compute.splice(
                     f"""\
-                {value}_delta = {value} - {accumulator}
-                {accumulator_weight}_next = {accumulator_weight} + ({cond}).to({acc_type})
-                {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
-                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator}_next)
-
                 {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
                 {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
                 {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
                 """
                 )
+
+                result_mean = result_var
+                result_m2 = self.cse.newvar()
+                result_weight = self.cse.newvar()
                 self.suffix.splice(
                     f"""\
-                _, {result_var}_tmp, _ = triton_helpers.welford(
+                {result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp = triton_helpers.welford(
                     {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
                 )
-                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                {result_mean} = {self.reduction_resize(f'{result_mean}_tmp')}
+                {result_m2} = {self.reduction_resize(f'{result_m2}_tmp')}
+                {result_weight} = {self.reduction_resize(f'{result_weight}_tmp')}
                 """
                 )
+                result_var = result_mean, result_m2, result_weight
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -1547,11 +1647,14 @@ class TritonKernel(Kernel):
                     self.suffix.writeline(
                         f"{result_var} = {final_reduction(accumulator)}"
                     )
+
+        self.cse.reduction_cache[cache_key] = result_var
+
+        if isinstance(result_var, tuple):
+            self.outside_loop_vars |= set(result_var)
         else:
-            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
-            self.suffix.writeline(f"{result_var} = {var_name}")
-            result_var.mask_vars = var_name.mask_vars
-        self.outside_loop_vars.add(result_var)
+            self.outside_loop_vars.add(result_var)
+
         return result_var
 
     def store_reduction(self, name, index, value):
@@ -1771,9 +1874,11 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
+            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
         }
 
         for tree in self.range_trees:
@@ -1834,9 +1939,6 @@ class TritonKernel(Kernel):
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark())
-
-        if name is not None:
-            return code.getvalue()
 
         return code.getvalue()
 
@@ -2003,7 +2105,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling:
+class TritonScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
@@ -2160,8 +2262,7 @@ class TritonScheduling:
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("Schedule:\n %s", node_schedule)
+        schedule_log.debug("Schedule:\n %s", node_schedule)
 
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -2193,7 +2294,14 @@ class TritonScheduling:
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        buf_sizes = [
+            buf.get_layout().storage_size()
+            for buf in buffers
+            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+        ]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
@@ -2243,7 +2351,6 @@ class TritonScheduling:
         return "tl.int64"
 
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
-        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
@@ -2267,7 +2374,7 @@ class TritonScheduling:
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        return tiled_groups, reduction_hint_val, mutations, index_dtype
+        return reduction_hint_val, mutations, index_dtype
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -2275,8 +2382,29 @@ class TritonScheduling:
         if origins:
             wrapper.writeline(origins)
 
+        if config.debug_fusion:
+            from torch._inductor.scheduler import (
+                BaseSchedulerNode,
+                ForeachKernelSchedulerNode,
+            )
+
+            if not any(
+                isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
+            ):
+                # We probablly should look what are the nodes inside a foreach
+                # schedule node
+                node_names = [
+                    n.get_name()
+                    for n in node_schedule
+                    if isinstance(n, BaseSchedulerNode)
+                ]
+                wrapper.writeline(
+                    f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
+                )
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
-        tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
         )
 
@@ -2358,6 +2486,11 @@ class TritonScheduling:
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
+
+            # DESCRIPTIVE_KRNL_NAME is used for profiling purposes; it shows the full kernel name
+            # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
+            # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
+            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
@@ -2407,19 +2540,13 @@ class TritonScheduling:
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
 
-        for node_group in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes()
+        for partitions_with_metadata in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes(), self
         ):
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ForeachKernel()
-
-            for nodes in fused_node_lists:
-                _, (numel, rnumel) = max(
-                    nodes, key=lambda x: int(x.is_reduction())
-                ).group
+            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
                 node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
                 (
-                    tiled_groups,
                     reduction_hint_val,
                     mutations,
                     index_dtype,

@@ -23,10 +23,11 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import SchedulerNode
+from ..scheduler import BaseScheduling, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
+    is_welford_reduction,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -95,7 +96,8 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
-    "var_unnormalized": "welford",
+    "welford_reduce": "welford",
+    "welford_combine": "welford",
 }
 VECTORIZABLE_RTYPES = {
     "max",
@@ -103,7 +105,8 @@ VECTORIZABLE_RTYPES = {
     "sum",
     "prod",
     "xor_sum",
-    "var_unnormalized",
+    "welford_reduce",
+    "welford_combine",
 }
 
 PYTHON_TO_CPP = {
@@ -145,7 +148,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
     raise AssertionError(reduction_type)
 
@@ -154,7 +157,7 @@ def reduction_init_vec(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
 
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{vec_type}>()"
 
     scalar_init = reduction_init(reduction_type, dtype)
@@ -164,7 +167,7 @@ def reduction_init_vec(reduction_type, dtype):
 def reduction_acc_type(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
 
     return scalar_type
@@ -174,7 +177,7 @@ def reduction_acc_type_vec(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
-    if reduction_type == "var_unnormalized":
+    if is_welford_reduction(reduction_type):
         return f"Welford<{vec_type}>"
 
     return vec_type
@@ -191,8 +194,14 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
-    if reduction_type == "var_unnormalized":
+    if reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
+    if reduction_type == "welford_combine":
+        if isinstance(next_value, tuple):
+            mean, m2, weight = next_value
+        else:
+            mean, m2, weight = reduction_project(reduction_type, next_value)
+        return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     raise AssertionError(reduction_type)
 
 
@@ -207,15 +216,23 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
         return f"{var} ^ {next_value}"
-    elif reduction_type == "var_unnormalized":
+    elif reduction_type == "welford_reduce":
         return f"welford_combine({var}, {next_value})"
+    elif reduction_type == "welford_combine":
+        if isinstance(next_value, tuple):
+            # When reading a value from Inductor IR we have a tuple of variable names
+            mean, m2, weight = next_value
+        else:
+            # When combining intermediate accumulators we have a Welford<T> struct
+            mean, m2, weight = reduction_project(reduction_type, next_value)
+        return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     else:
         raise NotImplementedError()
 
 
 def reduction_project(reduction_type, acc):
-    if reduction_type == "var_unnormalized":
-        return f"{acc}.m2"
+    if is_welford_reduction(reduction_type):
+        return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
@@ -276,6 +293,12 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
+
+    def _print_Where(self, expr):
+        c = self.paren(self.doprint(expr.args[0]))
+        p = self.paren(self.doprint(expr.args[1]))
+        q = self.paren(self.doprint(expr.args[2]))
+        return f"{c} ? {p} : {q}"
 
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
@@ -760,10 +783,11 @@ class CppVecOverrides(OpOverrides):
     def masked(mask, body, other):
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
-        code.writeline(f"auto {var} = [&]")
-        with V.kernel.swap_buffers(code), code.indent():
-            result = body()
-            code.writeline(f"return {result};")
+        with V.kernel.masked(mask) as new_mask:
+            code.writeline(f"auto {var} = [&]")
+            with V.kernel.swap_buffers(code), code.indent():
+                result = body()
+                code.writeline(f"return {result};")
         code.writeline(";")
         V.kernel.compute.splice(code)
 
@@ -782,7 +806,7 @@ class CppVecOverrides(OpOverrides):
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
         type = f"decltype({var}())"
-        float_mask = f"to_float_mask({mask})"
+        float_mask = f"to_float_mask({new_mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
 
     @staticmethod
@@ -1162,6 +1186,20 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self._load_mask = None
+
+    @contextlib.contextmanager
+    def masked(self, mask):
+        """Context manager to add an additional mask to loads and stores."""
+        prior = self._load_mask
+        if prior:
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+
+        self._load_mask = mask
+        try:
+            yield mask
+        finally:
+            self._load_mask = prior
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1246,9 +1284,7 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
 
-        result = self.cse.generate(
-            self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
-        )
+        result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
@@ -1429,7 +1465,10 @@ class CppVecKernel(CppKernel):
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
         is_broadcast = not index.has(tiling_var)
-        is_mask = dtype in [torch.bool, torch.uint8]
+        is_mask = (
+            dtype in [torch.bool, torch.uint8] and not opt_ctx.is_load_uint8_as_float
+        )
+        load_mask = f"to_float_mask({self._load_mask})" if self._load_mask else None
         non_contiguous = (
             not is_broadcast
             and stride_at(tiling_var, index) != 1
@@ -1450,14 +1489,28 @@ class CppVecKernel(CppKernel):
             else:
                 line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+            )
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in DTYPE_LOWP_FP:
-            line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
-            line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            line = (
+                f"masked_load({loadbuf}, {load_mask})"
+                if load_mask
+                else f"at::vec::Vectorized<float>::loadu({loadbuf})"
+            )
+
         if non_contiguous:
+            # TODO: support masked_load for non_contiguous path?
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             tmpbufsize = f"{self.tiling_factor}"
             if dtype in DTYPE_LOWP_FP:
@@ -1519,7 +1572,8 @@ class CppVecKernel(CppKernel):
             "sum",
             "prod",
             "xor_sum",
-            "var_unnormalized",
+            "welford_reduce",
+            "welford_combine",
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
@@ -1579,7 +1633,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            if reduction_type == "var_unnormalized":
+            if is_welford_reduction(reduction_type):
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -1597,9 +1651,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         else:
             tmpvar = acc_vec
 
-        result = self.cse.generate(
-            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
-        )
+        result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
 
@@ -1819,6 +1871,7 @@ class CppVecKernelChecker(CppVecKernel):
         self._orig_wrapper_code = None
 
         self.simd_vec = True
+
         self.fast_vec_list = []
         for k, v in CppVecOverrides.__dict__.items():
             if isinstance(v, staticmethod):
@@ -2000,6 +2053,8 @@ class CppVecKernelChecker(CppVecKernel):
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
+        if is_welford_reduction(reduction_type):
+            return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
     def store_reduction(self, name, index, value):
@@ -2633,14 +2688,19 @@ class CppKernelProxy(CppKernel):
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
-                with CppVecKernelChecker(
-                    deepcopy(self.kernel_group.args),
-                    parallel_num_threads(),
-                    tiling_factor,
-                    tiling_indices[-1],
-                ) as vec_checker:
-                    run(vec_checker)
-                if vec_checker.simd_vec:
+                could_vec = True
+                for tiling_indice in tiling_indices:
+                    with CppVecKernelChecker(
+                        deepcopy(self.kernel_group.args),
+                        parallel_num_threads(),
+                        tiling_factor,
+                        tiling_indice,
+                    ) as vec_checker:
+                        run(vec_checker)
+                        could_vec = could_vec and vec_checker.simd_vec
+                        if not could_vec:
+                            break
+                if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices
                     if len(tiling_indices) == 2:
@@ -2699,7 +2759,7 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
-class CppScheduling:
+class CppScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.get_kernel_group()
@@ -2880,8 +2940,6 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
-    simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
     simd_vec: bool = False
     collapsed: bool = False
     reduction_var_map: Dict[str, str] = None
@@ -2891,6 +2949,18 @@ class LoopLevel:
     inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
     # kernel assigned to this loop level, only valid when it is a leaf
     kernel: CppKernel = None
+
+    def __post_init__(self):
+        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # vectorization ISA is a time-consuming and one-shot operation. It leads
+        # to taking a longer time to import `codegen.cpp` package because the
+        # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
+        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
+        # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
+        # `__post_init__`
+        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:
         """Get all kernel objects under this loop level"""
