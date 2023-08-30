@@ -261,7 +261,7 @@ class X86InductorQuantizer(Quantizer):
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
         input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
-        bias_node = conv_node.args[2]
+        bias_node = None if len(conv_node.args) == 2 else conv_node.args[2]
         if isinstance(bias_node, Node):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
         if annotate_output:
