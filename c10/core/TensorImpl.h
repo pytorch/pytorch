@@ -65,7 +65,7 @@ inline std::vector<int64_t> ToVectorint64_t(const ArrayRef<int>& src) {
 /**
  * Return product of all dimensions starting from k
  */
-inline int64_t size_from_dim_(int k, IntArrayRef dims) {
+inline int64_t size_from_dim_(int64_t k, IntArrayRef dims) {
   int64_t r = 1;
   for (const auto i : c10::irange(k, dims.size())) {
     r *= dims[i];
@@ -74,8 +74,8 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline int64_t size_to_dim_(int k, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)k <= dims.size());
+inline int64_t size_to_dim_(int64_t k, IntArrayRef dims) {
+  TORCH_CHECK(k >= 0 && (unsigned)k <= dims.size());
   int64_t r = 1;
   for (const auto i : c10::irange(k)) {
     r *= dims[i];
