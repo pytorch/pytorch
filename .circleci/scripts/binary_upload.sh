@@ -11,7 +11,7 @@ PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
 # currently set within `designate_upload_channel`
 UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 # Designates what subfolder to put packages into
-UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-cpu}
+UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
 BUILD_NAME=${BUILD_NAME:-}
@@ -64,12 +64,17 @@ s3_upload() {
   local pkg_type
   extension="$1"
   pkg_type="$2"
-  s3_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}/"
+  s3_root_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}"
+  if [[ -z ${UPLOAD_SUBFOLDER:-} ]]; then
+    s3_upload_dir="${s3_root_dir}/"
+  else
+    s3_upload_dir="${s3_root_dir}/${UPLOAD_SUBFOLDER}/"
+  fi
   (
     for pkg in ${PKG_DIR}/*.${extension}; do
       (
         set -x
-        ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_dir}"
+        ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_upload_dir}"
       )
     done
   )

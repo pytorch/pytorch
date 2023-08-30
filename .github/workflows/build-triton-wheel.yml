@@ -65,6 +65,8 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Build Triton wheel
+        env:
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -102,9 +104,14 @@ jobs:
             BUILD_ROCM="--build-rocm"
           fi
 
+          RELEASE=""
+          if [[ "${IS_RELEASE_TAG}" == true ]]; then
+            RELEASE="--release"
+          fi
+
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py $BUILD_ROCM
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py $BUILD_ROCM $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
@@ -150,6 +157,9 @@ jobs:
       - name: Upload binaries
         env:
           PACKAGE_TYPE: wheel
+          # The UPLOAD_SUBFOLDER needs to be empty here so that triton wheels are uploaded
+          # to nightly or test
+          UPLOAD_SUBFOLDER: ""
           PKG_DIR: ${{ runner.temp }}/artifacts
           # When running these on pull_request events these should be blank
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -189,6 +199,8 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Build Triton conda package
+        env:
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -201,8 +213,13 @@ jobs:
             "${DOCKER_IMAGE}" \
           )
 
+          RELEASE=""
+          if [[ "${IS_RELEASE_TAG}" == true ]]; then
+            RELEASE="--release"
+          fi
+
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
-          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
+          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
