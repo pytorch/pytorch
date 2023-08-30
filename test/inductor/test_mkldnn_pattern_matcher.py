@@ -1,15 +1,14 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import copy
 import itertools
 
 import torch
-import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._export import capture_pre_autograd_graph, dynamic_dim
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
@@ -96,25 +95,34 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
-            with torch.no_grad():
-                export_model, guards = torchdynamo.export(
-                    mod,
-                    *copy.deepcopy(inputs),
-                    aten_graph=True,
-                )
-                quantizer = X86InductorQuantizer()
-                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-                prepare_model = prepare_pt2e(export_model, quantizer)
-                prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model).eval()
-                _ = torch.compile(convert_model)(*inputs)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_count"], matcher_count
-                )
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    matcher_nodes,
-                )
+            export_with_dynamic_shape_list = [
+                False,
+            ]
+            for export_with_dynamic_shape in export_with_dynamic_shape_list:
+                with torch.no_grad():
+                    export_model = capture_pre_autograd_graph(
+                        mod,
+                        inputs,
+                        constraints=[dynamic_dim(inputs[0], 0)]
+                        if export_with_dynamic_shape
+                        else [],
+                    )
+
+                    quantizer = X86InductorQuantizer()
+                    quantizer.set_global(
+                        xiq.get_default_x86_inductor_quantization_config()
+                    )
+                    prepare_model = prepare_pt2e(export_model, quantizer)
+                    prepare_model(*inputs)
+                    convert_model = convert_pt2e(prepare_model).eval()
+                    _ = torch.compile(convert_model)(*inputs)
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_count"], matcher_count
+                    )
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_nodes"],
+                        matcher_nodes,
+                    )
         else:
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)

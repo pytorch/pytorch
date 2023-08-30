@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import torch
-import torch._dynamo as torchdynamo
 import torch.nn as nn
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
@@ -20,8 +19,8 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-import operator
 from torch.ao.quantization import ObserverBase
+from torch._export import capture_pre_autograd_graph, dynamic_dim
 
 class Conv2DType(Enum):
     left = 1
@@ -239,16 +238,18 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         quantizer,
         expected_node_occurrence,
         expected_node_list=None,
+        export_with_dynamic_shape=False,
     ):
         m_eager = model.eval()
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m, guards = torchdynamo.export(
+        m = capture_pre_autograd_graph(
             m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
+            example_inputs,
+            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
         )
+
         export_model = copy.deepcopy(m)
         m = prepare_pt2e(m, quantizer)
         # Calibrate
@@ -291,7 +292,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                torch.ops.aten.convolution.default,
+                torch.ops.aten.conv2d.default,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             ]
@@ -328,7 +329,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.convolution.default,
+                    torch.ops.aten.conv2d.default,
                     torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -380,7 +381,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.convolution.default,
+                    torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -434,7 +435,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.convolution.default,
+                    torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -465,11 +466,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                torch.ops.aten.convolution.default,
+                torch.ops.aten.conv2d.default,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                torch.ops.aten.convolution.default,
-                torch.ops.aten.convolution.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv2d.default,
                 torch.ops.aten.add.Tensor,
                 torch.ops.aten.relu.default,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -505,10 +506,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.convolution.default,
+            torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.max_pool2d_with_indices.default,
+            torch.ops.aten.max_pool2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
@@ -523,19 +524,18 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         for node in prepare_model.graph.nodes:
             if (
                 node.op == "call_function"
-                and node.target is torch.ops.aten.max_pool2d_with_indices.default
+                and node.target is torch.ops.aten.max_pool2d.default
             ):
                 maxpool_node = node
                 input_obs_of_maxpool = getattr(
                     prepare_model, maxpool_node.args[0].target
                 )
-            elif node.op == "call_function" and node.target is operator.getitem:
                 output_obs_of_maxpool = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, list(maxpool_node.users)[0].target
                 )
             elif (
                 node.op == "call_function"
-                and node.target is torch.ops.aten.convolution.default
+                and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
                 input_obs_of_conv = getattr(prepare_model, conv_node.args[0].target)
@@ -566,13 +566,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.convolution.default,
+            torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.cat.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.max_pool2d_with_indices.default,
+            torch.ops.aten.max_pool2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
@@ -600,15 +600,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
             elif (
                 node.op == "call_function"
-                and node.target is torch.ops.aten.max_pool2d_with_indices.default
+                and node.target is torch.ops.aten.max_pool2d.default
             ):
                 maxpool_node = node
                 input_obs_of_maxpool = getattr(
                     prepare_model, maxpool_node.args[0].target
                 )
-            elif node.op == "call_function" and node.target is operator.getitem:
                 output_obs_of_maxpool = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, list(maxpool_node.users)[0].target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -641,7 +640,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.convolution.default,
+            torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.cat.default,
@@ -697,7 +696,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.convolution.default,
+            torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.cat.default,
@@ -748,7 +747,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.convolution.default,
+            torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.avg_pool2d.default,
@@ -776,7 +775,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
             elif (
                 node.op == "call_function"
-                and node.target is torch.ops.aten.convolution.default
+                and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
                 output_obs_of_conv = getattr(prepare_model, list(conv_node.users)[0].target)
@@ -808,7 +807,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.addmm.default if use_bias else torch.ops.aten.mm.default,
+                    torch.ops.aten.linear.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -850,7 +849,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.addmm.default if use_bias else torch.ops.aten.mm.default,
+                    torch.ops.aten.linear.default,
                     post_op_map[postop][0 if inplace else 1],
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
