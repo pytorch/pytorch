@@ -222,11 +222,11 @@ static PyObject* THPVariable_sparse_coo_tensor(
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
       "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None, bool is_coalesced=None)",
       "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
   });
 
-  ParsedArgs<7> parsed_args;
+  ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(
@@ -332,6 +332,11 @@ static PyObject* THPVariable_asarray(
 
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
 
   if (r.idx == 0) {
     auto obj = r.pyobject(0);

@@ -1,13 +1,14 @@
 import math
-from torch import inf, nan
 from numbers import Number
 
 import torch
+from torch import inf, nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Cauchy']
+__all__ = ["Cauchy"]
+
 
 class Cauchy(Distribution):
     r"""
@@ -26,7 +27,7 @@ class Cauchy(Distribution):
         loc (float or Tensor): mode or median of the distribution.
         scale (float or Tensor): half width at half maximum.
     """
-    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True
 
@@ -49,7 +50,9 @@ class Cauchy(Distribution):
 
     @property
     def mean(self):
-        return torch.full(self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device)
+        return torch.full(
+            self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device
+        )
 
     @property
     def mode(self):
@@ -57,7 +60,9 @@ class Cauchy(Distribution):
 
     @property
     def variance(self):
-        return torch.full(self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device)
+        return torch.full(
+            self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
+        )
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -67,7 +72,11 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return -math.log(math.pi) - self.scale.log() - (((value - self.loc) / self.scale)**2).log1p()
+        return (
+            -math.log(math.pi)
+            - self.scale.log()
+            - (((value - self.loc) / self.scale) ** 2).log1p()
+        )
 
     def cdf(self, value):
         if self._validate_args:

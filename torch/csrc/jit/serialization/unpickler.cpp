@@ -97,7 +97,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymBoolType::Kind:
-        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
+        TORCH_CHECK(!w.value.toSymBool().is_heap_allocated());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -230,9 +230,11 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
-#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
   return big_endian;
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
 }
 
 void Unpickler::run() {

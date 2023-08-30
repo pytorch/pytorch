@@ -110,6 +110,7 @@ class TORCH_API PyTorchStreamReader final {
       void* dst,
       size_t n,
       size_t chunk_size,
+      void* buf,
       const std::function<void(void*, const void*, size_t)>& memcpy_func);
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);

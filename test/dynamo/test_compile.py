@@ -6,13 +6,12 @@ import tempfile
 import unittest
 
 import torch
-import torch._dynamo
 from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
     def __init__(self):
-        super(ToyModel, self).__init__()
+        super().__init__()
         self.linear = torch.nn.Linear(10, 10)
         self.relu = torch.nn.ReLU()
 
