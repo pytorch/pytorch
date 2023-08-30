@@ -42,8 +42,8 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
 from tools.stats.upload_metrics import emit_metric
 from tools.testing.target_determination.determinator import (
+    AggregatedHeuristics,
     get_test_prioritizations,
-    TestPrioritizations,
 )
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1474,11 +1474,11 @@ def run_test_module(
 ) -> Optional[TestFailure]:
     maybe_set_hip_visible_devies()
 
+    test_name = test.name if isinstance(test, ShardedTest) else test
+
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
-    handler = CUSTOM_HANDLERS.get(
-        test.name if isinstance(test, ShardedTest) else test, run_test
-    )
+    handler = CUSTOM_HANDLERS.get(test_name, run_test)
     return_code = handler(test, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
@@ -1492,7 +1492,7 @@ def run_test_module(
         # return code -N, where N is the signal number.
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
-    return TestFailure(test, message)
+    return TestFailure(test_name, message)
 
 
 def run_tests(
@@ -1619,19 +1619,22 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    test_prioritization: TestPrioritizations = TestPrioritizations(
-        tests_being_ranked=selected_tests
+    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
+        unranked_tests=selected_tests
     )
     metrics_dict = {}
     if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        test_prioritization = get_test_prioritizations(selected_tests)
+        aggregated_heuristics = get_test_prioritizations(selected_tests)
 
+    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+    if IS_CI:
         metrics_dict = {
-            "high_relevance_tests": test_prioritization.get_high_relevance_tests(),
-            "probable_relevance_tests": test_prioritization.get_probable_relevance_tests(),
-            "unranked_relevance_tests": test_prioritization.get_unranked_relevance_tests(),
+            "high_relevance_tests": test_prioritizations.get_high_relevance_tests(),
+            "probable_relevance_tests": test_prioritizations.get_probable_relevance_tests(),
+            "unranked_relevance_tests": test_prioritizations.get_unranked_relevance_tests(),
             "cpp": options.cpp,
         }
 
@@ -1655,16 +1658,16 @@ def main():
     # Each batch will be run sequentially
     test_batches = [
         TestBatch(
-            "high_relevance", test_prioritization.get_high_relevance_tests(), False
+            "high_relevance", test_prioritizations.get_high_relevance_tests(), False
         ),
         TestBatch(
             "probable_relevance",
-            test_prioritization.get_probable_relevance_tests(),
+            test_prioritizations.get_probable_relevance_tests(),
             False,
         ),
         TestBatch(
             "unranked_relevance",
-            test_prioritization.get_unranked_relevance_tests(),
+            test_prioritizations.get_unranked_relevance_tests(),
             True,
         ),
     ]
@@ -1713,8 +1716,14 @@ def main():
 
     all_failures = [failure for batch in test_batches for failure in batch.failures]
 
-    if len(all_failures) != 0:
-        for _, err in all_failures:
+    num_tests = len(selected_tests)
+    if len(all_failures):
+        for test, err in all_failures:
+            test_stats = aggregated_heuristics.get_test_stats(test)
+            test_stats["num_total_tests"] = num_tests
+
+            emit_metric("td_test_failure_stats", test_stats)
+
             print_to_stderr(err)
 
         # A disabled test is expected to fail, so there is no need to report a failure here
