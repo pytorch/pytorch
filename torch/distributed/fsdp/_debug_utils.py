@@ -1,3 +1,8 @@
+import logging
+import time
+from collections import defaultdict
+from contextlib import contextmanager
+from enum import Enum
 from typing import Dict, List, Tuple
 
 import torch
@@ -7,6 +12,49 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class SimpleProfiler:
+    class Type(Enum):
+        ALL = "all"
+        ALLGATHER = "all_gather"
+        ALLGATHER_OBJ = "all_gather_object"
+        RESHARDING = "resharding"
+        H2D = "H2D"
+        D2H = "D2H"
+
+    results = defaultdict(float)
+    profiling = set()
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.results.clear()
+        cls.profiling.clear()
+
+    @classmethod
+    @contextmanager
+    def profile(cls, profile_type: str) -> None:
+        assert profile_type not in cls.profiling, (
+            f"{profile_type} is already being profiled. "
+            "SimpleProfiler does not support profiling multiple instances at "
+            "the same time. "
+        )
+
+        cls.profiling.add(profile_type)
+        begin = time.monotonic()
+        try:
+            yield
+        finally:
+            end = time.monotonic()
+            cls.results[profile_type] += end - begin
+            cls.profiling.remove(profile_type)
+
+    @classmethod
+    def dump_and_reset(cls, msg: str) -> None:
+        logger.warning("%s %s", msg, str(cls.results))
+        cls.reset()
 
 
 def _get_sharded_module_tree_with_module_name_to_fqns(
