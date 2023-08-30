@@ -313,6 +313,10 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
+
 
 # config specific to codegen/triton.py
 class triton:
