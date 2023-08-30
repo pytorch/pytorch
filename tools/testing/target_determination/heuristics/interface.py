@@ -263,7 +263,7 @@ class AggregatedHeuristics:
             metrics["heuristic_name"] = heuristic_name
             heuristics.append(metrics)
 
-            if metrics[METRIC_ORDER_OVERALL] > highest_ranking_heuristic_order:
+            if metrics[METRIC_ORDER_OVERALL] < highest_ranking_heuristic_order:
                 highest_ranking_heuristic = heuristic_name
                 highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
 
