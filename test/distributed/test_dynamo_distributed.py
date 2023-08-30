@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     requires_nccl,
     _dynamo_dist_per_rank_init,
-    skip_if_rocm,
 )
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
@@ -272,7 +271,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     sparingly for integration tests.
     """
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -305,7 +303,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(1)
-    @skip_if_rocm
     def test_fsdp_aot_eager(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
@@ -515,7 +512,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         # ensure compatibilty with dynamo explain
 
-        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
@@ -640,6 +637,51 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_higher_order_op(self):
+        from torch.utils.checkpoint import checkpoint
+
+        N = 1000
+
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(N, N)
+                self.linear2 = torch.nn.Linear(N, N)
+
+            def forward(self, x):
+                a = self.linear1(x)
+                a = self.linear2(a)
+                return a
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner_mod1 = InnerModule()
+                self.inner_mod2 = InnerModule()
+
+            def forward(self, x):
+                a = checkpoint(self.inner_mod1, x, use_reentrant=False)
+                a = torch.cos(a)
+                a = checkpoint(self.inner_mod2, a, use_reentrant=False)
+                a = torch.cos(a)
+                return a
+
+        mod = MockModule().cuda()
+        mod = DDP(mod, bucket_cap_mb=1)
+        x = torch.randn(N, N, device="cuda", requires_grad=True)
+        args = (x,)
+
+        backend = "aot_eager"
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "DDPOptimizer backend: Found a higher order op in the graph"
+        ):
+            torch.compile(mod, backend=cnt)(*args)
+
+
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
@@ -658,13 +700,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         Note: comptime prints the guards before the time they get installed or not installed, so in both cases
         (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
         with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
-        guard source 'local_fsdp_module'.
+        guard source 'local_nn_module'.
         """
         global GUARDS_FILE
         GUARDS_FILE = StringIO()
 
         for skip_guards, expected_guard_source in (
-            (True, "local_fsdp_module"),
+            (True, "local_nn_module"),
             (False, "local")
         ):
             torch._dynamo.reset()
@@ -775,11 +817,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
         inp = torch.randn((2, 3), device="cuda")
-        for _ in range(3):
+        for _ in range(15):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_fsdp_staticmethod(self):
         """
@@ -819,7 +861,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            self.assertEqual(cnt.frame_count, 1)
+            # 3 is expected here for 1 forward.
+            # Graph 1 should be add and imul
+            # Graphs 2 and 3 are forward hooks on device mesh, and are fine to capture.
+            self.assertEqual(cnt.frame_count, 3)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 

@@ -74,13 +74,25 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
-bool use_mkldnn(const Tensor& input) {
+bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  auto is_cpu_backend = [&](const TensorList tensors) {
+    bool backend_cpu = true;
+    for (const auto& t : tensors) {
+      if (!(t.options().backend() == at::Backend::CPU)) {
+        backend_cpu = false;
+        break;
+      }
+    }
+    return backend_cpu;
+  };
   return input.options().backend() == at::Backend::CPU &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+      is_cpu_backend(params) && is_cpu_backend(hx) &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      input.numel() != 0;
 #endif
   return false;
 }
@@ -1465,7 +1477,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
-  if (use_mkldnn(_input)) {
+  if (use_mkldnn(_input, _params, hx)) {
     if (!has_projections) {
       if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
         TORCH_WARN_ONCE(

@@ -62,13 +62,13 @@ if is_available():
     # this.
 
     from .distributed_c10d import (
-        _backend,
         _all_gather_base,
         _reduce_scatter_base,
         _create_process_group_wrapper,
         _rank_not_in_group,
         _coalescing_manager,
         _CoalescingManager,
+        _get_process_group_name,
     )
 
     from .rendezvous import (

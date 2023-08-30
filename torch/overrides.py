@@ -47,7 +47,6 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
-    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -147,6 +146,12 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
+        torch.export.constrain_as_size,
+        torch.export.constrain_as_value,
+        torch.export.dynamic_dim,
+        torch.export.export,
+        torch.export.load,
+        torch.export.save,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
@@ -186,6 +191,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_min,
         torch.sym_not,
         torch.sym_constrain_range,
+        torch.sym_constrain_range_for_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -556,7 +562,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fbgemm_pack_quantized_matrix: lambda input, a, b: -1,
         torch.feature_alpha_dropout: lambda input, p, train: -1,
         torch.feature_dropout: lambda input, p, train: -1,
-        torch.fft.fft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.ifft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.rfft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.irfft: lambda input, n=None, dim=-1, norm=None: -1,
@@ -683,7 +688,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.logical_not: lambda input, out=None: -1,
         torch.logical_or: lambda input, other, out=None: -1,
         torch.logical_xor: lambda input, other, out=None: -1,
-        torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.logit: lambda input, eps=None: -1,
         torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.lstm: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,
@@ -746,15 +750,12 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mv: lambda input, vec, out=None: -1,
         torch.mvlgamma: lambda input, p: -1,
         torch.narrow: lambda input, dim, start, length: -1,
-        torch.narrow_copy: lambda input, dim, start, length: -1,
         torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch._native_batch_norm_legit: lambda input, weight, bias, training, momentum, eps: -1,
         torch.native_dropout: lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
-        torch.native_norm: lambda input, p=2: -1,
-        torch.native_norm: lambda input, p=2: -1,
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.native_channel_shuffle: lambda input, groups : -1,
         torch.ne: lambda input, other, out=None: -1,
@@ -898,7 +899,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                                                 swap=False, reduction='mean': -1),
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nn.init.uniform_: lambda tensor, a=0., b=1.: -1,
-        torch.nn.init.constant_: lambda tensor, val: -1,
         torch.nn.init.normal_: lambda tensor, mean=0., std=1.: -1,
         torch.nn.init.constant_: lambda tensor, val: -1,
         torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode='fan_in', nonlinearity='leaky_relu': -1,
@@ -1147,7 +1147,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.slice_copy: lambda self, dim=0, start=None, end=None, step=1: -1,
         torch.split_copy: lambda self, split_size, dim=0: -1,
         torch.split_with_sizes_copy: lambda self, split_sizes, dim=0: -1,
-        torch.squeeze_copy: lambda self: -1,
         torch.squeeze_copy: lambda self, dim: -1,
         torch.t_copy: lambda self: -1,
         torch.transpose_copy: lambda self, dim0, dim1: -1,
@@ -1161,7 +1160,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.ccol_indices_copy: lambda self: -1,
         torch.row_indices_copy: lambda self: -1,
         torch.unbind_copy: lambda self, dim=0: -1,
-        torch.view_copy: lambda self, size: -1,
         torch.view_copy: lambda self, dtype: -1,
         torch.unfold_copy: lambda self, dimension, size, step: -1,
         torch.alias_copy: lambda self: -1,
@@ -1208,6 +1206,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.mT.__get__: lambda self: -1,
         Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._post_accumulate_grad_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,
@@ -1250,7 +1249,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.imag.__get__: lambda self: -1,
         Tensor.__cuda_array_interface__.__get__: lambda self: -1,
         Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
-        Tensor._coalesced_: lambda self: -1,
         Tensor._dimI: lambda self: -1,
         Tensor._dimV: lambda self: -1,
         Tensor._indices: lambda self: -1,
@@ -1286,6 +1284,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
         Tensor.dim: lambda self: -1,
+        Tensor.dim_order: lambda self: -1,
         Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cdouble: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.element_size: lambda self: -1,
@@ -1332,6 +1331,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.record_stream: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
+        Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
@@ -1349,7 +1349,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.slice_scatter: lambda self, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
-        Tensor._sparse_mask_projection: lambda self, mask: -1,
+        Tensor._sparse_mask_projection: lambda self, mask, accumulate_matches=False: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
@@ -1579,11 +1579,11 @@ def handle_torch_function(
         if result is not NotImplemented:
             return result
 
-    func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
+    func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
-        "no implementation found for '{}' on types that implement "
-        '__torch_function__: {}'
-    ).format(func_name, [type(arg) for arg in overloaded_args])
+        f"no implementation found for '{func_name}' on types that implement "
+        f'__torch_function__: {[type(arg) for arg in overloaded_args]}'
+    )
     if _is_torch_function_mode_enabled():
         msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)
@@ -1909,13 +1909,3 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
-
-def get_buffer(tensor_subclass, data, prefix):
-    import ctypes
-    assert prefix in {"stride", "size", "sym_size"}
-    buffer_name = f"_{prefix}_buffer"
-    if not hasattr(tensor_subclass, buffer_name):
-        SizeType = ctypes.c_longlong * len(data)
-        setattr(tensor_subclass, buffer_name, SizeType(*data))
-    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
-    return (ptr, len(data))

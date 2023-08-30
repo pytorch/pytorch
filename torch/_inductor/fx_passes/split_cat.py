@@ -1,6 +1,7 @@
+import itertools
 import logging
 import operator
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Sequence, Tuple, Union
 
 import numpy
 
@@ -117,12 +118,21 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         log.info("couldn't find cat args")
         return
     assert isinstance(tensors, (list, tuple))
-    if "example_value" not in tensors[0].meta:
-        log.warning("example value absent for node: %s", tensors[0])
-        return
+    for tensor in itertools.chain([cat_node], tensors):
+        if "example_value" not in tensor.meta:
+            log.warning("example value absent for node: %s", tensor)
+            return
 
-    ndim = tensors[0].meta["example_value"].dim()
-    assert all(ndim == x.meta["example_value"].dim() for x in tensors)
+    ndim = cat_node.meta["example_value"].dim()
+
+    def is_empty_tensor(x):
+        # special case where torch.cat supports cat'ing with an empty tensor
+        x_shape = x.meta["example_value"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(
+        ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
+    )
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
@@ -156,7 +166,24 @@ def find_next_users(split_node):
 def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_node = match.nodes[0]
     squeeze_input = get_arg_value(squeeze_node, 0)
-    dim = get_arg_value(squeeze_node, 1, "dim")
+
+    if "dim" in squeeze_node.kwargs:
+        assert len(squeeze_node.args) == 1
+        dim = squeeze_node.kwargs["dim"]
+    elif len(squeeze_node.args) == 1:
+        # squeeze(Tensor)
+        dim = None
+    elif len(squeeze_node.args) == 2:
+        # squeeze(Tensor self, int dim)
+        # squeeze(Tensor self, int[] dim)
+        dim = squeeze_node.args[1]
+    else:
+        # squeeze(Tensor self, int[] dim) (called with varargs)
+        dim = squeeze_node.args[1:]
+
+    if isinstance(dim, Sequence) and len(dim) == 1:
+        dim = dim[0]
+
     with match.graph.inserting_after(squeeze_node):
         if dim is None:
             new_squeeze_node = match.graph.call_function(
@@ -840,6 +867,8 @@ def merge_split_squeeze(
     graph = match.graph
     split = next(node for node in match.nodes if node.target == torch.split)
     if not all(s == 1 for s in split_sizes):
+        return
+    if isinstance(dim, Sequence):
         return
     next_users = find_next_users(split)
     if not all(node.target == torch.squeeze for node in next_users):
