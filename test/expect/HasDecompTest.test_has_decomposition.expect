@@ -457,7 +457,6 @@ aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
-aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_mm
 aten::_scaled_mm.out

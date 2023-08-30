@@ -1873,12 +1873,10 @@ class ReinterpretView(BaseView):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        namespace = V.graph.wrapper_code.namespace
-        if offset != "0":
-            return (
-                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
-            )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+        # reinterpret_tensor is similar to as_strided except:
+        # - offset is added to the existing offset (rather than replacing it)
+        # - view tracking is disabled similar to unsafe_view
+        return f"reinterpret_tensor({self.get_name()}, {size}, {stride}, {offset})"
 
 
 class SliceView(View):
@@ -1971,6 +1969,9 @@ class Constant(BaseConstant):
     def realize(self):
         pass
 
+    def constant_to_device(self, device):
+        return Constant(self.value, self.dtype, device)
+
 
 @dataclasses.dataclass
 class IndexingConstant(BaseConstant):
@@ -1983,6 +1984,9 @@ class IndexingConstant(BaseConstant):
             return ops.index_expr(self.index, self.dtype)
 
         return loader
+
+    def constant_to_device(self, device):
+        return IndexingConstant(self.index, self.dtype, device)
 
 
 @dataclasses.dataclass
