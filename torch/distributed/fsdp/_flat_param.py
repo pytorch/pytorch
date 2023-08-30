@@ -550,6 +550,9 @@ class FlatParamHandle:
         free_event_queue: _FreeEventQueue,
         limit_all_gathers: bool,
     ) -> None:
+        """
+        Get a reference to the free event queue of root FSDP.
+        """
         self._free_event_queue = free_event_queue
         self._limit_all_gathers = limit_all_gathers
 
