@@ -315,12 +315,12 @@ mha_fwd(const at::Tensor &q,
 
     auto q_dtype = q.dtype();
 
-    TORCH_CHECK(q_dtype == at::kFloat16 || q_dtype == at::kBFloat16);
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16);
     TORCH_CHECK(k.dtype() == q_dtype);
     TORCH_CHECK(v.dtype() == q_dtype);
     TORCH_CHECK(out.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt32);
-    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt32);
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
 
     TORCH_CHECK(q.is_cuda());
     TORCH_CHECK(k.is_cuda());
@@ -445,7 +445,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
     auto q_dtype = q.dtype();
 
-    TORCH_CHECK(q_dtype == at::kFloat16 || q_dtype == at::kBFloat16);
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16);
     TORCH_CHECK(k.dtype() == q_dtype);
     TORCH_CHECK(v.dtype() == q_dtype);
     TORCH_CHECK(out.dtype() == q_dtype);
@@ -453,8 +453,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(dq.dtype() == q_dtype);
     TORCH_CHECK(dk.dtype() == q_dtype);
     TORCH_CHECK(dv.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt32);
-    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt32);
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
 
     TORCH_CHECK(q.is_cuda());
     TORCH_CHECK(k.is_cuda());
@@ -583,16 +583,16 @@ bool fwd_test(bool do_verification){
     int d = n / nheads; //head_size//64
 
     //initialize the tensors
-    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);//at::kBFloat16;at::kHalf
-    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);//at::kBFloat16;at::kHalf
+    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
 
     at::Tensor q = q_host.to(at::kCUDA);
     at::Tensor k = k_host.to(at::kCUDA);
     at::Tensor v = v_host.to(at::kCUDA);
 
     //initialize the output tensor
-    at::Tensor out_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor out_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
     at::Tensor out = out_host.to(at::kCUDA);
 
     //initialize seqlens vector (size is b+1)
@@ -937,17 +937,17 @@ bool bwd_test(bool do_verification){
     int d = n / nheads; //head_size//64
 
     //initialize the tensors
-    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);//at::kBFloat16;at::kHalf
-    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor y_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor z_host = at::empty({batch_size*nheads, seqlen, seqlen}, at::kInt32);
+    at::Tensor q_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);//at::kBFloat16;at::kHalf
+    at::Tensor k_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor y_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor z_host = at::empty({batch_size*nheads, seqlen, seqlen}, at::kInt);
     at::Tensor lse_host = at::empty({batch_size, nheads, seqlen}, at::kFloat32);
 
-    at::Tensor ygrad_host = at::rand({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor qgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor kgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
-    at::Tensor vgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kFloat16);
+    at::Tensor ygrad_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor qgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor kgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
+    at::Tensor vgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
 
     at::Tensor q = q_host.to(at::kCUDA);
     at::Tensor k = k_host.to(at::kCUDA);
