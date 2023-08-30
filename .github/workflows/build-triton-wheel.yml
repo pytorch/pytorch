@@ -67,7 +67,7 @@ jobs:
 
       - name: Build Triton wheel
         env:
-          IS_RELEASE_TAG: startsWith(github.event.ref, 'refs/tags/v')
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -200,7 +200,7 @@ jobs:
 
       - name: Build Triton conda package
         env:
-          IS_RELEASE_TAG: startsWith(github.event.ref, 'refs/tags/v')
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
