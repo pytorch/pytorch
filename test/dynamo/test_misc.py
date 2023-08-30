@@ -2237,6 +2237,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         num = torch.Size([10, 8]).numel()
         self.assertEqual(opt_fn(), num)
 
+    def test_torch_size_numel_dynamic(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x.size().numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.rand(10, 1, 8, 1)
+        expect = fn(x)
+        self.assertEqual(opt_fn(x), expect)
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
