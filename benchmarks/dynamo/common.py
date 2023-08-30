@@ -305,6 +305,19 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+NON_DETERMINISTIC_MODELS = {
+    "alexnet",
+    "Background_Matting",
+    "pytorch_CycleGAN_and_pix2pix",
+    "pytorch_unet",
+    "Super_SloMo",
+    "vgg16",
+    # https://github.com/pytorch/pytorch/issues/96724
+    "Wav2Vec2ForCTC",
+    "Wav2Vec2ForPreTraining",
+    "sam",
+}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -3108,18 +3121,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        if args.only is not None and args.only not in {
-            "alexnet",
-            "Background_Matting",
-            "pytorch_CycleGAN_and_pix2pix",
-            "pytorch_unet",
-            "Super_SloMo",
-            "vgg16",
-            # https://github.com/pytorch/pytorch/issues/96724
-            "Wav2Vec2ForCTC",
-            "Wav2Vec2ForPreTraining",
-            "sam",
-        }:
+        if args.only is not None and args.only not in NON_DETERMINISTIC_MODELS:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"

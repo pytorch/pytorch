@@ -1,49 +1,65 @@
-# This script takes csvs produced by parse_logs.py and combines them
-# into a single CSV file
-
 import ast
 import csv
 import sys
 from collections import defaultdict
+from typing import Dict, Tuple
 
-assert len(sys.argv) == 3
 
-RESULTS = defaultdict(dict)
+def combine_csvs(static_file: str, dynamic_file: str) -> None:
+    """Combine CSV files produced by parse_logs.py into a single CSV output."""
 
-for side, f in zip(["static", "dynamic"], sys.argv[1:]):
-    with open(f) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            RESULTS[(row["bench"], row["name"])][side] = row
+    # Maps (bench, name) to their static and dynamic results
+    results: Dict[Tuple[str, str], Dict[str, dict]] = defaultdict(dict)
 
-fields = ["frame_time", "graph_breaks"]
+    # Read and store data from static and dynamic files
+    for side, filename in [("static", static_file), ("dynamic", dynamic_file)]:
+        with open(filename) as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                results[(row["bench"], row["name"])][side] = row
 
-out = csv.DictWriter(
-    sys.stdout,
-    ["bench", "name"] + [f"delta_{n}" for n in fields] + ["static_url", "dynamic_url"],
-    dialect="excel",
-)
-out.writeheader()
+    fields = ["frame_time", "graph_breaks"]
 
-for (bench, name), sides in RESULTS.items():
-    if "static" not in sides:
-        continue
-    if "dynamic" not in sides:
-        continue
-    if not name:
-        out.writerow(
-            {
-                "static_url": sides["static"]["explain"],
-                "dynamic_url": sides["dynamic"]["explain"],
-            }
-        )
-        continue
-    row = {"bench": bench, "name": name}
-    for f in fields:
-        try:
-            static = ast.literal_eval(sides["static"][f])
-            dynamic = ast.literal_eval(sides["dynamic"][f])
-        except SyntaxError:
+    # Prepare the CSV writer
+    out = csv.DictWriter(
+        sys.stdout,
+        ["bench", "name"]
+        + [f"delta_{n}" for n in fields]
+        + ["static_url", "dynamic_url"],
+        dialect="excel",
+    )
+    out.writeheader()
+
+    # Process and write combined results
+    for (bench, name), sides in results.items():
+        if "static" not in sides or "dynamic" not in sides:
             continue
-        row[f"delta_{f}"] = dynamic - static
-    out.writerow(row)
+        if not name:
+            out.writerow(
+                {
+                    "static_url": sides["static"]["explain"],
+                    "dynamic_url": sides["dynamic"]["explain"],
+                }
+            )
+            continue
+        row = {"bench": bench, "name": name}
+        for field in fields:
+            try:
+                static_value = ast.literal_eval(sides["static"][field])
+                dynamic_value = ast.literal_eval(sides["dynamic"][field])
+            except SyntaxError:
+                continue
+            row[f"delta_{field}"] = dynamic_value - static_value
+        out.writerow(row)
+
+
+def main():
+    if len(sys.argv) != 3:
+        raise ValueError("Expected two arguments: static_file and dynamic_file")
+
+    static_file, dynamic_file = sys.argv[1:3]
+    combine_csvs(static_file, dynamic_file)
+
+
+if __name__ == "__main__":
+    main()
