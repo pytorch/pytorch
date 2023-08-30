@@ -1567,7 +1567,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
 
-    def test_out_variants_on_graph_input(self):
+    def test_out_variants_with_resizing_on_graph_inputs(self):
         def fn(x, y):
             return torch.cosh(x, out=y) + 1
 
