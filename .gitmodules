@@ -66,10 +66,6 @@
     ignore = dirty
     path = third_party/python-peachpy
     url = https://github.com/malfet/PeachPy.git
-[submodule "third_party/python-six"]
-    ignore = dirty
-    path = third_party/python-six
-    url = https://github.com/benjaminp/six.git
 [submodule "third_party/onnx"]
     ignore = dirty
     path = third_party/onnx
