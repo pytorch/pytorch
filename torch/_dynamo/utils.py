@@ -1398,8 +1398,6 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     """
     op = node.op
 
-    from .exc import Unsupported
-
     try:
         if op == "call_function":
             return node.target(*args, **kwargs)
@@ -1413,7 +1411,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
-    except Unsupported:
+    except NotImplementedError:
         from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
         raise UnsupportedFakeTensorException(f"running {op} {node.target}(*{args}, **{kwargs})")
 
@@ -1707,11 +1705,7 @@ class numpy_to_tensor_wrapper:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
-        try:
-            out = self.f(*args, **kwargs)
-        except NotImplementedError:
-            from .exc import unimplemented
-            return unimplemented("caught NotImplementedError")
+        out = self.f(*args, **kwargs)
         return numpy_to_tensor(out)
 
 
