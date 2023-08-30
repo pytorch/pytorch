@@ -196,9 +196,10 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU, "_share_fd_: only available on CPU");
-  at::MapAllocator* ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  at::MapAllocator* ctx;
   // Storage is already in shared memory, just return a handle
-  if (ctx) {
+  if ((ctx = at::MapAllocator::fromDataPtr(storage.data_ptr()))) {
     // done
   } else {
     at::Storage new_storage(at::new_shm_fd_storage(storage.nbytes()));
@@ -247,10 +248,11 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
         "a file descriptor (int) and storage size (int)");
     return nullptr;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int fd;
   int tmp_fd = (int)THPUtils_unpackLong(_tmp_fd);
   int64_t size = THPUtils_unpackLong(_size);
-  int fd = dup(tmp_fd);
-  if (fd == -1) {
+  if ((fd = dup(tmp_fd)) == -1) {
     THPUtils_setError("could not duplicate a shared memory file descriptor");
     return nullptr;
   }
@@ -403,14 +405,16 @@ static PyObject* THPStorage_releaseIPCCounter(
 
 #ifdef USE_CUDA
 static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
-  char* buffer = nullptr;
-  Py_ssize_t handle_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  char* buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Py_ssize_t handle_size;
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
-    THPUtils_assertRet(
-        "", handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
+    // NOLINTNEXTLINE(bugprone-string-constructor)
+    return nullptr;
   }
-  THPUtils_assertRet(
-      "", handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
+  // NOLINTNEXTLINE(bugprone-string-constructor)
+  THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
 }
 #endif
@@ -453,9 +457,6 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     // Ensure that producer prepared all tensor's data
     std::string s_ipc_event_handle =
         THPStorage_bytesAsHandleString(_event_handle);
-    if (s_ipc_event_handle.empty()) {
-      return nullptr;
-    }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -466,14 +467,12 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
-  if (s_handle.empty()) {
-    return nullptr;
-  }
   std::shared_ptr<void> basePtr =
       c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* devPtr = basePtr.get();
   devPtr = (char*)devPtr + storage_offset_bytes;
 

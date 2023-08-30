@@ -564,6 +564,9 @@ def fx_codegen_and_compile(
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
 
+            if V.aot_compilation is True:
+                return compiled_fn
+
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
@@ -837,9 +840,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-_in_aot_compilation = BoxedBool(False)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -860,7 +860,7 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
-    with mock.patch.object(_in_aot_compilation, "value", True):
+    with V.set_aot_compilation(True):
         return compile_fx(
             model_,
             example_inputs_,
@@ -935,7 +935,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if _in_aot_compilation:
+    if V.aot_compilation is True:
         return optimized_function
 
     def wrapper(args):
@@ -1143,6 +1143,10 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
+
+    if config.from_export and V.aot_compilation is True:
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+            return inference_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

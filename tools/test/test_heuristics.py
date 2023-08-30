@@ -88,24 +88,26 @@ class TestParsePrevTests(unittest.TestCase):
     ) -> None:
         tests = ["test1", "test2", "test3", "test4", "test5"]
 
-        expected_prioritizations = TestPrioritizations()
-        expected_prioritizations.highly_relevant = ["test4", "test2"]
-        expected_prioritizations.probably_relevant = ["test1"]
-        expected_prioritizations.unranked_relevance = ["test3", "test5"]
+        expected_prioritizations = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test4", "test2"],
+            probable_relevance=["test1"],
+            unranked_relevance=["test3", "test5"],
+        )
 
         test_prioritizations = get_test_prioritizations(tests)
 
-        self.assertListEqual(
-            expected_prioritizations.highly_relevant,
-            test_prioritizations.highly_relevant,
+        self.assertTupleEqual(
+            expected_prioritizations.get_high_relevance_tests(),
+            test_prioritizations.get_high_relevance_tests(),
         )
-        self.assertListEqual(
-            expected_prioritizations.probably_relevant,
-            test_prioritizations.probably_relevant,
+        self.assertTupleEqual(
+            expected_prioritizations.get_probable_relevance_tests(),
+            test_prioritizations.get_probable_relevance_tests(),
         )
-        self.assertListEqual(
-            expected_prioritizations.unranked_relevance,
-            test_prioritizations.unranked_relevance,
+        self.assertTupleEqual(
+            expected_prioritizations.get_unranked_relevance_tests(),
+            test_prioritizations.get_unranked_relevance_tests(),
         )
 
 
