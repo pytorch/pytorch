@@ -1263,12 +1263,15 @@ class FlatParamHandle:
             return
 
         if self._limit_all_gathers:
-            # Current stream is unshard stream as we call handle.unshard in
+            # All-gather rate limiting coming into effect via stream wait
+            # Current stream is unshard stream as we call `handle.unshard` in
             # its with-stream context
             unshard_stream = self._device_handle.current_stream()
             event_with_tensor = self._free_event_queue.dequeue_if_needed()
             if event_with_tensor:
+                # Wait for a resharding event (compute done)
                 unshard_stream.wait_event(event_with_tensor.event)
+                # Free the storage of the "-2" all-gather
                 _free_storage(event_with_tensor.tensor)
                 # Caching allocator would recycle the stashed unshard buffer's
                 # storage into the unshard stream's pool, and potentially reuse
@@ -1673,14 +1676,14 @@ class FlatParamHandle:
         self._use_sharded_flat_param()
 
         if free_unsharded_flat_param:
-            # In the new rate limiter, we stash an all-gather buffer to keep it from
-            # being freed by the caching allocator until two all-gathers later. So
-            # that the caching allocator would try to reuse its storage for the next
-            # next all-gather.
-            # We also do not call `record_stream` to hand over the ownership to
-            # the compute stream (i.e. the ownership is still with the unshard
-            # stream)
             if self._limit_all_gathers:
+                # In the new rate limiter, we stash an all-gather buffer to keep
+                # it from being freed by the caching allocator until two
+                # all-gathers later. So that the caching allocator would try to
+                # reuse its storage for the +2 all-gather.
+                # We also do not call `record_stream` to hand over the ownership
+                # to the compute stream (i.e. the ownership is still with the
+                # unshard stream). We keep the tensor alive via stashing.
                 comp_done_event = self._device_handle.Event()
                 comp_done_event.record()
                 unsharded_flat_param = self._get_padded_unsharded_flat_param()
