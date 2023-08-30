@@ -744,6 +744,11 @@ void initDispatchBindings(PyObject* module) {
     return c10::SymInt(
         c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
+
+  using c10::impl::TorchDispatchModeKey;
+  py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
+      .value("PROXY", TorchDispatchModeKey::PROXY)
+      .value("FAKE", TorchDispatchModeKey::FAKE);
 }
 
 // TODO: dedupe with the kernel

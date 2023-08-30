@@ -1,6 +1,7 @@
 import functools
 import operator
 from functools import reduce
+from typing import Any, Tuple
 
 import torch
 
@@ -286,6 +287,7 @@ if torch._C._has_mkldnn:
             ):
                 matched = False
             else:  # inp is a Number
+                assert max_value is not None
                 matched = min_value <= max_value
             if is_bf16:
                 dtype1 = kwargs.get("to_float")
@@ -658,6 +660,8 @@ if torch._C._has_mkldnn:
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
+            assert isinstance(reshape_1, list)
+            assert isinstance(reshape_2, list)
             assert len(reshape_1) == 2
             dynamic_shapes = not all(
                 isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
@@ -1012,7 +1016,7 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs = (input, packed_weight_node)
+                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
