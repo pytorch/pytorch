@@ -214,6 +214,8 @@ __all__ = [
     "prim_uninitialized",
     "rand_like",
     "rand",
+    "randint_like",
+    "randint",
     "randn_like",
     "randn",
     "reciprocal",
@@ -1074,6 +1076,7 @@ def embedding_bag(
 
 
 @_onnx_symbolic("aten::size")
+@symbolic_helper.quantized_args(True, quantize_output=False)
 @_beartype.beartype
 def size(g: jit_utils.GraphContext, self, dim=None):
     if dim is None:
@@ -1672,8 +1675,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 g,
                 flattened_indices,
                 axes=[2 + i for i in range(ndims)],
-                starts=tuple_fn(0),
-                ends=tuple_fn(1),
+                starts=list(tuple_fn(0)),
+                ends=list(tuple_fn(1)),
             )
             indices = sub(g, indices, s)
             return r, indices
@@ -5124,6 +5127,80 @@ def _pad_packed_sequence(
     return data, lengths
 
 
+@_onnx_symbolic("aten::randint")
+@_beartype.beartype
+def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    shape = symbolic_helper._maybe_get_const(shapes, "is")
+    if symbolic_helper._is_value(shape):
+        shape_const = g.op(
+            "ConstantOfShape",
+            shapes,
+            value_t=torch.tensor([0], dtype=torch.float),
+        )
+        randn = g.op(
+            "RandomUniformLike",
+            shape_const,
+            low_f=low_i,
+            high_f=high_i,
+        )
+    else:
+        randn = g.op(
+            "RandomUniform",
+            shape_i=shape,
+            low_f=low_i,
+            high_f=high_i,
+        )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
+@_onnx_symbolic("aten::randint_like")
+@_beartype.beartype
+def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    randn = g.op(
+        "RandomUniformLike",
+        self,
+        low_f=low_i,
+        high_f=high_i,
+    )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
 @_onnx_symbolic("aten::randn")
 @_beartype.beartype
 def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
@@ -5292,6 +5369,10 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
             input,
         )
 
+    if dim == 0:
+        return symbolic_helper._reshape_helper(g, input, [1])
+    if dim == 1:
+        return g.op("Identity", input)
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0:
         end_dim = dim + end_dim

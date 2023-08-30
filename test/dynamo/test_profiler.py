@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+from unittest.mock import patch
+
 import torch
 
 import torch._dynamo.test_case
@@ -18,7 +20,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def outer_fn(x, y):
             return inner_fn(x) * y
 
-        x, y = [torch.rand((2, 2)) for _ in range(2)]
+        x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
             outer_fn(x, y)
@@ -38,13 +40,79 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return x.sin() * y.cos()
 
-        x, y = [torch.rand((2, 2)) for _ in range(2)]
+        x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
             torch._dynamo.optimize("aot_eager")(fn)(x, y)
 
         self.assertTrue(
             any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
+        )
+
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
+    def test_profile_dynamic_shapes_runtime(self):
+        def fn(x, y, z):
+            return x @ y + z
+
+        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+
+        inputs = [
+            (torch.rand(a, b), torch.rand(b, c), torch.rand(a, c))
+            for (a, b, c) in [(15, 16, 17), (15, 15, 16), (16, 16, 16)]
+        ]
+
+        opt_fn(*inputs[0])
+        opt_fn(*inputs[1])
+
+        with torch.profiler.profile(record_shapes=True):
+            opt_fn(*inputs[2])
+
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
+    def test_profile_dynamic_shapes_compilation(self):
+        def fn(x, y, z):
+            return x @ y + z
+
+        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+
+        inputs = (torch.rand(15, 16), torch.rand(16, 17), torch.rand(15, 17))
+
+        with torch.profiler.profile(record_shapes=True):
+            opt_fn(*inputs)
+
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
+    def test_profile_dynamic_shapes_list_compilation(self):
+        def fn(x, y, z):
+            return torch.cat([x, y], dim=0) + z
+
+        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+
+        inputs = (torch.rand(4, 16), torch.rand(12, 16), torch.rand(16, 16))
+
+        with torch.profiler.profile(record_shapes=True):
+            opt_fn(*inputs)
+
+    def test_profiler_cache_lookup_profiler_step(self):
+        def fn(x, y, z):
+            return torch.add(torch.sub(x, y), z)
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+
+        (
+            x,
+            y,
+            z,
+        ) = (torch.rand(4, 4) for _ in range(3))
+
+        prof = torch.profiler.profile(
+            schedule=torch.profiler.schedule(wait=2, warmup=2, active=2, repeat=1)
+        )
+
+        for _ in range(10):
+            opt_fn(x, y, z)
+            prof.step()
+
+        self.assertTrue(
+            any(e.name == "TorchDynamo Cache Lookup" for e in prof.events())
         )
 
 

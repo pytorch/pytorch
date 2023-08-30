@@ -223,6 +223,8 @@ class ReplicateTest(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
         model = Net()
+        model_cuda = deepcopy(model).cuda()
+        model_cuda2 = deepcopy(model_cuda)
         replicate(model, device_id=torch.device("cpu"))
         # DDP instance is attached in first pre forward
         model(torch.randn(2, 2))
@@ -230,19 +232,16 @@ class ReplicateTest(MultiProcessTestCase):
         # Should be None for CPU training
         self.assertEqual(None, replicate_ddp_weakref.device_ids)
 
-        model.cuda()
-        model_cuda = deepcopy(model)
         replicate(model_cuda, device_id=torch.device(torch.cuda.current_device()))
         # DDP instance is attached in first pre forward
         model_cuda(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
         # Pass in int as device_id
-        model_cuda = deepcopy(model_cuda)
-        replicate(model_cuda, device_id=int(torch.cuda.current_device()))
+        replicate(model_cuda2, device_id=int(torch.cuda.current_device()))
         # DDP instance is attached in first pre forward
-        model_cuda(torch.randn(2, 2))
-        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        model_cuda2(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
     def test_replicate_wrong_device_id_type(self):

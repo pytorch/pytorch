@@ -19,6 +19,8 @@
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#endif
+#ifdef USE_MEM_EFF_ATTENTION
 // MemoryEfficient Attention Specific Imports
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h>
@@ -115,9 +117,10 @@ _efficient_attention_backward(
     const at::Tensor& philox_seed, // seed using for generating random numbers for dropout
     const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
+    const bool bias_requires_grad,
     const c10::optional<double> scale,
     c10::optional <int64_t> num_splits_key) {
-  #if defined(USE_FLASH_ATTENTION)
+  #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
@@ -186,8 +189,6 @@ _efficient_attention_backward(
   int64_t nH = query.size(2);
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
-
-  const bool bias_requires_grad = bias.has_value() && bias->requires_grad();
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   grad_q = at::empty(query.sizes(), query.options());
@@ -344,7 +345,13 @@ _efficient_attention_backward(
 
       // assign strides for bias, viewed as:
       // (batch_sz, n_heads, n_queries, n_keys)
-      const at::Tensor bias_4d_view = get_bias_4d_view(*bias, B, nH, M, N);
+      // We make sure to expand prior to calling the kernel
+      const at::Tensor& bias_4d_view = *bias;
+      TORCH_CHECK(bias_4d_view.dim()==4);
+      TORCH_CHECK(bias_4d_view.size(0)==B);
+      TORCH_CHECK(bias_4d_view.size(1)==nH);
+      TORCH_CHECK(bias_4d_view.size(2)==M);
+      TORCH_CHECK(bias_4d_view.size(3)==N);
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
@@ -359,8 +366,14 @@ _efficient_attention_backward(
         // different values of Q will point to the same memory
         // locations, meaning bias.stride(1) == 0, while we'd want
         // grad_bias.stride(1) == nK
-        const at::Tensor grad_bias_4d_view =
-            get_bias_4d_view(grad_bias, B, nH, M, N);
+        // We have expanded the input prior to calling the forward kernel
+        const at::Tensor& grad_bias_4d_view = grad_bias;
+        TORCH_CHECK(grad_bias_4d_view.dim()==4);
+        TORCH_CHECK(grad_bias_4d_view.size(0)==B);
+        TORCH_CHECK(grad_bias_4d_view.size(1)==nH);
+        TORCH_CHECK(grad_bias_4d_view.size(2)==M);
+        TORCH_CHECK(grad_bias_4d_view.size(3)==N);
+
         ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias_4d_view.stride(0));
         ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias_4d_view.stride(1));
         ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias_4d_view.stride(2));
@@ -462,7 +475,7 @@ _efficient_attention_backward(
   AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(grad_q, grad_k, grad_v, grad_bias);
   #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
 
@@ -531,20 +544,23 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
 }
 
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
+    const at::Tensor& attn_bias,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     double dropout_p,
+    std::array<bool, 4> grad_input_mask,
     bool causal,
-    c10::optional<double> scale){
+    c10::optional<double> scale) {
+
   if (!grad_out_.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out = grad_out_.transpose(1, 2);
   auto out_t = out.transpose(1, 2);
@@ -554,10 +570,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // TODO_DRISS
-  // These are place holders unitl we add support for bias
-  auto bias = c10::nullopt;
-
+  // This is needed because SaveVarible automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> kernel_bias;
+  if (attn_bias.defined()) {
+    kernel_bias = attn_bias;
+  }
   // Will add with signauter changes for dropout and bias
   // We are only handiling Dense inputs, but this should be passed
   // from forward to backward
@@ -567,14 +585,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-
   std::tie(grad_q, grad_k, grad_v, grad_bias) =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
           k_t,
           v_t,
-          bias,
+          kernel_bias,
           out_t,
           c10::nullopt,
           c10::nullopt,
@@ -585,10 +602,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
           philox_seed,
           philox_offset,
           static_cast<int64_t>(custom_mask_type),
+          grad_input_mask[3],
           scale,
           c10::nullopt);  // num_split_keys
   return std::make_tuple(
-      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }
 
 } // namespace native
