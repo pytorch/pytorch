@@ -8062,7 +8062,8 @@ class TestNNDeviceType(NNTestCase):
             out3.backward(grad_out_f, retain_graph=True)
             # bfloat16/half input grad and bfloat16/half parameters
             out.backward(grad_out_bf1, retain_graph=True)
-            self.assertEqual(m_f.weight.grad, m_f2.weight.grad, atol=1e-5, rtol=1e-5)
+            # Need higher tolerances atol=1e-4 and rtol=1e-4 on macos
+            self.assertEqual(m_f.weight.grad, m_f2.weight.grad, atol=1e-4, rtol=1e-4)
             self.assertEqual(m_f.bias.grad, m_f2.bias.grad, atol=1e-5, rtol=1e-5)
             self.assertEqual(input_bf2.grad.float(), input_f.grad, atol=5e-5, rtol=5e-3)
             # Full bf16/half has lower precision compared with mixed bf16/half and fp32.
