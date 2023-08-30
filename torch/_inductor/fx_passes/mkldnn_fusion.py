@@ -1020,10 +1020,10 @@ if torch._C._has_mkldnn:
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if is_bf16_weight:
-                    packed_linear_inputs += (bias, "none", [], "") # type: ignore[assignment]
+                    packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
-                    packed_linear_inputs += (transpose_weight_node, bias, batch_size) # type: ignore[assignment]
+                    packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                     packed_linear_op = torch.ops.mkl._mkl_linear
                 packed_linear_node = graph.create_node(
                     "call_function", packed_linear_op, packed_linear_inputs
