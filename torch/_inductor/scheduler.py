@@ -171,6 +171,7 @@ class BaseSchedulerNode:
 
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
+
         for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
             used_names.add(dep.name)
             if V.graph.name_to_buffer.get(dep.name):
@@ -1006,7 +1007,6 @@ class Scheduler:
         # used during codegen:
         self.current_device = None
         self.buffer_names_to_free = set()
-        self.buffer_names_no_longer_needed = set()
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
@@ -1559,9 +1559,18 @@ class Scheduler:
         same kernel can be removed.
         """
 
-        names_to_remove = (
-            V.kernel.store_buffer_names & self.buffer_names_no_longer_needed
-        )
+        # V.kernel.store_buffer_names should represent the set of nodes
+        # get fused
+        fused_node_names = V.kernel.store_buffer_names
+        names_to_remove = []
+        for out_buf in V.kernel.store_buffer_names:
+            users = {
+                user.get_name()
+                for user in self.name_to_node[out_buf].users
+                if not user.is_weak
+            }
+            if users.issubset(fused_node_names):
+                names_to_remove.append(out_buf)
 
         def remove_filter(n):
             return (
@@ -1657,7 +1666,6 @@ class Scheduler:
     def codegen(self):
         for node in self.nodes:
             self.enter_context(node)
-            self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
