@@ -221,6 +221,8 @@ def run_query(query):
             f"Query failed to run by returning code of {request.status_code}. {request.json()}"
         )
 
+_ERRORS = []
+_MAX_ERROR_LEN = 20
 
 def github_data(pr_number):
     query = (
@@ -253,7 +255,14 @@ def github_data(pr_number):
     )
     query = run_query(query)
     if query.get("errors"):
-        return [], "None", ()
+        _ERRORS.append(query.get("errors"))
+        if len(_ERRORS) < _MAX_ERROR_LEN:
+            return [], "None", ()
+        else:
+            raise Exception(
+                f"Got {_MAX_ERROR_LEN} errors: {_ERRORS}, please check if"
+                " there is something wrong"
+            )
     edges = query["data"]["repository"]["pullRequest"]["labels"]["edges"]
     labels = [edge["node"]["name"] for edge in edges]
     author = query["data"]["repository"]["pullRequest"]["author"]["login"]
