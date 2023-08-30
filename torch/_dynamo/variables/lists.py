@@ -542,6 +542,34 @@ class SizeVariable(TupleVariable):
     def unpack_var_sequence(self, tx):
         return [x.add_options(self) for x in self.items]
 
+    def numel(self, tx):
+        from .builtin import BuiltinVariable
+        from .tensor import SymNodeVariable
+
+        const_result = 1
+        sym_sizes = []
+
+        for v in self.items:
+            if isinstance(v, ConstantVariable):
+                const_result *= v.value
+            else:
+                assert isinstance(v, SymNodeVariable), type(v)
+                # Delay proxy calls  until we know it will be necessary
+                sym_sizes.append(v)
+
+        result = ConstantVariable(const_result).add_options(self)
+        if sym_sizes and const_result == 1:
+            # Skip multiplying by 1
+            result, *sym_sizes = sym_sizes
+
+        if not sym_sizes or const_result == 0:
+            return result
+
+        mul = BuiltinVariable(operator.mul)
+        for v in sym_sizes:
+            result = mul.call_function(tx, [result, v], {})
+        return result
+
     def call_method(
         self,
         tx,
@@ -555,11 +583,9 @@ class SizeVariable(TupleVariable):
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            result = 1
-            for v in self.items:
-                assert isinstance(v, ConstantVariable)
-                result = result * v.value
-            return ConstantVariable(result).add_options(self)
+            assert not args and not kwargs
+            return self.numel(tx)
+
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
