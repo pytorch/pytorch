@@ -281,17 +281,22 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
 
 .. code-block:: python
 
-   import inspect
    print("source code of __compiled_fn_0:")
-   print(inspect.getsource(__compiled_fn_0))
+   print(__compiled_fn_0._torchdynamo_orig_callable.__self__)
+   print("=" * 60)
    print("source code of __resume_at_30_1:")
    print(decompile(__resume_at_30_1))
+   print("=" * 60)
    print("source code of __resume_at_38_2:")
    print(decompile(__resume_at_38_2))
 
 ::
 
    source code of __compiled_fn_0:
+   GraphModule()
+
+
+
    def forward(self, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
        l_a_ = L_a_
        l_b_ = L_b_
@@ -302,11 +307,14 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
        lt = sum_1 < 0;  sum_1 = None
        return (truediv, lt)
 
+   # To see more debug info, please use `graph_module.print_readable()`
+   ============================================================
    source code of __resume_at_30_1:
    def <resume in toy_example>(b, x):
        b = b * -1
        return x * b
 
+   ============================================================
    source code of __resume_at_38_2:
    def <resume in toy_example>(b, x):
        return x * b
