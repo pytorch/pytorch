@@ -3295,15 +3295,21 @@ def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
         return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
 
 
-@register_decomposition(aten.grid_sampler_2d)
-@pw_cast_for_opmath
-def grid_sampler_2d(
+def _grid_sampler_2d(
     a: Tensor,
     grid: Tensor,
     interpolation_mode: int = 0,
     padding_mode: int = 0,
     align_corners: bool = False,
+    _expand_grid: bool = True,
 ) -> Tensor:
+    # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
+    # optionaly expand the input grid for performance reasons.
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+
     torch._check(
         interpolation_mode in (0, 1, 2),
         lambda: f"Invalid interpolation mode {interpolation_mode}",
@@ -3352,7 +3358,16 @@ def grid_sampler_2d(
         return compute_coordinates(coords_un, size)
 
     N, C, iH, iW = a.shape
-    _, oH, oW, _ = grid.shape
+    _, oH, oW, two = grid.shape
+    assert two == 2
+
+    if _expand_grid:
+        # Let's expand grid to [N, C, oH, oW, 2]
+        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
+        # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
+        # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
+        grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, 2)
 
     def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
         return torch.logical_and(
@@ -3368,8 +3383,9 @@ def grid_sampler_2d(
         # to (x, y) = (0, 0) and also set the weight to 0
         # We also change the shape of the tensor to the appropriate one for
         # broadcasting with N_idx, C_idx for the purposes of advanced indexing
+        c = C if _expand_grid else 1
         return tuple(
-            torch.where(cond, t, 0).view(N, 1, oH, oW)
+            torch.where(cond, t, 0).view(N, c, oH, oW)
             for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
         )
 
@@ -3422,6 +3438,10 @@ def grid_sampler_2d(
         tx = ix - ix_nw
         ty = iy - iy_nw
 
+        if not _expand_grid:
+            tx = tx.unsqueeze(1)
+            ty = ty.unsqueeze(1)
+
         def get_value_bounded(ix: Tensor, iy: Tensor) -> Tensor:
             x = compute_coordinates(ix, iW)
             y = compute_coordinates(iy, iH)
@@ -3435,10 +3455,28 @@ def grid_sampler_2d(
                 get_value_bounded(ix_nw + 1, iy_ofs),
                 get_value_bounded(ix_nw + 2, iy_ofs),
             )
-            return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
+            return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple(get_coeff(ofs) for ofs in range(4))
-        return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
+        return _upsample_cubic_interp1d(coeffs, ty)
+
+
+@register_decomposition(aten.grid_sampler_2d)
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: Tensor,
+    grid: Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> Tensor:
+    return _grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+    )
 
 
 @register_decomposition(aten.mv)
@@ -3886,6 +3924,85 @@ def multilabel_margin_loss_forward(
     # result
     is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
+
+
+# scaled_dot_product_attention used to be decomposed in pre-autograd, given that
+# it calls _scaled_dot_product_attention_math and
+# _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
+# kernel. As a result it's decomposed into ops with finer granularity.
+# However recent PRs (#103826 #105131) added new logic in
+# scaled_dot_product_attention and now it calls
+# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
+# in _scaled_dot_product_flash_attention showing up in torch.export().
+# This decomposition ensures scaled_dot_product_attention is still decomposed
+# the same way as before, i.e., going through
+# _scaled_dot_product_attention_math. Notice that this decomp rule should be
+# excluded by inductor.
+@register_decomposition(aten._scaled_dot_product_flash_attention.default)
+def scaled_dot_product_flash_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+    dtype = query.dtype
+    batchSize, num_head, qSize, headSize = (
+        query.shape[0],
+        query.shape[1],
+        query.shape[2],
+        query.shape[3],
+    )
+
+    torch._check(
+        torch.is_floating_point(query) and dtype is not torch.half,
+        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: "q, k, v must be a 4 dimensional tensor",
+    )
+    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
+        lambda: "q, k, v should have the same head size",
+    )
+    torch._check(
+        return_debug_mask is False, lambda: "return_debug_mask is not supported."
+    )
+
+    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
+    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    max_q, max_k = 0, 0
+    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    debug_attn_mask = torch.empty(
+        [],
+        dtype=query.dtype,
+        device=query.device,
+        requires_grad=query.requires_grad,
+    )
+    output, _ = aten._scaled_dot_product_attention_math.default(
+        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+    )
+    return (
+        output,
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask,
+    )
 
 
 def register_inplace(aten_op, outplace_op):

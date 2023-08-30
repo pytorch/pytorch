@@ -1857,11 +1857,13 @@ class CommonTemplate:
             )
 
     @slowTest
+    @expectedFailureCodegenDynamic
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv bn test")
 
+        # fails dynamic check which bn is fused, and there will not have loops vars.
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {
@@ -4668,6 +4670,16 @@ class CommonTemplate:
 
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
+
+    def test_adding_tensor_offsets(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[16:32]
+
+        with torch.no_grad():
+            x = torch.randn(1024, device=self.device)
+            self.assertEqual(fn(x[0:]), x[16:][:16])
+            self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
     # from GPT2ForSequenceClassification
     def test_index_tensor(self):
