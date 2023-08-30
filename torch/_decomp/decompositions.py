@@ -3875,25 +3875,59 @@ def multilabel_margin_loss_forward(
 # the same way as before, i.e., going through
 # _scaled_dot_product_attention_math. Notice that this decomp rule should be
 # excluded by inductor.
-@register_decomposition(aten.scaled_dot_product_attention.default)
-@aten.scaled_dot_product_attention.default.py_impl(
-    DispatchKey.CompositeImplicitAutograd
-)
-@out_wrapper()
-def scaled_dot_product_attention(
+@register_decomposition(aten._scaled_dot_product_flash_attention.default)
+def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
     attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
+    return_debug_mask: bool = False,
     *,
     scale: Optional[float] = None,
-) -> Tensor:
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+    dtype = query.dtype
+    batchSize, num_head, qSize, headSize = (
+        query.shape[0],
+        query.shape[1],
+        query.shape[2],
+        query.shape[3],
+    )
+
+    torch._check(
+        torch.is_floating_point(query) and dtype is not torch.half,
+        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: "q, k, v must be a 4 dimensional tensor",
+    )
+    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
+        lambda: "q, k, v should have the same head size",
+    )
+    torch._check(return_debug_mask == False, lambda: "return_debug_mask is not supported.")
+
+    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
+    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    max_q, max_k = 0, 0
+    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    debug_attn_mask = torch.empty(
+        [],
+        dtype=query.dtype,
+        device=query.device,
+        requires_grad=query.requires_grad,
+    )
     output, _ = aten._scaled_dot_product_attention_math.default(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
-    return output
+    return (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
 
 
 def register_inplace(aten_op, outplace_op):
