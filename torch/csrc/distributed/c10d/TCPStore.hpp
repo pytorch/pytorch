@@ -104,6 +104,10 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
+  bool isLibUvBackend() const noexcept {
+    return usingLibUv_;
+  }
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
@@ -121,6 +125,7 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
+  bool usingLibUv_ = false;
 };
 
 } // namespace c10d
