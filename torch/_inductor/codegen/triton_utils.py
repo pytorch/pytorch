@@ -3,12 +3,22 @@ from ..utils import instance_descriptor
 from ..virtualized import V
 from .common import SizeArg, TensorArg
 
+import torch
+def dtype_shim(input_dtype: torch.dtype) -> str:
+    float8_map = {
+        torch.float8_e4m3fn: "fp8e4",
+        torch.float8_e5m2: "fp8e5",
+             }
+    if input_dtype in float8_map:
+        return float8_map[input_dtype]
+    else:
+        return input_dtype
 
 def signature_of(arg, *, size_dtype: str):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
-        tye = JITFunction._type_of(arg.dtype)
+        tye = JITFunction._type_of(dtype_shim(arg.dtype))
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
