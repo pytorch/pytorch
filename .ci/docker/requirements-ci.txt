@@ -211,12 +211,10 @@ scikit-image==0.20.0 ; python_version >= "3.10"
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.6.3 ; python_version < "3.10"
-scipy==1.8.1 ; python_version == "3.10"
-scipy==1.10.1 ; python_version == "3.11"
+scipy==1.10.1
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
-#Pinned versions: 1.6.3
+#Pinned versions: 1.10.1
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
 #test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
 #test_linalg.py, test_binary_ufuncs.py
