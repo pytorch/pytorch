@@ -36,7 +36,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
     _reset_flat_param_grad_info_if_needed,
 )
-from torch.distributed.fsdp._shard_utils import SimpleProfiler
 from torch.distributed.fsdp.api import (
     FullStateDictConfig,
     ShardingStrategy,
