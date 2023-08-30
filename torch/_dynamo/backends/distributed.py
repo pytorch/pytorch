@@ -213,6 +213,11 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
+        assert torch._inductor.config.keep_output_stride, \"""
+Detected that you are running DDP with torch.compile, along with these two flags:
+- torch._dynamo.config.optimize_ddp = True
+- torch._inductor.config.keep_output_stride = False
+This combination of flags is incompatible. Please set keep_output_stride to False."""
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
