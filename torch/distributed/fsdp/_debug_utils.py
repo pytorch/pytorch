@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Set, Tuple, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleProfiler:
-    class Type(Enum):
+    class Type(Enum, str):
         ALL = "all"
         ALLGATHER = "all_gather"
         ALLGATHER_OBJ = "all_gather_object"
@@ -25,8 +25,8 @@ class SimpleProfiler:
         H2D = "H2D"
         D2H = "D2H"
 
-    results = defaultdict(float)
-    profiling = set()
+    results: Dict[str, float] = defaultdict(float)
+    profiling: Set[str] = set()
 
     @classmethod
     def reset(cls) -> None:
@@ -35,7 +35,7 @@ class SimpleProfiler:
 
     @classmethod
     @contextmanager
-    def profile(cls, profile_type: str) -> None:
+    def profile(cls, profile_type: str) -> Iterator[None]:
         assert profile_type not in cls.profiling, (
             f"{profile_type} is already being profiled. "
             "SimpleProfiler does not support profiling multiple instances at "
