@@ -70,7 +70,7 @@ def build_triton(
     if not release:
         # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
         # while release build should only include the version, i.e. 2.1.0
-        version = "{version}+{commit_hash[:10]}"
+        version = f"{version}+{commit_hash[:10]}"
 
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
