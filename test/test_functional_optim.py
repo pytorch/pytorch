@@ -77,7 +77,7 @@ class TestFunctionalOptimParity(TestCase):
     # Dynamo fails at compiling this for python 3.8/3.11
     # Since it passes while compiling the actual code under test
     # we disable dynamo here.
-    @torch._disable_dynamo
+    @torch._disable_dynamo(recursive=False)
     def _test_functional_optim_parity(self, optim_cls, *args, **kwargs):
         module_optim = MyModule()
         module_functional = MyModule()
