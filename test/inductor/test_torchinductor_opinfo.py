@@ -209,10 +209,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "linalg.eigh": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    ("linspace", "tensor_overload"): {b8, f16, f32, f64, i32, i64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    ("logspace", "tensor_overload"): {b8, f16, f32, f64, i32, i64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
@@ -280,10 +276,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    ("linspace", "tensor_overload"): {b8, f16, f32, f64, i32, i64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    ("logspace", "tensor_overload"): {b8, f16, f32, f64, i32, i64},
     "log_normal": {f16, f32, f64},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
