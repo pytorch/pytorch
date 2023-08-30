@@ -28,13 +28,13 @@ hf_T5_generate,pass,23
 hf_T5_large,pass_due_to_skip,0
 hf_Whisper,pass,0
 lennard_jones,pass,0
-llama,fail_accuracy,0
+llama,pass,0
 maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 moco,pass,11
-nanogpt_generate,fail_to_run,0
+nanogpt_generate,fail_accuracy,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,58
 phlippe_densenet,pass,0

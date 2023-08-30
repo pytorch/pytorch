@@ -254,6 +254,64 @@ class CPUReproTests(TestCase):
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
+    @config.patch(implicit_fallbacks=True)
+    def test_multihead_attention_cpu(self):
+        def fn(
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ):
+            return torch._native_multi_head_attention(
+                q,
+                k,
+                v,
+                embed_dim,
+                num_heads,
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                mask,
+                need_weights,
+            )
+
+        B = 1
+        T = 3
+        embed_dim = 6
+        num_heads = 2
+        q = torch.randn([B, T, embed_dim])
+        k = torch.randn([B, T, embed_dim])
+        v = torch.randn([B, T, embed_dim])
+        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
+        qkv_bias = torch.randn([3 * embed_dim])
+        proj_weight = torch.randn([3 * embed_dim, embed_dim])
+        proj_bias = torch.randn([3 * embed_dim])
+        mask = None
+        need_weights = False
+
+        inps = [
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ]
+        self.common(fn, inps)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
@@ -928,6 +986,53 @@ class CPUReproTests(TestCase):
                     ),
                 )
                 assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_non_contiguous_load_buf_quant(self):
+        def fn(
+            x1,
+            x2,
+            groups,
+        ):
+            x = torch.cat((x1, x2), dim=1)
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, 0, 255, torch.uint8
+            )
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, num_channels, height, width)
+            return x
+
+        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+            memory_format=torch.channels_last
+        )
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    x,
+                    x2,
+                    2,
+                ),
+            )
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1750,7 +1855,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
-            input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+            input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
                 memory_format=torch.channels_last
             )
             maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -2327,6 +2432,17 @@ class CPUReproTests(TestCase):
             return x
 
         self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":

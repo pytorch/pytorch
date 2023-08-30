@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import *  # noqa: F403
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
@@ -562,7 +563,6 @@ class TestPythonRegistration(TestCase):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
 
-
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -744,7 +744,8 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
         x = LoggingTensor(torch.ones(1))
-        self.assertRaises(RuntimeError, lambda: x.storage())
+        storage = x.untyped_storage()
+        self.assertRaises(RuntimeError, lambda: storage.data_ptr())
 
     def test_make_wrapper_subclass_noalloc(self) -> None:
         # This is ludicrously big (8TB) and this should pass because wrapper
@@ -892,6 +893,36 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_make_fx_with_subclass(self) -> None:
+        def f(x, y):
+            # Returns (TwoTensor, Tensor)
+            return x * y, y + y
+        x_a = torch.zeros(4)
+        x_b = torch.zeros(4)
+        y = torch.ones(4)
+
+        # make_fx() is not responsible for unwrapping tensor subclass inputs,
+        # so we do it manually here.
+        # Why? In general, make_fx(f)(*args) promises that the graph returned has the same calling
+        # convention as f(*args). Unwrapping tensor subclass inputs can potentially change
+        # the number of input args to the graph, breaking that assumption
+        def f_to_trace(x_a, x_b, y):
+            x = TwoTensor(x_a, x_b)
+            out1, out2 = f(x, y)
+            out1_unwrapped_attrs, _ = out1.__tensor_flatten__()
+            return (*[getattr(out1, attr) for attr in out1_unwrapped_attrs], out2)
+        fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
+        self.assertExpectedInline(fx_g.code, """\
+
+
+
+def forward(self, x_a_1, x_b_1, y_1):
+    mul = torch.ops.aten.mul.Tensor(x_a_1, y_1);  x_a_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(x_b_1, y_1);  x_b_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, y_1);  y_1 = None
+    return (mul, mul_1, add)
+    """)
 
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
@@ -1862,6 +1893,40 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
     def test_standard_is_not_subclass(self):
         # https://github.com/pytorch/pytorch/issues/79079
         self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
+
+    def test_sym_sizes_strides_slow_path(self):
+        class TestTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, (0,), dispatch_sizes_strides_policy="sizes")
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func in (
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.sym_stride.default
+                ):
+                    from torch._dynamo.source import ConstantSource
+                    from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+                    shape_env = ShapeEnv()
+                    si = shape_env.create_symintnode(
+                        shape_env.create_symbol(
+                            123,
+                            source=ConstantSource("abc"),
+                            dynamic_dim=DimDynamic.DUCK,
+                            constraint_dim=None,
+                        ),
+                        hint=123
+                    )
+                    return (si,)
+
+        t = TestTensor()
+        si = t.size()[0]
+        self.assertIsInstance(si, torch.SymInt)
+        si = t.stride()[0]
+        self.assertIsInstance(si, torch.SymInt)
 
     def test_strides_slow_path(self):
         for use_wrapper_subclass in [True, False]:
