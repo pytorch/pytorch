@@ -1038,8 +1038,17 @@ def reduction_num_outputs(reduction_type):
 def is_dynamic(*args):
     from . import ir
 
-    return any(
-        isinstance(t, ir.TensorBox)
-        and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-        for t in args
-    )
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if any(s.free_symbols for s in t.data.get_size()):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size")
+            if any(s.free_symbols for s in t.get_size()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise ValueError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
