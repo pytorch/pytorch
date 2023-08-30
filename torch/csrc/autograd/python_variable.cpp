@@ -702,7 +702,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     Storage storage{
         Storage::use_byte_size_t{},
         0,
-        at::DataPtr{},
+        at::DataPtr{nullptr, r.device(7)},
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizeable=*/true};
 
@@ -720,9 +720,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      TORCH_CHECK(
-          false,
-          "Setting sizes_strides_policy isn't supported for this overload")
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
     }
   }
 

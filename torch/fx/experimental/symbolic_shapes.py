@@ -3357,9 +3357,6 @@ class ShapeEnv:
                     self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
-            except RecursionError:
-                self.counter["sympy_recursion_error"] += 1
-                self.log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
         if expr.has(Mod):
             mod_expr = tuple(expr.atoms(Mod))[0]
             try:
