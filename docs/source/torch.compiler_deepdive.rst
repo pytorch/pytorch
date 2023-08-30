@@ -232,7 +232,7 @@ If you know python bytecode, you can understand the above output. There is also 
    print("compiled code:")
    print(decompile(code))
 
-The output is something like the following:
+The output is:
 
 ::
 
