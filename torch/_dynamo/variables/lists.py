@@ -15,7 +15,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields, product
+from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -541,9 +541,9 @@ class SizeVariable(TupleVariable):
     def unpack_var_sequence(self, tx):
         return [x.add_options(self) for x in self.items]
 
-    def numel(self):
-        from .tensor import SymNodeVariable
+    def numel(self, tx):
         from .builtin import BuiltinVariable
+        from .tensor import SymNodeVariable
 
         const_result = 1
         sym_sizes = []
@@ -582,7 +582,8 @@ class SizeVariable(TupleVariable):
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            return self.numel()
+            assert not args and not kwargs
+            return self.numel(tx)
 
         return super().call_method(tx, name, args, kwargs)
 
