@@ -4,6 +4,10 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+retry () {
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+}
+
 # A bunch of custom pip dependencies for ONNX
 pip_install \
   beartype==0.10.4 \
@@ -12,24 +16,32 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4 \
-  onnx==1.14.0
+  numpy==1.22.4
 
+# ONNXRuntime should be installed before installing
+# onnx-weekly. Otherwise, onnx-weekly could be
+# overwritten by onnx.
 pip_install \
-  onnxruntime==1.15.0 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
-  transformers==4.25.1
+  transformers==4.31.0
 
-# TODO: change this when onnx-script is on testPypi
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@7e131c578f290ffad1f26bacda11a83daf5476ba"
+pip_install coloredlogs packaging
+retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
+
+# Using 1.15dev branch for the following not yet released features and fixes.
+# - Segfault fix for shape inference.
+# - Inliner to workaround ORT segfault.
+pip_install -i https://test.pypi.org/simple/ onnx==1.14.1rc2
+
+pip_install onnxscript-preview==0.1.0.dev20230825 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu

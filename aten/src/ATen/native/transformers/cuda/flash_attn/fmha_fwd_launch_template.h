@@ -12,6 +12,8 @@
 #include <ATen/native/transformers/cuda/flash_attn/static_switch.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_fprop_kernel_1xN.h>
 
+namespace pytorch_fmha {
+
 // Find the number of splits that maximizes the occupancy. For example, if we have
 // batch * n_heads = 48 and we have 108 SMs, having 2 splits (efficiency = 0.89) is
 // better than having 3 splits (efficiency = 0.67). However, we also don't want too many
@@ -90,3 +92,5 @@ void run_fmha_fwd_loop(Launch_params<FMHA_fprop_params> &launch_params) {
         FMHA_CHECK_CUDA(cudaPeekAtLastError());
     }));
 }
+
+}; // namespace pytorch_fmha

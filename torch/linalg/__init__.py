@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -648,6 +647,13 @@ The eigenvalues are returned in ascending order.
              :math:`\lambda_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
 
+.. warning:: User may see pytorch crashes if running `eigh` on CUDA devices with CUDA versions before 12.1 update 1
+             with large ill-conditioned matrices as inputs.
+             Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
+             If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
+             or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
+             try other supported backends.
+
 .. seealso::
 
         :func:`torch.linalg.eigvalsh` computes only the eigenvalues of a Hermitian matrix.
@@ -871,8 +877,8 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -920,8 +926,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -2590,7 +2596,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inverse(A)
+    >>> Ainv = torch.linalg.inv(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

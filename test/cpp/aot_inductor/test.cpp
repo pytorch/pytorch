@@ -3,8 +3,8 @@
 #include <vector>
 
 #include <c10/cuda/CUDAStream.h>
+#include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/torch.h>
-#include "aot_inductor_interface.h"
 
 namespace torch {
 namespace aot_inductor {
@@ -23,17 +23,28 @@ TEST(AotInductorTest, BasicTest) {
   Net net;
   net.to(torch::kCUDA);
 
+  // We should fix the weight over here.
+  // This should match exactly with the one in test.py
+  torch::Tensor weights =
+      at::arange(640, at::dtype(at::kFloat).device(at::kCUDA));
+  weights = at::reshape(weights, {10, 64});
+  torch::Tensor bias = at::zeros({10}, at::dtype(at::kFloat).device(at::kCUDA));
+
+  for (const auto& pair : net.named_parameters()) {
+    if (pair.key().find("weight") != std::string::npos) {
+      pair.value().copy_(weights);
+    } else if (pair.key().find("bias") != std::string::npos) {
+      pair.value().copy_(bias);
+    }
+  }
+
   torch::Tensor x =
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor y =
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor results_ref = net.forward(x, y);
 
-  // TODO: we need to provide an API to concatenate args and weights
   std::vector<torch::Tensor> inputs;
-  for (const auto& pair : net.named_parameters()) {
-    inputs.push_back(pair.value());
-  }
   inputs.push_back(x);
   inputs.push_back(y);
 

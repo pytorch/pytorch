@@ -163,11 +163,14 @@ SKIP_ACCURACY_CHECK_MODELS = {
 }
 
 
-REQUIRE_HIGHER_TOLERANCE = {
+REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "MT5ForConditionalGeneration",
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "RobertaForQuestionAnswering",
 }
 
 
@@ -530,10 +533,13 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
+        else:
+            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):

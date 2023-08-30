@@ -128,7 +128,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 }
 
 void InputOutputEncoder::push(const at::Tensor& t) {
-  if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
+  // TODO fix nested and symbolic sizes
+  if (t.defined() && !t.is_nested() &&
+      !t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     tags_.emplace_back(Tag::Tensor);
     tensor_metadata_.emplace_back(t);
     tensor_sizes_strides_.copy(t.sizes());
@@ -155,7 +157,7 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.size() == 0)) {
+  if (C10_UNLIKELY(list_ref.empty())) {
     return true;
   }
   if (C10_UNLIKELY(!list_ref[0].isScalar())) {
@@ -201,7 +203,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       if (io_type == tagToIOType(tag)) {
         out.push_back(std::move(input));
       } else {
-        out.push_back(c10::nullopt);
+        out.emplace_back(c10::nullopt);
       }
     };
 
@@ -214,11 +216,20 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
 
         case Tag::TensorListBegin: {
           std::vector<TensorMetadata> arg;
+          bool found_undefined = false;
           while (*(++tag_it) != Tag::TERMINATOR) {
+            if (*tag_it == Tag::UndefinedTensor) {
+              found_undefined = true;
+              continue;
+            }
             TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
             arg.emplace_back(decode_tensor());
           }
-          push_value(Tag::TensorListBegin, std::move(arg));
+          if (found_undefined) {
+            push_value(*tag_it, c10::nullopt);
+          } else {
+            push_value(Tag::TensorListBegin, std::move(arg));
+          }
         } break;
 
         case Tag::ScalarList:
@@ -296,8 +307,8 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event;
-  uint64_t corr_id;
+  KinetoObserverContext::Event* event = nullptr;
+  uint64_t corr_id = 0;
   std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
       fn.seqNr(),
       fn.forwardThreadId(),
@@ -387,7 +398,7 @@ struct StealOrDefault {
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
@@ -454,7 +465,7 @@ void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   for (const auto& i : raw_events) {
@@ -1347,7 +1358,7 @@ RecordQueue::getRecords(
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
-        time_t start_time_ns;
+        time_t start_time_ns = 0;
         if constexpr (std::is_same_v<
                           std::remove_reference_t<decltype(i)>,
                           ExtraFields<EventType::Backend>>) {
@@ -1456,6 +1467,25 @@ void set_fwd_bwd_enabled_fn(std::function<bool()> fn) {
 
 void set_fwd_bwd_enabled_val(bool val) {
   fwd_bwd_enabled_fn() = [val]() { return val; };
+}
+
+namespace {
+std::function<bool()>& cuda_sync_enabled_fn() {
+  static std::function<bool()> fn = []() { return false; };
+  return fn;
+}
+} // namespace
+
+bool get_cuda_sync_enabled() {
+  return cuda_sync_enabled_fn()();
+}
+
+void set_cuda_sync_enabled_fn(std::function<bool()> fn) {
+  cuda_sync_enabled_fn() = std::move(fn);
+}
+
+void set_cuda_sync_enabled_val(bool val) {
+  cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
 } // namespace impl

@@ -2,15 +2,17 @@
 # (https://github.com/ericjang/maml-jax).
 # We translated his implementation from JAX to PyTorch.
 
-from functorch import grad, vmap, make_functional
-import matplotlib.pyplot as plt
 import math
-import torch
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from functorch import grad, make_functional, vmap
 from torch import nn
 from torch.nn import functional as F
-import matplotlib as mpl
-mpl.use('Agg')
+
+mpl.use("Agg")
 
 
 class ThreeLayerNet(nn.Module):
@@ -29,6 +31,7 @@ class ThreeLayerNet(nn.Module):
         x = self.relu2(x)
         x = self.fc3(x)
         return x
+
 
 # TODO: Use F.mse_loss
 
@@ -51,17 +54,18 @@ def sample_tasks(outer_batch_size, inner_batch_size):
     As = []
     phases = []
     for _ in range(outer_batch_size):
-        As.append(np.random.uniform(low=0.1, high=.5))
-        phases.append(np.random.uniform(low=0., high=np.pi))
+        As.append(np.random.uniform(low=0.1, high=0.5))
+        phases.append(np.random.uniform(low=0.0, high=np.pi))
 
     def get_batch():
         xs, ys = [], []
         for A, phase in zip(As, phases):
-            x = np.random.uniform(low=-5., high=5., size=(inner_batch_size, 1))
+            x = np.random.uniform(low=-5.0, high=5.0, size=(inner_batch_size, 1))
             y = A * np.sin(x + phase)
             xs.append(x)
             ys.append(y)
         return torch.tensor(xs, dtype=torch.float), torch.tensor(ys, dtype=torch.float)
+
     x1, y1 = get_batch()
     x2, y2 = get_batch()
     return x1, y1, x2, y2
@@ -91,7 +95,7 @@ for it in range(20000):
     opt.step()
 
     if it % 100 == 0:
-        print('Iteration %d -- Outer Loss: %.4f' % (it, loss2))
+        print("Iteration %d -- Outer Loss: %.4f" % (it, loss2))
     losses.append(loss2.detach())
 
 t_A = torch.tensor(0.0).uniform_(0.1, 0.5)
@@ -116,11 +120,11 @@ test_y = t_A * torch.sin(test_x + t_b)
 
 test_f = net(t_params, test_x)
 
-plt.plot(test_x.data.numpy(), test_y.data.numpy(), label='sin(x)')
-plt.plot(test_x.data.numpy(), test_f.data.numpy(), label='net(x)')
-plt.plot(t_x.data.numpy(), t_y.data.numpy(), 'o', label='Examples')
+plt.plot(test_x.data.numpy(), test_y.data.numpy(), label="sin(x)")
+plt.plot(test_x.data.numpy(), test_f.data.numpy(), label="net(x)")
+plt.plot(t_x.data.numpy(), t_y.data.numpy(), "o", label="Examples")
 plt.legend()
-plt.savefig('maml-sine.png')
+plt.savefig("maml-sine.png")
 plt.figure()
-plt.plot(np.convolve(losses, [.05] * 20))
-plt.savefig('losses.png')
+plt.plot(np.convolve(losses, [0.05] * 20))
+plt.savefig("losses.png")

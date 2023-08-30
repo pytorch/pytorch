@@ -500,11 +500,16 @@ lazy_tensor_core_python_sources = [
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
+inductor_core_resources = [
+    "torch/csrc/inductor/inductor_ops.cpp",
+]
+
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
+    inductor_core_resources +
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )
@@ -523,6 +528,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
+    "torch/csrc/distributed/c10d/TCPStoreBackend.cpp",
+    "torch/csrc/distributed/c10d/TCPStoreLibUvBackend.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
@@ -822,6 +829,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
     "torch/csrc/dynamo/guards.cpp",
@@ -953,6 +961,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
     "aten/src/ATen/record_function.cpp",
@@ -967,6 +976,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
     "aten/src/ATen/detail/ORTHooksInterface.h",
+    "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
 ]
@@ -1116,6 +1126,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
     "aten/src/ATen/native/cpu/DistributionKernels.cpp",
+    "aten/src/ATen/native/cpu/FlashAttentionKernel.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
@@ -1379,6 +1390,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseBinaryOpIntersectionKernel.cpp",
     "aten/src/ATen/native/sparse/FlattenIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
+    "aten/src/ATen/native/transformers/sdp_utils_cpp.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",

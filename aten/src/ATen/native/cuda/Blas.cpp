@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -81,6 +82,35 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
+struct cublasCommonArgs {
+  cublasCommonArgs(const Tensor& mat1, const Tensor& mat2, Tensor& c) {
+    bool transpose_result, transpose_mat1, transpose_mat2;
+    result = prepare_matrix_for_cublas(c, transpose_result);
+    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+    auto mat1_sizes = mat1.sizes();
+    auto mat2_sizes = mat2.sizes();
+    if (transpose_result) {
+      transpose_mat1 = !transpose_mat1;
+      transpose_mat2 = !transpose_mat2;
+      mat1_sizes = mata->sizes();
+      mat2_sizes = matb->sizes();
+    }
+
+    m = mat1_sizes[transpose_result ? 1 : 0];
+    k = mat1_sizes[transpose_result ? 0 : 1];
+    n = mat2_sizes[transpose_result ? 0 : 1];
+    lda = mata->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+    ldb = matb->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+    result_ld = result->stride(transpose_result ? 0 : 1);
+    transa = transpose_mat1 ?  mata->is_conj() ? 'c' : 't' : 'n';
+    transb = transpose_mat2 ?  matb->is_conj() ? 'c' : 't' : 'n';
+  }
+  char transa, transb;
+  int64_t m, n, k;
+  int64_t lda, ldb, result_ld;
+  c10::MaybeOwned<Tensor> mata, matb, result;
+};
 } // namespace
 
 c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
@@ -156,8 +186,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
   )
 
-  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
-  checkAllSameGPU(__func__, args);
+  TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
+  checkAllSameGPU(__func__, targs);
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
@@ -223,26 +253,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     return result;
   }
 
-  bool transpose_result;
-  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
-  bool transpose_mat1;
-  bool transpose_mat2;
-  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
-  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
-
-  if (transpose_result) {
-    transpose_mat1 = !transpose_mat1;
-    transpose_mat2 = !transpose_mat2;
-    mat1_sizes = mat1_->sizes();
-    mat2_sizes = mat2_->sizes();
-  }
-
-  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
-  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
-  int64_t n = mat2_sizes[transpose_result ? 0 : 1];
-  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
-  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
-  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
+  cublasCommonArgs args(mat1, mat2, result);
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -263,7 +274,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             c10::nullopt /* pin_memory */));
   }
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
@@ -274,19 +285,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         "addmm_cuda_lt",
         [&] {
           at::cuda::blas::gemm_and_bias<scalar_t>(
-              transpose_mat1,
-              transpose_mat2,
-              m,
-              n,
-              k,
+              args.transa == 't',
+              args.transb == 't',
+              args.m,
+              args.n,
+              args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
-              mat1_->data_ptr<scalar_t>(),
-              mat1_ld,
-              mat2_->data_ptr<scalar_t>(),
-              mat2_ld,
+              args.mata->data_ptr<scalar_t>(),
+              args.lda,
+              args.matb->data_ptr<scalar_t>(),
+              args.ldb,
               self.const_data_ptr<scalar_t>(),
-              result_->data_ptr<scalar_t>(),
-              result_ld,
+              args.result->data_ptr<scalar_t>(),
+              args.result_ld,
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
               activation_to_gemm_and_blas_arg(activation)
 #else
@@ -312,30 +323,30 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_t alpha_val = alpha.to<opmath_t>();
           opmath_t beta_val = beta.to<opmath_t>();
-          const scalar_t* mat1_ptr = mat1_->const_data_ptr<scalar_t>();
-          const scalar_t* mat2_ptr = mat2_->const_data_ptr<scalar_t>();
-          scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
+          const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
+          scalar_t* result_ptr = args.result->mutable_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
-              transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
-              transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
-              m,
-              n,
-              k,
+              args.transa,
+              args.transb,
+              args.m,
+              args.n,
+              args.k,
               alpha_val,
               mat1_ptr,
-              mat1_ld,
+              args.lda,
               mat2_ptr,
-              mat2_ld,
+              args.ldb,
               beta_val,
               result_ptr,
-              result_ld);
+              args.result_ld);
         });
     switch (activation) {
       case Activation::RELU:
-        at::relu_(const_cast<Tensor&>(*result_));
+        at::relu_(const_cast<Tensor&>(*args.result));
         break;
       case Activation::GELU:
-        at::gelu_(const_cast<Tensor&>(*result_), "tanh");
+        at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
         break;
       default: break;
     }
@@ -347,12 +358,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // epilogue above.
 #if !defined(CUDA_VERSION) || CUDA_VERSION < 11080
   if (useLtInterface && activation == Activation::GELU) {
-    at::gelu_(const_cast<Tensor&>(*result_), "tanh");
+    at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
 #endif
 
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
+  if (!result.is_same(*args.result)) {
+    result.copy_(*args.result);
   }
   return result;
 }
@@ -668,46 +679,24 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION == 11070
-  auto mat1 = self;
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-  bool transpose_result;
-  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
-  bool transpose_mat1;
-  bool transpose_mat2;
-  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
-  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
-
-  if (transpose_result) {
-    transpose_mat1 = !transpose_mat1;
-    transpose_mat2 = !transpose_mat2;
-    mat1_sizes = mat1_->sizes();
-    mat2_sizes = mat2_->sizes();
-  }
-
-  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
-  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
-  int64_t n = mat2_sizes[transpose_result ? 0 : 1];
-  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
-  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
-  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION >= 11070
+  cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(
-      transpose_mat1,
-      transpose_mat2,
-      m,
-      n,
-      k,
-      mat1_->data_ptr<int8_t>(),
-      mat1_ld,
-      mat2_->data_ptr<int8_t>(),
-      mat2_ld,
-      result_->data_ptr<int32_t>(),
-      result_ld);
+      args.transa == 't',
+      args.transb == 't',
+      args.m,
+      args.n,
+      args.k,
+      args.mata->data_ptr<int8_t>(),
+      args.lda,
+      args.matb->data_ptr<int8_t>(),
+      args.ldb,
+      args.result->data_ptr<int32_t>(),
+      args.result_ld);
 
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
+  if (!result.is_same(*args.result)) {
+    result.copy_(*args.result);
   }
 #else
 #if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION)
@@ -723,6 +712,117 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cuda(self, mat2, result);
+}
+
+// Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
+// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
+// If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only works if matrices sizes are divisible by 32
+std::tuple<Tensor&, Tensor&>
+_scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
+          const c10::optional<at::Tensor>& bias,
+          c10::optional<c10::ScalarType> out_dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result,
+          Tensor& out, Tensor& amax) {
+  // Check sizes
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  TORCH_CHECK(!scale_a || (scale_a->numel() == 1 && scale_a->scalar_type() == kFloat),
+       "scale_a must be float scalar");
+  TORCH_CHECK(!scale_b || (scale_b->numel() == 1 && scale_b->scalar_type() == kFloat),
+       "scale_b must be a float scalar");
+  TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+       "scale_result must be a float scalar");
+  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
+       " but got ", bias->numel());
+  TORCH_CHECK(mat1.sizes()[0] % 16 == 0 && mat1.sizes()[1] % 16 == 0, "mat1 shape (", mat1.sizes()[0], "x",
+       mat1.sizes()[1], " must be divisible by 16");
+  TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
+       mat2.sizes()[1], " must be divisible by 16");
+  // Check types
+  TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
+  TORCH_CHECK(amax.scalar_type() == kFloat, "amax must be a float scalar");
+  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat1.scalar_type());
+  // Type restrictions imposed by CuBLASLt as of CUDA-12.1
+  TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
+        "Multiplication of two Float8_e5m2 matrices is not supported");
+  if (bias) {
+    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
+    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
+         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
+    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
+          bias->scalar_type() == ScalarType::BFloat16,
+          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
+          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+  }
+  {
+    auto bias_ = bias.value_or(Tensor());
+    auto scale_a_ = scale_a.value_or(Tensor());
+    auto scale_b_ = scale_b.value_or(Tensor());
+    auto scale_result_ = scale_result.value_or(Tensor());
+    TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3},
+                      {bias_, "bias", 4}, {scale_a_, "scale_a", 5}, {scale_b_, "scale_b", 6},
+                      {scale_result_, "scale_result", 7}};
+    checkAllSameGPU(__func__, targs);
+  }
+
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+  at::native::resize_output(amax, {});
+
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
+  cublasCommonArgs args(mat1, mat2, out);
+  const auto out_dtype_ = args.result->scalar_type();
+  TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  at::cuda::blas::scaled_gemm(
+      args.transa,
+      args.transb,
+      args.m,
+      args.n,
+      args.k,
+      args.mata->data_ptr(),
+      scale_a ? scale_a->data_ptr() : nullptr,
+      args.lda,
+      args.mata->scalar_type(),
+      args.matb->data_ptr(),
+      scale_b ? scale_b->data_ptr() : nullptr,
+      args.ldb,
+      args.matb->scalar_type(),
+      bias ? bias->data_ptr(): nullptr,
+      bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
+      args.result->data_ptr(),
+      scale_result ? scale_result->data_ptr() : nullptr,
+      args.result_ld,
+      out_dtype_,
+      amax.data_ptr());
+#else
+  TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
+#endif
+
+  return {out, amax};
+}
+
+std::tuple<Tensor, Tensor>
+_scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+          const c10::optional<at::Tensor>& bias,
+          c10::optional<c10::ScalarType> out_dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result) {
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
+  Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, out ,amax);
 }
 
 } // namespace at::native

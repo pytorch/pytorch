@@ -46,6 +46,7 @@ include(cmake/public/utils.cmake)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   include(cmake/CheckAbi.cmake)
   string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
+  string(APPEND CMAKE_CUDA_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
   else()
@@ -207,6 +208,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    USE_CUSPARSELT "Use cuSPARSELt" ON
+    "USE_CUDA" OFF)
+cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -340,6 +344,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(DEBUG_CUDA "When compiling DEBUG, also attempt to compile CUDA with debug flags (may cause nvcc to OOM)" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 cmake_dependent_option(
@@ -413,6 +418,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -428,8 +434,14 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
   set(USE_SYSTEM_PYBIND11 ON)
+  if(USE_NCCL)
+    set(USE_SYSTEM_NCCL ON)
+  endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
+  endif()
+  if(USE_ZSTD)
+    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -715,7 +727,13 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
-if(NOT MSVC)
+# Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
+cmake_dependent_option(
+  USE_MEM_EFF_ATTENTION
+  "Enable memory-efficient attention for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+
+if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
   # CUDA-12.1 crashes when trying to compile with --source-in-ptx
@@ -724,7 +742,7 @@ if(NOT MSVC)
     string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
     string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
   endif()
-endif(NOT MSVC)
+endif(DEBUG_CUDA)
 
 
 if(USE_FBGEMM)
@@ -900,6 +918,7 @@ if(NOT MSVC)
   endif()
   append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
@@ -1031,6 +1050,10 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
 
 if(USE_MIMALLOC)
+  set(MI_OVERRIDE OFF)
+  set(MI_BUILD_SHARED OFF)
+  set(MI_BUILD_OBJECT OFF)
+  set(MI_BUILD_TESTS OFF)
   add_definitions(-DUSE_MIMALLOC)
   add_subdirectory(third_party/mimalloc)
   include_directories(third_party/mimalloc/include)
@@ -1137,6 +1160,10 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
