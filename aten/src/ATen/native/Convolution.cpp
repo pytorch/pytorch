@@ -508,9 +508,6 @@ struct ConvParams {
     if (transposed && is_output_padding_big()) {
       return false;
     }
-    if (transposed && groups > 1 && at::symint::size<T>(input, 1) == groups) {
-      return false;
-    }
     if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
       return true;
     }
