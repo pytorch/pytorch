@@ -288,8 +288,8 @@ def vander(x: ArrayLike, N=None, increasing=False):
 
 
 def linspace(
-    start: ArrayLike,
-    stop: ArrayLike,
+    start: ArrayLikeOrScalar,
+    stop: ArrayLikeOrScalar,
     num=50,
     endpoint=True,
     retstep=False,
@@ -325,8 +325,8 @@ def geomspace(
 
 
 def logspace(
-    start,
-    stop,
+    start: ArrayLikeOrScalar,
+    stop: ArrayLikeOrScalar,
     num=50,
     endpoint=True,
     base=10.0,
