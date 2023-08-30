@@ -93,19 +93,21 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   --dim;
   int64_t tensor_dim = sizes.size(1);
   for (const auto split_idx : c10::irange(chunks)) {
-      auto new_sizes = sizes.clone() ;
-      auto new_strides = strides.clone();
-      // This copys offsets so we are safe to move
-      auto new_offsets = offsets.clone();
-      int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
-      // Get start val for each split
-      int64_t start_val = split_idx * split_size;
-      for (int64_t i : c10::irange(n_tensors)) {
-        const int64_t index = i * tensor_dim + dim;
-        new_offsets[i] = offsets_ptr[i] + start_val;
-        size_ptr[index] = split_size;
+    auto new_sizes = at::empty_like(sizes) ;
+    auto new_strides = at::empty_like(strides);
+    // This copys offsets so we are safe to move
+    auto new_offsets = at::empty_like(offsets);
+    int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
+    int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
+    // Get start val for each split
+    int64_t start_val = split_idx * split_size;
+    for (int64_t i : c10::irange(n_tensors)) {
+      const int64_t index = i * tensor_dim + dim;
+      new_offsets_ptr[i] = offsets_ptr[i] + start_val;
+      size_ptr[index] = split_size;
     }
-    splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
+    splits[split_idx] = create_nested_view_tensor(
+      self, std::move(new_sizes), std::move(new_strides), std::move(new_offsets));
   }
   return splits;
 }
@@ -149,18 +151,21 @@ std::vector<Tensor> split_with_sizes_nested(
   int64_t start_val = 0;
   for (const auto split_idx : c10::irange(num_splits)) {
     auto split_size = split_sizes[split_idx];
-    auto new_sizes = sizes.clone();
-    auto new_strides = strides.clone();
-    auto new_offsets = offsets.clone();
+    auto new_sizes = at::empty_like(sizes);
+    auto new_strides = at::empty_like(strides);
+    auto new_offsets = at::empty_like(offsets);
     int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
+    int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
+
     // Get start val for each split
     for (int64_t i : c10::irange(n_tensors)) {
       const int64_t index = i * tensor_dim + dim;
-      new_offsets[i] = offsets_ptr[i] + start_val;
+      new_offsets_ptr[i] = offsets_ptr[i] + start_val;
       size_ptr[index] = split_size;
     }
     start_val += split_size;
-    splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
+    splits[split_idx] = create_nested_view_tensor(
+      self, std::move(new_sizes), std::move(new_strides), std::move(new_offsets));
   }
   return splits;
 }
