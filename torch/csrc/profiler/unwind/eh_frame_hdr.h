@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include <ostream>
+#include <iostream>
 
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>

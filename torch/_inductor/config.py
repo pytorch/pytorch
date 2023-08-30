@@ -74,6 +74,9 @@ force_mixed_mm = False
 # If not specified, a temp directory will be created under the default caching path
 aot_inductor_output_path = ""
 
+# TODO: capture whether the graph is from export
+from_export = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -137,6 +140,10 @@ implicit_fallbacks = True
 
 # fuse even in cases without common reads
 aggressive_fusion = False
+
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64

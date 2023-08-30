@@ -237,6 +237,18 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual(amaxb_fp8.item(), 3.0)
 
+    def test_float32_output_errors_with_bias(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
+        y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
+        bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Bias is not supported when out_dtype is set to Float32",
+            lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
+        )
+
+
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
