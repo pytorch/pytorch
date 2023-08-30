@@ -4804,13 +4804,13 @@ def linspace(
             start.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        start = _maybe_convert_to_dtype(start, dtype)
+        start = _maybe_convert_to_dtype(start, torch.float64)
     if isinstance(end, TensorLikeType):
         torch._check(
             end.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        end = _maybe_convert_to_dtype(end, dtype)
+        end = _maybe_convert_to_dtype(end, torch.float64)
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
@@ -4845,9 +4845,10 @@ def linspace(
     if steps == 0:
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
-        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    if start == end:
-        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+        if isinstance(start, TensorLikeType):
+            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+        else:
+            return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
     # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
