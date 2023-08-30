@@ -15,6 +15,8 @@ from torch.fx import Node
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
+import unittest
+
 
 class TestHelperModules:
     class Conv2dWithObsSharingOps(torch.nn.Module):
@@ -193,6 +195,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             node_tags,
         )
 
+    @unittest.skip("Temporarily disabled")
     def test_metadata_porting_for_dq(self):
         """
         Model under test

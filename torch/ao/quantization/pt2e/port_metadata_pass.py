@@ -1,17 +1,17 @@
 import logging
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch._export.error import InternalError
 from torch._export.pass_base import _ExportPassBase
 
-from torch.ao.quantization.quantizer import QuantizationAnnotation, QuantizationSpecBase
-
 from torch.ao.quantization.pt2e.utils import (
-    _filter_sym_size_users,
-    _find_q_dq_node_for_user,
-    _is_valid_annotation,
+    filter_sym_size_users,
+    find_q_dq_node_for_user,
+    is_valid_annotation,
 )
+
+from torch.ao.quantization.quantizer import QuantizationSpecBase
 
 from torch.fx.passes.infra.pass_base import PassResult
 
@@ -83,12 +83,12 @@ def _port_metadata_for_input_quant_nodes(
         choose_qparams_node = _find_choose_qparams_node(input_node)
         if choose_qparams_node is None:
             raise ValueError(f"No chose qparams node found for {node}")
-        choose_qparam_users = _filter_sym_size_users(choose_qparams_node)
+        choose_qparam_users = filter_sym_size_users(choose_qparams_node)
         if len(choose_qparam_users) != 2:
             raise InternalError(f"Expecting exactly two user for {choose_qparams_node}")
         scale_node = choose_qparam_users.pop()
         dynamic_q_node = list(scale_node.users.keys())[0]
-        dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
+        dynamic_q_node_users = filter_sym_size_users(dynamic_q_node)
         if len(dynamic_q_node_users) > 1:
             raise InternalError(f"Expecting single user for {dynamic_q_node}")
         dynamic_dq_node = dynamic_q_node_users.pop()
@@ -96,7 +96,7 @@ def _port_metadata_for_input_quant_nodes(
         _add_metadata(dynamic_q_node, node)
         _add_metadata(dynamic_dq_node, node)
     else:
-        q_node, dq_node = _find_q_dq_node_for_user(input_node, node)
+        q_node, dq_node = find_q_dq_node_for_user(input_node, node)
         if q_node is None or dq_node is None:
             return
         _add_metadata(dq_node, node)
@@ -108,13 +108,13 @@ def _port_metadata_for_output_quant_nodes(
     if qspec is None:
         return
 
-    node_users = _filter_sym_size_users(node)
+    node_users = filter_sym_size_users(node)
     if len(node_users) != 1:
         raise InternalError(f"Expecting {node} to have single user")
     q_node = node_users.pop()
     if q_node.op != "call_function" or q_node.target not in _QUANTIZE_OPS:
         logger.warning(
-                f"Expecting {node} user to be a quantized op but got {q_node}"  # noqa: G004
+            f"Expecting {node} user to be a quantized op but got {q_node}"  # noqa: G004
         )  # noqa: G004
         return
 
@@ -172,7 +172,7 @@ class PortNodeMetaForQDQ(_ExportPassBase):
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             annotation = node.meta.get("quantization_annotation", None)
-            if _is_valid_annotation(annotation):
+            if is_valid_annotation(annotation):
                 input_qspec_map = node.meta["quantization_annotation"].input_qspec_map
                 output_qspec = node.meta["quantization_annotation"].output_qspec
                 for input_node, qspec in input_qspec_map.items():
