@@ -1304,6 +1304,18 @@ class Scheduler:
         node_list_1 = node1.get_nodes()
         node_list_2 = node2.get_nodes()
         node_list_fused = node_list_1 + node_list_2
+
+        # We can not accurately benchmark kernel using atomic_add
+        # due to how we generate random integer inputs.
+        # Skip benchmarking them by allowing fusion.
+        if any(
+            hasattr(n.node, "data")
+            and hasattr(n.node.data, "scatter_mode")
+            and n.node.data.scatter_mode == "atomic_add"
+            for n in node_list_fused
+        ):
+            return True
+
         ms1 = self.benchmark_fused_nodes(node_list_1)
         ms2 = self.benchmark_fused_nodes(node_list_2)
         ms_fused = self.benchmark_fused_nodes(node_list_fused)

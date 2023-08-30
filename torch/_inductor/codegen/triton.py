@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 from typing import Dict, Iterable, List, Set
 
 import sympy
@@ -2746,11 +2747,31 @@ class TritonScheduling(BaseScheduling):
         with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
         mod = PyCodeCache.load(src_code)
+
+        def cache_file_path():
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return float(fd.read())
+            return None
+
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
+                fd.write(str(ms))
+
         log.debug(
             "kernel src code for %s written to: %s",
             {n.get_name() for n in nodes},
             mod.__file__,
         )
+        ms = load_cache()
+        if ms is not None:
+            return ms
+
         args = mod.get_args()
         call = mod.call
         ms = do_bench(lambda: call(args))
@@ -2759,6 +2780,7 @@ class TritonScheduling(BaseScheduling):
             {n.get_name() for n in nodes},
             ms,
         )
+        store_cache()
         return ms
 
 
