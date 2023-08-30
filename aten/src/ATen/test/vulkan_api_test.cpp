@@ -616,6 +616,26 @@ TEST_F(VulkanAPITest, addmm_expand) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, addmm_expand2) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({17, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({6, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, avg_pool2d) {
   const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::avg_pool2d(in_cpu, {5, 3}, {1, 2}, {2, 0}, true);
@@ -6495,16 +6515,40 @@ void test_linear(
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, linear_2d) {
+TEST_F(VulkanAPITest, linear_2d_flat) {
   test_linear({1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_3d) {
+TEST_F(VulkanAPITest, linear_2d_small) {
+  test_linear({2, 3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_2d_large) {
+  test_linear({49, 37}, {23, 37}, {23});
+}
+
+TEST_F(VulkanAPITest, linear_3d_flat) {
   test_linear({1, 1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_4d) {
+TEST_F(VulkanAPITest, linear_3d_small) {
+  test_linear({2, 3, 4}, {5, 4}, {5});
+}
+
+TEST_F(VulkanAPITest, linear_3d_large) {
+  test_linear({23, 17, 41}, {15, 41}, {15});
+}
+
+TEST_F(VulkanAPITest, linear_4d_flat) {
   test_linear({1, 1, 1, 37}, {41, 37}, {41});
+}
+
+TEST_F(VulkanAPITest, linear_4d_small) {
+  test_linear({2, 3, 4, 5}, {6, 5}, {6});
+}
+
+TEST_F(VulkanAPITest, linear_4d_large) {
+  test_linear({9, 13, 11, 17}, {23, 17}, {23});
 }
 
 TEST_F(VulkanAPITest, lstm_success) {
