@@ -1544,6 +1544,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_unique_f16(self):
+        @torch.compile
+        def fn():
+            x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
+            return np.unique(x)
+
+        result = fn()
+        self.assertEqual(result, np.array([1, 2, 3], dtype=np.float16))
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
