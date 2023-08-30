@@ -3908,7 +3908,9 @@ def scaled_dot_product_flash_attention(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
     )
-    torch._check(return_debug_mask == False, lambda: "return_debug_mask is not supported.")
+    torch._check(
+        return_debug_mask is False, lambda: "return_debug_mask is not supported."
+    )
 
     logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
     cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
@@ -3927,7 +3929,17 @@ def scaled_dot_product_flash_attention(
     output, _ = aten._scaled_dot_product_attention_math.default(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
-    return (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
+    return (
+        output,
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask,
+    )
 
 
 def register_inplace(aten_op, outplace_op):
