@@ -978,8 +978,8 @@ def flatnonzero(a: ArrayLike):
 
 def clip(
     a: ArrayLike,
-    min: Optional[ArrayLike] = None,
-    max: Optional[ArrayLike] = None,
+    min: Optional[ArrayLikeOrScalar] = None,
+    max: Optional[ArrayLikeOrScalar] = None,
     out: Optional[OutArray] = None,
 ):
     return torch.clamp(a, min, max)
