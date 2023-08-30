@@ -31,9 +31,6 @@ pip_install \
 pip_install coloredlogs packaging
 retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
 
-pip_install coloredlogs packaging
-retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
-
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.
 # - Inliner to workaround ORT segfault.
