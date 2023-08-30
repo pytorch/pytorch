@@ -797,7 +797,7 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
                 record_hook_proxy = tx.output.create_proxy(
                     "call_function", record_hook_fn, (self.as_proxy(), hook_proxy), {}
                 )
-                self.as_proxy().register_hook(hook_proxy)
+                # self.as_proxy().register_hook(hook_proxy)
             else:
                 fn_var.source = src
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
