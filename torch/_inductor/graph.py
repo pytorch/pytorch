@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
@@ -189,7 +189,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -242,6 +242,15 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # Currently on ROCm we are seeing some slow downs in gcnArch that do not
+        # have optimal NHWC implementations. On ROCm MI200 series we will
+        # default to the enforced last channels behavior, but on non-MI200 series
+        # we will disable the forced layout.
+        if torch.version.hip and torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            if not re.search(r"MI2\d\d", gpu_name):
+                return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
         if (
@@ -423,7 +432,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_dtype()
-        m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
+        m = re.match(r"(as_strided|reinterpret_tensor)\(([a-zA-Z0-9_]+),", buffer_name)
         if m:
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
@@ -494,9 +503,9 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data):
-        def allocate():
-            for name, value in self.constants.items():
+    def add_tensor_constant(self, data, name=None):
+        def allocate(name):
+            for constant_name, value in self.constants.items():
                 if (
                     not data.is_mkldnn
                     and data.size() == value.size()
@@ -505,17 +514,21 @@ class GraphLowering(torch.fx.Interpreter):
                     and data.device == value.device
                     and torch.eq(data, value).all()
                 ):
-                    return name
-            name = f"constant{len(self.constants)}"
+                    return constant_name
+
+            if name is None:
+                name = f"constant{len(self.constants)}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
             ).hexdigest()
             return name
 
+        name = allocate(name)
+
         return TensorBox.create(
             ir.ConstantBuffer(
-                allocate(),
+                name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -610,7 +623,7 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr(self.module, target)
 
         if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
+            return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
@@ -621,7 +634,7 @@ class GraphLowering(torch.fx.Interpreter):
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value)
+        return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()
@@ -779,6 +792,9 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
                                 torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.onednn.qconv2d_pointwise.default,
+                                torch.ops.onednn.qconv2d_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]

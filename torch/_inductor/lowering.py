@@ -195,9 +195,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
-                if arg.get_dtype() != dtype:
-                    return to_dtype(arg, dtype)
-                return arg
+                return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
@@ -496,10 +494,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
-        return clone(x)
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -507,10 +504,14 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
+def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    return to_dtype(x, dtype, copy=True)
+
+
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
@@ -531,12 +532,21 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
-@register_lowering(prims.device_put, type_promotion_kind=None)
-def to_device(x: TensorBox, device: torch.device):
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    return to_dtype_bitcast(x, dtype, copy=True)
+
+
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
-        return clone(x)
+        return clone(x) if copy else x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(prims.device_put, type_promotion_kind=None)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -928,6 +938,15 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    if all(input.get_dtype() is torch.uint8 for input in inputs):
+        # TODO <leslie> Remove this fallback when we support vectorization
+        # code gen with uint8 data type directly.
+        for input in inputs:
+            input.realize()
+        if all(len(input.layout.size) == 4 for input in inputs):
+            inputs, _ = require_channels_last(aten.cat, *inputs)
+        return fallback_handler(aten.cat)(inputs, dim)
+
     if len(inputs) == 1:
         return clone(inputs[0])
 
@@ -1106,6 +1125,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._convolution_transpose_pointwise,
             torch.ops.mkldnn._linear_pointwise,
             aten.mkldnn_rnn_layer.default,
+            torch.ops.onednn.qconv2d_pointwise,
         ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
@@ -1285,6 +1305,136 @@ def register_onednn_fusion_ops():
                     batch_first,
                     train,
                 ),
+            )
+
+        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        def qconvolution_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
+        )
+        def qconvolution_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            accum: TensorBox,
+            accum_scale,
+            accum_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    accum,
+                    accum_scale,
+                    accum_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
+        @register_lowering(torch.ops.onednn.qlinear_pointwise, type_promotion_kind=None)
+        def qlinear_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QLinearPointwisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
             )
 
         if torch._C.has_mkl:
@@ -1467,7 +1617,6 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
     if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
@@ -1673,6 +1822,13 @@ def require_dense(_, *args, **kwargs):
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_channels_last(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
     )
     return args, kwargs
 
@@ -4610,3 +4766,7 @@ except ImportError:
 from . import kernel
 
 import_submodule(kernel)
+
+from . import quantized_lowerings
+
+quantized_lowerings.register_quantized_ops()

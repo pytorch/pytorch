@@ -13,11 +13,17 @@ from torch.testing._internal.common_utils import *  # noqa: F403
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.multiprocessing.reductions import StorageWeakRef
 
 import logging
 import sys
@@ -562,7 +568,6 @@ class TestPythonRegistration(TestCase):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
 
-
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -893,6 +898,36 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_make_fx_with_subclass(self) -> None:
+        def f(x, y):
+            # Returns (TwoTensor, Tensor)
+            return x * y, y + y
+        x_a = torch.zeros(4)
+        x_b = torch.zeros(4)
+        y = torch.ones(4)
+
+        # make_fx() is not responsible for unwrapping tensor subclass inputs,
+        # so we do it manually here.
+        # Why? In general, make_fx(f)(*args) promises that the graph returned has the same calling
+        # convention as f(*args). Unwrapping tensor subclass inputs can potentially change
+        # the number of input args to the graph, breaking that assumption
+        def f_to_trace(x_a, x_b, y):
+            x = TwoTensor(x_a, x_b)
+            out1, out2 = f(x, y)
+            out1_unwrapped_attrs, _ = out1.__tensor_flatten__()
+            return (*[getattr(out1, attr) for attr in out1_unwrapped_attrs], out2)
+        fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
+        self.assertExpectedInline(fx_g.code, """\
+
+
+
+def forward(self, x_a_1, x_b_1, y_1):
+    mul = torch.ops.aten.mul.Tensor(x_a_1, y_1);  x_a_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(x_b_1, y_1);  x_b_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, y_1);  y_1 = None
+    return (mul, mul_1, add)
+    """)
 
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
@@ -1864,6 +1899,40 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         # https://github.com/pytorch/pytorch/issues/79079
         self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
 
+    def test_sym_sizes_strides_slow_path(self):
+        class TestTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, (0,), dispatch_sizes_strides_policy="sizes")
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func in (
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.sym_stride.default
+                ):
+                    from torch._dynamo.source import ConstantSource
+                    from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+                    shape_env = ShapeEnv()
+                    si = shape_env.create_symintnode(
+                        shape_env.create_symbol(
+                            123,
+                            source=ConstantSource("abc"),
+                            dynamic_dim=DimDynamic.DUCK,
+                            constraint_dim=None,
+                        ),
+                        hint=123
+                    )
+                    return (si,)
+
+        t = TestTensor()
+        si = t.size()[0]
+        self.assertIsInstance(si, torch.SymInt)
+        si = t.stride()[0]
+        self.assertIsInstance(si, torch.SymInt)
+
     def test_strides_slow_path(self):
         for use_wrapper_subclass in [True, False]:
             class StridesNotImplemented(torch.Tensor):
@@ -1960,6 +2029,53 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
 
+    def test_custom_size_policy_dynamic_shapes(self):
+        data = torch.randn(6, 2)
+
+        class CustomSizeDynamicShapesTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                    # Calling the overload that has kwargs causes us to go down the first overload path,
+                    # which will **always** specialize sizes.
+                    # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                    cls,
+                    inner.size(),
+                    inner.stride(),
+                    None,
+                    None,
+                    inner.dtype,
+                    inner.layout,
+                    inner.device,
+                    False,
+                    inner.requires_grad,
+                    "sizes",
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func == torch.ops.aten.sym_size.default:
+                    return args[0].inner.shape
+                if func == torch.ops.aten.sym_stride.default:
+                    return args[0].inner.shape
+                return NotImplemented
+
+        x = torch.ones(2, 2)
+
+        def trace_fn(x):
+            x_wrapper = CustomSizeDynamicShapesTensor(x)
+            return x_wrapper.size(), x_wrapper.stride()
+        fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
+    return ((sym_size, sym_size_1), (sym_size, sym_size_1))""")
+
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
 
@@ -2042,6 +2158,74 @@ class TestPythonDispatcher(TestCase):
         r = torch._C._EnablePythonDispatcher()
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
+
+class TestWrapperSubclassAliasing(TestCase):
+
+    def _test_wrapper_subclass_aliasing(self, op, args, kwargs):
+        def to_subclass(t: torch.Tensor):
+            return TwoTensor(t, t.clone())
+
+        result_ref = op(*args, **kwargs)
+
+        args_subclass = pytree.tree_map_only(torch.Tensor, to_subclass, args)
+        kwargs_subclass = pytree.tree_map_only(torch.Tensor, to_subclass, kwargs)
+
+        result_test = op(*args_subclass, **kwargs_subclass)
+
+        args_ref_flat, _ = pytree.tree_flatten((args, kwargs))
+        args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
+
+        args_test_flat, _ = pytree.tree_flatten((args_subclass, kwargs_subclass))
+        args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
+
+        result_ref_flat, _ = pytree.tree_flatten(result_ref)
+        result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
+
+        result_test_flat, _ = pytree.tree_flatten(result_test)
+        result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
+
+        for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
+            for a_ref, a_test in zip(args_ref_flat_tensors, args_test_flat_tensors):
+                out_is_inpt = o_ref is a_ref
+                if out_is_inpt:
+                    self.assertTrue(o_test is a_test)
+
+                out_aliases_inpt = StorageWeakRef(o_ref.untyped_storage()) == StorageWeakRef(a_ref.untyped_storage())
+                if out_aliases_inpt:
+                    self.assertTrue(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+                else:
+                    self.assertFalse(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+
+    # This tests the correctness of `torch.utils._python_dispatch.return_and_correct_aliasing`,
+    # a util for wrapper subclasses to promise correct aliasing behavior.
+    # It's probably overkill to test every OpInfo,
+    # so I picked a sampling of ops with representative schemas.
+    @ops([op for op in op_db if op.name in [
+        'mul',  # out-of-place
+        'cat',  # out-of-place (TensorList input)
+        'index',  # out-of-place (Optional TensorList input)
+        'mul_',  # inplace
+        'view',  # view
+        't_',  # inplace-view
+        'split',  # view (multi-return)
+        'native_batch_norm',  # mutable op (returns outputs and mutates some inputs)
+    ]], allowed_dtypes=(torch.float,))
+    def test_wrapper_subclass_aliasing(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        sample = first_sample(self, samples)
+        args = (sample.input, *sample.args)
+        kwargs = sample.kwargs
+        self._test_wrapper_subclass_aliasing(op, args, kwargs)
+
+    @ops(custom_op_db, allowed_dtypes=(torch.float,))
+    def test_wrapper_subclass_aliasing_custom(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        sample = first_sample(self, samples)
+        args = (sample.input, *sample.args)
+        kwargs = sample.kwargs
+        self._test_wrapper_subclass_aliasing(op, args, kwargs)
+
+instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
 if __name__ == '__main__':
     run_tests()

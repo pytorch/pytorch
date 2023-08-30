@@ -65,6 +65,12 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
+    def _print_Where(self, expr):
+        c = self.doprint(expr.args[0])
+        p = self.doprint(expr.args[1])
+        q = self.doprint(expr.args[2])
+        return f"tl.where({c}, {p}, {q})"
+
     def _print_Min(self, expr):
         nargs = len(expr.args)
         if len(expr.args) == 1:
@@ -1186,6 +1192,8 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def indirect_indexing(self, var, size, check=True):
+        # TODO(lezcano) This code should be lifted to codegen/common.py.
+        # This should be easy, as now CSE variables carry bounds info
         class IndirectAssertLine(DeferredLineBase):
             def __init__(self, line, var, mask, size_map):
                 self.var = var
@@ -1222,6 +1230,28 @@ class TritonKernel(Kernel):
 
             def _new_line(self, line):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+
+        if var.bounds.lower < 0:
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+                # Take the negative part of the bound and add size to it
+                # Then take union of that and the positive part
+                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                neg = var.bounds & ValueRanges(-sympy.oo, -1)
+                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:
+                    pos = var.bounds & ValueRanges(0, sympy.oo)
+                    new_bounds = new_bounds | pos
+
+            stm = f"{var} + {self.index_to_str(size)}"
+            # Mixed negative and non-negative
+            if var.bounds.upper >= 0:
+                stm = f"tl.where({var} < 0, {stm}, {var})"
+            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+            new_var.update_on_args("index_wrap", (var,), {})
+            var = new_var
 
         generate_assert = (
             (check or config.debug_index_asserts)
@@ -2268,7 +2298,14 @@ class TritonScheduling(BaseScheduling):
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        buf_sizes = [
+            buf.get_layout().storage_size()
+            for buf in buffers
+            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+        ]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
@@ -2318,7 +2355,6 @@ class TritonScheduling(BaseScheduling):
         return "tl.int64"
 
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
-        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
@@ -2342,7 +2378,7 @@ class TritonScheduling(BaseScheduling):
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        return tiled_groups, reduction_hint_val, mutations, index_dtype
+        return reduction_hint_val, mutations, index_dtype
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -2351,7 +2387,8 @@ class TritonScheduling(BaseScheduling):
             wrapper.writeline(origins)
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
-        tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
         )
 
@@ -2487,19 +2524,13 @@ class TritonScheduling(BaseScheduling):
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
 
-        for node_group in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes()
+        for partitions_with_metadata in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes(), self
         ):
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ForeachKernel()
-
-            for nodes in fused_node_lists:
-                _, (numel, rnumel) = max(
-                    nodes, key=lambda x: int(x.is_reduction())
-                ).group
+            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
                 node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
                 (
-                    tiled_groups,
                     reduction_hint_val,
                     mutations,
                     index_dtype,

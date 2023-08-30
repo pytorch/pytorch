@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import dis
 import enum
+import itertools
 import logging
 import math
 import operator
@@ -1285,10 +1286,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             args = (s.input, *sample.args)
             return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
 
-        # The last sample from gather does not work in np.take_along_axis
         samples = list(
-            sample_inputs_gather(None, "cpu", torch.float32, requires_grad=False)
-        )[:-1]
+            sample_inputs_gather(
+                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+            )
+        )
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         i = 1
@@ -1297,6 +1299,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn(*args), opt_fn(*args))
             self.assertEqual(cnts.frame_count, i)
             i += 1
+
+    def test_numpy_torch_operators(self):
+        def fn(op, t1, t2):
+            return op(t1, t2)
+
+        from torch._dynamo.variables.builtin import BuiltinVariable
+
+        operators = BuiltinVariable._fx_graph_functions()
+
+        for op, t1_np, t2_np in itertools.product(
+            operators, (True, False), (True, False)
+        ):
+            if op is operator.getitem:
+                # skip
+                # Did you know that tensor[ndarray_of_floats] works?
+                continue
+            t1 = torch.rand(5)
+            if t1_np:
+                t1 = t1.numpy()
+            t2 = torch.rand(5)
+            if t2_np:
+                t2 = t2.numpy()
+            try:
+                # TODO try a bit harder
+                result = op(t1, t2)
+            except (RuntimeError, TypeError, IndexError):
+                continue
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
+            self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
+            torch._dynamo.reset()
 
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
@@ -2151,6 +2185,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x_clone)
 
         self.assertTrue(same(ref, res))
+
+    def test_torch_size_numel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn():
+            return torch.Size([10, 8]).numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        num = torch.Size([10, 8]).numel()
+        self.assertEqual(opt_fn(), num)
 
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -6714,6 +6758,133 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 0)
+
+    def test_derpy_nn_module_usage(self):
+        def ff1(x):
+            self = mod1
+            return torch.sigmoid(self.mod2(x) + self.param1)
+
+        def ff2(x):
+            self = mod2
+            return torch.cos(torch.sin(x) * self.param2 + 10)
+
+        mod1 = torch.nn.Module()
+        mod2 = torch.nn.Module()
+        mod1.register_module("mod2", mod2)
+        mod1.register_parameter("param1", torch.nn.Parameter(torch.randn(10)))
+        mod1.forward = ff1
+        mod2.register_parameter("param2", torch.nn.Parameter(torch.randn(10)))
+        mod2.forward = ff2
+        mod1.eval()
+
+        x = torch.randn(10)
+        expected = mod1(x)
+        counter = CompileCounter()
+        actual = torch.compile(mod1, backend=counter, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counter.op_count, 6)
+
+    def test_itertools_accumulate_tensors_default_sum(self):
+        def fn(a, b, c, d, x):
+            l = [a, b, c, d, x]
+            for i, t in enumerate(l):
+                l[i] = t * x
+            return itertools.accumulate(l)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        x = torch.randn([2, 2])
+        eager = fn(*t_list, x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(*t_list, x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_builtins(self):
+        for builtin_op in [operator.mul, operator.sub, operator.pow]:
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=builtin_op)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_user_defined(self):
+        def udo_fn_0(a, b):
+            return -1
+
+        rando = random.randint(0, 1)
+
+        def udo_fn_1(a, b):
+            return a * rando + b * rando
+
+        seen = []
+
+        def udo_fn_2(a, b):
+            seen.append(a)
+            seen.append(b)
+            return a * len(seen)
+
+        for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            torch._dynamo.reset()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=udo_fn)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_pure_python_accumulate(self):
+        def accumulate(iterable, func=lambda x, y: x + y):
+            it = iter(iterable)
+            try:
+                # Initialize the accumulator with the first value from the iterable
+                accumulator = next(it)
+            except StopIteration:
+                # If the iterable is empty, return an empty generator
+                return
+            yield accumulator
+
+            for element in it:
+                accumulator = func(accumulator, element)
+                yield accumulator
+
+        def fn(it):
+            return accumulate(it)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        eager = fn(t_list)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(t_list)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
 
 
 class TestTracer(JitTestCase):

@@ -13,17 +13,20 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cpp_extension = functools.partial(
+    unittest.skipIf, IS_FBCODE, "cpp_extension N/A in fbcode"
+)
 
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, example_outputs):
+    def load(cls, model, example_inputs, example_outputs, options=None):
         # AOTInductorModel relies on the caller to pass in output_tensors,
         # so we need to explicitly allocate output tensors here.
         output_tensors = []
@@ -35,13 +38,14 @@ class AOTInductorModelRunner:
         so_path, exported = torch._export.aot_compile(
             model,
             example_inputs,
+            options=options,
         )
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_inductor_model_container.h>
 
-        torch::aot_inductor::AOTInductorModel model;
+        torch::aot_inductor::AOTInductorModelContainer model(1);
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,
@@ -60,21 +64,20 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
-    def run(cls, model, example_inputs, example_outputs):
+    def run(cls, model, example_inputs, example_outputs, options=None):
         example_outputs = copy.deepcopy(example_outputs)
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs
+            model, example_inputs, example_outputs, options
         )
-        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
+        optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
 class AotInductorTests(TestCase):
+    @requires_cpp_extension()
     def test_simple(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -93,6 +96,31 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
+    def test_with_offset(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
+                self.tensor = self.orig_tensor[5:, :]
+
+            def forward(self, x, y):
+                return (
+                    x
+                    + torch.nn.functional.linear(y, self.orig_tensor[:10, :])
+                    + self.tensor
+                )
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -113,6 +141,7 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @requires_cpp_extension()
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -192,6 +221,54 @@ class AotInductorTests(TestCase):
                         seq_nr_set.add(int(res.group(1)))
 
         self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
+
+    @requires_cpp_extension()
+    def test_dynamic_smem_above_default_limit(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        model = Repro()
+        # on A100, the generated Triton kernel for this MM
+        # requires 55296 bytes of dynamic SMEM which is above
+        # the A100's default dynamic SMEM limit of 49152 bytes.
+        example_inputs = (
+            torch.randn(10285, 96, device="cuda"),
+            torch.randn(96, 1, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
+    def test_addmm(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k):
+                super().__init__()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
 
 
 if __name__ == "__main__":

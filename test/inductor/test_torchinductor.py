@@ -1857,11 +1857,13 @@ class CommonTemplate:
             )
 
     @slowTest
+    @expectedFailureCodegenDynamic
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv bn test")
 
+        # fails dynamic check which bn is fused, and there will not have loops vars.
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {
@@ -4669,6 +4671,16 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_adding_tensor_offsets(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[16:32]
+
+        with torch.no_grad():
+            x = torch.randn(1024, device=self.device)
+            self.assertEqual(fn(x[0:]), x[16:][:16])
+            self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
+
     # from GPT2ForSequenceClassification
     def test_index_tensor(self):
         def fn(x, y):
@@ -5664,12 +5676,11 @@ class CommonTemplate:
         result, (fw_code, bw_code) = run_fw_bw_and_get_code(
             lambda: run(torch.randn([8, 32], device=self.device))
         )
+
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-            expected_kernel = 4
-        else:
-            expected_kernel = 6
+        expected_kernel = 4
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
@@ -7193,6 +7204,63 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 ConstantFolder(mod).run()
 
             self.assertTrue(max_live_tensors == 2)
+
+        @skipIfRocm
+        def test_neg_index(self):
+            def test(fn, inps, has_assert: bool, has_wrapping=True):
+                for dynamic in (True, False):
+                    fn_opt = torch.compile(dynamic=dynamic)(fn)
+                    code = run_and_get_triton_code(fn_opt, *inps)
+                    self.assertTrue(("tl.where" in code) is has_wrapping)
+                    self.assertTrue(("device_assert" in code) is has_assert)
+                    self.assertEqual(fn(*inps), fn_opt(*inps))
+
+            def indirect(a, b):
+                return a[b - 1]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.zeros(4, dtype=torch.long, device="cuda")
+            test(indirect, (a, b), has_assert=True)
+
+            def direct(x):
+                return x[:, -1]
+
+            a = torch.rand(1, 64, 32, device="cuda")
+            test(direct, (a,), has_assert=False, has_wrapping=False)
+
+            def flip(a, b):
+                return a[b]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+            test(flip, (a, b), has_assert=True)
+
+            # Constant propagate a constant that's negative
+            def flip_with_index_constant(a):
+                b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # Wrapping is constant-folded
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+            # Operation where we can't prove that the index is always positive or negative
+            def pos_and_neg(a):
+                b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # It has wrapping but no assert
+            test(pos_and_neg, (a,), has_assert=False, has_wrapping=True)
+
+            # We currently don't do constant propagation with float constants
+            def flip_with_index(a):
+                b = 1.0 * torch.arange(
+                    start=-1, end=-a.numel() - 1, step=-1, device="cuda"
+                )
+                b = b.int()
+                return a[b]
+
+            # Constant is propagated as we can prove that the result is always negative.
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
