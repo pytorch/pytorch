@@ -3270,6 +3270,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
+    @requires_cuda()
     @torch._inductor.config.patch("layout_optimization", True)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
