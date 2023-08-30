@@ -1,7 +1,7 @@
 import itertools
 import logging
 import operator
-from typing import Callable, List, Sequence, Tuple, Union
+from typing import Callable, List, Sequence, Tuple, Union, Any
 
 import numpy
 
@@ -464,10 +464,10 @@ class SplitCatSimplifier:
             split_ranges,
         ):  # This need not be a strict condition
             # However, we keep it now for simplicity.
-            return
+            return # type: ignore[return-value]
         split_ranges = self.fill_gaps(split_ranges, 0, cumulative_sizes[-1])
         if len(split_sections) == len(split_ranges):  # Simplification not possible
-            return
+            return # type: ignore[return-value]
         counters["inductor"]["scmerge_split_sections_removed"] = len(
             split_sections
         ) - len(split_ranges)
@@ -507,7 +507,6 @@ class SplitCatSimplifier:
         transform_params_list = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             if user_node.target not in {torch.cat, torch.stack}:
-                transform_params_list.append(None)
                 continue
 
             cat_dim = get_arg_value(user_node, 1, "dim")
@@ -523,7 +522,7 @@ class SplitCatSimplifier:
                     ]
                     # All sections should be equal
                     if len(set(subset_split_sections)) != 1:
-                        return
+                        return # type: ignore[return-value]
 
                     num_splits = len(subset_split_sections)
                     unflatten_params = (split_dim, (num_splits, -1))
@@ -531,16 +530,16 @@ class SplitCatSimplifier:
                         (split_dim, cat_dim) if split_dim != cat_dim else None
                     )
                     transform_params.append(
-                        (unflatten_params, movedim_params, None, None)
+                        (unflatten_params, movedim_params, None, None) # type: ignore[arg-type]
                     )
                 elif (
                     user_node.target == torch.stack or split_dim != cat_dim
                 ):  # We need to unsqueeze inputs not coming through split
-                    transform_params.append((None, None, (cat_dim,), None))
+                    transform_params.append((None, None, (cat_dim), None))
                 else:  # Non-split inputs
                     transform_params.append((None, None, None, None))
             transform_params_list.append(transform_params)
-        return transform_params_list
+        return # type: ignore[return-value]
 
     def replace_split(
         self,
@@ -748,7 +747,7 @@ class UnbindCatRemover(SplitCatSimplifier):
             split_sections, next_users, user_inputs_list
         )
         if not simplified_split_ranges or len(simplified_split_ranges) != 1:
-            return None
+            return None # type: ignore[return-value]
         return simplified_split_ranges
 
     def get_transform_params(
@@ -798,11 +797,11 @@ class UnbindCatRemover(SplitCatSimplifier):
                 elif (
                     user_node.target == torch.stack
                 ):  # We need to unsqueeze inputs not coming through unbind into cat
-                    transform_params.append((None, None, (cat_dim,), None))
+                    transform_params.append((None, None, (cat_dim,), None)) # type: ignore[arg-type]
                 else:  # Non-unbind inputs
                     transform_params.append((None, None, None, None))
             transform_params_list.append(transform_params)
-        return transform_params_list
+        return transform_params_list # type: ignore[return-value]
 
 
 class GetItem(CallFunction):

@@ -217,7 +217,6 @@ exclude_patterns = [
     'torch/_inductor/codegen/__init__.py',
     'torch/_inductor/codegen/cpp.py',
     'torch/_inductor/codegen/triton.py',
-    'torch/_inductor/fx_passes/split_cat.py',
     'torch/_inductor/fx_passes/binary_folding.py',
     'torch/_inductor/fx_passes/replace_random.py',
     'torch/_inductor/fx_passes/joint_graph.py',
