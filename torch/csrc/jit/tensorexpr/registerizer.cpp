@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
+#include <iostream>
 
 namespace torch::jit::tensorexpr {
 namespace registerizer {

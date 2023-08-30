@@ -7,7 +7,11 @@ import typing
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
-from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._decomp import (
+    core_aten_decompositions,
+    get_decompositions,
+    remove_decompositions,
+)
 from torch._decomp.decompositions import pw_cast_for_opmath
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 
@@ -55,6 +59,14 @@ inductor_decompositions = get_decompositions(
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+
+# Remove unwanted decompositions included via the core ATen decompositions from
+# the Inductor decomp table.
+decomps_to_exclude = [
+    aten._unsafe_index,
+]
+
+remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(ops):
@@ -329,7 +341,7 @@ def full_like(
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
         device=device or self.device,
-        requires_grad=requires_grad or self.requires_grad,
+        requires_grad=requires_grad,
     )
 
 
