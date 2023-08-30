@@ -138,6 +138,7 @@ class AotInductorTests(TestCase):
 
     @requires_cuda()
     @patch("torch._inductor.config.comment_origin", True)
+    @patch("torch._inductor.config.profiler_mark_wrapper_call", True)
     def test_inductor_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self):
