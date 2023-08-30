@@ -9,6 +9,7 @@ from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.exporter import (
     ExportOutputSerializer,
+    LargeProtobufExportOutputSerializer,
     ProtobufExportOutputSerializer,
     ResolvedExportOptions,
 )
@@ -22,6 +23,16 @@ class SampleModel(torch.nn.Module):
         y = x + 1
         z = y.relu()
         return (y, z)
+
+
+class _LargeModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(2**28))  # 1GB
+        self.param2 = torch.nn.Parameter(torch.randn(2**28))  # 1GB
+
+    def forward(self, x):
+        return self.param + self.param2 + x
 
 
 class TestExportOptionsAPI(common_utils.TestCase):
@@ -110,6 +121,17 @@ class TestDynamoExportAPI(common_utils.TestCase):
             with open(path) as fp:
                 self.assertEqual(fp.read(), expected_buffer)
 
+    def test_save_succeeds_when_model_greater_than_2gb_and_destination_is_str(self):
+        with common_utils.TemporaryFileName() as path:
+            dynamo_export(_LargeModel(), torch.randn(1)).save(path)
+
+    def test_save_raises_when_model_greater_than_2gb_and_destination_is_not_str(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "'destination' should be provided as a path-like string when saving a model larger than 2GB. ",
+        ):
+            dynamo_export(_LargeModel(), torch.randn(1)).save(io.BytesIO())
+
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName(suffix=".sarif") as path:
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save_diagnostics(path)
@@ -181,6 +203,21 @@ class TestProtobufExportOutputSerializerAPI(common_utils.TestCase):
         with self.assertRaises(roar.BeartypeException):
             serializer = ProtobufExportOutputSerializer()
             serializer.serialize(None, None)  # type: ignore[arg-type]
+
+    def test_serialize_raises_when_model_greater_than_2gb(self):
+        export_output = torch.onnx.dynamo_export(_LargeModel(), torch.randn(1))
+        serializer = ProtobufExportOutputSerializer()
+        with self.assertRaisesRegex(ValueError, "exceeds maximum protobuf size of 2GB"):
+            serializer.serialize(export_output, io.BytesIO())
+
+
+class TestLargeProtobufExportOutputSerializerAPI(common_utils.TestCase):
+    def test_serialize_succeeds_when_model_greater_than_2gb(self):
+        export_output = torch.onnx.dynamo_export(_LargeModel(), torch.randn(1))
+        with common_utils.TemporaryFileName() as path:
+            serializer = LargeProtobufExportOutputSerializer(path)
+            # `io.BytesIO()` is unused, but required by the Protocol interface.
+            serializer.serialize(export_output, io.BytesIO())
 
 
 if __name__ == "__main__":

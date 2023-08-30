@@ -88,10 +88,37 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             new_arg = arg
             obs_or_fq_map[(observed_arg, node)] = arg_as_input_act_obs_or_fq
         else:
+            # skip inserting new observers if there is an observer inserted for the arg before
+            # that has the same dtype that we want to insert here
+            # alternatively we could have a dedup pass after we insert all observers to deduplicate
+            # observers
+            # Example:
+            # arg -> existing_obs -> conv1
+            #    \ -> conv2
+            #
+            # instead of inserting new observers we will have:
+            # arg -> existing_obs -> conv1
+            #                   \ -> conv2
+            existing_obs_node = None
+            for maybe_obs_node in arg.users.keys():
+                if maybe_obs_node.op == 'call_module':
+                    maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
+                    if (
+                        type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq) and
+                        maybe_obs_mod.dtype == arg_as_input_target_dtype
+                    ):
+                        arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
+                        existing_obs_node = maybe_obs_node
+                        break
+
             assert arg_as_input_act_obs_or_fq is not None
-            new_obs_node = _insert_obs_or_fq(
-                arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)  # type: ignore[arg-type]
-            new_arg = new_obs_node
+            if existing_obs_node is None:
+                new_obs_node = _insert_obs_or_fq(
+                    arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)
+                # override this arg to be the observed arg
+                new_arg = new_obs_node
+            else:
+                new_arg = existing_obs_node
             # When quantizing two layers with different configs we can have
             # conv2d (int8) -> avgpool(uint8)
             # In this case observer insertion for avgpool will come here but the input
