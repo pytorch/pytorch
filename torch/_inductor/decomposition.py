@@ -67,6 +67,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
