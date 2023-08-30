@@ -72,7 +72,7 @@ def argmax(
     keepdims: KeepDims = False,
 ):
     if a.is_complex():
-        raise NotImplementedError
+        raise NotImplementedError(f"argmax with dtype={a.dtype}.")
 
     axis = _util.allow_only_single_axis(axis)
 
@@ -92,7 +92,7 @@ def argmin(
     keepdims: KeepDims = False,
 ):
     if a.is_complex():
-        raise NotImplementedError
+        raise NotImplementedError(f"argmin with dtype={a.dtype}.")
 
     axis = _util.allow_only_single_axis(axis)
 
