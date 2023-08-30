@@ -183,7 +183,7 @@ static at::Tensor lift_functionalize(const at::Tensor & self) {
 static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
   // See Note [Exporting and compiling a graph with lift_fresh_copy]
   if (at::functionalization::impl::isFunctionalTensor(self)) {
-    return self;
+    return self.view_as(self);
   }
 
   at::AutoDispatchSkipFunctionalize guard;

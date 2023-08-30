@@ -2798,7 +2798,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         out_ref = mod(x)
         out_test = compiled_f(x)
-        self.assertEqual(out_ref.detach(), out_test.detach())
+        self.assertEqual(out_ref[0].detach(), out_test[0].detach())
 
     def test_inference_python_dispatcher(self):
         # Extracted from unet
