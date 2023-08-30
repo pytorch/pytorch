@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import importlib
 import logging
@@ -585,6 +587,13 @@ class OrtBackendOptions:
     sub-graphs are compiled by ``OrtBackend``.
     """
 
+    dynamic: Optional[bool] = None
+    """Whether dynamic shape tracing was used to capture the graph. More details can be found in
+    ``torch.compile``'s documentation. ``export_options.dynamic_shapes`` will be overriden by this value
+    if either ``export_options`` is None, or ``export_options.dynamic_shapes`` is None. Otherwise, this
+    value will be ignored.
+    """
+
     export_options: Optional["torch.onnx.ExportOptions"] = None
     """Options for the TorchDynamo-based ONNX exporter used by the ``OrtBackend``."""
 
@@ -626,6 +635,15 @@ class OrtBackend:
                 else self._options.export_options
             )
         )
+
+        # If user doesn't specify export_options.dynamic_shapes, we use the `dynamic` flag
+        # from `torch.compile` call. Otherwise, `export_options.dynamic_shapes` has higher
+        # priority.
+        if (
+            self._options.export_options is None
+            or self._options.export_options.dynamic_shapes is None
+        ):
+            self._resolved_onnx_exporter_options.dynamic_shapes = self._options.dynamic
 
         #  Given DORT's computation flow:
         #   1. OrtOperatorSupport uses support_dict and extra_support_dict to select operators
@@ -937,11 +955,17 @@ class OrtBackend:
         return partitioned_prim_graph_module
 
     def __call__(
-        self, graph_module: torch.fx.GraphModule, args
+        self, graph_module: torch.fx.GraphModule, args, **kwargs
     ) -> torch.fx.GraphModule:
         """If ``OrtBackendOptions.use_aot_autograd`` is ``True``, the `auto_autograd` compiler
         will be invoked, wrapping this ``OrtBackend`` instance's ``compile`` method. Otherwise,
         the ``compile`` method is invoked directly."""
+        # kwargs, including `options`, is ignored. Since this is calling an already instantiated
+        # `OrtBackend` instance.
+        # It is generally recommended to use `torch_compile_backend` or string "onnxrt" as the
+        # backend for `torch.compile`, which will automatically instantiate an `OrtBackend` instance
+        # with the provided options.
+        del kwargs
         if self._options.use_aot_autograd:
             from functorch.compile import min_cut_rematerialization_partition
 

@@ -37,6 +37,11 @@ def make_aot_ort(dynamic: bool = False):
     return ort_backend, ort_backend
 
 
+class _TestModule(nn.Module):
+    def forward(self, x, y):
+        return x + y
+
+
 class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
@@ -52,6 +57,54 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.assertIn("onnxrt", torch._dynamo.backends.registry.list_backends())
         backend = torch._dynamo.backends.registry.lookup_backend("onnxrt")
         self.assertEqual(backend.__module__, "torch.onnx._internal.onnxruntime")
+
+    @parameterized.expand(
+        [
+            (True,),
+            (False,),
+            (None,),
+        ]
+    )
+    def test_torch_compile_dynamic_option_is_passed_to_onnxruntime_backend(
+        self, dynamic: Optional[bool]
+    ):
+        torch.compile(_TestModule(), backend="onnxrt", dynamic=dynamic)(
+            torch.randn(2), torch.randn(2)
+        )
+        backends = OrtBackend.get_cached_instances()
+        assert len(backends) == 1
+        backend = backends[0]
+        self.assertEqual(
+            backend._resolved_onnx_exporter_options.dynamic_shapes, dynamic
+        )
+
+    @parameterized.expand(
+        [
+            (True, ExportOptions(dynamic_shapes=False)),
+            (False, ExportOptions(dynamic_shapes=True)),
+            (None, ExportOptions(dynamic_shapes=True)),
+        ]
+    )
+    def test_torch_compile_dynamic_option_is_overriden_for_onnxruntime_backend_by_export_options(
+        self, dynamic: Optional[bool], export_options: torch.onnx.ExportOptions
+    ):
+        torch.compile(
+            _TestModule(),
+            backend="onnxrt",
+            dynamic=dynamic,
+            options={"export_options": export_options},
+        )(torch.randn(2), torch.randn(2))
+        backends = OrtBackend.get_cached_instances()
+        assert len(backends) == 1
+        backend = backends[0]
+        self.assertEqual(
+            backend._resolved_onnx_exporter_options.dynamic_shapes,
+            export_options.dynamic_shapes,
+        )
+        if dynamic != export_options.dynamic_shapes:
+            self.assertNotEqual(
+                backend._resolved_onnx_exporter_options.dynamic_shapes, dynamic
+            )
 
     def _test_torch_compile_backend_caching_assert_reused(
         self, options: OrtBackendOptions

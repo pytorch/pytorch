@@ -1596,6 +1596,9 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if dynamic is not None:
+            self.kwargs.setdefault("options", {})
+            self.kwargs["options"]["dynamic"] = dynamic
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileWrapper) and
