@@ -2006,9 +2006,6 @@ class TritonKernel(Kernel):
             V.graph.scheduler.current_device.index,
         )
 
-        wrapper.writeline(
-            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
-        )
 
     def warn_mix_layout(self, kernel_name):
         """
@@ -2345,17 +2342,20 @@ class TritonScheduling(BaseScheduling):
 
         return tiled_groups, reduction_hint_val, mutations, index_dtype
 
+    def codegen_insert_marker(self, node_schedule):
+        wrapper = V.graph.wrapper_code
+        # Introduce a data structure to hold the marker info
+        # Then pass the new data structure to writeline
+        # This will cause a with record_function to be emitted on the
+        # next line
+        op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
+        origin_ops = [(op.op_type, op.mod_name, op.torch_op) for op in op_info.oi_list]
+        wrapper.writeline(op_info)
+
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
-            # Introduce a data structure to hold the marker info
-            # Then pass the new data structure to writeline
-            # This will cause a with record_function to be emitted on the
-            # next line
-            op_info = get_origin_op_info(origins, config.triton.descriptive_names)
-            origin_ops = [(op.op_type, op.mod_name, op.torch_op) for op in op_info]
-            wrapper.writeline(op_info)
             wrapper.writeline(origins)
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
@@ -2375,6 +2375,7 @@ class TritonScheduling(BaseScheduling):
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
+        self.codegen_insert_marker(node_schedule)
         kernel.call_kernel(kernel_name)
 
         if config.warn_mix_layout:
@@ -2481,6 +2482,7 @@ class TritonScheduling(BaseScheduling):
         node_schedule = [template_node, *epilogue_nodes]
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
+        self.codegen_insert_marker(node_schedule)
         kernel.call_kernel(kernel_name)
         self.scheduler.free_buffers()
 
@@ -2520,6 +2522,7 @@ class TritonScheduling(BaseScheduling):
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
             self.codegen_comment([foreach_node])
+            self.codegen_insert_marker([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()

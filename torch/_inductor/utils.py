@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -81,8 +82,14 @@ class OriginOpInfo:
     op_type: str
     mod_name: str
     torch_op: str
-    aot_seq_id: int
+    aot_seq_nr: int
 
+    def __post_init__(self):
+        self.mod_name = re.sub(r'\"', '', self.mod_name)
+
+@dataclass
+class OriginOpList:
+    oi_list: list[OriginOpInfo]
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
@@ -294,9 +301,18 @@ def aggregate_origins(node_schedule):
         return set()
 
 
+def get_module_name_from_meta(meta_dict):
+    mod_name = ""
+    torch_op = ""
+    if "nn_module_stack" in meta_dict:
+        mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
+        mod_name = re.sub(r'\[[a-zA-Z\']*\]', '', mod_name)
+        mod_name = re.sub(r'__', '', mod_name)
+    return mod_name, torch_op
+
 def get_origin_op_info(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
-    sources = []
+    sources = OriginOpList([])
     # Unique op_names might constrain the origin modules
     # Possible that multiple ops w/ same name can have different modules
     unique_op_names = {}
@@ -304,41 +320,31 @@ def get_origin_op_info(node_schedule, descriptive_names):
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         for origin in all_origins:
             if origin.op == "call_function" and "original_aten" in origin.meta:
-                mod_name = ""
-                torch_op = ""
                 op_name = origin.meta["original_aten"]._overloadpacket.__name__
-                if "nn_module_stack" in origin.meta:
-                    mod_name, torch_op = list(origin.meta["nn_module_stack"].values())[
-                        0
-                    ]
-                aot_seq_id = origin.meta.get("seq_id", 0)
+                mod_name, torch_op = get_module_name_from_meta(origin.meta)
+                aot_seq_nr = origin.meta.get("seq_nr", 0)
                 if op_name not in unique_op_names:
-                    sources.append(
-                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_id)
+                    sources.oi_list.append(
+                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_nr)
                     )
                     unique_op_names[op_name] = mod_name
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
-                op_name = ""
-                mod_name = ""
-                if "nn_module_stack" in origin.meta:
-                    mod_name, torch_op = list(origin.meta["nn_module_stack"].values())[
-                        0
-                    ]
+                mod_name, torch_op = get_module_name_from_meta(origin.meta)
                 if isinstance(origin.meta["source_fn"][1], str):
                     op_name = origin.meta["source_fn"][1]
                 else:
                     op_name = origin.meta["source_fn"][1].__name__
-                aot_seq_id = origin.meta.get("seq_id", -1)
+                aot_seq_nr = origin.meta.get("seq_nr", -1)
                 if op_name not in unique_op_names:
-                    sources.append(
-                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_id)
+                    sources.oi_list.append(
+                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_nr)
                     )
                     unique_op_names[op_name] = mod_name
     elif descriptive_names == "inductor_node":
-        sources = [
+        sources.oi_list = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
     else:
@@ -353,7 +359,7 @@ def get_origin_op_info(node_schedule, descriptive_names):
 def get_fused_kernel_name(node_schedule, descriptive_names):
     sources = get_origin_op_info(node_schedule, descriptive_names)
     # op_info is a tuple of (op_type, mod_name)
-    op_types = [op_info.op_type for op_info in sources]
+    op_types = [op_info.op_type for op_info in sources.oi_list]
     # op_types = set(op_types)
     op_types = sorted(op_types)[: config.kernel_name_max_ops]
     return "_".join(["fused"] + op_types)

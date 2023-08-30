@@ -371,9 +371,6 @@ class BaseSchedulerNode:
                     .replace("}", "}}")
                     .replace("\n", "\\")
                 )
-                if "seq_nr" in o.meta:
-                    seq_nr = o.meta["seq_nr"]
-                    out_lines.append(f"#pragma CMT Seq ID {seq_nr}")
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
 
