@@ -481,13 +481,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qconv2d_add(self):
         r"""
         This testcase will quantize a Conv2d->Add pattern as:
-               X
-             /   \
-      Conv1(X)   Conv2(X)
-             \   /
-              Add
-               |
-               Y
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                 Y
         """
 
         class M(torch.nn.Module):
@@ -538,15 +538,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qconv2d_add_relu(self):
         r"""
         This testcase will quantize a Conv2d->Add->ReLU pattern as:
-               X
-             /   \
-      Conv1(X)   Conv2(X)
-             \   /
-              Add
-               |
-              ReLU
-               |
-               Y
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                ReLU
+                 |
+                 Y
         """
 
         class M(torch.nn.Module):
@@ -597,16 +597,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qconv2d_dequant_promotion(self):
         r"""
-        This testcase if dequant node before conv2d is promotion correctly:
-               X
-               |
-            Conv1(X)
-             /   \
-      Conv2(X)   Conv3(X)
-             \   /
-              Add
-               |
-               Y
+        This testcase tests if dequant node before conv2d is promoted correctly:
+                 X
+                 |
+              Conv1(X)
+               /   \
+        Conv2(X)   Conv3(X)
+               \   /
+                Add
+                 |
+                 Y
         """
 
         class M(torch.nn.Module):
@@ -653,7 +653,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qlinear(self):
         r"""
-        This testcase will quantize a single linear Moduel.
+        This testcase will quantize a single Linear Moduel.
         """
 
         class M(torch.nn.Module):
@@ -692,7 +692,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qlinear_relu(self):
         r"""
-        This testcase will quantize Linear->ReLU pattern.
+        This testcase will quantize a Linear->ReLU pattern.
         """
 
         class M(torch.nn.Module):
@@ -732,16 +732,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qlinear_dequant_promotion(self):
         r"""
-        This testcase if dequant node before linear is promotion correctly:
-               X
-               |
-            Linear1(X)
-             /   \
-      Linear2(X)   Linear3(X)
-             \   /
-              Add
-               |
-               Y
+        This testcase test if dequant node before linear is promoted correctly:
+                  X
+                  |
+               Linear1(X)
+                /   \
+        Linear2(X)   Linear3(X)
+                \   /
+                 Add
+                  |
+                  Y
         """
 
         class M(torch.nn.Module):
@@ -836,15 +836,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:
-               X
-             /   \
-      Conv1(X)  Pow(x)
-                   \
-                  Conv2(X)
-            \     /
-              Cat
-               |
-               Y
+                X
+             /     \
+        Conv1(X)  Pow(x)
+            \        \
+             \     Conv2(X)
+              \    /
+               Cat
+                |
+                Y
         """
 
         class M(torch.nn.Module):
