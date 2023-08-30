@@ -106,8 +106,7 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
         new_offsets_ptr[i] = offsets_ptr[i] + start_val;
         size_ptr[index] = split_size;
     }
-    splits[split_idx] = create_nested_view_tensor(
-      self, std::move(new_sizes), std::move(new_strides), std::move(new_offsets));
+    splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
 }
@@ -164,8 +163,7 @@ std::vector<Tensor> split_with_sizes_nested(
       size_ptr[index] = split_size;
     }
     start_val += split_size;
-    splits[split_idx] = create_nested_view_tensor(
-      self, std::move(new_sizes), std::move(new_strides), std::move(new_offsets));
+    splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
 }
