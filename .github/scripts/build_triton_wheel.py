@@ -11,9 +11,6 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
-def is_release_branch() -> bool:
-
-
 def read_triton_pin(rocm_hash: bool = False) -> str:
     triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
@@ -182,7 +179,7 @@ def main() -> None:
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
-        release=release,
+        release=args.release,
     )
 
 
