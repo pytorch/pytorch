@@ -165,7 +165,7 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd = make_test(ASGD, kernel_count=10, lr=0.01)
+    test_asgd = make_test(ASGD, kernel_count=2, lr=0.01)
     # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
@@ -177,7 +177,7 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd_recompile = make_recompile_test(ASGD, kernel_count=10, lr=0.01)
+    test_asgd_recompile = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
     # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
 
