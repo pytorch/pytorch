@@ -239,6 +239,7 @@ class TestHelperModules:
             x *= y
             return x
 
+
 class PT2EQuantizationTestCase(QuantizationTestCase):
     """
     Base QuantizationTestCase for PT2 with some helper methods.
@@ -314,12 +315,24 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
-    def _verify_symmetric_qnnpack_qat_numerics(
+    def _verify_symmetric_xnnpack_qat_numerics(
+        self,
+        model: torch.nn.Module,
+        example_inputs: Tuple[Any, ...],
+    ):
+        self._verify_symmetric_xnnpack_qat_numerics_helper(
+            model, example_inputs, is_per_channel=True,
+        )
+        self._verify_symmetric_xnnpack_qat_numerics_helper(
+            model, example_inputs, is_per_channel=False,
+        )
+
+    def _verify_symmetric_xnnpack_qat_numerics_helper(
         self,
         model: torch.nn.Module,
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
-        verify_convert: bool = False,
+        verify_convert: bool = True,
     ):
         """
         Helper method to verify that the QAT numerics for PT2E quantization match those of
@@ -371,7 +384,32 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             quant_result_fx = model_fx(*example_inputs)
             self.assertEqual(quant_result_pt2e, quant_result_fx)
 
-    def _verify_symmetric_qnnpack_qat_graph(
+    def _verify_symmetric_xnnpack_qat_graph(
+        self,
+        m: torch.fx.GraphModule,
+        example_inputs: Tuple[Any, ...],
+        has_relu: bool,
+        has_bias: bool = True,
+        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+    ):
+        self._verify_symmetric_xnnpack_qat_graph_helper(
+            m,
+            example_inputs,
+            is_per_channel=True,
+            has_relu=has_relu,
+            has_bias=has_bias,
+            expected_conv_literal_args=expected_conv_literal_args,
+        )
+        self._verify_symmetric_xnnpack_qat_graph_helper(
+            m,
+            example_inputs,
+            is_per_channel=False,
+            has_relu=has_relu,
+            has_bias=has_bias,
+            expected_conv_literal_args=expected_conv_literal_args,
+        )
+
+    def _verify_symmetric_xnnpack_qat_graph_helper(
         self,
         m: torch.fx.GraphModule,
         example_inputs: Tuple[Any, ...],
@@ -385,6 +423,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         with fake quantizes inserted into the correct places.
         # TODO: also verify that metadata is copied over to the new nodes.
         """
+        m = copy.deepcopy(m)
         quantizer = XNNPACKQuantizer()
         quantizer.set_global(
             get_symmetric_quantization_config(is_per_channel, is_qat=True)
@@ -513,6 +552,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
+        fixed_output_tol: float = None,
         output_scale_idx: int = 3,
     ) -> torch.nn.Module:
         """ TODO: need to implement output checking based on output_scale once
@@ -542,23 +582,28 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
         pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        idx = 0
-        for n in model_copy.graph.nodes:
-            if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-                idx += 1
-                if idx == output_scale_idx:
-                    output_scale = n.args[1]
-        assert output_scale is not None
+
+        output_tol = None
+        if fixed_output_tol is not None:
+            output_tol = fixed_output_tol
+        else:
+            idx = 0
+            for n in model_copy.graph.nodes:
+                if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+                    idx += 1
+                    if idx == output_scale_idx:
+                        output_tol = n.args[1]
+            assert output_tol is not None
 
         # make sure the result is off by one at most in the quantized integer representation
         self.assertTrue(
-            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
+            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_tol + 1e-5)
         )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_simple_quantizer(self):
-        # TODO: use OP_TO_ANNOTATRO
+        # TODO: use OP_TO_ANNOTATOR
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 for node in model.graph.nodes:
@@ -627,7 +672,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
     def test_wo_annotate_conv_output_quantizer(self):
-        # TODO: use OP_TO_ANNOTATRO
+        # TODO: use OP_TO_ANNOTATOR
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 act_qspec = QuantizationSpec(
@@ -701,7 +746,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
     def test_max_pool2d_quantizer(self):
-        # TODO: use OP_TO_ANNOTATRO
+        # TODO: use OP_TO_ANNOTATOR
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 act_qspec = QuantizationSpec(
@@ -797,7 +842,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
     def test_derived_qspec(self):
-        # TODO: use OP_TO_ANNOTATRO
+        # TODO: use OP_TO_ANNOTATOR
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 for node in model.graph.nodes:
@@ -1908,31 +1953,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        # simple conv
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(has_relu=False), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(has_relu=False), example_inputs, is_per_channel=True, verify_convert=True,
-        )
-        # conv + relu
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(has_relu=True), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(has_relu=True), example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=False), example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=True), example_inputs)
 
-    def test_prepare_qat_conv_bn_fusion(self):
+    def test_qat_conv_bn_fusion(self):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         m = TestHelperModules.ConvWithBNRelu(relu=False)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m, example_inputs, is_per_channel=False, has_relu=False
-        )
-        m = TestHelperModules.ConvWithBNRelu(relu=False)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m, example_inputs, is_per_channel=True, has_relu=False
-        )
+        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_fusion_literal_args(self):
         class M(torch.nn.Module):
@@ -1949,26 +1977,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         # stride, padding, dilation, transposed, output_padding, groups
         conv_args = ((2, 2), (4, 4), (1, 1), False, (0, 0), 1)
-        self._verify_symmetric_qnnpack_qat_graph(
+        self._verify_symmetric_xnnpack_qat_graph(
             M(),
             example_inputs,
-            is_per_channel=False,
             has_relu=False,
             expected_conv_literal_args=conv_args,
         )
-        self._verify_symmetric_qnnpack_qat_graph(
-            M(),
-            example_inputs,
-            is_per_channel=True,
-            has_relu=False,
-            expected_conv_literal_args=conv_args,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
     def test_qat_conv_bn_fusion_no_conv_bias(self):
         class M2(torch.nn.Module):
@@ -1991,57 +2006,25 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         example_inputs = (torch.randn(3, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=False, has_relu=False, has_bias=False,
+        self._verify_symmetric_xnnpack_qat_graph(
+            m1, example_inputs, has_relu=False, has_bias=False,
         )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=True, has_relu=False, has_bias=False,
-        )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m1, example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m1, example_inputs, is_per_channel=True, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M2(), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M2(), example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(m1, example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(M2(), example_inputs)
 
-    def test_prepare_qat_conv_bn_relu_fusion(self):
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True)
+    def test_qat_conv_bn_relu_fusion(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=False, has_relu=True
-        )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=True, has_relu=True
-        )
+        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_relu_fusion_no_conv_bias(self):
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
+        m = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
         example_inputs = (torch.randn(3, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=False, has_relu=True, has_bias=False,
+        self._verify_symmetric_xnnpack_qat_graph(
+            m, example_inputs, has_relu=True, has_bias=False,
         )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m1, example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
-        self._verify_symmetric_qnnpack_qat_graph(
-            m1, example_inputs, is_per_channel=True, has_relu=True, has_bias=False,
-        )
-        m1 = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m1, example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_inplace_add_relu(self):
         class M(torch.nn.Module):
@@ -2058,54 +2041,50 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x
 
         example_inputs = (torch.randn(1, 1, 3, 3),)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
-    # @unittest.skip("not needed due to IR changes")
     def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
         """
-        Test this special case seen in resnet18:
+        Test the case where the placeholder node for the [conv - bn - getitem] pattern
+        is also a getitem node:
 
-          maxpool -> conv -> bn -> conv_bn_getitem
+          some_op -> unrelated_getitem -> conv -> bn -> conv_bn_getitem
 
-        We want the metadata to be copied from the `conv_bn_getitem` node
+        We want the metadata to be copied from the `conv_bn_getitem` node, not from
+        the `unrelated_getitem` node, which is not part of the conv-bn pattern but
+        is returned as part of the match anyway (as a placeholder).
         """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.maxpool = torch.nn.MaxPool2d(kernel_size=1)
+                self.bn1 = torch.nn.BatchNorm2d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.bn2 = torch.nn.BatchNorm2d(3)
 
             def forward(self, x):
-                x = self.maxpool(x)
+                x = self.bn1(x)
                 x = self.conv(x)
-                x = self.bn(x)
+                x = self.bn2(x)
                 return x
 
         def _get_getitem_nodes(m: torch.fx.GraphModule):
             """
-            Return a 2-tuple of (maxpool_getitem_node, conv_bn_getitem_node) from the graph.
+            Return a 2-tuple of (unrelated_getitem_node, conv_bn_getitem_node) from the graph.
             """
-            maxpool_getitem_node, conv_bn_getitem_node = None, None
+            unrelated_getitem_node, conv_bn_getitem_node = None, None
             for node in m.graph.nodes:
-                if node.target != operator.getitem:
-                    continue
                 if (
-                    node.args[0].target
-                    == torch.ops.aten._native_batch_norm_legit.default
+                    node.target != operator.getitem or
+                    node.args[0].target != torch.ops.aten._native_batch_norm_legit.default
                 ):
-                    conv_bn_getitem_node = node
+                    continue
+                if node.args[0].args[0].op == "placeholder":
+                    unrelated_getitem_node = node
                 else:
-                    raise ValueError("Unexpected getitem node ", node, node.args)
-            assert (
-                conv_bn_getitem_node is not None
-            ), "did not find conv bn getitem node, bad test setup"
-            return conv_bn_getitem_node
+                    conv_bn_getitem_node = node
+            assert unrelated_getitem_node is not None, "did not find unrelated getitem node, bad test setup"
+            assert conv_bn_getitem_node is not None, "did not find conv bn getitem node, bad test setup"
+            return (unrelated_getitem_node, conv_bn_getitem_node)
 
         # Program capture
         example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -2115,7 +2094,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
         m.graph.eliminate_dead_code()
         m.recompile()
-        original_conv_bn_getitem_node = _get_getitem_nodes(m)
+        (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
 
         # Prepare QAT
         quantizer = XNNPACKQuantizer()
@@ -2123,35 +2102,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             get_symmetric_quantization_config(is_per_channel=False, is_qat=True)
         )
         m = prepare_qat_pt2e(m, quantizer)
-        conv_bn_getitem_node = _get_getitem_nodes(m)
+        (unrelated_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
 
-        # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
+        # Verify that the metadata was copied from `conv_bn_getitem`, not `unrelated_getitem`
         original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta[
             "quantization_annotation"
         ]
         conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
         self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
-
-    # TODO: merge these numerics tests with the graph tests above
-    def test_qat_conv_bn_numerics(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=False)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m, example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m, example_inputs, is_per_channel=True, verify_convert=True,
-        )
-
-    def test_qat_conv_bn_relu_numerics(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=True)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m, example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            m, example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self.assertTrue("quantization_annotation" not in unrelated_getitem_node.meta)
 
     def test_qat_update_shared_qspec(self):
         """
@@ -2170,14 +2129,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 x = self.bn(x)
                 x = self.hardtanh(x)
                 return x
-        m = M()
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False, verify_convert=True,
-        )
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=True, verify_convert=True,
-        )
+        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
     def test_representation_linear(self):
         class M(torch.nn.Module):
@@ -2199,6 +2152,29 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             quantizer,
             ref_node_occurrence={},
             non_ref_node_occurrence={}
+        )
+
+    def test_representation_dynamic_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False, is_dynamic=True)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 5),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={},
+            fixed_output_tol=1e-4,
         )
 
     def test_representation_conv2d(self):
@@ -2580,12 +2556,7 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.resnet18()
-            self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=False, verify_convert=True,
-            )
-            self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=True, verify_convert=True,
-            )
+            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
@@ -2594,9 +2565,4 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()
-            self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=False, verify_convert=True,
-            )
-            self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=True, verify_convert=True,
-            )
+            self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
