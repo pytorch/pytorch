@@ -1,3 +1,4 @@
+import logging
 import inspect
 from typing import Dict, List
 
@@ -17,6 +18,8 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+
+log = logging.getLogger(__name__)
 
 
 class ContextWrappingVariable(VariableTracker):
@@ -84,8 +87,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 variables.UserDefinedObjectVariable(self.cm_obj, **options),
                 **options,
             ).call_function(tx, [], {})
-        except Exception:
-            unimplemented(f"context manager `{self.cm_obj}`")
+        except Exception as e:
+            log.exception(e)
+            unimplemented(f"Context manager `{self.cm_obj}`'s `__enter__` method is not supported")
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
@@ -106,8 +110,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 ],
                 {},
             )
-        except Exception:
-            unimplemented(f"context manager `{self.cm_obj}`")
+        except Exception as e:
+            log.exception(e)
+            unimplemented(f"Context manager `{self.cm_obj}`'s `__exit__` method is not supported")
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
