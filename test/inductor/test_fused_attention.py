@@ -443,6 +443,58 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
+    @skipIfRocm
+    def _test_sdpa_rewriter_13(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, n_head, seq_len, embed_dim)"""
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .clone()
+                .matmul(value)
+            )
+
+        self._check_common(dot_prod_attention)
+        self._check_common(checkpoint_wrapper(dot_prod_attention))
+
+    @skipIfRocm
+    def _test_sdpa_rewriter_14(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .clone()
+                .matmul(value)
+            )
+
+        self._check_common(dot_prod_attention)
+        self._check_common(checkpoint_wrapper(dot_prod_attention))
+
+    @skipIfRocm
+    def _test_sdpa_rewriter_15(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.transpose(1, 2)
+            k = key.transpose(1, 2)
+            v = value.transpose(1, 2)
+            return (
+                torch.matmul(q, k.transpose(-2, -1))
+                .div(math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .clone()
+                .matmul(v)
+            )
+
+        self._check_common(dot_prod_attention)
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
 
@@ -493,6 +545,15 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
         test_sdpa_rewriter_12_cuda = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
         )
+        test_sdpa_rewriter_13_cuda = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13
+        )
+        test_sdpa_rewriter_14_cuda = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
+        )
+        test_sdpa_rewriter_15_cuda = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
+        )
 
 
 if HAS_CPU:
@@ -516,6 +577,15 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_12_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
+        )
+        test_sdpa_rewriter_13_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13
+        )
+        test_sdpa_rewriter_14_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
+        )
+        test_sdpa_rewriter_15_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
 
 
