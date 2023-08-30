@@ -95,7 +95,6 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   for (const auto split_idx : c10::irange(chunks)) {
       auto new_sizes = at::empty_like(sizes) ;
       auto new_strides = strides.clone();
-      // This copys offsets so we are safe to move
       auto new_offsets = at::empty_like(offsets);
       int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
       int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
@@ -152,7 +151,7 @@ std::vector<Tensor> split_with_sizes_nested(
   for (const auto split_idx : c10::irange(num_splits)) {
     auto split_size = split_sizes[split_idx];
     auto new_sizes = at::empty_like(sizes);
-    auto new_strides = at::empty_like(strides);
+    auto new_strides = strides.clone();
     auto new_offsets = at::empty_like(offsets);
     int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
     int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
