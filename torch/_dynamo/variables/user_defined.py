@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import copy
 import functools
 import importlib
 import inspect
@@ -7,9 +8,16 @@ import itertools
 import random
 import threading
 import types
-from typing import Dict, List
+from contextlib import contextmanager
+from typing import Any, Dict, List, Tuple
 
 import torch.nn
+from torch._dynamo.variables.constant import (
+    ConstantVariable,
+    register_dynamo_pytree_spec_type,
+)
+from torch._dynamo.variables.tensor import TensorVariable
+from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -574,6 +582,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
+    current_tx = None
+
+    @classmethod
+    @contextmanager
+    def use_tx(cls, tx):
+        prev, cls.current_tx = cls.current_tx, tx
+        try:
+            yield
+        finally:
+            cls.current_tx = prev
+
+    def as_proxy(self):
+        value = copy.copy(self.value)
+        for field in value._fields:
+            a = getattr(value, field)
+            if isinstance(a, ConstantVariable) and a.as_python_constant() is None:
+                setattr(value, field, None)
+            elif isinstance(a, TensorVariable):
+                setattr(value, field, a.as_proxy())
+        return value
+
     @staticmethod
     def is_matching_object(obj):
         try:
@@ -590,3 +619,47 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
     # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+
+
+def _register_dynamo_kjt_to_tree_spec():
+    def _kjtv_flatten(k: KeyedJaggedTensorVariable) -> Tuple[List[Any], pytree.Context]:
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        assert KeyedJaggedTensorVariable.current_tx is not None
+        flat_vars = [
+            k.var_getattr(KeyedJaggedTensorVariable.current_tx, a)
+            for a in KeyedJaggedTensor._fields
+        ]
+        return flat_vars, k.value._keys
+
+    def _kjtv_unflatten(
+        values: List[Any], context: pytree.Context
+    ) -> KeyedJaggedTensorVariable:
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+        def get_example_value(x):
+            if isinstance(x, ConstantVariable):
+                return x.as_python_constant()
+            elif isinstance(x, TensorVariable):
+                return x.as_proxy().node.meta["example_value"]
+            else:
+                return x
+        real_values = [get_example_value(x) for x in values]
+        kjt = KeyedJaggedTensor(context, *real_values)
+        # Work around __init__ from KeyedJaggedTensor
+        for f, v in zip(KeyedJaggedTensor._fields, values):
+            setattr(kjt, f, v)
+        return KeyedJaggedTensorVariable(kjt)
+
+    pytree._register_pytree_node(
+        KeyedJaggedTensorVariable,
+        _kjtv_flatten,
+        _kjtv_unflatten,
+    )
+
+    try:
+        from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+    except (ImportError, AttributeError):
+        pass
+    else:
+        register_dynamo_pytree_spec_type(KeyedJaggedTensorVariable, KeyedJaggedTensor)

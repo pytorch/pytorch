@@ -17,7 +17,7 @@ from ..guards import make_dupe_guard
 from ..source import GetItemSource
 from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, register_dynamo_pytree_spec_type
 from .functions import UserFunctionVariable, UserMethodVariable
 
 
@@ -736,6 +736,7 @@ def _register_dynamo_list_to_tree_spec():
         ListVariable,
         _listvariable_flatten,
     )
+    register_dynamo_pytree_spec_type(ListVariable, list)
 
 
 def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
@@ -762,6 +763,7 @@ def _register_dynamo_tuple_to_tree_spec():
         TupleVariable,
         _tuplevariable_flatten,
     )
+    register_dynamo_pytree_spec_type(TupleVariable, tuple)
 
 
 class SetVariable(VariableTracker):

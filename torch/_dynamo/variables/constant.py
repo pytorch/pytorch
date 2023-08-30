@@ -1,7 +1,9 @@
+import copy
 import operator
 from typing import Dict, List
 
 import torch
+from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..exc import unimplemented
@@ -183,3 +185,26 @@ class EnumVariable(VariableTracker):
         if callable(member):
             raise NotImplementedError()
         return member
+
+
+_SUPPORTED_PYTREE_SPEC_TYPES = {}
+
+
+def register_dynamo_pytree_spec_type(vt, t):
+    assert issubclass(vt, VariableTracker)
+    assert not issubclass(t, VariableTracker)
+    assert vt not in _SUPPORTED_PYTREE_SPEC_TYPES
+    _SUPPORTED_PYTREE_SPEC_TYPES[vt] = t
+
+
+class TreeSpecVariable(ConstantVariable):
+    def as_python_constant(self):
+        def get_real_spec(spec: pytree.TreeSpec):
+            ret = copy.copy(spec)
+            if ret.type is not None and issubclass(ret.type, VariableTracker):
+                ret.type = _SUPPORTED_PYTREE_SPEC_TYPES[ret.type]
+            assert isinstance(ret.children_specs, list)
+            ret.children_specs = [get_real_spec(s) for s in ret.children_specs]
+            return ret
+
+        return get_real_spec(self.value)

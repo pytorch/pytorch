@@ -17,7 +17,7 @@ from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, register_dynamo_pytree_spec_type
 from .tensor import TensorVariable
 
 
@@ -500,3 +500,4 @@ def _register_dynamo_dict_to_tree_spec():
         ConstDictVariable,
         _dictvariable_flatten,
     )
+    register_dynamo_pytree_spec_type(ConstDictVariable, dict)

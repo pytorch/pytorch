@@ -16,6 +16,8 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
+from torch._dynamo.variables.constant import TreeSpecVariable
+from torch._dynamo.variables.user_defined import KeyedJaggedTensorVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -600,9 +602,10 @@ class TorchVariable(VariableTracker):
             if len(args) != 1:
                 unimplemented("Unsupported flatten with len(args) != 1")
 
-            flattened, spec = torch.utils._pytree.tree_flatten(args[0])
+            with KeyedJaggedTensorVariable.use_tx(tx):
+                flattened, spec = torch.utils._pytree.tree_flatten(args[0])
             return TupleVariable(
-                [ListVariable(flattened), ConstantVariable(spec)], **options
+                [ListVariable(flattened), TreeSpecVariable(spec)], **options
             )
         elif self.value == torch.utils._pytree.tree_unflatten:
             if len(args) != 2:

@@ -63,6 +63,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
 
@@ -788,6 +789,7 @@ def is_safe_constant(v):
             type(type),
             torch.device,
             torch.dtype,
+            pytree.TreeSpec,
         ),
     )
 
