@@ -1413,7 +1413,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             return node.meta["example_value"]
     except NotImplementedError:
         from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
-        raise UnsupportedFakeTensorException(f"running {op} {node.target}(*{args}, **{kwargs})")
+
+        raise UnsupportedFakeTensorException(
+            f"running {op} {node.target}(*{args}, **{kwargs})"
+        )
 
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"

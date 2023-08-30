@@ -26,4 +26,3 @@ from math import pi, e  # isort: skip
 
 False_ = False
 True_ = True
-

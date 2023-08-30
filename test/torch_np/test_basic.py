@@ -514,7 +514,8 @@ class TestDivmod:
 class TestSmokeNotImpl:
     def test_basic(self):
         # smoke test that the "NotImplemented" annotation is picked up
-        assert w.empty(3, like="ooops") is NotImplemented
+        with assert_raises(NotImplementedError):
+            w.empty(3, like="ooops")
 
 
 class TestDefaultDtype:

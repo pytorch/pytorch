@@ -1588,7 +1588,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return np.random.choice(["L", "U"])
 
         res = fn2()
-        assert res in ("L", "U") 
+        assert res in ("L", "U")
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
