@@ -158,6 +158,7 @@ jobs:
       - name: Upload binaries
         env:
           PACKAGE_TYPE: wheel
+          UPLOAD_SUBFOLDER: ""
           PKG_DIR: ${{ runner.temp }}/artifacts
           # When running these on pull_request events these should be blank
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
