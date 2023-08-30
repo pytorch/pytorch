@@ -589,7 +589,7 @@ class OrtBackendOptions:
 
     dynamic: Optional[bool] = None
     """Whether dynamic shape tracing was used to capture the graph. More details can be found in
-    ``torch.compile``'s documentation. ``export_options.dynamic_shapes`` will be overriden by this value
+    ``torch.compile``'s documentation. ``export_options.dynamic_shapes`` will be set to this value
     if either ``export_options`` is None, or ``export_options.dynamic_shapes`` is None. Otherwise, this
     value will be ignored.
     """
