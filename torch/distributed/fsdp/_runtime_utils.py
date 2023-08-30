@@ -650,6 +650,9 @@ def _pre_backward_hook(
     *unused: Any,
 ) -> Any:
     import os
+    gpu_id = int(os.environ["LOCAL_RANK"])
+    if gpu_id == 0:
+        print("RUNNING PRE BWD HOOK")
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
         # print(id(state), "Running pre backward!")
@@ -724,8 +727,9 @@ def _post_backward_hook(
     *unused: Any,
 ):
     import os
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
+    gpu_id = int(os.environ["LOCAL_RANK"])
+    if gpu_id == 0:
+        print("RUNNING POST BWD HOOK")
         # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     # if state.training_state == TrainingState.IDLE:
         # return

@@ -57,6 +57,20 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
+def hook_printing_fn(*grad, real_fn):
+    print("RUNNING HOOK", real_fn)
+    return real_fn(*grad)
+
+def record_hook_fn(tensor, hook_fn):
+    # nonlocal stored_hook_fn
+    # stored_hook_fn = hook_fn.real_fn
+    print("RECORD HOOK FN", hook_fn)
+    # breakpoint()
+    print("Tensor?", tensor)
+    print("Hook?", hook_fn)
+    tensor.register_hook(functools.partial(hook_printing_fn, real_fn=hook_fn))
+    return tensor
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -728,7 +742,6 @@ class TensorVariable(VariableTracker):
             else:
                 fn = fn_var.fn
                 name = fn_var.fn.__name__
-
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),

@@ -356,6 +356,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
+    print(proxy_out.tracer.graph)
     # This makes DCE marginally less likely to DCE inplace operations.
     # It is not strictly necessary
     # Kind of a hacky way to test if an op is in-place or not
