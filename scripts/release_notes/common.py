@@ -253,7 +253,7 @@ def github_data(pr_number):
     )
     query = run_query(query)
     if query.get("errors"):
-        raise Exception(query["errors"])
+        return [], "None", ()
     edges = query["data"]["repository"]["pullRequest"]["labels"]["edges"]
     labels = [edge["node"]["name"] for edge in edges]
     author = query["data"]["repository"]["pullRequest"]["author"]["login"]
