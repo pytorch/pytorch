@@ -11,9 +11,9 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 
+
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
-
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_eager_fallback(self, dtype: torch.dtype):
         x_shape = (16, 16)
@@ -24,7 +24,9 @@ class TestFP8Types(TestCase):
             b_scale = torch.Tensor([1.0]).to(device="cuda")
             output_scale = None
             input_bias = torch.rand(32, device="cuda", dtype=dtype)
-            weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T.to(torch.float8_e4m3fn)
+            weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T.to(
+                torch.float8_e4m3fn
+            )
             a_inverse_scale = 1 / a_scale
             b_inverse_scale = 1 / b_scale
             output, updated_amax = torch._scaled_mm(
@@ -39,7 +41,7 @@ class TestFP8Types(TestCase):
             return output
 
         x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
-        compiled_fp8_matmul = torch.compile(fp8_matmul_unwrapped, backend="inductor", dynamic=False)
+        compiled_fp8_matmul = torch.compile(fp8_matmul_unwrapped, backend="inductor")
         y_fp8 = compiled_fp8_matmul(x)
 
 

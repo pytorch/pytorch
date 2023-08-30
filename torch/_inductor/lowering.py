@@ -147,13 +147,6 @@ def is_boolean_type(x):
         return isinstance(x, bool)
 
 
-# def is_float8_type(x):
-#     if isinstance(x, TensorBox):
-#         return is_float8_type(x.get_dtype())
-#     else:
-#         return is_iuns
-
-
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
         if isinstance(inp, (Number, sympy.Symbol)):
@@ -1489,12 +1482,23 @@ def _warn_complex_not_supported():
     )
 
 
+@functools.lru_cache(None)
+def _warn_float8_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
+    )
+
+
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
+        return True
+    # FP8 Tensors are currently not supported
+    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
+        _warn_float8_not_supported()
         return True
     return False
 
@@ -1883,6 +1887,7 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten._scaled_mm.default)
 
 make_fallback(aten.view_as_complex, require_contiguous)
 
@@ -2020,11 +2025,6 @@ make_fallback(aten.zeros.names)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
-
-# Need to add support to codegen for float8 types, for now fallback
-make_fallback(aten._scaled_mm.default)
-make_fallback(torch.ops.prims.convert_element_type.default)
-make_fallback(aten.clone.default)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
