@@ -233,8 +233,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/__init__.py',
     'torch/_inductor/fx_passes/group_batch_fusion.py',
     'torch/_inductor/fx_passes/pre_grad.py',
-    'torch/_inductor/fx_passes/quantization.py',
-    'torch/_inductor/fx_passes/mkldnn_fusion.py',
     'torch/_inductor/fx_passes/fuse_attention.py',
     'torch/_inductor/fx_passes/freezing_patterns.py',
 ]
