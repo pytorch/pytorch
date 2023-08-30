@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
@@ -376,17 +377,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
   int64_t n_input = self.size(1);
 
   auto save_mean = at::empty({n_input},
-                             self.scalar_type(),
-                             // TODO: Accumulate type?
-                             // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
+                             at::toAccumulateType(self.scalar_type(), self.device().type()),
                              c10::nullopt,
                              kMPS,
                              c10::nullopt,
                              c10::nullopt);
   auto save_var = at::empty({n_input},
-                            self.scalar_type(),
-                            // TODO: Accumulate type?
-                            // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
+                            at::toAccumulateType(self.scalar_type(), self.device().type()),
                             c10::nullopt,
                             kMPS,
                             c10::nullopt,
