@@ -35,7 +35,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable, SizeVariable
+from .lists import SizeVariable
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -228,7 +228,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -649,7 +649,7 @@ class TensorVariable(VariableTracker):
             if (
                 name == "new"
                 and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
+                and isinstance(args[0], SizeVariable)
             ):
                 name = "new_empty"
             return wrap_fx_proxy(

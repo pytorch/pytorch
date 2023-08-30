@@ -595,15 +595,6 @@ class SizeVariable(TupleVariable):
             return self.items[index].add_options(arg, self)
 
 
-class ShapeVariable(TupleVariable):
-    """
-    Represents tensor.shape(...) and helps differentiate between a constant
-    TupleVariable and ShapeVariable.
-    """
-
-    pass
-
-
 class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, **kwargs):
         super().__init__(items, **kwargs)

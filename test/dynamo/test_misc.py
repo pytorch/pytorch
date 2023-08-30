@@ -2207,6 +2207,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         expect = fn(x)
         self.assertEqual(opt_fn(x), expect)
 
+    def test_shape_type(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            if type(x.shape) == torch.Size:
+                return 1
+            else:
+                return 0
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.rand(())
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
