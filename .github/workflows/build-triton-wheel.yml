@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - release/2.1
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
@@ -105,57 +109,55 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: "pytorch-triton-wheel-${{ matrix.py_vers }}"
+          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
+          name: pytorch-triton-wheel
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
+
   upload-wheel:
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-22.04
     needs: build-wheel
     container:
       image: continuumio/miniconda3:4.12.0
-    env:
-      GITHUB_TOKEN: ${{ secrets.github-token }}
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
-      - name: Download Build Artifacts (3.8)
+      - uses: actions/checkout@v3
+
+      - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-wheel-3.8"
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Download Build Artifacts (3.9)
-        uses: actions/download-artifact@v3
-        with:
-          name: "pytorch-triton-wheel-3.9"
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Download Build Artifacts (3.10)
-        uses: actions/download-artifact@v3
-        with:
-          name: "pytorch-triton-wheel-3.10"
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Download Build Artifacts (3.11)
-        uses: actions/download-artifact@v3
-        with:
-          name: "pytorch-triton-wheel-3.11"
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Upload binaries
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
-        env:
-          PKG_DIR: "${{ runner.temp }}/artifacts"
-          # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
-          UPLOAD_BUCKET: "s3://pytorch"
+          name: pytorch-triton-wheel
+          path: ${{ runner.temp }}/artifacts/
+
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         run: |
-            set -ex
-            pip install -q awscli
-            s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
-            for pkg in "${PKG_DIR}/"*.whl; do
-              aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
-             done
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
+      - name: Upload binaries
+        env:
+          PACKAGE_TYPE: wheel
+          PKG_DIR: ${{ runner.temp }}/artifacts
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+        run: |
+          set -ex
+          bash .circleci/scripts/binary_upload.sh
+
   build-conda:
     name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
@@ -164,11 +166,9 @@ jobs:
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
-    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'conda-aws-upload' || '' }}
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
-      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
@@ -198,31 +198,66 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
-            -e ANACONDA_API_TOKEN \
             "${DOCKER_IMAGE}" \
           )
 
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
-
-      - name: Upload artifacts to Anaconda
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
-        run: |
-          container_name=$(docker container ps --format '{{.ID}}')
-          docker exec -t "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
-
-      - name: Chown artifacts
-        run: |
-          container_name=$(docker container ps --format '{{.ID}}')
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
         with:
-          name: "pytorch-triton-conda-${{ matrix.py_vers }}"
+          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
+          name: pytorch-triton-conda
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
+
+  upload-conda:
+    runs-on: ubuntu-22.04
+    needs: build-conda
+    container:
+      image: continuumio/miniconda3:4.12.0
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pytorch-triton-conda
+          path: ${{ runner.temp }}/artifacts/
+
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
+      - name: Upload binaries to Anaconda
+        env:
+          PACKAGE_TYPE: conda
+          PKG_DIR: ${{ runner.temp }}/artifacts
+          # When running these on pull_request events these should be blank
+          CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+          CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+        run: |
+          set -ex
+
+          if [[ "${UPLOAD_CHANNEL}" = "nightly" ]]; then
+            export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
+          else
+            export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
+          fi
+          bash .circleci/scripts/binary_upload.sh
