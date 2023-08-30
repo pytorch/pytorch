@@ -1,8 +1,7 @@
 from functools import lru_cache
-from typing import Callable, Dict, Optional
+from typing import Callable, cast, Dict
 
 import torch
-import torch.distributed._tensor.api as dtensor
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -16,13 +15,7 @@ from torch.distributed._tensor.op_schema import (
     PlacementStrategy,
     StrategyType,
 )
-from torch.fx import Node
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
-from torch.utils._pytree import tree_flatten
-
-
-def unwrap_schema(e: object) -> object:
-    return e._spec if isinstance(e, dtensor.DTensor) else e
+from torch.distributed._tensor.placement_types import TensorMeta
 
 
 class ShardingPropagator:
@@ -30,7 +23,7 @@ class ShardingPropagator:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: Dict[
             OpOverload,
-            Callable[[Node, DeviceMesh, Dict[Node, StrategyType]], StrategyType],
+            Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
 
@@ -45,12 +38,77 @@ class ShardingPropagator:
     def register_op_strategy(
         self,
         op_overload: OpOverload,
-        rule_func: Callable[[Node, DeviceMesh, Dict[Node, StrategyType]], StrategyType],
+        strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
     ):
         """
         Register a sharding strategy generator for an operator.
         """
-        self.op_strategy_funcs[op_overload] = rule_func
+        self.op_strategy_funcs[op_overload] = strategy_func
+
+    def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
+        """
+        Propagate the tensor metadata, it could either return a TensorMeta
+        or a list/tuple of TensorMetas
+        """
+        # special case op list, we don't need to propagate for local
+        # scalar. TODO: figure out a better way to handle this
+        skip_prop_list = [
+            torch.ops.aten._local_scalar_dense.default,
+            torch.ops.aten.equal.default,
+            torch.ops.aten.is_same_size.default,
+        ]
+        if op_schema.op in skip_prop_list:
+            return None
+
+        # NOTE: We must call the tracing in fake tensor mode so that it
+        # avoids materializing memory
+        with FakeTensorMode():
+            fake_args = op_schema.gen_fake_args()
+            fake_kwargs = op_schema.gen_fake_kwargs()
+            fake_out = op_schema.op(*fake_args, **fake_kwargs)
+
+        if isinstance(fake_out, torch.Tensor):
+            return TensorMeta(
+                shape=fake_out.shape, stride=fake_out.stride(), dtype=fake_out.dtype
+            )
+
+        elif isinstance(fake_out, (tuple, list)):
+            tensor_meta_list = []
+            for i, fake_out_item in enumerate(fake_out):
+                if isinstance(fake_out_item, torch.Tensor):
+                    tensor_meta_list.append(
+                        TensorMeta(
+                            shape=fake_out_item.shape,
+                            stride=fake_out_item.stride(),
+                            dtype=fake_out_item.dtype,
+                        )
+                    )
+            return (
+                tuple(tensor_meta_list)
+                if isinstance(fake_out, tuple)
+                else tensor_meta_list
+            )
+        else:
+            # if fake is not a tensor or tuple of tensor, return as none
+            return None
+
+    def _wrap_output_spec_tensor_meta(
+        self, output_spec: OutputSpecType, output_tensor_meta: object
+    ) -> None:
+        """
+        Wrap the output_spec with the tensor metadata from the output.
+        """
+        if output_spec is not None:
+            if isinstance(output_spec, DTensorSpec):
+                assert isinstance(output_tensor_meta, TensorMeta)
+                output_spec.tensor_meta = output_tensor_meta
+            elif isinstance(output_spec, (tuple, list)):
+                for i, spec in enumerate(output_spec):
+                    if isinstance(spec, DTensorSpec):
+                        assert isinstance(output_tensor_meta, (tuple, list))
+                        output_tensor_meta_i = output_tensor_meta[i]
+                        assert isinstance(output_tensor_meta_i, TensorMeta)
+                        spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
         output_sharding = self.propagate_op_sharding(op_info.schema)
@@ -60,52 +118,40 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        op_gm = self._prepare_op_graph(op_schema)
-        if op_gm is None:
+        out_tensor_meta = self._propagate_tensor_meta(op_schema)
+        if out_tensor_meta is None:
             return OutputSharding(None, [op_schema])
 
-        if op_schema.op in self.op_strategy_funcs:
-            # generate op strategy for the op, this is done by propagating
-            # the sharding in the graph.
-            flat_args_sharding, _ = tree_flatten(
-                [op_schema.args_schema, op_schema.kwargs_schema]
-            )
-            node_to_strategy: Dict[Node, StrategyType] = {}
-            output_node = None
-            out_node_strategy = None
-            mesh = flat_args_sharding[0].mesh
-            placeholder_idx = 0
-            for node in op_gm.graph.nodes:
-                if node.op == "placeholder":
-                    # set sharding to placeholders if it's Node
-                    if isinstance(flat_args_sharding[placeholder_idx], DTensorSpec):
-                        strategy = PlacementStrategy(
-                            flat_args_sharding[placeholder_idx]
-                        )
-                        # for eager execution, inputs only have one fixed sharding
-                        node_to_strategy[node] = OpStrategy([strategy])
-                    placeholder_idx += 1
-                elif node.op == "call_function":
-                    if isinstance(node.target, OpOverload):
-                        op_strategy_func = self.op_strategy_funcs[op_schema.op]
-                        out_strategies = op_strategy_func(node, mesh, node_to_strategy)
-                        node_to_strategy[node] = out_strategies
-                    else:
-                        raise NotImplementedError(
-                            f"Unsupported function: {node.target}"
-                        )
-                elif node.op == "output":
-                    output_node = node.args[0]
-                    out_node_strategy = node_to_strategy[output_node[0]]
-                else:
-                    raise NotImplementedError(f"Unsupported node type: {node.op}")
+        def spec_to_strategy(spec: object) -> object:
+            if isinstance(spec, DTensorSpec):
+                return OpStrategy([PlacementStrategy(spec)])
+            else:
+                return spec
 
-            # NOTE: This had the assumption we only have one call_function op in the
-            # op graph, we need to harden this logic when there're decomposed ops.
-            assert isinstance(out_node_strategy, OpStrategy)
+        if op_schema.op in self.op_strategy_funcs:
+            # generate op strategy for the op.
+            input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+            mesh = input_spec.mesh
+
+            # swap the args spec with args strategies
+            args_sharding_strategy = [
+                spec_to_strategy(i) for i in op_schema.args_schema
+            ]
+
+            # construct a new OpSchema on args for strategy based propagation
+            # TODO: op schema should contain flat sharding by default later
+            strategy_schema: OpSchema = OpSchema(
+                op=op_schema.op,
+                args_schema=tuple(args_sharding_strategy),
+                kwargs_schema=op_schema.kwargs_schema,
+            )
+
+            op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
+
+            assert isinstance(op_strategy, OpStrategy)
             # we take the first strategy for now
             # TODO: add a min cost selection logic
-            output_strategy = out_node_strategy.strategies[0]
+            output_strategy = op_strategy.strategies[0]
             needs_redistribute = False
             expected_input_specs = []
             for idx, input_spec in enumerate(op_schema.args_spec):
@@ -129,18 +175,14 @@ class ShardingPropagator:
                 suggestion_schema,
                 needs_redistribute=needs_redistribute,
             )
-            if output_node is not None:
-                self._wrap_output_spec_meta(output_sharding.output_spec, output_node)
+            # associate the output sharding with the output tensor metadata
+            self._wrap_output_spec_tensor_meta(
+                output_sharding.output_spec, out_tensor_meta
+            )
             return output_sharding
 
         elif op_schema.op in self.op_to_rules:
-            # first we propagate the tensor metadata
-            output_node = None
-            for node in op_gm.graph.nodes:
-                if node.op == "output":
-                    output_node = node.args[0]
-
-            # then we propagate the sharding
+            # propagate the sharding with rule
             sharding_prop_func = self.op_to_rules[op_schema.op]
 
             # step 1. there's sharding propagation rule, run
@@ -180,51 +222,13 @@ class ShardingPropagator:
                     output_sharding.output_spec = propagation_res.output_spec
                     output_sharding.needs_redistribute = True
 
-            # associate the output sharding with the output metadata
-            if output_node is not None:
-                self._wrap_output_spec_meta(output_sharding.output_spec, output_node)
+            # associate the output sharding with the output tensor metadata
+            self._wrap_output_spec_tensor_meta(
+                output_sharding.output_spec, out_tensor_meta
+            )
 
             return output_sharding
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
-
-    def _wrap_output_spec_meta(
-        self, output_spec: OutputSpecType, output_nodes: Node
-    ) -> None:
-        """
-        Wrap the output_spec with the metadata from the output node.
-        """
-        if output_spec is not None:
-            assert isinstance(output_nodes, (tuple, list))
-            if isinstance(output_spec, DTensorSpec):
-                output_spec.tensor_meta = output_nodes[0].meta["tensor_meta"]
-            elif isinstance(output_spec, (tuple, list)):
-                for i, spec in enumerate(output_spec):
-                    if isinstance(spec, DTensorSpec):
-                        spec.tensor_meta = output_nodes[i].meta["tensor_meta"]
-
-    def _prepare_op_graph(
-        self,
-        op_schema: OpSchema,
-    ) -> Optional[torch.fx.GraphModule]:
-        # prepare the op graph for sharding propagation
-        # special case op list, we don't need to propagate for local
-        # scalar. TODO: figure out a better way to handle this
-        skip_prop_list = [
-            torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
-            torch.ops.aten.is_same_size.default,
-        ]
-        if op_schema.op in skip_prop_list:
-            return None
-
-        # NOTE: We must call the tracing in fake tensor mode so that it
-        # avoids materializing memory
-        with FakeTensorMode():
-            fake_args = op_schema.gen_fake_args()
-            fake_kwargs = op_schema.gen_fake_kwargs()
-            g = get_isolated_graphmodule(op_schema.op, fake_args, fake_kwargs)
-
-        return g

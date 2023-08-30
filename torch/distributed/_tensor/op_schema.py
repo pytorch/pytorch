@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.utils._pytree import tree_map_only, TreeSpec
 
@@ -94,6 +95,14 @@ class OpStrategy(StrategyType):
         Returns the max number of shards across all placement strategies
         """
         return max([strategy.output_spec.num_shards for strategy in self.strategies])
+
+    @property
+    def output_shape(self):
+        return self.strategies[0].output_spec.shape
+
+    @property
+    def output_ndim(self):
+        return self.strategies[0].output_spec.ndim
 
 
 class TupleStrategy(StrategyType):
@@ -240,6 +249,7 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
+    mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
     flat_kwargs_schema: List[object]
