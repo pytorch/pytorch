@@ -1355,6 +1355,12 @@ class Scheduler:
             return True
 
         node_list_1 = node1.get_nodes()
+        device = node_list_1[0].get_device()
+
+        # don't support benchmark fusion for CPU right now.
+        if device.type == "cpu":
+            return True
+
         node_list_2 = node2.get_nodes()
         node_list_fused = node_list_1 + node_list_2
 
