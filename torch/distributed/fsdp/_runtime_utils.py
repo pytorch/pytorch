@@ -649,10 +649,8 @@ def _pre_backward_hook(
     handle: FlatParamHandle,
     *unused: Any,
 ) -> Any:
-    import os
-    gpu_id = int(os.environ["LOCAL_RANK"])
-    if gpu_id == 0:
-        print("RUNNING PRE BWD HOOK")
+    # if gpu_id == 0:
+    print("RUNNING PRE BWD HOOK")
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
         # print(id(state), "Running pre backward!")
@@ -720,16 +718,16 @@ def _pre_backward_hook(
 
 
 @no_type_check
-@torch.no_grad()
+# @torch.no_grad()
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
     *unused: Any,
 ):
-    import os
-    gpu_id = int(os.environ["LOCAL_RANK"])
-    if gpu_id == 0:
-        print("RUNNING POST BWD HOOK")
+    # import os
+    # gpu_id = int(os.environ["LOCAL_RANK"])
+    # if gpu_id == 0:
+    print("RUNNING POST BWD HOOK")
         # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     # if state.training_state == TrainingState.IDLE:
         # return
@@ -787,7 +785,13 @@ def _post_backward_hook(
                 # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
                 and not handle._force_full_precision
             ):
-                flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+
+                with torch.no_grad():
+                    # flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+                    curr_version = flat_param.grad._version
+                    flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
+                    torch._C._autograd._unsafe_set_version_counter(flat_param.grad, curr_version)
+
             if handle.uses_sharded_strategy:
                 _reduce_grad(state, handle)
             else:

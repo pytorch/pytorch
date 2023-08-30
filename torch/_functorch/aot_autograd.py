@@ -4691,10 +4691,10 @@ def aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
-    gpu_id = int(os.environ["LOCAL_RANK"])
-    if gpu_id == 0:
-        for i, param in enumerate(params.values()):
-            print(f"{i}. Post compile. {param.size()}")
+    # gpu_id = int(os.environ["LOCAL_RANK"])
+    # if gpu_id == 0:
+    #     for i, param in enumerate(params.values()):
+    #         print(f"{i}. Post compile. {param.size()}")
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
@@ -4751,8 +4751,8 @@ def aot_module_simplified(
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
-    for i, arg in enumerate(full_args):
-        print(f"{i}. post compile args compile. {arg.size() if isinstance(arg, torch.Tensor) else 'n/a'} src: {aot_autograd_arg_pos_to_source[i].name()}")
+    # for i, arg in enumerate(full_args):
+    #     print(f"{i}. post compile args compile. {arg.size() if isinstance(arg, torch.Tensor) else 'n/a'} src: {aot_autograd_arg_pos_to_source[i].name()}")
 
     dynamic_shapes = False
     for x in full_args:

@@ -203,9 +203,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value == functools.partial:
             subargs = args[1:]
             subargs_real_values = []
+            subkwargs = {}
             for subarg in subargs:
                 subargs_real_values.append(subarg.value)
-            new_fn = functools.partial(args[0].fn, *subargs_real_values)
+            for k, v in kwargs.items():
+                subkwargs[k] = v.value
+
+            new_fn = functools.partial(args[0].fn, *subargs_real_values, **subkwargs)
             return variables.functions.UserFunctionVariable(new_fn, **options)
         return super().call_function(tx, args, kwargs)
 
@@ -463,7 +467,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 partial_kwargs[k] = kwarg_vt
             
             partial_kwargs.update(kwargs)
-
+            breakpoint()
             # unimplemented(f"Special partial? {self.source} {self.value.func} {[type(t) for t in self.value.args]} {args} {kwargs}")
             return variables.UserFunctionVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
