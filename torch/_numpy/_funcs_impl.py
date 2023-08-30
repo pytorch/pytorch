@@ -956,19 +956,9 @@ def unique(
     (ar,), axis = _util.axis_none_flatten(ar, axis=axis)
     axis = _util.normalize_axis_index(axis, ar.ndim)
 
-    is_half = ar.dtype == torch.float16
-    if is_half:
-        ar = ar.to(torch.float32)
-
     result = torch.unique(
         ar, return_inverse=return_inverse, return_counts=return_counts, dim=axis
     )
-
-    if is_half:
-        if isinstance(result, tuple):
-            result = (result[0].to(torch.float16),) + result[1:]
-        else:
-            result = result.to(torch.float16)
 
     return result
 
