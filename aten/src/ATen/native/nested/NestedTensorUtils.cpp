@@ -9,7 +9,6 @@
 #include <ATen/ops/_nested_tensor_storage_offsets_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/chunk_native.h>
-#include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #endif
 
@@ -94,9 +93,9 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   --dim;
   int64_t tensor_dim = sizes.size(1);
   for (const auto split_idx : c10::irange(chunks)) {
-      auto new_sizes = at::native::empty_like(sizes);
+      auto new_sizes = sizes.clone();
       auto new_strides = strides.clone();
-      auto new_offsets = at::native::empty_like(offsets);
+      auto new_offsets = offsets.clone();
       int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
       int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
       // Get start val for each split
@@ -150,9 +149,9 @@ std::vector<Tensor> split_with_sizes_nested(
   int64_t start_val = 0;
   for (const auto split_idx : c10::irange(num_splits)) {
     auto split_size = split_sizes[split_idx];
-    auto new_sizes = at::native::empty_like(sizes);
+    auto new_sizes = sizes.clone();
     auto new_strides = strides.clone();
-    auto new_offsets = at::native::empty_like(offsets);
+    auto new_offsets = offsets.clone();
     int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
     int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
     // Get start val for each split
