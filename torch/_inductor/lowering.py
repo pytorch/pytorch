@@ -146,6 +146,12 @@ def is_boolean_type(x):
     else:
         return isinstance(x, bool)
 
+# def is_float8_type(x):
+#     if isinstance(x, TensorBox):
+#         return is_float8_type(x.get_dtype())
+#     else:
+#         return is_iuns
+
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
@@ -2013,6 +2019,11 @@ make_fallback(aten.zeros.names)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
+
+# Need to add support to codegen for float8 types, for now fallback
+make_fallback(aten._scaled_mm.default)
+make_fallback(torch.ops.prims.convert_element_type.default)
+make_fallback(aten.clone.default)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
