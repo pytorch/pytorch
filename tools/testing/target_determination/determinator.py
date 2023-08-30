@@ -9,7 +9,7 @@ from tools.testing.target_determination.heuristics import (
 
 
 def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
-    rankings = TestPrioritizations(unranked_relevance=tests.copy())
+    rankings = TestPrioritizations(tests_being_ranked=tests)
     print(f"Received {len(tests)} tests to prioritize")
     for test in tests:
         print(f"  {test}")
@@ -18,9 +18,7 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         new_rankings = heuristic.get_test_priorities(tests)
         rankings.integrate_priorities(new_rankings)
 
-        num_tests_found = len(new_rankings.highly_relevant) + len(
-            new_rankings.probably_relevant
-        )
+        num_tests_found = len(new_rankings.get_prioritized_tests())
         print(
             f"Heuristic {heuristic} identified {num_tests_found} tests "
             + f"to prioritize ({(num_tests_found / len(tests)):.2%}%)"
@@ -29,26 +27,12 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         if num_tests_found:
             new_rankings.print_info()
 
-    num_tests_analyzed = (
-        len(rankings.highly_relevant)
-        + len(rankings.probably_relevant)
-        + len(rankings.unranked_relevance)
-    )
-
-    assert num_tests_analyzed == len(tests), (
-        f"Was given {len(tests)} tests to prioritize, but analysis returned {num_tests_analyzed} tests. "
-        + "Breakdown:\n"
-        + f"Highly relevant: {len(rankings.highly_relevant)}\n"
-        + f"Probably relevant: {len(rankings.probably_relevant)}\n"
-        + f"Unranked relevance: {len(rankings.unranked_relevance)}\n"
-    )
-
     emit_metric(
         "test_reordering_prioritized_tests",
         {
-            "highly_relevant_tests": rankings.highly_relevant,
-            "probably_relevant_tests": rankings.probably_relevant,
-            "unranked_tests": rankings.unranked_relevance,
+            "high_relevance_tests": rankings.get_high_relevance_tests(),
+            "probable_relevance_tests": rankings.get_probable_relevance_tests(),
+            "unranked_relevance_tests": rankings.get_unranked_relevance_tests(),
         },
     )
     return rankings

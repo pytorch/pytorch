@@ -31,6 +31,12 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
+from .cache_size import (
+    CacheSizeRelevantForFrame,
+    compute_cache_size,
+    exceeds_cache_size_limit,
+    is_recompilation,
+)
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -219,21 +225,6 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
-def is_recompilation(cache_size):
-    # cache_size here refers to the number of total cached entries on the code
-    # object.
-    return cache_size >= 1
-
-
-def compute_cache_size(cache_entry):
-    # Walk the linked list to calculate the cache size
-    running_cache_size = 0
-    while cache_entry:
-        running_cache_size += 1
-        cache_entry = cache_entry.next
-    return running_cache_size
-
-
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
@@ -254,7 +245,7 @@ def convert_frame_assert(
 
         code = frame.f_code
 
-        cache_size = compute_cache_size(cache_entry)
+        cache_size = compute_cache_size(frame, cache_entry)
         if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
@@ -316,7 +307,7 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if cache_size >= config.cache_size_limit:
+        if exceeds_cache_size_limit(cache_size):
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -383,7 +374,8 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size,
+                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "accumulated_cache_size": cache_size.num_cache_entries,
             },
         )
 
@@ -422,7 +414,7 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
-    cache_size: int,
+    cache_size: CacheSizeRelevantForFrame,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
     compile_id=None,
@@ -619,7 +611,8 @@ def _compile(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                cache_size,
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
                 graph_node_count,
@@ -635,12 +628,10 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
-    ):
+    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks, frame_state)
+            result = inner_convert(frame, cache_entry, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
@@ -705,7 +696,7 @@ def replay(filename):
             export=False,
             export_constraints=None,
             hooks=Hooks(),
-            cache_size=0,
+            cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
         )
     except Exception:

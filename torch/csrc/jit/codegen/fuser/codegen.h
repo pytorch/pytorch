@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <iostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace torch {
