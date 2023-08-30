@@ -1772,14 +1772,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
-
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod
@@ -2186,6 +2178,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_torch_size_numel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn():
+            return torch.Size([10, 8]).numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        num = torch.Size([10, 8]).numel()
+        self.assertEqual(opt_fn(), num)
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2216,13 +2218,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(100, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        # Python code is needed here, since torch.manual_seed graph-breaks.
+        # Refs: https://github.com/pytorch/pytorch/issues/107187
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -6773,6 +6779,108 @@ def ___make_guard_fn():
         actual = torch.compile(mod1, backend=counter, fullgraph=True)(x)
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
+
+    def test_itertools_accumulate_tensors_default_sum(self):
+        def fn(a, b, c, d, x):
+            l = [a, b, c, d, x]
+            for i, t in enumerate(l):
+                l[i] = t * x
+            return itertools.accumulate(l)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        x = torch.randn([2, 2])
+        eager = fn(*t_list, x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(*t_list, x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_builtins(self):
+        for builtin_op in [operator.mul, operator.sub, operator.pow]:
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=builtin_op)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_user_defined(self):
+        def udo_fn_0(a, b):
+            return -1
+
+        rando = random.randint(0, 1)
+
+        def udo_fn_1(a, b):
+            return a * rando + b * rando
+
+        seen = []
+
+        def udo_fn_2(a, b):
+            seen.append(a)
+            seen.append(b)
+            return a * len(seen)
+
+        for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            torch._dynamo.reset()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=udo_fn)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_pure_python_accumulate(self):
+        def accumulate(iterable, func=lambda x, y: x + y):
+            it = iter(iterable)
+            try:
+                # Initialize the accumulator with the first value from the iterable
+                accumulator = next(it)
+            except StopIteration:
+                # If the iterable is empty, return an empty generator
+                return
+            yield accumulator
+
+            for element in it:
+                accumulator = func(accumulator, element)
+                yield accumulator
+
+        def fn(it):
+            return accumulate(it)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        eager = fn(t_list)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(t_list)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
 
 
 class TestTracer(JitTestCase):

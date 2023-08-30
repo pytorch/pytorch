@@ -2,14 +2,18 @@ import functools
 import itertools
 import logging
 import operator
-from typing import List, Optional, Union
+from collections import defaultdict, namedtuple
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+from torch._decomp import register_decomposition
+from torch._prims_common import is_integer_dtype
 
 from .. import config, ir, pattern_matcher
+from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -26,9 +30,9 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    remove_extra_clones,
     stable_topological_sort,
 )
+from ..utils import decode_device
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -61,11 +65,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if is_inference and config.reordering:
         reorder_for_locality(gm.graph)
 
+    fake_tensor_updater = FakeTensorUpdater(gm.graph)
     if config.pattern_matcher:
         lazy_init()
 
         group_batch_fusion_post_grad_passes(gm.graph)
-        remove_extra_clones(gm.graph)
+        remove_noop_ops(gm.graph)
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
@@ -73,6 +78,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             inference_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+
+    fake_tensor_updater.incremental_update()
+    # Keep this last, since it introduces mutation. Look at
+    # ./fx_passes/README.md for a discussion of mutation invariants.
+    reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
 
@@ -368,7 +378,7 @@ _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)
             _cat_1,
             CallFunction(
                 aten.slice,
-                CallFunction(aten.slice, _cat_1, 0, 0, 9223372036854775807),
+                _cat_1,
                 1,
                 0,
                 KeywordArg("size"),
@@ -478,6 +488,186 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+
+def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same size/strides"""
+    val1 = node1.meta.get("val")
+    val2 = node2.meta.get("val")
+    return (
+        val1 is not None
+        and val2 is not None
+        and val1.size() == val2.size()
+        and val1.layout == val2.layout
+        and (val1.layout != torch.strided or val1.stride() == val2.stride())
+    )
+
+
+noop_registry: Dict[Any, Any] = {}
+
+
+def register_noop_decomp(targets, nop_arg=0):
+    def register_fun(cond):
+        register_decomposition(targets, registry=noop_registry, unsafe=True)(
+            (cond, nop_arg)
+        )
+
+    return register_fun
+
+
+@register_noop_decomp(aten.slice)
+def slice_noop(self, dim=0, start=None, end=None, step=1):
+    if start is None or end is None:
+        return False
+    if start == 0 and end >= 2**63 - 1 and step == 1:
+        return True
+    return False
+
+
+@register_noop_decomp(aten.slice_scatter, 1)
+def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
+    if start is None:
+        start = 0
+    if end is None:
+        end = 2**63 - 1
+    if start == 0 and end >= 2**63 - 1 and step == 1:
+        return True
+    return False
+
+
+@register_noop_decomp(aten.constant_pad_nd)
+def constant_pad_nd(x, padding, fill_value=0):
+    if all(p == 0 for p in padding):
+        return True
+
+
+@register_noop_decomp(torch.ops.prims.convert_element_type)
+def convert_element_type_noop(x, dtype: torch.dtype):
+    return x.dtype == dtype
+
+
+@register_noop_decomp(torch.ops.prims.device_put)
+def device_put_noop(x, device):
+    return x.device == decode_device(device)
+
+
+@register_noop_decomp([aten.ceil, aten.floor, aten.round, aten.trunc])
+def int_noop(x):
+    return is_integer_dtype(x.dtype)
+
+
+@register_noop_decomp([aten.pow])
+def pow_noop(a, b):
+    return isinstance(b, int) and b == 1
+
+
+@register_noop_decomp([aten.cat], lambda args: args[0][0])
+def cat_noop(inputs, dim=0):
+    return len(inputs) == 1
+
+
+@register_noop_decomp([aten.clone, aten.alias])
+def true_noop(*args, **kwargs):
+    return True
+
+
+def remove_noop_ops(graph: torch.fx.Graph):
+    """
+    Removes aten.clone and aten.alias ops from the graph when it's safe.
+
+    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    """
+    input_storages = set()
+    output_storages = set()
+
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            input_storages.add(get_node_storage(node))
+        else:
+            break
+
+    for out in tuple(graph.nodes)[-1].args[0]:
+        if isinstance(out, torch.fx.Node):
+            output_storages.add(get_node_storage(out))
+
+    for node in graph.nodes:
+        if node.target in noop_registry:
+            cond, src_index = noop_registry[node.target]
+            if isinstance(src_index, int):
+                src = node.args[src_index]
+            else:
+                src = src_index(node.args)
+            if not isinstance(src, torch.fx.Node):
+                continue
+            # See fx_passes/README.md for a discussion of why this is
+            # necessary.
+            if get_node_storage(node) in output_storages and (
+                get_node_storage(src) in input_storages
+                or get_node_storage(src) in output_storages
+            ):
+                continue
+            is_valid, args, kwargs = get_fake_args_kwargs(node)
+            if not is_valid:
+                continue
+            if same_layout(node, src) and cond(*args, **kwargs):
+                node.replace_all_uses_with(src)
+                graph.erase_node(node)
+
+
+InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
+
+
+def reinplace_scatters(graph):
+    """
+    Reinplaces scatter operations in easy cases where the node being mutated
+    is only used by the scatter (users == 1), and the node being mutated
+    shares storage with no other nodes.
+
+    Also handles input mutations when there is a corresponding copy node.
+    """
+
+    copy_nodes = {}
+    mutated_inputs = set()
+    storage_to_nodes = defaultdict(list)
+    for node in reversed(graph.nodes):
+        storage_to_nodes[get_node_storage(node)].append(node)
+        if node.target == aten.copy_.default:
+            copy_nodes[(node.args[0], node.args[1])] = node
+            assert node.args[0].op == "placeholder"
+            mutated_inputs.add(node.args[0])
+
+    inplaceable_ops = {
+        aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+    }
+    for node in graph.nodes:
+        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
+            mutated_arg = node.args[inplaceable_op.mutated_arg]
+            if get_node_storage(mutated_arg) is None:
+                continue
+            shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+            if mutated_arg.op == "placeholder":
+                if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
+                    continue
+
+                if (
+                    len(shared_view_nodes) > 2
+                ):  # Arg aliases another node other than copy_
+                    continue
+
+                # Check for any uses other than current node and copy_ epilogue
+                if len(mutated_arg.users) > 2:
+                    continue
+
+                graph.erase_node(copy_node)
+                node.target = inplaceable_op.inplace_op
+            else:
+                # NB: This condition could be relaxed if none of the aliases
+                # are used after this mutation op. But that's trickier.
+                if len(shared_view_nodes) > 1:  # Arg aliases another node
+                    continue
+                if len(mutated_arg.users) > 1:  # Arg used somewhere else
+                    continue
+                node.target = inplaceable_op.inplace_op
 
 
 @register_lowering_pattern(

@@ -341,8 +341,7 @@ static struct PyGetSetDef CacheEntry_properties[] = {
 
 
 static PyObject* cache_entry_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
-  CacheEntry *self;
-  self = (CacheEntry*) type->tp_alloc(type, 0);
+  CacheEntry *self = (CacheEntry*) type->tp_alloc(type, 0);
   if (self != NULL) {
     // The corresponding decrefs for Py_None are in cache_entry_init.
     Py_INCREF(Py_None);
@@ -586,7 +585,7 @@ Debugger helper functions.
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   // TODO(anijain2305) - CacheEntry being the first class Python object might
   // obviate the need of this function. Revisit.
-  PyObject* object;
+  PyObject* object = NULL;
   if (!PyArg_ParseTuple(args, "O", &object)) {
     return NULL;
   }
@@ -822,8 +821,8 @@ inline static PyObject* eval_custom_code(
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
-  auto ncells = PyCode_GetNCellvars(code);
-  auto nfrees = PyCode_GetNFreevars(code);
+  Py_ssize_t ncells = PyCode_GetNCellvars(code);
+  Py_ssize_t nfrees = PyCode_GetNFreevars(code);
 
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
