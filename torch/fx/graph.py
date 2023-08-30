@@ -39,9 +39,6 @@ _origin_type_map = {
 # generated code
 TransformCodeFunc = Callable[[List[str]], List[str]]
 
-# parse stack trace into file, lineno, code
-ParsedStackTrace = collections.namedtuple("ParsedStackTrace", ["file", "lineno", "code"])
-
 
 class _CustomBuiltin(NamedTuple):
     """Additional objs that we add to every graph's globals.
@@ -282,6 +279,7 @@ class _PyTreeInfo(NamedTuple):
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
         return None
+    ParsedStackTrace = collections.namedtuple("ParsedStackTrace", ["file", "lineno", "code"])
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
     lines = stack_trace.strip().split('\n')
     # stacktrace should have innermost frame last, so we

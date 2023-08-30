@@ -188,15 +188,11 @@ def get_orig_fx_node_name_to_buf_meta(nodes: SchedulerNodeList):
         buf_name = ir_node.name
         buf_meta = BufMeta(buf_name, len(ir_node.origins))
         for origin in ir_node.origins:
-            # investigate which origin.stack_trace is none
-            # and why one orig fx node belongs to multiple buffers
-            if origin.stack_trace is None:
-                continue
             node_name = origin.name
-            assert (
-                node_name not in node_name_to_buf_meta
-            ), f"node_name={node_name} should not be in {node_name_to_buf_meta}"
-            node_name_to_buf_meta[node_name] = buf_meta
+            # when buf1 and buf2 both have origin=node1
+            # we draw node1 according to buf1
+            if node_name not in node_name_to_buf_meta:
+                node_name_to_buf_meta[node_name] = buf_meta
     return node_name_to_buf_meta
 
 
