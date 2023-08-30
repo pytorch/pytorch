@@ -1857,11 +1857,13 @@ class CommonTemplate:
             )
 
     @slowTest
+    @expectedFailureCodegenDynamic
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv bn test")
 
+        # fails dynamic check which bn is fused, and there will not have loops vars.
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {

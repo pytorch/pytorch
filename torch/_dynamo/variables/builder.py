@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
@@ -821,8 +822,16 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            base = self.name
+            name = self.name
+            for i in itertools.count():
+                if name not in self.tx.output.nn_modules:
+                    self.tx.output.nn_modules[name] = value
+                    break
+                name = f"{base}_{i}"
             return FSDPManagedNNModuleVariable(
                 value,
+                name,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
                 source=self.get_source(),
             )
@@ -874,8 +883,7 @@ class VariableBuilder:
         if (
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
-            and not source.guard_source().is_fsdp_module()
-        ):
+        ) and not source.guard_source().is_fsdp_module():
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,

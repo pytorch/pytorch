@@ -294,9 +294,10 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, hashed in V.graph.constant_reprs.items():
-            # include a hash so our code cache gives different constants different files
-            self.write_constant(name, hashed)
+        if not V.graph.aot_mode:
+            for name, hashed in V.graph.constant_reprs.items():
+                # include a hash so our code cache gives different constants different files
+                self.write_constant(name, hashed)
 
         self.allocated = set()
         self.freed = set()
@@ -1009,10 +1010,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
-                constants_idx = inputs_len + idx
-                self.prefix.writeline(
-                    f"at::Tensor {constants_key} = args[{constants_idx}];"
-                )
+                if V.graph.aot_mode:
+                    self.prefix.writeline(
+                        f"""at::Tensor {constants_key} = constants_->at("{constants_key}");"""
+                    )
+                else:
+                    # Append constants as inputs to the graph
+                    constants_idx = inputs_len + idx
+                    self.prefix.writeline(
+                        f"at::Tensor {constants_key} = args[{constants_idx}];"
+                    )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
@@ -1044,14 +1051,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         num_inputs = len(V.graph.graph_inputs)
         num_outputs = len(V.graph.graph_outputs)
+        num_constants = len(V.graph.constants)
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel()
-                : AOTInductorModelBase({num_inputs}, {num_outputs}) {{
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map)
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}) {{
             """
         )
 
         with self.prefix.indent():
+            from .cpp import DTYPE_TO_ATEN
+
             for idx, name in enumerate(V.graph.graph_inputs.keys()):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
@@ -1069,6 +1079,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.writeline(
                         f"inputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
+
+            for idx, (name, tensor) in enumerate(V.graph.constants.items()):
+                assert isinstance(tensor, torch.Tensor)
+                self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].dtype = {DTYPE_TO_ATEN[tensor.dtype]};"
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
+                )
+
+                size_str = ", ".join([str(s) for s in tensor.size()])
+                self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
+
+                stride_str = ", ".join([str(s) for s in tensor.stride()])
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].stride = {{{stride_str}}};"
+                )
+
+            self.prefix.writeline("constants_ = constants_map;")
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 # TODO: handle symbolic expressions later.
