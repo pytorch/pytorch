@@ -1010,6 +1010,25 @@ class TritonKernel(Kernel):
             for idx_range, iter_range in zip(index_numels, self.numels)
         )
 
+    def is_reused(self, name):
+        # A variable is reused if any of the following hold
+        #  1) We are doing broadcasting
+        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
+        #   2.1) We are in a reduction loop
+        #   2.2) Its not its last use
+        #   2.3) This load will not be lifted to the body
+        if self.is_broadcasted(original_index):
+            return True
+        elif self.inside_reduction and not self.persistent_reduction:
+            if name in self.args.inplace_buffers:
+                names = set(self.args.inplace_buffers[name].other_names)
+            else:
+                names = {name}
+            last_use = len(names & self.last_usage) > 0
+            return not last_use and ("rmask" in mask or indirect_indexing)
+        else:
+            return False
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
@@ -1293,24 +1312,11 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index)
 
-        # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
-        #  1) We are doing broadcasting
-        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   2.1) We are in a reduction loop
-        #   2.2) Its not its last use
-        #   2.3) This load will not be lifted to the body
-        if self.is_broadcasted(original_index):
-            ep = ", eviction_policy='evict_last'"
-        elif self.inside_reduction and not self.persistent_reduction:
-            if name in self.args.inplace_buffers:
-                names = set(self.args.inplace_buffers[name].other_names)
-            else:
-                names = {name}
-            last_use = len(names & self.last_usage) > 0
-            evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            ep = ", eviction_policy='evict_last'" if evict_last else ""
+        if self.is_reused(name):
+            mode = ", eviction_policy='evict_last'"
         else:
-            ep = ""
+            mode = ", cache_modifier='.lu'"
+
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -1327,7 +1333,7 @@ class TritonKernel(Kernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = expand_str
             else:
-                line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+                line = f"tl.load({var} + ({index}), {mask}{mode}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
 
