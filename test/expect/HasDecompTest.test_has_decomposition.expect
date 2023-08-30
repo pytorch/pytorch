@@ -60,6 +60,8 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
+aten::_cslt_compress
+aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -179,6 +181,9 @@ aten::_foreach_clamp_min.Scalar_out
 aten::_foreach_clamp_min_.List
 aten::_foreach_clamp_min_.Scalar
 aten::_foreach_clamp_min_.ScalarList
+aten::_foreach_copy
+aten::_foreach_copy.out
+aten::_foreach_copy_
 aten::_foreach_cos
 aten::_foreach_cos.out
 aten::_foreach_cos_
@@ -325,10 +330,16 @@ aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
 aten::_fused_adam
 aten::_fused_adam.out
+aten::_fused_adam.tensor_lr
+aten::_fused_adam.tensor_lr_out
 aten::_fused_adam_
+aten::_fused_adam_.tensor_lr
 aten::_fused_adamw
 aten::_fused_adamw.out
+aten::_fused_adamw.tensor_lr
+aten::_fused_adamw.tensor_lr_out
 aten::_fused_adamw_
+aten::_fused_adamw_.tensor_lr
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
@@ -448,6 +459,8 @@ aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
+aten::_scaled_mm
+aten::_scaled_mm.out
 aten::_segment_reduce_backward
 aten::_segment_reduce_backward.out
 aten::_slow_conv2d_backward.grad_input
@@ -1172,6 +1185,8 @@ aten::sort
 aten::sort.stable
 aten::sort.values
 aten::sort.values_stable
+aten::sparse_compressed_tensor.comp_plain_value
+aten::sparse_compressed_tensor.comp_plain_value_size
 aten::sparse_coo_tensor.size
 aten::sparse_coo_tensor.size_out
 aten::sparse_dim

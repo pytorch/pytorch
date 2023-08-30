@@ -13,13 +13,13 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
 
 import pkg_resources
 
 import torch
 import torch.distributed as dist
+from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -37,34 +37,25 @@ from torch.utils import cpp_extension
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-try:
-    # using tools/ to optimize test run.
-    sys.path.insert(0, str(REPO_ROOT))
-    from tools.stats.export_test_times import TEST_TIMES_FILE
-    from tools.stats.upload_stats_lib import emit_metric
-    from tools.testing.test_selections import (
-        calculate_shards,
-        get_reordered_tests,
-        get_test_case_configs,
-        NUM_PROCS,
-        ShardedTest,
-        THRESHOLD,
-    )
+# using tools/ to optimize test run.
+sys.path.insert(0, str(REPO_ROOT))
+from tools.stats.export_test_times import TEST_TIMES_FILE
+from tools.stats.upload_metrics import emit_metric
+from tools.testing.target_determination.determinator import (
+    get_test_prioritizations,
+    TestPrioritizations,
+)
+from tools.testing.test_selections import (
+    calculate_shards,
+    get_test_case_configs,
+    NUM_PROCS,
+    ShardedTest,
+    THRESHOLD,
+)
 
-    HAVE_TEST_SELECTION_TOOLS = True
-except ImportError as e:
-
-    class ShardedTest:
-        pass
-
-    NUM_PROCS = 2
-    HAVE_TEST_SELECTION_TOOLS = False
-    print(
-        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
-    )
-finally:
-    # Make sure to remove REPO_ROOT after import is done
-    sys.path.remove(str(REPO_ROOT))
+HAVE_TEST_SELECTION_TOOLS = True
+# Make sure to remove REPO_ROOT after import is done
+sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -987,7 +978,7 @@ def get_pytest_args(
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error and IS_CI and HAVE_TEST_SELECTION_TOOLS:
+        if not options.continue_through_error and IS_CI:
             pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
@@ -1366,7 +1357,9 @@ def get_selected_tests(options) -> List[ShardedTest]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":
+    if torch.version.cuda is not None and version.parse(
+        torch.version.cuda
+    ) >= version.parse("11.6"):
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1416,21 +1409,30 @@ def get_selected_tests(options) -> List[ShardedTest]:
 
 def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
-    path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
-    if os.path.exists(path):
-        with open(path) as f:
-            test_file_times = cast(Dict[str, Any], json.load(f))
-    else:
-        test_file_times = {}
-    test_config = os.environ.get("TEST_CONFIG")
-    if test_config not in test_file_times:
-        print(
-            "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
-        )
+    path = os.path.join(str(REPO_ROOT), file)
+    if not os.path.exists(path):
+        print("::warning:: Failed to find test times file. Using round robin sharding.")
         return {}
+
+    with open(path) as f:
+        test_times_file = cast(Dict[str, Any], json.load(f))
+    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    test_config = os.environ.get("TEST_CONFIG")
+    if test_config in test_times_file.get(build_environment, {}):
+        print("Found test times from artifacts")
+        return test_times_file[build_environment][test_config]
+    elif test_config in test_times_file["default"]:
+        print(
+            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
+            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+        )
+        return test_times_file["default"][test_config]
     else:
-        print("Found test time stats from artifacts")
-        return test_file_times[test_config]
+        print(
+            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
+            f" and {test_config} test config. Using default build env and default test config instead."
+        )
+        return test_times_file["default"]["default"]
 
 
 def do_sharding(
@@ -1448,17 +1450,16 @@ def do_sharding(
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
 
-    if HAVE_TEST_SELECTION_TOOLS:
-        # Do sharding
-        shards = calculate_shards(
-            num_shards,
-            selected_tests,
-            test_file_times,
-            must_serial=must_serial,
-            sort_by_time=sort_by_time,
-        )
-        _, tests_from_shard = shards[which_shard - 1]
-        selected_tests = tests_from_shard
+    # Do sharding
+    shards = calculate_shards(
+        num_shards,
+        selected_tests,
+        test_file_times,
+        must_serial=must_serial,
+        sort_by_time=sort_by_time,
+    )
+    _, tests_from_shard = shards[which_shard - 1]
+    selected_tests = tests_from_shard
 
     return selected_tests
 
@@ -1618,41 +1619,45 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    prioritized_tests = []
-    general_tests = selected_tests
-    if IS_CI and HAVE_TEST_SELECTION_TOOLS:
+    test_prioritization: TestPrioritizations = TestPrioritizations(
+        unranked_relevance=selected_tests.copy()
+    )
+    metrics_dict = {}
+    if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        (prioritized_tests, general_tests) = get_reordered_tests(general_tests)
+        test_prioritization = get_test_prioritizations(selected_tests)
 
-    metrics_dict = {
-        "prioritized_tests": prioritized_tests,
-        "general_tests": general_tests,
-        "cpp": options.cpp,
-    }
+        metrics_dict = {
+            "highly_relevant_tests": test_prioritization.highly_relevant,
+            "probably_relevant_tests": test_prioritization.probably_relevant,
+            "unranked_relevance_tests": test_prioritization.unranked_relevance,
+            "cpp": options.cpp,
+        }
+
+    class TestBatch:
+        """Defines a set of tests with similar priority that should be run together on the current shard"""
+
+        name: str
+        sharded_tests: List[ShardedTest]
+        failures: List[TestFailure]
+
+        def __init__(self, name: str, raw_tests: List[str], should_sort_shard: bool):
+            self.name = name
+            self.failures = []
+            self.sharded_tests = do_sharding(
+                options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
+            )
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
-    prioritized_tests = do_sharding(
-        options, prioritized_tests, test_times_dict, sort_by_time=False
-    )
-    general_tests = do_sharding(options, general_tests, test_times_dict)
+    test_batches: List[TestBatch] = []
 
-    if options.verbose:
-
-        def print_tests(category, tests):
-            tests_str = "\n ".join(str(x) for x in tests)
-            print_to_stderr(f"{category} tests:\n {tests_str}")
-
-        print_tests(
-            "Prioritized parallel", [x for x in prioritized_tests if not must_serial(x)]
-        )
-        print_tests(
-            "Prioritized serial", [x for x in prioritized_tests if must_serial(x)]
-        )
-        print_tests(
-            "General parallel", [x for x in general_tests if not must_serial(x)]
-        )
-        print_tests("General serial", [x for x in general_tests if must_serial(x)])
+    # Each batch will be run sequentially
+    test_batches = [
+        TestBatch("highly_relevant", test_prioritization.highly_relevant, False),
+        TestBatch("probably_relevant", test_prioritization.probably_relevant, False),
+        TestBatch("unranked_relevance", test_prioritization.unranked_relevance, True),
+    ]
 
     if options.dry_run:
         return
@@ -1667,17 +1672,18 @@ def main():
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    prioritized_failures: List[TestFailure] = []
-    general_failures: List[TestFailure] = []
-    start_time = time.time()
-    # First run the prioritized tests, then the remaining tests.
     try:
-        run_tests(prioritized_tests, test_directory, options, prioritized_failures)
-        metrics_dict["prioritized_failures"] = [x.test for x in prioritized_failures]
-        metrics_dict["general_start_time"] = time.time() - start_time
-        run_tests(general_tests, test_directory, options, general_failures)
-        metrics_dict["general_end_time"] = time.time() - start_time
-        metrics_dict["all_failures"] = [x.test for x in general_failures]
+        # Actually run the tests
+        start_time = time.time()
+        for test_batch in test_batches:
+            print(f"Starting test batch '{test_batch.name}'")
+            metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
+            run_tests(
+                test_batch.sharded_tests, test_directory, options, test_batch.failures
+            )
+            metrics_dict[f"{test_batch.name}_failures"] = [
+                x.test for x in test_batch.failures
+            ]
 
     finally:
         if options.coverage:
@@ -1692,10 +1698,11 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-        if IS_CI and HAVE_TEST_SELECTION_TOOLS:
+        if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
-    all_failures = prioritized_failures + general_failures
+    all_failures = [failure for batch in test_batches for failure in batch.failures]
+
     if len(all_failures) != 0:
         for _, err in all_failures:
             print_to_stderr(err)

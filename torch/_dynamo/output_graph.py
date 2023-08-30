@@ -272,28 +272,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
                 co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        # Register a SHAPE_ENV guard to make sure we setup shape guards
-        # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
-        )
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
+        self.init_ambient_guards()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -359,6 +344,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+    # This gets its own helper function so guards DEBUG logs are more
+    # informative
+    def init_ambient_guards(self):
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        )
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
     @property
     def root_tracer(self):
@@ -624,7 +628,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
+        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
+        # but route here fore registration of children.
+        if is_dynamic_nn_module(target) and not getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -632,6 +641,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
+
+        if is_dynamic_nn_module(target) and getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
+            name = "_".join(map(str, names))
+            base = name
+            for i in itertools.count():
+                if name not in self.nn_modules:
+                    self.nn_modules[name] = target
+                    break
+                name = f"{base}_{i}"
+            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
+            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
+            vt = variables.nn_module.FSDPManagedNNModuleVariable(
+                target,
+                name,
+                **options,
+            )
+            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer

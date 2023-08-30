@@ -9,22 +9,13 @@ from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr
 
-# It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
-# so those cases are omitted intentionally
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
-}
-
-_GUARD_SOURCE_FSDP_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
     GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_NOT_NN_MODULE = {
@@ -139,6 +130,18 @@ class GlobalSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -446,7 +449,7 @@ class NotNNModuleSource(NNModuleSource):
 @dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)
