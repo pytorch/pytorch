@@ -115,7 +115,6 @@ class CondOpArgsMismatchError(ArgsMismatchError):
 
 class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
-    GRAPH_BREAK_IN_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()

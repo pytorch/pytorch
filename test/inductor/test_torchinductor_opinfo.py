@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -206,8 +207,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16},
     "exponential": {f16},
     "geometric": {f16},
-    "linalg.eigh": {f32, f64},
-    "linalg.eigvalsh": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
@@ -227,7 +226,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randn_like": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "uniform": {f16},
     "view_as_complex": {f16},
@@ -254,8 +252,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "geometric": {f16, f32, f64, i32, i64},
     "kron": {f16},
     "linalg.eig": {f32, f64},
-    "linalg.eigh": {f32, f64},
-    "linalg.eigvalsh": {f32, f64},
     "log_normal": {f16, f32, f64},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
@@ -283,7 +279,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("round", "decimals_3"): {f16},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
 }
@@ -533,7 +528,8 @@ class TestInductorOpInfo(TestCase):
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
                 with mode:
-                    fn(*args, **kwargs)
+                    with enable_python_dispatcher():
+                        fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
                 return False
