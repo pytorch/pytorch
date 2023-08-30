@@ -213,7 +213,7 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        assert torch._inductor.config.keep_output_stride, \"""
+        assert torch._inductor.config.keep_output_stride, """\
 Detected that you are running DDP with torch.compile, along with these two flags:
 - torch._dynamo.config.optimize_ddp = True
 - torch._inductor.config.keep_output_stride = False
