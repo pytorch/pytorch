@@ -783,6 +783,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfRocm
     def test_qmaxpool2d(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU->MaxPool2d pattern.
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -830,6 +834,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfRocm
     def test_qcat(self):
+        r"""
+        This testcase will quantize cat based pattern:
+               X
+             /   \
+      Conv1(X)  Pow(x)
+                   \
+                  Conv2(X)
+            \     /
+              Cat
+               |
+               Y
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
