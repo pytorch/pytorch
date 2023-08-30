@@ -12,7 +12,10 @@ from torch._decomp import (
     get_decompositions,
     remove_decompositions,
 )
-from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions import (
+    _grid_sampler_2d as decomp_grid_sampler_2d,
+    pw_cast_for_opmath,
+)
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
 
@@ -432,6 +435,37 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition([aten.grid_sampler_2d])
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: torch.Tensor,
+    grid: torch.Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> torch.Tensor:
+    # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+    _expand_grid = not (
+        a.device == torch.device("cpu")
+        and interpolation_mode == 0
+        and a.is_contiguous(memory_format=torch.contiguous_format)
+    )
+
+    output = decomp_grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+        _expand_grid=_expand_grid,
+    )
+    return output
 
 
 @register_decomposition(aten._foreach_addcmul.Scalar)

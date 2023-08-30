@@ -7,7 +7,6 @@ import unittest
 import torch
 
 import torch._dynamo
-import torch.multiprocessing as mp
 
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
@@ -440,7 +439,6 @@ def opcheck(op, args, kwargs=None, *, test_utils="ALL", raise_exception=True):
         tester = ALL_TEST_UTILS[test_util]
         try:
             tester(op, args, kwargs)
-            # safe_tester(tester, op, args, kwargs)
             results_dict[test_util] = "SUCCESS"
         except Exception as ex:
             if raise_exception:
@@ -450,28 +448,6 @@ def opcheck(op, args, kwargs=None, *, test_utils="ALL", raise_exception=True):
                 ) from ex
             results_dict[test_util] = ex
     return results_dict
-
-
-def safe_tester(tester, op, args, kwargs):
-    def run(queue):
-        try:
-            tester(op, args, kwargs)
-        except Exception as ex:
-            queue.put(ex)
-            return
-        queue.put(None)
-
-    mp.set_start_method("forkserver")
-    queue = mp.queue()
-    proc = mp.Process(target=run, args=queue)
-    proc.start()
-    proc.join()
-
-    if queue.empty():
-        raise RuntimeError("??")
-    maybe_ex = queue.get()
-    if maybe_ex is not None:
-        raise maybe_ex
 
 
 class OpCheckError(Exception):

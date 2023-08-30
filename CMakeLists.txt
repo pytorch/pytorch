@@ -727,6 +727,12 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
+# Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
+cmake_dependent_option(
+  USE_MEM_EFF_ATTENTION
+  "Enable memory-efficient attention for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
