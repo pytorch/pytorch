@@ -82,6 +82,7 @@ namespace impl {
     c10::QScheme,
     c10::ScalarType,
     c10::Device,
+    c10::DeviceIndex,
     c10::Layout,
     c10::MemoryFormat,
     at::Dimname
