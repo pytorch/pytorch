@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union, Any
 
 import sympy
 
@@ -128,7 +128,7 @@ class ReadWrites:
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
-    op_counts: collections.Counter = None # type: ignore[assignment]
+    op_counts: typing.Counter[Any] = None # type: ignore[assignment]
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -168,7 +168,7 @@ class ReadWrites:
         all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
 
-        op_counts = collections.Counter() # type: collections.Counter
+        op_counts: typing.Counter[Any] = collections.Counter()
         for rw in read_writes:
             if rw.op_counts is not None:
                 op_counts.update(rw.op_counts)
@@ -280,7 +280,7 @@ class _OpCounter:
     def __init__(self, inner):
         super().__init__()
         self.parent_handler = inner
-        self._op_counts = collections.Counter() # type: collections.Counter
+        self._op_counts: typing.Counter[Any] = collections.Counter()
 
     def __getattr__(self, name):
         self._op_counts[name] += 1
@@ -330,7 +330,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 
 def extract_read_writes(
-    fn: Callable,
+    fn: Callable[[sympy.Expr], Any],
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
