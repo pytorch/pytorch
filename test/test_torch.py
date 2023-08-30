@@ -6049,8 +6049,8 @@ class TestTorch(TestCase):
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
     def test_linspace_logspace(self):
-        # Check if the input tensors require grad, the output does not require
-        # since the output of factory functions should not be part of any computational graph.
+        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # The output of factory functions should not be part of any computational graph.
         start = 0.0
         end = 3.0
 
