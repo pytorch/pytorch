@@ -316,8 +316,8 @@ class ExportedProgram:
         from torch._export import combine_args_kwargs
 
         if self.call_spec.in_spec is not None:
+            user_args = combine_args_kwargs(args, kwargs)
             try:
-                user_args = combine_args_kwargs(args, kwargs)
                 args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
