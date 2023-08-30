@@ -146,6 +146,7 @@ def is_boolean_type(x):
     else:
         return isinstance(x, bool)
 
+
 # def is_float8_type(x):
 #     if isinstance(x, TensorBox):
 #         return is_float8_type(x.get_dtype())
