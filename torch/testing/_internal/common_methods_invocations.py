@@ -19028,6 +19028,15 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
     ),
     PythonRefInfo(
+        "_refs.take_along_dim",
+        torch_opinfo_name="take_along_dim",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestCommon',
+                         'test_python_ref'),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.to",
         torch_opinfo_name="to",
     ),

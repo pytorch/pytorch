@@ -359,8 +359,6 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "_upsample_bilinear2d_aa"),
 
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
-
-    (None, None, "take_along_dim"),  # aten.take_along_dim was not decomposed
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
