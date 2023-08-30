@@ -103,7 +103,7 @@ class TuningProcess:
             return pickle.load(self.process.stdout)
         except EOFError:
             # Child crashed; recreate it
-            self.process = None
+            self.close()
             self.initialize()
             raise
         except pickle.UnpicklingError:
@@ -111,6 +111,19 @@ class TuningProcess:
                 "Error deserializing response from the benchmarking subprocess. "
                 "Is the benchmark code path writing to stdout?"
             )
+
+    def close(self) -> None:
+        """
+        Close the communication pipes from the child process.
+        """
+        if self.process is not None:
+            assert self.process.stdin is not None
+            assert self.process.stdout is not None
+            assert self.process.stderr is not None
+            self.process.stdin.close()
+            self.process.stdout.close()
+            self.process.stderr.close()
+            self.process = None
 
     def terminate(self) -> None:
         """
@@ -125,7 +138,7 @@ class TuningProcess:
         """
         if self.process is not None:
             self.process.wait()
-            self.process = None
+            self.close()
 
 
 @dataclasses.dataclass
@@ -133,7 +146,7 @@ class TuningProcessPool:
     processes: Optional[Queue[TuningProcess]] = None
     executor: Optional[ThreadPoolExecutor] = None
 
-    def initialize(self) -> None:
+    def initialize(self, count: Optional[int] = None) -> None:
         """
         Start the child processes.
         """
@@ -141,7 +154,7 @@ class TuningProcessPool:
         if self.processes is not None:
             return
 
-        count = torch.cuda.device_count()
+        count = count or torch.cuda.device_count()
         assert count > 0
 
         # Launch the child processes and push a msg to "warm up"
@@ -348,6 +361,23 @@ class BenchmarkRequest:
                 file=sys.stderr,
             )
         return out
+
+
+class TestBenchmarkRequest(BenchmarkRequest):
+    """
+    Supports unit testing. Defined in this file so that the TuningProcess
+    sub-process knows how to unpickle these objects.
+    """
+
+    def __init__(self, value: Optional[float] = None) -> None:
+        self.value = value
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
+    ) -> float:
+        if self.value is None:
+            raise Exception("Failed to run")
+        return self.value
 
 
 def benchmark_in_sub_process(
