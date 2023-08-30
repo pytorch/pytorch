@@ -2211,13 +2211,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(x):
-            if type(x.shape) == torch.Size:
-                return 1
-            else:
-                return 0
+            return x + (type(x.shape) == torch.Size)
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        x = torch.rand(())
+        x = torch.zeros(())
         self.assertEqual(opt_fn(x), fn(x))
 
     def test_size_dim(self):
