@@ -396,6 +396,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d(self):
+        r"""
+        This testcase will quantize a single Conv2d module.
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -433,6 +437,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_relu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern.
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -471,6 +479,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_add(self):
+        r"""
+        This testcase will quantize a Conv2d->Add pattern as:
+               X
+             /   \
+      Conv1(X)   Conv2(X)
+             \   /
+              Add
+               |
+               Y
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -517,6 +536,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_add_relu(self):
+        r"""
+        This testcase will quantize a Conv2d->Add->ReLU pattern as:
+               X
+             /   \
+      Conv1(X)   Conv2(X)
+             \   /
+              Add
+               |
+              ReLU
+               |
+               Y
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -564,6 +596,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_dequant_promotion(self):
+        r"""
+        This testcase if dequant node before conv2d is promotion correctly:
+               X
+               |
+            Conv1(X)
+             /   \
+      Conv2(X)   Conv3(X)
+             \   /
+              Add
+               |
+               Y
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -607,6 +652,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear(self):
+        r"""
+        This testcase will quantize a single linear Moduel.
+        """
+
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -642,6 +691,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear_relu(self):
+        r"""
+        This testcase will quantize Linear->ReLU pattern.
+        """
+
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -678,6 +731,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear_dequant_promotion(self):
+        r"""
+        This testcase if dequant node before linear is promotion correctly:
+               X
+               |
+            Linear1(X)
+             /   \
+      Linear2(X)   Linear3(X)
+             \   /
+              Add
+               |
+               Y
+        """
+
         class M(torch.nn.Module):
             def __init__(
                 self,
