@@ -325,7 +325,7 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
-        # TODO: the messages for primOps are inconsistent need to validate if ok
+        # FIXME: https://github.com/pytorch/pytorch/issues/108204
         default_msg = (
             r"(Unsupported dtype|"
             r"FFT doesn't support tensors* of type)"
@@ -449,7 +449,7 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-        # TODO: the messages for primOps are different from eager need to validate if ok
+        # FIXME: https://github.com/pytorch/pytorch/issues/108205
         errMsg = r"(dims must be unique|duplicate value in the list of dims)"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))

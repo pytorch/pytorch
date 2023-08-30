@@ -654,14 +654,6 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -671,14 +663,6 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -688,14 +672,6 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -721,7 +697,7 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # TODO: internally promoted to complex64 so not rejected
+            # FIXME: https://github.com/pytorch/pytorch/issues/108204
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
@@ -737,14 +713,6 @@ python_ref_db: List[OpInfo] = [
             # _refs.fft.* functions have inconsistent behavior for empty tensors
             # https://github.com/pytorch/pytorch/issues/105986
             DecorateInfo(unittest.expectedFailure, "TestFFT", "test_empty_fft"),
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
         ),
     ),
     SpectralFuncPythonRefInfo(
@@ -758,7 +726,7 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # TODO: internally promoted to complex64 so not rejected
+            # FIXME: https://github.com/pytorch/pytorch/issues/108204
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
@@ -778,7 +746,7 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # TODO: internally promoted to complex64 so not rejected
+            # FIXME: https://github.com/pytorch/pytorch/issues/108204
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
@@ -790,17 +758,7 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
-        skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
-        ),
-    ),
+   ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
@@ -812,7 +770,7 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # TODO: internally promoted to complex64 so not rejected
+            # FIXME: https://github.com/pytorch/pytorch/issues/108204
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
@@ -832,14 +790,14 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # TODO: internally promoted to complex64 so not rejected
+            # FIXME: https://github.com/pytorch/pytorch/issues/108204
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
                 "test_fft_half_and_bfloat16_errors",
                 dtypes=[torch.bfloat16],
             ),
-            # TODO: investigate failure
+            # FIXME: https://github.com/pytorch/pytorch/issues/108205
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
@@ -858,15 +816,7 @@ python_ref_db: List[OpInfo] = [
             )
         ],
         skips=(
-            # FIXME: not being handled correctly
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestFFT",
-            #     "test_fft_half_and_bfloat16_errors",
-            #     dtypes=[torch.bfloat16],
-            #     device_type="cuda",
-            # ),
-            # TODO: investigate failure
+            # FIXME: https://github.com/pytorch/pytorch/issues/108205
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestFFT",
