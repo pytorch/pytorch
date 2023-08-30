@@ -9,7 +9,7 @@ from torch.ao.quantization.observer import (
     MinMaxObserver,
     PlaceholderObserver,
 )
-from torch.ao.quantization.pt2e.utils import _find_q_dq_node_for_user
+from torch.ao.quantization.pt2e.utils import find_q_dq_node_for_user
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
@@ -113,7 +113,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                         and hasattr(qspec, "dtype")
                         and qspec.dtype != torch.float
                     ):
-                        q_node, dq_node = _find_q_dq_node_for_user(input_node, n)
+                        q_node, dq_node = find_q_dq_node_for_user(input_node, n)
                         if dq_node is None:
                             raise ValueError(
                                 f"No dq node found for {n}, even though {n} annotated for quantization."
