@@ -479,6 +479,9 @@ class TestOpVersioning(TestCase):
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
 )
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_pytree_flatten
+)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

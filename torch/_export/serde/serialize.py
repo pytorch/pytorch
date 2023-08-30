@@ -19,7 +19,7 @@ import torch
 import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import treespec_dumps, treespec_loads, tree_map_only
+from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_map_only
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -51,7 +51,6 @@ from .schema import (  # type: ignore[attr-defined]
     TensorArgument,
     TensorMeta,
     TensorValue,
-    TREESPEC_VERSION,
 )
 
 
@@ -190,15 +189,15 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 
 def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     return CallSpec(
-        in_spec=treespec_dumps(call_spec.in_spec, TREESPEC_VERSION) if call_spec.in_spec else "",
-        out_spec=treespec_dumps(call_spec.out_spec, TREESPEC_VERSION) if call_spec.out_spec else "",
+        in_spec=pytree_to_str(call_spec.in_spec) if call_spec.in_spec else "",
+        out_spec=pytree_to_str(call_spec.out_spec) if call_spec.out_spec else "",
     )
 
 
 def deserialize_call_spec(call_spec: CallSpec) -> ep.CallSpec:
     return ep.CallSpec(
-        in_spec=treespec_loads(call_spec.in_spec) if call_spec.in_spec else None,
-        out_spec=treespec_loads(call_spec.out_spec) if call_spec.out_spec else None,
+        in_spec=str_to_pytree(call_spec.in_spec) if call_spec.in_spec else None,
+        out_spec=str_to_pytree(call_spec.out_spec) if call_spec.out_spec else None,
     )
 
 
@@ -660,8 +659,8 @@ class GraphModuleSerializer:
         return ModuleCallSignature(
             inputs=[serialize_argument(x) for x in module_call_signature.inputs],
             outputs=[serialize_argument(x) for x in module_call_signature.outputs],
-            in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
-            out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            in_spec=pytree_to_str(module_call_signature.in_spec),
+            out_spec=pytree_to_str(module_call_signature.out_spec),
         )
 
     def serialize_module_call_graph(self, module_call_graph: List[ep.ModuleCallEntry]) -> List[ModuleCallEntry]:
@@ -1300,8 +1299,8 @@ class GraphModuleDeserializer:
         return ep.ModuleCallSignature(
             inputs=[deserialize_argument(x) for x in module_call_signature.inputs],
             outputs=[deserialize_argument(x) for x in module_call_signature.outputs],
-            in_spec=treespec_loads(module_call_signature.in_spec),
-            out_spec=treespec_loads(module_call_signature.out_spec),
+            in_spec=str_to_pytree(module_call_signature.in_spec),
+            out_spec=str_to_pytree(module_call_signature.out_spec),
         )
 
     def deserialize_module_call_graph(self, module_call_graph: List[ModuleCallEntry]) -> List[ep.ModuleCallEntry]:
