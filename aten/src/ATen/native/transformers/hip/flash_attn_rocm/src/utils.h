@@ -50,7 +50,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// enum DataType {kFloat16, kFloat32, kBFloat16, kInt32, kInt8};
+// enum DataType {, kFloat32, kBFloat16, kInt32, kInt8};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -82,10 +82,10 @@ static inline size_t get_size_in_bytes( size_t n, dtype_t datatype ){
   return 0;
 };
 
-template <>
-static inline size_t get_size_in_bytes( size_t n, at::kFloat datatype ){
-  return n * 4;
-};
+/* template <> */
+/* static inline size_t get_size_in_bytes( size_t n, at::kFloat datatype ){ */
+/*   return n * 4; */
+/* }; */
 template <>
 static inline size_t get_size_in_bytes( size_t n, at::kBFloat16 datatype ){
   return n * 2;
@@ -94,14 +94,14 @@ template <>
 static inline size_t get_size_in_bytes( size_t n, at::kHalf datatype ){
   return n * 2;
 };
-// template <>
-// static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt32 dtype ){
-//   return n * 4;
-// };
-// template <>
-// static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt8 dtype ){
-//   return n;
-// };
+/* template <> */
+/* static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt32 dtype ){ */
+/*   return n * 4; */
+/* }; */
+/* template <> */
+/* static inline size_t get_size_in_bytes( size_t n, at::ScalarType::kInt8 dtype ){ */
+/*   return n; */
+/* }; */
 
 
 static std::tuple<uint64_t, uint64_t> unpack(at::PhiloxCudaState arg) {
@@ -123,9 +123,9 @@ static std::tuple<uint64_t, uint64_t> unpack(at::PhiloxCudaState arg) {
 class SimpleDeviceMem {
  public:
   SimpleDeviceMem() = delete;
-  explicit SimpleDeviceMem(std::size_t mem_size) 
+  explicit SimpleDeviceMem(std::size_t mem_size)
       : p_mem_{} { (void)hipMalloc(static_cast<void**>(&p_mem_), mem_size); }
-      
+
     void* GetDeviceBuffer() const { return p_mem_; }
     ~SimpleDeviceMem() { (void)hipFree(p_mem_); }
 
