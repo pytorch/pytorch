@@ -74,9 +74,6 @@ force_mixed_mm = False
 # If not specified, a temp directory will be created under the default caching path
 aot_inductor_output_path = ""
 
-# TODO: capture whether the graph is from export
-from_export = False
-
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
