@@ -456,6 +456,10 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
+            elif col in ("mfu"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} TF/s")
+            elif col in ("memory_bandwidth"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} GB/s")
             elif col in ("accuracy"):
                 pass_rate = (data[col] == "pass").mean()
                 print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
@@ -666,11 +670,7 @@ def maybe_mark_step(args):
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
-
-    Writes to ./speedups.csv
     """
-    # if args.dynamic_shapes:
-    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
@@ -788,11 +788,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             "compression_ratio",
             "eager_peak_mem",
             "dynamo_peak_mem",
+            "mfu",
+            "memory_bandwidth",
         ]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+        row.append(kwargs["mfu"])
+        row.append(kwargs["memory_bandwidth"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -1874,12 +1879,10 @@ class BenchmarkRunner:
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         from torch._dynamo.utils import evaluate_model_flops
-        try:
-            evaluate_model_flops(model, example_inputs)
-        except Exception as e:
-            raise NotImplementedError("mfu calculation failed") from e
-        
-    def memory_bandwidth(self, model, example_inputs, num_samples = 1):
+
+        return evaluate_model_flops(model, example_inputs)
+
+    def memory_bandwidth(self, model, example_inputs, num_samples=1, batch_size=1):
         """
         TODO: Should we use batch size finder for this?
         """
@@ -1888,10 +1891,7 @@ class BenchmarkRunner:
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         from torch._dynamo.utils import memory_bandwidth
 
-        try:
-            memory_bandwidth(model, example_inputs, num_samples)
-        except Exception as e:
-            raise NotImplementedError("memory bandwidth calculation failed") from e
+        return memory_bandwidth(model, example_inputs, num_samples, batch_size=1)
 
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
@@ -2360,15 +2360,17 @@ class BenchmarkRunner:
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
 
-            memory_bandwidth = self.memory_bandwidth(model, example_inputs)
-            mfu = self.mfu(model, example_inputs)
+            memory_bandwidth = self.memory_bandwidth(
+                model, example_inputs, current_batch_size
+            )
+            max_flop_utilization = self.mfu(model, example_inputs)
 
             if self.args.print_memory:
                 print(
                     f"memory: eager: {eager_peak_mem:.2f} GB, "
                     f"dynamo: {dynamo_peak_mem:.2f} GB, "
                     f"ratio: {compression_ratio:.2f}",
-                    f"memory_bandwidth : {memory_bandwidth}",
+                    f"memory_bandwidth : {memory_bandwidth} GB/s",
                 )
 
             if experiment.func is speedup_experiment:
@@ -2378,8 +2380,8 @@ class BenchmarkRunner:
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
                 experiment_kwargs["memory_bandwidth"] = memory_bandwidth
-                experiment_kwargs["mfu"] = mfu
-
+                experiment_kwargs["mfu"] = max_flop_utilization
+            breakpoint()
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
                 results = []

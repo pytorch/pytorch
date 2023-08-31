@@ -19,8 +19,6 @@ import os
 import pstats
 import sys
 
-from torch.utils.flop_counter import FlopCounterMode
-
 import textwrap
 import time
 import types
@@ -29,6 +27,8 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
+
+from torch.utils.flop_counter import FlopCounterMode
 
 try:
     import numpy as np
@@ -2087,10 +2087,10 @@ def get_static_address_type(t):
     return None
 
 
-
 def get_flops_achieved(f):
     """
     Measures and prints the Software FLOPs achieved by a given function.
+    h/t: https://gist.github.com/Chillee/07b36672a0ca2d1280e42b8d10f23174
     """
     flop_counter = FlopCounterMode(display=False)
     with flop_counter:
@@ -2098,12 +2098,13 @@ def get_flops_achieved(f):
     total_flops = sum(flop_counter.get_flop_counts()["Global"].values())
     ms_per_iter = torch._inductor.utils.do_bench(f)
     iters_per_second = 1e3 / ms_per_iter
-    print(f"Model FLOPS: {iters_per_second * total_flops / 1e12} TF/s")
+    flops_achieved = iters_per_second * total_flops / 1e12
+    return flops_achieved
 
 
 def evaluate_model_flops(model, inp):
     """
-    Evaluates the Software FLOPs of a given model with a specific input.
+    Evaluates the Software FLOPs of a given model with a specific input in TF/s
 
     Example usage:
     --------------
@@ -2116,11 +2117,12 @@ def evaluate_model_flops(model, inp):
     # compiled_model = torch.compile(model)
     # evaluate_model_flops(compiled_model, inp)
     """
-    get_flops_achieved(lambda: model(*inp))
+    return get_flops_achieved(lambda: model(*inp))
 
 
-def memory_bandwidth(model, inp, num_samples=1):
+def memory_bandwidth(model, inp, num_samples=1, batch_size=1):
     """
+    Evaluates memory bandwidth in GB/s
     Memory bandwidth is most useful in regimes with small batch sizes
     The formula is bw = model_size / (batch_size * time) for a specific number of samples
     In a more real world use case this would also include tokenization encoding and decoding
@@ -2140,10 +2142,6 @@ def memory_bandwidth(model, inp, num_samples=1):
             for p in itertools.chain(model.parameters(), model.buffers())
         ]
     )
-
-    # Assume batch size is the first dimension
-    # batch_size = inp.size(0)
-    batch_size = 1
 
     total_time = 0.0
 
@@ -2165,7 +2163,4 @@ def memory_bandwidth(model, inp, num_samples=1):
 
     avg_time = total_time / num_samples
     bandwidth = (model_size / batch_size) / avg_time / 1e9
-    print(
-        f"Average memory bandwidth per image over {num_samples} samples: {bandwidth:.02f} GB/s"
-    )
     return bandwidth
