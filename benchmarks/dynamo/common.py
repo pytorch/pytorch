@@ -1883,9 +1883,6 @@ class BenchmarkRunner:
         return evaluate_model_flops(model, example_inputs)
 
     def memory_bandwidth(self, model, example_inputs, num_samples=1, batch_size=1):
-        """
-        TODO: Should we use batch size finder for this?
-        """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
