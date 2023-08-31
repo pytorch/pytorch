@@ -2781,7 +2781,10 @@ class TritonScheduling(BaseScheduling):
 
         args = mod.get_args()
         call = mod.call
-        ms = do_bench(lambda: call(args))
+        wrapped_jit_function = mod.KERNEL_NAME
+        # We have to clone the inplace updated arguments to avoid earlier calls
+        # generating out of range indices for later calls.
+        ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)))
         log.debug(
             "The fused kernel for %s took %.3fms to run",
             {n.get_name() for n in nodes},
