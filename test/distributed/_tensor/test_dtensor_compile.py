@@ -104,6 +104,20 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+        # test if user calls from_local with mesh/placements as kwargs and that should still work
+        def from_local_kwargs_fn(x):
+            dt = DTensor.from_local(
+                x, device_mesh=mesh, placements=[Replicate()], run_check=False
+            )
+            return dt.to_local() + 2
+
+        ref = from_local_kwargs_fn(x)
+        opt_kwargs_fn = torch.compile(
+            from_local_kwargs_fn, backend="eager", fullgraph=True
+        )
+        res = opt_kwargs_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -117,6 +131,21 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        def redistribute_kwargs_fn(x):
+            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+            return (
+                dt.redistribute(device_mesh=mesh, placements=[Replicate()]).to_local()
+                + 2
+            )
+
+        x = torch.ones(1)
+        ref = redistribute_kwargs_fn(x)
+        opt_kwargs_fn = torch.compile(
+            redistribute_kwargs_fn, backend="eager", fullgraph=True
+        )
+        res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
 
