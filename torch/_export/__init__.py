@@ -210,6 +210,43 @@ def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
     return False
 
 
+def _replace_param_buffer_names(param_buffer_table, sig):
+    def replace(x):
+        return param_buffer_table.get(x, x)
+
+    sig.parameters = pytree.tree_map(replace, sig.parameters)
+    sig.buffers = pytree.tree_map(replace, sig.buffers)
+    sig.inputs_to_parameters = pytree.tree_map(replace, sig.inputs_to_parameters)
+    sig.inputs_to_buffers = pytree.tree_map(replace, sig.inputs_to_buffers)
+    sig.buffers_to_mutate = pytree.tree_map(replace, sig.buffers_to_mutate)
+    if sig.backward_signature is not None:
+        sig.backward_signature.gradients_to_parameters = pytree.tree_map(
+            replace, sig.backward_signature.gradients_to_parameters
+        )
+
+
+def _normalize_nn_module_stack(gm_torch_level, root_cls):
+    # Append a root module to every nn_module_stack.
+    root = "L['self']"
+    root_key = re.sub(r'[^a-zA-Z0-9]', '_', root)
+    for gm in gm_torch_level.modules():
+        if not isinstance(gm, torch.fx.GraphModule):
+            continue
+        for node in gm.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                continue
+            add_root = True
+            if nn_module_stack := node.meta.get("nn_module_stack", {}):
+                path, ty = next(iter(nn_module_stack.values()))
+                assert issubclass(ty, torch.nn.Module)
+                # TODO Figure out why sometimes we have root sometimes we don't.
+                if path == root and ty is root_cls:
+                    add_root = False
+            if add_root:
+                # TODO(zhxchen17) normalize all the way down to dot strings.
+                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+
+
 def export(
     f: Callable,
     args: Tuple[Any, ...],
@@ -257,7 +294,7 @@ def export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
-            module_call_signatures: Dict[str, ModuleCallSignature] = {}
+            module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             # TODO Horrible hack to skip dynamo
             if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
                 if len(constraints) > 0:
@@ -267,7 +304,7 @@ def export(
                     )
                 gm_torch_level = f
             else:
-                with _wrap_submodules(f, preserve_module_call_signature, module_call_signatures):
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
                     gm_torch_level, _ = torch._dynamo.export(
                         f,
                         constraints=constraints,
@@ -285,10 +322,10 @@ def export(
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
     params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
-    for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
+    for name, param in gm_torch_level.named_parameters():
         params_buffers[name] = param
 
-    for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
+    for name, buffer in gm_torch_level.named_buffers():
         params_buffers[name] = buffer
 
     fake_args, fake_kwargs, fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
@@ -352,6 +389,26 @@ def export(
     )
     gm_torch_level.recompile()
 
+    param_buffer_table = {}
+    if isinstance(f, torch.nn.Module):
+        param_lookup = {}
+        buffer_lookup = {}
+        for name, param in f.named_parameters():
+            param_lookup[id(param)] = name
+        for name, buffer in f.named_buffers():
+            buffer_lookup[id(buffer)] = name
+        for dynamo_name, dynamo_param in gm_torch_level.named_parameters():
+            assert dynamo_name not in param_buffer_table
+            if id(dynamo_param) in param_lookup:
+                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
+        for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers():
+            assert dynamo_name not in param_buffer_table
+            if id(dynamo_buffer) in buffer_lookup:
+                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
+
+    if isinstance(f, torch.nn.Module):
+        _normalize_nn_module_stack(gm_torch_level, type(f))
+
     # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
     # to follow the order in orig_args and correctly call gm_torch_level
     gm, graph_signature = aot_export_module(
@@ -387,6 +444,7 @@ def export(
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
     flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    _, orig_in_spec = pytree.tree_flatten((args, kwargs))
     index = 0
     total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
     for node in gm.graph.nodes:
@@ -433,24 +491,39 @@ def export(
         export_graph_signature,
         flat_args,
     )
+
+    if isinstance(f, torch.nn.Module):
+        _replace_param_buffer_names(param_buffer_table, export_graph_signature)
+
+    module_call_signatures = {fqn: ModuleCallSignature(inputs=[], outputs=[], **specs) for fqn, specs in module_call_specs.items()}
+
+    if len(preserve_module_call_signature) > 0:
+        res = CollectTracepointsPass(module_call_signatures)(gm)
+        assert res is not None
+        gm = res.graph_module
+
     assert orig_out_spec is not None
     exported_program = ExportedProgram(
         gm,
         gm.graph,
         export_graph_signature,
+        # TODO(zhxchen17) Remove this field.
         CallSpec(in_spec, orig_out_spec),
-        params_buffers,
+        # TODO(zhxchen17) Return empty state_dict for functions.
+        {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
+        if isinstance(f, torch.nn.Module) else param_buffer_table,
         range_constraints,
         equality_constraints,
+        [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         (args, {}),
     )
 
-    exported_program = exported_program._transform(
-        _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-    )
-    if len(preserve_module_call_signature) > 0:
-        exported_program = exported_program._transform(CollectTracepointsPass(module_call_signatures))
+    if len(range_constraints) > 0 or len(equality_constraints) > 0:
+        exported_program = exported_program._transform(
+            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+        )
+
     return exported_program._transform(_ReplaceSymSizeOpPass())
 
 
