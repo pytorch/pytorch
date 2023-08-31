@@ -306,6 +306,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+
 # HF accelerate init_on_device
 @contextmanager
 def init_on_device(device: torch.device, include_buffers: bool = None):
@@ -337,7 +338,9 @@ def init_on_device(device: torch.device, include_buffers: bool = None):
         if param is not None:
             param_cls = type(module._parameters[name])
             kwargs = module._parameters[name].__dict__
-            module._parameters[name] = param_cls(module._parameters[name].to(device), **kwargs)
+            module._parameters[name] = param_cls(
+                module._parameters[name].to(device), **kwargs
+            )
 
     def register_empty_buffer(module, name, buffer, persistent=True):
         old_register_buffer(module, name, buffer, persistent=persistent)
@@ -365,13 +368,20 @@ def init_on_device(device: torch.device, include_buffers: bool = None):
         if include_buffers:
             nn.Module.register_buffer = register_empty_buffer
         for torch_function_name in tensor_constructors_to_patch.keys():
-            setattr(torch, torch_function_name, patch_tensor_constructor(getattr(torch, torch_function_name)))
+            setattr(
+                torch,
+                torch_function_name,
+                patch_tensor_constructor(getattr(torch, torch_function_name)),
+            )
         yield
     finally:
         nn.Module.register_parameter = old_register_parameter
         if include_buffers:
             nn.Module.register_buffer = old_register_buffer
-        for torch_function_name, old_torch_function in tensor_constructors_to_patch.items():
+        for (
+            torch_function_name,
+            old_torch_function,
+        ) in tensor_constructors_to_patch.items():
             setattr(torch, torch_function_name, old_torch_function)
 
 
@@ -2029,8 +2039,9 @@ class BenchmarkRunner:
                         param.data.zero_()
 
                 if isinstance(module, nn.Module):
-                    if not hasattr(module, 'reset_parameters'):
+                    if not hasattr(module, "reset_parameters"):
                         module.reset_parameters = lambda: reset_parameters(module)
+
             model.apply(apply_custom_reset_parameters)
 
             model = FSDP(
