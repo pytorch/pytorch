@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -128,7 +128,7 @@ class ReadWrites:
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
-    op_counts: collections.Counter = None
+    op_counts: typing.Counter[Any] = None  # type: ignore[assignment]
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -168,7 +168,7 @@ class ReadWrites:
         all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
 
-        op_counts = collections.Counter()
+        op_counts: typing.Counter[Any] = collections.Counter()
         for rw in read_writes:
             if rw.op_counts is not None:
                 op_counts.update(rw.op_counts)
@@ -207,7 +207,7 @@ class _RecordLoadStoreInner(V.MockHandler):
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
             sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes
+            return index, var_names, sizes  # type: ignore[return-value]
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -220,7 +220,7 @@ class _RecordLoadStoreInner(V.MockHandler):
             # if k in free_symbols
         }
         index_vars = [*var_ranges.keys()]
-        sizes = [*var_ranges.values()]
+        sizes = [*var_ranges.values()]  # type: ignore[assignment]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -241,10 +241,10 @@ class _RecordLoadStoreInner(V.MockHandler):
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_vars), tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[return-value]
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._reads.add(MemoryDep(name, *self.canonicalize(index)))
+        self._reads.add(MemoryDep(name, *self.canonicalize(index)))  # type: ignore[call-arg]
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int):
@@ -252,14 +252,14 @@ class _RecordLoadStoreInner(V.MockHandler):
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
+        self._writes.add(MemoryDep(name, *self.canonicalize(index)))  # type: ignore[call-arg]
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
         return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
-        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))  # type: ignore[call-arg]
         return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
@@ -270,7 +270,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         indexing_dtype: torch.dtype,
         right: bool,
     ):
-        self._reads.add(StarDep(offsets_name))
+        self._reads.add(StarDep(offsets_name))  # type: ignore[arg-type]
         return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
 
 
@@ -280,7 +280,7 @@ class _OpCounter:
     def __init__(self, inner):
         super().__init__()
         self.parent_handler = inner
-        self._op_counts = collections.Counter()
+        self._op_counts: typing.Counter[Any] = collections.Counter()
 
     def __getattr__(self, name):
         self._op_counts[name] += 1
@@ -330,7 +330,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 
 def extract_read_writes(
-    fn: Callable,
+    fn: Callable[[sympy.Expr], Any],
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",

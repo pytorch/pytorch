@@ -37,9 +37,9 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model_container.h>
+        #include <torch/csrc/inductor/aot_inductor_model.h>
 
-        torch::aot_inductor::AOTInductorModelContainer model(1);
+        torch::aot_inductor::AOTInductorModel model;
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,
@@ -63,10 +63,12 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs, options
         )
+        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        optimized(flat_example_inputs, output_tensors)
+        all_args = (*param_buffer_values, *flat_example_inputs)
+        optimized(all_args, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
@@ -79,29 +81,6 @@ class AotInductorTests(TestCase):
 
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
-
-        model = Repro()
-        example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
-        )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
-
-    def test_with_offset(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
-                self.tensor = self.orig_tensor[5:, :]
-
-            def forward(self, x, y):
-                return (
-                    x
-                    + torch.nn.functional.linear(y, self.orig_tensor[:10, :])
-                    + self.tensor
-                )
 
         model = Repro()
         example_inputs = (
