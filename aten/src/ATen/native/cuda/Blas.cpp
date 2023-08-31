@@ -497,12 +497,6 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       other.numel(),
       " elements respectively");
   TORCH_CHECK(
-      self.device() == other.device(),
-      "expected all tensors to be on the same device. Found: ",
-      self.device(),
-      ", ",
-      other.device());
-  TORCH_CHECK(
       (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
           (other.stride(0) <= INT_MAX),
       "dot only supports n, incx, incy with the bound [val] <= %d",
@@ -755,6 +749,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
   if (bias) {
+    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
          "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
     TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
