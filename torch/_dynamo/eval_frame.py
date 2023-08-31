@@ -94,7 +94,7 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = torch._C._dynamo.eval_frame.CacheEntry
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
 def _debug_get_cache_entry_list(
