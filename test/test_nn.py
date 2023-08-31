@@ -1772,6 +1772,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+        m = nn.Linear(4, 5, dtype=torch.bfloat16, device="cpu")
+        m = torch.nn.utils.weight_norm(m)
+
+        m = nn.Linear(4, 5, dtype=torch.bfloat16, device="cuda")
+        m = torch.nn.utils.weight_norm(m)
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
