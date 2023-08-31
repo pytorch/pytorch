@@ -307,7 +307,7 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
        lt = sum_1 < 0;  sum_1 = None
        return (truediv, lt)
 
-   # To see more debug info, please use `graph_module.print_readable()`
+   # To see more debug info, please use ``graph_module.print_readable()``
    ============================================================
    source code of __resume_at_30_1:
    def <resume in toy_example>(b, x):
