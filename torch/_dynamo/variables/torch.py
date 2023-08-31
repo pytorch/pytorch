@@ -756,6 +756,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
+                    if (
+                        kwargs["out"] in tx.output.graphargs
+                        and kwargs["out"].size != tensor_variable.size
+                    ):
+                        # It's hard to get out variants with resizing on graph inputs work
+                        # properly across dynamo/aot/inductor, just fall back.
+                        unimplemented("out variants with resizing on graph inputs")
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable

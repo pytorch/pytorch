@@ -143,14 +143,18 @@ jobs:
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
         run: |
+          set -ex
+
           # reference ends with an RC suffix
-          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
 
@@ -165,6 +169,7 @@ jobs:
           # When running these on pull_request events these should be blank
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+        shell: bash
         run: |
           set -ex
           bash .circleci/scripts/binary_upload.sh
@@ -251,14 +256,18 @@ jobs:
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
         run: |
+          set -ex
+
           # reference ends with an RC suffix
-          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
 
@@ -270,6 +279,7 @@ jobs:
           # When running these on pull_request events these should be blank
           CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
           CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+        shell: bash
         run: |
           set -ex
 

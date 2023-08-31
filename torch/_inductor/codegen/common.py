@@ -422,8 +422,13 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
+        # V.kernel may be null since this method may be called for the
+        # wrapper codegen where there is no specific kernel.
         if (
-            self.name not in V.graph.removed_buffers
+            self.name
+            not in (
+                V.graph.removed_buffers | getattr(V.kernel, "removed_buffers", set())
+            )
             and self.name not in V.graph.inplaced_to_remove
         ):
             return self.line
@@ -811,9 +816,10 @@ class Kernel(CodeGen):
     load_format = None
     store_format = None
 
-    def __init__(self, args=None):
+    def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
-        metrics.generated_kernel_count += 1
+        if increase_kernel_count:
+            metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
@@ -824,6 +830,12 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+
+        self.removed_buffers = set()
+        # key: the buffer to write
+        # value: the buffer to read and whose memory can be reused for
+        #   the buffer specified by key
+        self.inplace_update_buffers = dict()
 
     @contextlib.contextmanager
     def set_current_node(self, node):

@@ -17,6 +17,7 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._higher_order_ops.out_dtype import out_dtype
 
 from . import config
 
@@ -54,6 +55,7 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         aten.std,
         aten.std_mean,
+        out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
@@ -211,6 +213,11 @@ def bmm(self, batch2):
 
 @register_decomposition([aten.mm])
 def mm(self, input2):
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if self.shape[0] == 1 or input2.shape[1] == 1:
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device == "cpu":
         if (
             self.size(-1) == 1
