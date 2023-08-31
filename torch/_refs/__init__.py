@@ -4441,7 +4441,7 @@ def take_along_dim(
     )
 
     if dim is None:
-        return aten.gather(a.view(-1), 0, indices.view(-1))
+        return torch.gather(a.view(-1), 0, indices.view(-1))
     else:
         self_sizes = list(a.shape)
         self_sizes[dim] = indices.size(dim)
@@ -4453,7 +4453,7 @@ def take_along_dim(
         broadcast_shape = utils.infer_size_shapes(indices_sizes, a.size())
         self_broadcast = broadcast_to(a, broadcast_shape)
 
-        return aten.gather(self_broadcast, dim, indices_broadcast)
+        return torch.gather(self_broadcast, dim, indices_broadcast)
 
 
 @out_wrapper()
