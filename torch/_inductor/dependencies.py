@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union, Any
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
