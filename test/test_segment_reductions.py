@@ -183,7 +183,7 @@ class TestSegmentReductions(TestCase):
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
-        data = torch.ones((0))
+        data = torch.ones(0)
 
         for reduction in reductions:
             for initial in [0, None]:

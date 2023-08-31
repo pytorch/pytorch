@@ -8,6 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/addmv_native.h>
+#include <ATen/ops/dot_native.h>
 #include <ATen/ops/mm.h>
 #endif
 
@@ -115,12 +116,12 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   return output;
 }
 
-Tensor& addmv_out_mps_impl(const Tensor& self,
-                           const Tensor& mat,
-                           const Tensor& vec,
-                           const Scalar& beta_,
-                           const Scalar& alpha_,
-                           Tensor& result) {
+static Tensor& addmv_out_mps_impl(const Tensor& self,
+                                  const Tensor& mat,
+                                  const Tensor& vec,
+                                  const Scalar& beta_,
+                                  const Scalar& alpha_,
+                                  Tensor& result) {
   using namespace mps;
 
   TORCH_CHECK(mat.is_mps());

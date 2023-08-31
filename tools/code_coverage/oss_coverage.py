@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import time
 
-from package.oss.cov_json import get_json_report
-from package.oss.init import initialization
-from package.tool.summarize_jsons import summarize_jsons
-from package.util.setting import TestPlatform
-from package.util.utils import print_time
+from package.oss.cov_json import get_json_report  # type: ignore[import]
+from package.oss.init import initialization  # type: ignore[import]
+from package.tool.summarize_jsons import summarize_jsons  # type: ignore[import]
+from package.util.setting import TestPlatform  # type: ignore[import]
+from package.util.utils import print_time  # type: ignore[import]
 
 
 def report_coverage() -> None:

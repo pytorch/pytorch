@@ -7,8 +7,7 @@
 
 #include <vector>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 static std::vector<int8_t> p2pAccessEnabled_;
 static int64_t num_devices_ = -1;
@@ -55,4 +54,4 @@ bool get_p2p_access(int dev, int dev_to_access) {
   return cache;
 }
 
-}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

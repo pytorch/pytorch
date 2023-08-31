@@ -2,6 +2,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/linear_backward_native.h>
+#include <ATen/ops/linear_native.h>
 
 namespace at::native {
 
@@ -126,7 +128,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
   return output;
 }
 
-Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
+static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
   TORCH_CHECK(grad_output.is_mps(), "mps_linear_backward: grad_output needs to be mps layout");
   TORCH_CHECK(weight.device().is_mps() && (weight.scalar_type() == kFloat || (weight.scalar_type() == kHalf)),
               "mps_linear_backward: unsupported weights data type: ",
@@ -187,10 +189,10 @@ Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_out
   }
 }
 
-std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& grad_output,
-                                                        const Tensor& input,
-                                                        const Tensor& weight,
-                                                        bool bias_defined) {
+static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& grad_output,
+                                                               const Tensor& input,
+                                                               const Tensor& weight,
+                                                               bool bias_defined) {
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
               "_mps_linear_backward: grad_output and input needs to be mps layout");
 

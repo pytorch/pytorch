@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import subprocess
 import os
+import subprocess
 
 COMMON_TESTS = [
     (
@@ -31,8 +31,7 @@ GPU_TESTS = [
 
 
 if __name__ == "__main__":
-
-    if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1':
+    if "USE_CUDA" in os.environ and os.environ["USE_CUDA"] == "1":
         TESTS = COMMON_TESTS + GPU_TESTS
     else:
         TESTS = COMMON_TESTS
@@ -44,8 +43,10 @@ if __name__ == "__main__":
         try:
             subprocess.check_call(command_args)
         except subprocess.CalledProcessError as e:
-            sdk_root = os.environ.get('WindowsSdkDir', 'C:\\Program Files (x86)\\Windows Kits\\10')
-            debugger = os.path.join(sdk_root, 'Debuggers', 'x64', 'cdb.exe')
+            sdk_root = os.environ.get(
+                "WindowsSdkDir", "C:\\Program Files (x86)\\Windows Kits\\10"
+            )
+            debugger = os.path.join(sdk_root, "Debuggers", "x64", "cdb.exe")
             if os.path.exists(debugger):
                 command_args = [debugger, "-o", "-c", "~*g; q"] + command_args
                 command_string = " ".join(command_args)

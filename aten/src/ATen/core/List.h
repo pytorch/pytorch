@@ -78,7 +78,7 @@ public:
   ListElementReference& operator=(const T& new_value) &&;
 
   // assigning another ref to this assigns the underlying value
-  ListElementReference& operator=(ListElementReference&& rhs) &&;
+  ListElementReference& operator=(ListElementReference&& rhs) && noexcept;
 
   const IValue& get() const& {
     return *iterator_;
@@ -124,7 +124,7 @@ class ListIterator final {
   ListIterator(const ListIterator&) = default;
   ListIterator(ListIterator&&) noexcept = default;
   ListIterator& operator=(const ListIterator&) = default;
-  ListIterator& operator=(ListIterator&&) = default;
+  ListIterator& operator=(ListIterator&&) noexcept = default;
 
   ListIterator& operator++() {
       ++iterator_;

@@ -30,7 +30,7 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class InternalMatch():
+class InternalMatch:
     # Nodes from which the match was found
     anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
@@ -359,7 +359,7 @@ class SubgraphMatcher:
         if before != after:
             logger.info("Filtered out %s matches because they are not fully contained", before - after)
 
-        # filter out the matches that that forms a cycle if the subgraph is fused
+        # filter out the matches that form a cycle if the subgraph is fused
         valid_matches = []
         for match in matches:
             matched_compute_nodes = \

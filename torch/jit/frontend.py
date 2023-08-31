@@ -1,35 +1,81 @@
-import torch
-import sys
 import ast
 import dataclasses
 import inspect
-import string
 import re
+import string
+import sys
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
-from torch._C._jit_tree_views import (
-    ClassDef, Ident, Stmt, Decl, Def, Var,
-    EmptyTypeAnnotation, Param, ExprStmt, Assign,
-    Delete, Return, Raise, Assert, AugAssign, While,
-    For, If, Pass, Break, Continue, Apply, Dots, Select,
-    TrueLiteral, FalseLiteral, NoneLiteral, Starred,
-    ListLiteral, TupleLiteral, DictLiteral, Const,
-    StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
-    SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
-    DictComp,
-)
-from torch._sources import get_source_lines_and_file, parse_def, make_source_context
-from torch._sources import ParsedDef as _ParsedDef
-from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
-from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
-from torch._jit_internal import should_drop, _is_drop_fn, is_static_fn, FunctionModifiers  # noqa: F401
-from torch import _jit_internal
+
+import torch
 import torch.jit.annotations
+from torch import _jit_internal
+from torch._C._jit_tree_views import (
+    Apply,
+    Assert,
+    Assign,
+    Attribute,
+    AugAssign,
+    BinOp,
+    Break,
+    ClassDef,
+    Const,
+    Continue,
+    Decl,
+    Def,
+    Delete,
+    DictComp,
+    DictLiteral,
+    Dots,
+    EmptyTypeAnnotation,
+    ExprStmt,
+    FalseLiteral,
+    For,
+    Ident,
+    If,
+    ListComp,
+    ListLiteral,
+    NoneLiteral,
+    Param,
+    Pass,
+    Property,
+    Raise,
+    Return,
+    Select,
+    SliceExpr,
+    Starred,
+    Stmt,
+    StringLiteral,
+    Subscript,
+    TernaryIf,
+    TrueLiteral,
+    TupleLiteral,
+    UnaryOp,
+    Var,
+    While,
+    With,
+    WithItem,
+)
+from torch._jit_internal import (  # noqa: F401
+    _is_drop_fn,
+    FunctionModifiers,
+    is_static_fn,
+    should_drop,
+)
+from torch._sources import (
+    get_source_lines_and_file,
+    make_source_context,
+    parse_def,
+    ParsedDef as _ParsedDef,
+)
+from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
+from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
 
 _IS_ASTUNPARSE_INSTALLED = False
 try:
     import astunparse  # type: ignore[import]
+
     _IS_ASTUNPARSE_INSTALLED = True
 except ImportError:
     pass
@@ -37,8 +83,8 @@ except ImportError:
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
-_reserved_prefix = '__jit'
-_reserved_names = {'print'}
+_reserved_prefix = "__jit"
+_reserved_names = {"print"}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
 
 
@@ -76,25 +122,31 @@ node_start_tokens = {
     ast.Continue: "continue",
 }
 
-pretty_node_names.update({
-    ast.AsyncFunctionDef: "async function definitions",
-    ast.AsyncFor: "async for loops",
-    ast.AsyncWith: "async with statements",
-    ast.Try: "try blocks",
-    ast.Nonlocal: "nonlocal variables",
-})
+pretty_node_names.update(
+    {
+        ast.AsyncFunctionDef: "async function definitions",
+        ast.AsyncFor: "async for loops",
+        ast.AsyncWith: "async with statements",
+        ast.Try: "try blocks",
+        ast.Nonlocal: "nonlocal variables",
+    }
+)
 
-node_start_tokens.update({
-    ast.AsyncFunctionDef: "async def",
-    ast.AsyncFor: "async for",
-    ast.AsyncWith: "async with",
-    ast.Try: "try",
-    ast.Nonlocal: "nonlocal",
-})
+node_start_tokens.update(
+    {
+        ast.AsyncFunctionDef: "async def",
+        ast.AsyncFor: "async for",
+        ast.AsyncWith: "async with",
+        ast.Try: "try",
+        ast.Nonlocal: "nonlocal",
+    }
+)
 
-pretty_node_names.update({
-    ast.AnnAssign: "annotated assignments",
-})
+pretty_node_names.update(
+    {
+        ast.AnnAssign: "annotated assignments",
+    }
+)
 # NB: no specific token for AnnAssign
 
 
@@ -116,15 +168,17 @@ class NotSupportedError(FrontendError):
 
 
 class UnsupportedNodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node, reason=''):
+    def __init__(self, ctx, offending_node, reason=""):
         # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
-        range_len = len(node_start_tokens.get(node_type, ' '))
-        source_range = ctx.make_range(offending_node.lineno,
-                                      offending_node.col_offset,
-                                      offending_node.col_offset + range_len)
+        range_len = len(node_start_tokens.get(node_type, " "))
+        source_range = ctx.make_range(
+            offending_node.lineno,
+            offending_node.col_offset,
+            offending_node.col_offset + range_len,
+        )
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
+        msg = f"{feature_name} {reason + ' ' if reason else ''}aren't supported"
         super().__init__(source_range, msg)
 
 
@@ -153,8 +207,7 @@ def get_class_properties(cls, self_name):
         A list of Property objects corresponding to the properties of cls. Property
         here refers to the subclass of TreeView.
     """
-    props = inspect.getmembers(
-        cls, predicate=lambda m: isinstance(m, property))
+    props = inspect.getmembers(cls, predicate=lambda m: isinstance(m, property))
     # Any property that should not compiled must be in this list on the Module.
     unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
@@ -162,9 +215,17 @@ def get_class_properties(cls, self_name):
     properties = []
     for prop in props:
         if prop[0] not in unused_properties and not should_drop(prop[1].fget):
-            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+            getter = get_jit_def(
+                prop[1].fget, f"__{prop[0]}_getter", self_name=self_name
+            )
+            setter = (
+                get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name)
+                if prop[1].fset
+                else None
+            )
+            properties.append(
+                Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter)
+            )
 
     return properties
 
@@ -178,6 +239,7 @@ def get_class_assigns(ctx, cls_ast):
             assigns.append(builder(ctx, entry))
         except NotSupportedError:
             pass
+
     for entry in cls_ast.body:
         if isinstance(entry, ast.Assign):
             maybe_build_assign(StmtBuilder.build_Assign, entry)
@@ -194,15 +256,17 @@ def get_jit_class_def(cls, self_name):
         predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
-        and not _is_drop_fn(m)
+        and not _is_drop_fn(m),
     )
 
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
     # Get and parse the source code for this class
-    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
-    source = ''.join(sourcelines)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(
+        cls, torch._C.ErrorReport.call_stack()
+    )
+    source = "".join(sourcelines)
 
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
@@ -220,7 +284,8 @@ def get_jit_class_def(cls, self_name):
         overrides = {
             method.name
             for method in class_ast.body
-            if isinstance(method, ast.FunctionDef) and method.name in DATACLASS_MAGIC_METHODS
+            if isinstance(method, ast.FunctionDef)
+            and method.name in DATACLASS_MAGIC_METHODS
         }
         for i, (name, _) in enumerate(methods):
             # Is this a magic method we can synthesize?
@@ -237,8 +302,12 @@ def get_jit_class_def(cls, self_name):
     ]
     properties = get_class_properties(cls, self_name)
 
-    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
+    leading_whitespace_len = len(source.split("\n", 1)[0]) - len(
+        dedent_src.split("\n", 1)[0]
+    )
+    ctx = make_source_context(
+        source, filename, file_lineno, leading_whitespace_len, False
+    )
     assigns = get_class_assigns(ctx, class_ast)
 
     return build_class_def(ctx, class_ast, method_defs, properties, self_name, assigns)
@@ -271,9 +340,15 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
-        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError(f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}")
+        unused_fn_def = ast.parse(
+            'def unused_fn(self: Any):\n\traise RuntimeError("Cannot call @unused methods")'
+        )
+        if len(unused_fn_def.body) != 1 or not isinstance(
+            unused_fn_def.body[0], ast.FunctionDef
+        ):
+            raise RuntimeError(
+                f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}"
+            )
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -294,7 +369,15 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
-    return build_def(parsed_def.ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
+    return build_def(
+        parsed_def.ctx,
+        fn_def,
+        type_line,
+        def_name,
+        self_name=self_name,
+        pdt_arg_types=pdt_arg_types,
+    )
+
 
 # TODO: more robust handling of recognizing ignore context manager
 def is_torch_jit_ignore_context_manager(stmt):
@@ -305,36 +388,40 @@ def is_torch_jit_ignore_context_manager(stmt):
         if isinstance(function, ast.Attribute):
             attr_name = function.attr
             attr_value = function.value
-            if attr_name == "_IgnoreContextManager" and isinstance(attr_value, ast.Attribute):
+            if attr_name == "_IgnoreContextManager" and isinstance(
+                attr_value, ast.Attribute
+            ):
                 # there should be at most two nested attributes (e.g torch.jit._IgnoreContextManager)
                 if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
                     if attr_value.value.id == "torch":
                         return True
     return False
 
+
 class Builder:
     def __call__(self, ctx, node):
-        method = getattr(self, 'build_' + node.__class__.__name__, None)
+        method = getattr(self, "build_" + node.__class__.__name__, None)
         if method is None:
             raise UnsupportedNodeError(ctx, node)
         return method(ctx, node)
 
 
 def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
-                       py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
+    r = ctx.make_range(
+        py_def.lineno, py_def.col_offset, py_def.col_offset + len("class")
+    )
+    return ClassDef(
+        Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns
+    )
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno,
-                       py_def.col_offset,
-                       py_def.col_offset + len("def"))
+    r = ctx.make_range(py_def.lineno, py_def.col_offset, py_def.col_offset + len("def"))
 
     param_list = build_param_list(ctx, py_def.args, self_name, pdt_arg_types)
     return_type = None
-    if getattr(py_def, 'returns', None) is not None:
+    if getattr(py_def, "returns", None) is not None:
         return_type = build_expr(ctx, py_def.returns)
 
     decl = Decl(r, param_list, return_type)
@@ -343,23 +430,27 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
         type_comment_decl = torch._C.parse_type_comment(type_line)
         decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
 
-    return Def(Ident(r, def_name),
-               decl,
-               build_stmts(ctx, body))
+    return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
 
-_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments "
-                     "or use keyword-only arguments with defaults")
+_vararg_kwarg_err = (
+    "Compiled functions can't take variable number of arguments "
+    "or use keyword-only arguments with defaults"
+)
 
 
 def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
-        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        ctx_range = ctx.make_range(
+            expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg)
+        )
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if py_args.vararg is not None:
         expr = py_args.vararg
-        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        ctx_range = ctx.make_range(
+            expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg)
+        )
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if len(py_args.kw_defaults) > 0:
         # kw_defaults is a list of the values for the kwargs (which default to None),
@@ -370,15 +461,33 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     # List of Tuple of args and type as inferred by profile directed typing
-    arg_and_types = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
-                     for arg in py_args.args]
-    arg_and_types_kwonlyargs = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg])
-                                else None) for arg in py_args.kwonlyargs]
+    arg_and_types = [
+        (
+            arg,
+            pdt_arg_types[arg.arg]
+            if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+            else None,
+        )
+        for arg in py_args.args
+    ]
+    arg_and_types_kwonlyargs = [
+        (
+            arg,
+            pdt_arg_types[arg.arg]
+            if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+            else None,
+        )
+        for arg in py_args.kwonlyargs
+    ]
 
-    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
-              for arg, arg_type in arg_and_types]
-    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
-               for arg, arg_type in arg_and_types_kwonlyargs]
+    result = [
+        build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
+        for arg, arg_type in arg_and_types
+    ]
+    result += [
+        build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
+        for arg, arg_type in arg_and_types_kwonlyargs
+    ]
     return result
 
 
@@ -386,19 +495,20 @@ def build_param(ctx, py_arg, self_name, kwarg_only, pdt_arg_type=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
-    if getattr(py_arg, 'annotation', None) is not None:
+    if getattr(py_arg, "annotation", None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
     elif pdt_arg_type:
         annotation_expr = Var(Ident(r, pdt_arg_type))
-    elif self_name is not None and name == 'self':
+    elif self_name is not None and name == "self":
         annotation_expr = Var(Ident(r, self_name))
     else:
         annotation_expr = EmptyTypeAnnotation(r)
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
+
 def build_ignore_context_manager(ctx, stmt):
-    InputType = namedtuple('InputType', ['name', 'ann'])
-    OutputType = namedtuple('OutputType', ['name', 'ann'])
+    InputType = namedtuple("InputType", ["name", "ann"])
+    OutputType = namedtuple("OutputType", ["name", "ann"])
 
     def process_ins_outs(args):
         # parse the context manager to figure out inputs and outputs
@@ -419,7 +529,7 @@ def build_ignore_context_manager(ctx, stmt):
     def create_unique_name_ext(ctx, stmt):
         # extension will be based on the full path filename plus
         # the line number of original context manager
-        fn = re.sub(r'[^a-zA-Z0-9_]', '_', ctx.filename)
+        fn = re.sub(r"[^a-zA-Z0-9_]", "_", ctx.filename)
         return f"{fn}_{stmt.lineno}"
 
     def build_return_ann_stmt(outputs):
@@ -444,7 +554,9 @@ def build_ignore_context_manager(ctx, stmt):
     # build the replacement function str with given inputs and outputs
     ignore_function_name = "func_ignore_" + create_unique_name_ext(ctx, stmt)
     ignore_function_str = "\ndef " + ignore_function_name
-    ignore_function_str += "(" + ", ".join([var.name + " :" + var.ann for var in inputs]) + ")"
+    ignore_function_str += (
+        "(" + ", ".join([var.name + " :" + var.ann for var in inputs]) + ")"
+    )
 
     return_ann, return_stmt = build_return_ann_stmt(outputs)
     ignore_function_str += return_ann + ": pass"
@@ -461,14 +573,16 @@ def build_ignore_context_manager(ctx, stmt):
 
     # registers the custom function in the global context
     ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
-    ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
+    ignore_func_str += f'\nglobals()["{ignore_function_name}"] = {ignore_function_name}'
     exec(ignore_func_str)  # noqa: P204
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
     assign_str_lhs = build_args(outputs)
     # this function will be registered in torch.jit.frontend module by default
-    assign_str_rhs = "torch.jit.frontend.{}(".format(ignore_function_name) + build_args(inputs) + ")"
+    assign_str_rhs = (
+        f"torch.jit.frontend.{ignore_function_name}(" + build_args(inputs) + ")"
+    )
 
     if len(outputs) > 0:
         assign_str = assign_str_lhs + " = " + assign_str_rhs
@@ -476,6 +590,7 @@ def build_ignore_context_manager(ctx, stmt):
         assign_str = assign_str_rhs
     assign_ast = ast.parse(assign_str).body[0]
     return assign_ast
+
 
 def get_default_args(fn):
     if fn is None:
@@ -506,12 +621,15 @@ def get_default_args_for_class(cls):
         cls,
         predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
         and not is_static_fn(cls, m.__name__)
-        and m.__name__ in cls.__dict__
+        and m.__name__ in cls.__dict__,
     )
 
     # Get method defaults. Property defaults do not need to be considered
     # because setters cannot be invoked without a value.
-    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+    defaults = {
+        method_name: get_default_args(method_impl)
+        for method_name, method_impl in methods
+    }
 
     return defaults
 
@@ -525,28 +643,32 @@ class WithItemBuilder(Builder):
         op_vars = item.optional_vars
         r = ctx.make_range(lineno, start, end)
 
-        return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
+        return WithItem(
+            r,
+            build_expr(ctx, item.context_expr),
+            build_expr(ctx, op_vars) if op_vars else None,
+        )
 
 
 class StmtBuilder(Builder):
     augassign_map = {
-        ast.Add: '+',
-        ast.Sub: '-',
-        ast.Mult: '*',
-        ast.Div: '/',
-        ast.Mod: '%',
-        ast.BitOr: '|',
-        ast.BitAnd: '&',
-        ast.BitXor: '^',
-        ast.LShift: '<<',
-        ast.RShift: '>>',
-        ast.Pow: '**',
+        ast.Add: "+",
+        ast.Sub: "-",
+        ast.Mult: "*",
+        ast.Div: "/",
+        ast.Mod: "%",
+        ast.BitOr: "|",
+        ast.BitAnd: "&",
+        ast.BitXor: "^",
+        ast.LShift: "<<",
+        ast.RShift: ">>",
+        ast.Pow: "**",
     }
 
     @staticmethod
     def build_Expr(ctx, stmt):
         value = stmt.value
-        if value.__class__.__name__ == 'Str':
+        if value.__class__.__name__ == "Str":
             # If a statement is a string literal expression,
             # then it is a docstring. Just ignore it.
             return None
@@ -562,18 +684,23 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_AnnAssign(ctx, stmt):
         if stmt.value is None:
-            raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
+            raise UnsupportedNodeError(ctx, stmt, reason="without assigned value")
 
         # Disallow type annotations on instance attributes outside of __init__
-        if type(stmt.target) == ast.Attribute and \
-                stmt.target.value.id == "self" and ctx.funcname != "__init__":  # type: ignore[attr-defined]
+        if (
+            type(stmt.target) == ast.Attribute
+            and stmt.target.value.id == "self"  # type: ignore[attr-defined]
+            and ctx.funcname != "__init__"
+        ):
             start = stmt.col_offset
             end = start + len(f"self.{stmt.target.attr}")
-            if hasattr(stmt.annotation, 'id'):
+            if hasattr(stmt.annotation, "id"):
                 end += len(f": {stmt.annotation.id}")
             sr = ctx.make_range(stmt.lineno, start, end)
-            raise ValueError("Type annotations on instance attributes must be declared in "
-                             f"__init__, not '{ctx.funcname}': {sr}")
+            raise ValueError(
+                "Type annotations on instance attributes must be declared in "
+                f"__init__, not '{ctx.funcname}': {sr}"
+            )
 
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
@@ -588,7 +715,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Return(ctx, stmt):
-        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
+        r = ctx.make_range(
+            stmt.lineno, stmt.col_offset, stmt.col_offset + len("return")
+        )
         return Return(r, None if stmt.value is None else build_expr(ctx, stmt.value))
 
     @staticmethod
@@ -599,7 +728,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Assert(ctx, stmt):
-        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("assert"))
+        r = ctx.make_range(
+            stmt.lineno, stmt.col_offset, stmt.col_offset + len("assert")
+        )
         test = build_expr(ctx, stmt.test)
         msg = build_expr(ctx, stmt.msg) if stmt.msg is not None else None
         return Assert(r, test, msg)
@@ -613,8 +744,9 @@ class StmtBuilder(Builder):
             op_token = StmtBuilder.augassign_map[op]
         else:
             raise NotSupportedError(
-                find_before(ctx, rhs.range().start, '=', offsets=(-1, 0)),
-                "unsupported kind of augmented assignment: " + op.__name__)
+                find_before(ctx, rhs.range().start, "=", offsets=(-1, 0)),
+                "unsupported kind of augmented assignment: " + op.__name__,
+            )
         return AugAssign(lhs, op_token, rhs)
 
     @staticmethod
@@ -622,10 +754,11 @@ class StmtBuilder(Builder):
         if stmt.orelse:
             # TODO: try to recover the location of else:? Python doesn't give us useful
             # annotations in this case
-            raise NotSupportedError(None, "else branches of while loops aren't supported")
+            raise NotSupportedError(
+                None, "else branches of while loops aren't supported"
+            )
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("while"))
-        return While(r, build_expr(ctx, stmt.test),
-                     build_stmts(ctx, stmt.body))
+        return While(r, build_expr(ctx, stmt.test), build_stmts(ctx, stmt.body))
 
     @staticmethod
     def build_For(ctx, stmt):
@@ -634,21 +767,29 @@ class StmtBuilder(Builder):
             raise NotSupportedError(r, "else branches of for loops aren't supported")
 
         return For(
-            r, [build_expr(ctx, stmt.target)],
-            [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
+            r,
+            [build_expr(ctx, stmt.target)],
+            [build_expr(ctx, stmt.iter)],
+            build_stmts(ctx, stmt.body),
+        )
 
     @staticmethod
     def build_If(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("if"))
-        return If(r, build_expr(ctx, stmt.test),
-                  build_stmts(ctx, stmt.body),
-                  build_stmts(ctx, stmt.orelse))
+        return If(
+            r,
+            build_expr(ctx, stmt.test),
+            build_stmts(ctx, stmt.body),
+            build_stmts(ctx, stmt.orelse),
+        )
 
     @staticmethod
     def build_Print(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("print"))
         if stmt.dest:
-            raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
+            raise NotSupportedError(
+                r, "print statements with non-default destinations aren't supported"
+            )
         args = [build_expr(ctx, val) for val in stmt.values]
         return ExprStmt(Apply(Var(Ident(r, "print")), args, []))
 
@@ -664,7 +805,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Continue(ctx, stmt):
-        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
+        r = ctx.make_range(
+            stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue")
+        )
         return Continue(r)
 
     @staticmethod
@@ -673,52 +816,55 @@ class StmtBuilder(Builder):
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
             if not _IS_ASTUNPARSE_INSTALLED:
-                raise RuntimeError("torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
-                                   please install it in your Python environment")
+                raise RuntimeError(
+                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                                   please install it in your Python environment"
+                )
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
+
 class ExprBuilder(Builder):
     binop_map = {
-        ast.Add: '+',
-        ast.Sub: '-',
-        ast.Mult: '*',
-        ast.Div: '/',
-        ast.Pow: '**',
-        ast.Mod: '%',
-        ast.FloorDiv: '//',
-        ast.BitAnd: '&',
-        ast.BitXor: '^',
-        ast.BitOr: '|',
-        ast.LShift: '<<',
-        ast.RShift: '>>',
+        ast.Add: "+",
+        ast.Sub: "-",
+        ast.Mult: "*",
+        ast.Div: "/",
+        ast.Pow: "**",
+        ast.Mod: "%",
+        ast.FloorDiv: "//",
+        ast.BitAnd: "&",
+        ast.BitXor: "^",
+        ast.BitOr: "|",
+        ast.LShift: "<<",
+        ast.RShift: ">>",
     }
 
-    binop_map[ast.MatMult] = '@'
+    binop_map[ast.MatMult] = "@"
 
     unop_map = {
-        ast.Not: 'not',
-        ast.USub: '-',
-        ast.Invert: '~',
+        ast.Not: "not",
+        ast.USub: "-",
+        ast.Invert: "~",
     }
 
     boolop_map = {
-        ast.And: 'and',
-        ast.Or: 'or',
+        ast.And: "and",
+        ast.Or: "or",
     }
 
     cmpop_map = {
-        ast.Eq: '==',
-        ast.NotEq: '!=',
-        ast.LtE: '<=',
-        ast.Lt: '<',
-        ast.GtE: '>=',
-        ast.Gt: '>',
-        ast.Is: 'is',
-        ast.IsNot: 'is not',
-        ast.In: 'in',
-        ast.NotIn: 'not in',
+        ast.Eq: "==",
+        ast.NotEq: "!=",
+        ast.LtE: "<=",
+        ast.Lt: "<",
+        ast.GtE: ">=",
+        ast.Gt: ">",
+        ast.Is: "is",
+        ast.IsNot: "is not",
+        ast.In: "in",
+        ast.NotIn: "not in",
     }
 
     @staticmethod
@@ -726,7 +872,7 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         # expr.attr is just a string, so it's not annotated in any way, so we have
         # to build the range manually
-        source = ctx.source.encode('utf-8')
+        source = ctx.source.encode("utf-8")
 
         def get_char(index):
             return chr(source[index])
@@ -742,7 +888,7 @@ class ExprBuilder(Builder):
     def build_Call(ctx, expr):
         func = build_expr(ctx, expr.func)
         args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-        if hasattr(expr, 'starargs') and expr.starargs:
+        if hasattr(expr, "starargs") and expr.starargs:
             stararg_expr = build_expr(ctx, expr.starargs)
             args += [Starred(stararg_expr.range(), stararg_expr)]
         kwargs = []
@@ -750,21 +896,28 @@ class ExprBuilder(Builder):
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
             if not kw.arg:
-                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
+                raise NotSupportedError(
+                    kw_expr.range(), "keyword-arg expansion is not supported"
+                )
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
     @staticmethod
     def build_Ellipsis(ctx, expr):
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 3)  # len("...") == 3
+        r = ctx.make_range(
+            expr.lineno, expr.col_offset, expr.col_offset + 3
+        )  # len("...") == 3
         return Dots(r)
 
     @staticmethod
     def build_Name(ctx, expr):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(expr.id))
         if expr.id.startswith(_reserved_prefix):
-            raise NotSupportedError(r, "names of variables used in JIT-ed functions "
-                                       "can't start with " + _reserved_prefix)
+            raise NotSupportedError(
+                r,
+                "names of variables used in JIT-ed functions "
+                "can't start with " + _reserved_prefix,
+            )
         if expr.id == "True":
             return TrueLiteral(r)
         elif expr.id == "False":
@@ -777,7 +930,9 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_NameConstant(ctx, expr):
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(expr.value)))
+        r = ctx.make_range(
+            expr.lineno, expr.col_offset, expr.col_offset + len(str(expr.value))
+        )
         if expr.value is True:
             return TrueLiteral(r)
         elif expr.value is False:
@@ -797,13 +952,18 @@ class ExprBuilder(Builder):
 
         if op == ast.Div and not ctx.uses_true_division:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
-            raise FrontendError(err_range, 'Division of ints in TorchScript uses Python 3 true '
-                                'division semantics. Please put `from __future__ '
-                                'import division` at the top of your file')
+            raise FrontendError(
+                err_range,
+                "Division of ints in TorchScript uses Python 3 true "
+                "division semantics. Please put `from __future__ "
+                "import division` at the top of your file",
+            )
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
-            raise NotSupportedError(err_range, "unsupported binary operator: " + op.__name__)
+            raise NotSupportedError(
+                err_range, "unsupported binary operator: " + op.__name__
+            )
         return BinOp(op_token, lhs, rhs)
 
     @staticmethod
@@ -812,20 +972,30 @@ class ExprBuilder(Builder):
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
         if op_token is None:
-            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
+            raise NotSupportedError(
+                expr.range(), "unsupported unary operator: " + op.__name__
+            )
+        r = ctx.make_range(
+            expr.lineno, expr.col_offset, expr.col_offset + len(op_token)
+        )
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod
     def build_BoolOp(ctx, expr):
         if len(expr.values) < 2:
-            raise AssertionError("expected at least 2 values in BoolOp, but got " + str(len(expr.values)))
+            raise AssertionError(
+                "expected at least 2 values in BoolOp, but got " + str(len(expr.values))
+            )
         sub_exprs = [build_expr(ctx, sub_expr) for sub_expr in expr.values]
         op = type(expr.op)
         op_token = ExprBuilder.boolop_map.get(op)
         if op_token is None:
-            err_range = ctx.make_raw_range(sub_exprs[0].range().end, sub_exprs[1].range().start)
-            raise NotSupportedError(err_range, "unsupported boolean operator: " + op.__name__)
+            err_range = ctx.make_raw_range(
+                sub_exprs[0].range().end, sub_exprs[1].range().start
+            )
+            raise NotSupportedError(
+                err_range, "unsupported boolean operator: " + op.__name__
+            )
         lhs = sub_exprs[0]
         for rhs in sub_exprs[1:]:
             lhs = BinOp(op_token, lhs, rhs)
@@ -833,9 +1003,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_IfExp(ctx, expr):
-        return TernaryIf(build_expr(ctx, expr.test),
-                         build_expr(ctx, expr.body),
-                         build_expr(ctx, expr.orelse))
+        return TernaryIf(
+            build_expr(ctx, expr.test),
+            build_expr(ctx, expr.body),
+            build_expr(ctx, expr.orelse),
+        )
 
     @staticmethod
     def build_Compare(ctx, expr):
@@ -846,35 +1018,50 @@ class ExprBuilder(Builder):
             op_token = ExprBuilder.cmpop_map.get(op)
             r = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             if op_token is None:
-                raise NotSupportedError(r, "unsupported comparison operator: " + op.__name__)
+                raise NotSupportedError(
+                    r, "unsupported comparison operator: " + op.__name__
+                )
 
             if op == ast.NotIn:
                 # NB: `not in` is just `not( in )`, so we don't introduce new tree view
                 # but just make it a nested call in our tree view structure
-                in_expr = BinOp('in', lhs, rhs)
-                cmp_expr = UnaryOp(r, 'not', in_expr)
+                in_expr = BinOp("in", lhs, rhs)
+                cmp_expr = UnaryOp(r, "not", in_expr)
             else:
                 cmp_expr = BinOp(op_token, lhs, rhs)
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp('and', result, cmp_expr)
+                result = BinOp("and", result, cmp_expr)
         return result
 
     @staticmethod
     def build_Subscript(ctx, expr):
         def build_SliceExpr(ctx, base, slice_expr):
-            lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
-            upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
-            step = build_expr(ctx, slice_expr.step) if slice_expr.step is not None else None
+            lower = (
+                build_expr(ctx, slice_expr.lower)
+                if slice_expr.lower is not None
+                else None
+            )
+            upper = (
+                build_expr(ctx, slice_expr.upper)
+                if slice_expr.upper is not None
+                else None
+            )
+            step = (
+                build_expr(ctx, slice_expr.step)
+                if slice_expr.step is not None
+                else None
+            )
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
             if isinstance(index_expr.value, ast.Tuple):
-                raise NotSupportedError(base.range(),
-                                        "slicing multiple dimensions with "
-                                        "tuples not supported yet")
+                raise NotSupportedError(
+                    base.range(),
+                    "slicing multiple dimensions with " "tuples not supported yet",
+                )
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):
@@ -888,24 +1075,30 @@ class ExprBuilder(Builder):
                 elif sub_type is ast.Ellipsis:
                     sub_exprs.append(Dots(base.range()))
                 else:
-                    raise NotSupportedError(base.range(),
-                                            "slicing multiple dimensions with "
-                                            "{} not supported".format(sub_type))
+                    raise NotSupportedError(
+                        base.range(),
+                        f"slicing multiple dimensions with {sub_type} not supported",
+                    )
             return sub_exprs
+
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
             if isinstance(expr.slice.value, ast.Tuple):
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
-                indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
+                indices = [
+                    build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts
+                ]
                 if not indices:
                     # `col_offset` is an int, but `end_col_offset` is
                     # `Optional[int]`. The magic number is here to make
                     # sure we can parse `()` on any machine
-                    r = ctx.make_range(expr.lineno,
-                                       expr.slice.value.col_offset,
-                                       expr.slice.value.col_offset + 2)
+                    r = ctx.make_range(
+                        expr.lineno,
+                        expr.slice.value.col_offset,
+                        expr.slice.value.col_offset + 2,
+                    )
                     tup = TupleLiteral(r, [])
                     indices.append(tup)
                 return Subscript(base, indices)
@@ -915,7 +1108,10 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        elif sys.version_info >= (3, 9):  # In Python3.9 array indicies are not wrapped in ast.Index
+        elif sys.version_info >= (
+            3,
+            9,
+        ):  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -927,9 +1123,9 @@ class ExprBuilder(Builder):
                 # Special-case logic for `typing.Tuple[()]`
                 if not indices:
                     # See note above r.e. magic number
-                    r = ctx.make_range(expr.lineno,
-                                       expr.slice.col_offset,
-                                       expr.slice.col_offset + 2)
+                    r = ctx.make_range(
+                        expr.lineno, expr.slice.col_offset, expr.slice.col_offset + 2
+                    )
                     tup = TupleLiteral(r, [])
                     indices.append(tup)
                 return Subscript(base, indices)
@@ -939,21 +1135,30 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_List(ctx, expr):
-        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.elts])
+        return ListLiteral(
+            ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+            [build_expr(ctx, e) for e in expr.elts],
+        )
 
     @staticmethod
     def build_Tuple(ctx, expr):
-        return TupleLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                            [build_expr(ctx, e) for e in expr.elts])
+        return TupleLiteral(
+            ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+            [build_expr(ctx, e) for e in expr.elts],
+        )
 
     @staticmethod
     def build_Dict(ctx, expr):
         range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         if expr.keys and not expr.keys[0]:
-            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
-        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
-                           [build_expr(ctx, e) for e in expr.values])
+            raise NotSupportedError(
+                range, "Dict expansion (e.g. `{**dict}`) is not supported"
+            )
+        return DictLiteral(
+            range,
+            [build_expr(ctx, e) for e in expr.keys],
+            [build_expr(ctx, e) for e in expr.values],
+        )
 
     @staticmethod
     def build_Num(ctx, expr):
@@ -975,43 +1180,47 @@ class ExprBuilder(Builder):
         elif isinstance(value, type(Ellipsis)):
             return ExprBuilder.build_Ellipsis(ctx, expr)
         else:
-            error_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(value)))
+            error_range = ctx.make_range(
+                expr.lineno, expr.col_offset, expr.col_offset + len(str(value))
+            )
             raise FrontendError(error_range, "Unknown Constant expression type")
 
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
+        r = ctx.make_range(
+            expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1
+        )
         return StringLiteral(r, value)
 
     @staticmethod
     def build_JoinedStr(ctx, expr):
-        s = ''
+        s = ""
         args = []
         for value in expr.values:
             r = ctx.make_range(value.lineno, value.col_offset, value.col_offset + 1)
             if isinstance(value, ast.FormattedValue):
                 if value.conversion != -1:
-                    raise NotSupportedError(r, 'Don\'t support conversion in JoinedStr')
+                    raise NotSupportedError(r, "Don't support conversion in JoinedStr")
                 if value.format_spec is not None:
-                    raise NotSupportedError(r, 'Don\'t support formatting in JoinedStr')
-                s += '{}'
+                    raise NotSupportedError(r, "Don't support formatting in JoinedStr")
+                s += "{}"
                 args.append(build_expr(ctx, value.value))
             elif isinstance(value, ast.Str):
                 s += value.s
             else:
-                raise NotSupportedError(r, 'Unsupported value in JoinedStr')
+                raise NotSupportedError(r, "Unsupported value in JoinedStr")
 
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
-        return Apply(Select(StringLiteral(r, s), Ident(r, 'format')), args, [])
+        return Apply(Select(StringLiteral(r, s), Ident(r, "format")), args, [])
 
     @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) != 1):
+        if len(stmt.generators) != 1:
             raise NotSupportedError(r, "Only a single generator is currently supported")
 
-        if (len(stmt.generators[0].ifs) != 0):
+        if len(stmt.generators[0].ifs) != 0:
             raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
@@ -1028,10 +1237,10 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_DictComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) != 1):
+        if len(stmt.generators) != 1:
             raise NotSupportedError(r, "Only a single generator is currently supported")
 
-        if (len(stmt.generators[0].ifs) != 0):
+        if len(stmt.generators[0].ifs) != 0:
             raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         key_expr = build_expr(ctx, stmt.key)
@@ -1046,9 +1255,11 @@ class ExprBuilder(Builder):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return Starred(r, build_expr(ctx, expr.value))
 
+
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
 build_withitem = WithItemBuilder()
+
 
 def find_before(ctx, pos, substr, offsets=(0, 0)):
     new_pos = ctx.source[:pos].rindex(substr)

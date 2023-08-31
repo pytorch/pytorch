@@ -38,7 +38,7 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
 
     val = node.meta.get("val", None)
     if val is None or not _check_is_fake_tensor(val):
-        raise SpecViolationError("Node.meta {} is missing val field.".format(node.name))
+        raise SpecViolationError(f"Node.meta {node.name} is missing val field.")
 
 
 @compatibility(is_backward_compatible=False)
@@ -71,7 +71,7 @@ class Verifier:
 
         if not isinstance(op, OpOverload):
             raise SpecViolationError(
-                "Operator '{}' is not a registered Op".format(op_name),
+                f"Operator '{op_name}' is not a registered Op",
             )
 
         # All ops functional
@@ -87,7 +87,7 @@ class Verifier:
             # TODO(T140410192): should have fake tensor for all dialects
             if node.op in {"call_module", "call_method"}:
                 raise SpecViolationError(
-                    "call_module is not valid: got a class '{}' ".format(node.target),
+                    f"call_module is not valid: got a class '{node.target}' ",
                 )
 
             if node.op == "call_function":
@@ -122,19 +122,17 @@ class ATenDialectVerifier(Verifier):
 
         if not isinstance(op, OpOverload):
             raise SpecViolationError(
-                "Operator '{}' is not a registered Op".format(op_name),
+                f"Operator '{op_name}' is not a registered Op",
             )
 
         if (
-            torch.Tag.core not in op.tags  # type: ignore[attr-defined]
-            and torch.Tag.view_copy not in op.tags  # type: ignore[attr-defined]
+            torch.Tag.core not in op.tags
+            and torch.Tag.view_copy not in op.tags
         ):
             # NOTE(qihan): whether view_copy operators are marked as canonical is still under
             #            discussion.
             raise SpecViolationError(
-                "Operator {}.{} is not Aten Canonical.".format(
-                    op.__module__, op.__name__
-                )
+                f"Operator {op.__module__}.{op.__name__} is not Aten Canonical."
             )
 
     @compatibility(is_backward_compatible=False)

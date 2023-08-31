@@ -184,7 +184,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
-            store = dist.PrefixStore(str("rpc_prefix_{}".format(_init_counter)), store)
+            store = dist.PrefixStore(str(f"rpc_prefix_{_init_counter}"), store)
             _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
@@ -212,9 +212,7 @@ if is_available():
         for arg, arg_type in type_mapping.items():
             if not isinstance(arg, arg_type):  # type: ignore[arg-type]
                 raise RuntimeError(
-                    "Argument {} must be of type {} but got type {}".format(
-                        arg, arg_type, type(arg)
-                    )
+                    f"Argument {arg} must be of type {arg_type} but got type {type(arg)}"
                 )
 
     def _init_rpc_backend(

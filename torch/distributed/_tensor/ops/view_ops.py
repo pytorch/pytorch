@@ -617,7 +617,7 @@ def register_prop_rule_map(
 
         if shard_out is not None:
             # no reshard needed
-            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
+            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
             local_out_shape = compute_local_shape(
                 list(global_out_shape), mesh, shard_out
             )
@@ -652,7 +652,7 @@ def register_prop_rule_map(
                         func_schema=op_schema.func_schema,
                         args_schema=(
                             DTensorSpec(
-                                placements=suggested_placements,
+                                placements=tuple(suggested_placements),
                                 mesh=input_dtensor_spec.mesh,
                                 tensor_meta=input_dtensor_spec.tensor_meta,
                             ),

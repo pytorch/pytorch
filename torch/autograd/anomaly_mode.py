@@ -1,7 +1,8 @@
-import torch
 import warnings
 
 from typing import Any
+
+import torch
 
 __all__ = ["detect_anomaly", "set_detect_anomaly"]
 
@@ -77,9 +78,12 @@ class detect_anomaly:
         self.prev = torch.is_anomaly_enabled()
         self.check_nan = check_nan
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
-        warnings.warn('Anomaly Detection has been enabled. '
-                      'This mode will increase the runtime '
-                      'and should only be enabled for debugging.', stacklevel=2)
+        warnings.warn(
+            "Anomaly Detection has been enabled. "
+            "This mode will increase the runtime "
+            "and should only be enabled for debugging.",
+            stacklevel=2,
+        )
 
     def __enter__(self) -> None:
         torch.set_anomaly_enabled(True, self.check_nan)

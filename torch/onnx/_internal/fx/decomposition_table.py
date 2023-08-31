@@ -13,9 +13,11 @@ from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import registration
 
 
+# TODO: OnnxRegistry annotation: beartype is a runtime type checker for python3,
+# so it doesn't work with TYPE_CHECKING
 @_beartype.beartype
 def _create_onnx_supports_op_overload_table(
-    registry: registration.OnnxRegistry,
+    registry,
 ) -> Set[Union[torch._ops.OpOverload, Callable]]:
     """
     Creates a set of OpOverload and Callable objects that represent ONNX-supported PyTorch operations.
@@ -73,9 +75,11 @@ def _create_onnx_supports_op_overload_table(
     return table
 
 
+# TODO: OnnxRegistry annotation: beartype is a runtime type checker for python3,
+# so it doesn't work with TYPE_CHECKING
 @_beartype.beartype
 def create_onnx_friendly_decomposition_table(
-    registry: registration.OnnxRegistry,
+    registry,
 ) -> Dict[torch._ops.OpOverload, Callable]:
     """
     This function creates a dictionary of op overloads and their decomposition functions
@@ -84,7 +88,7 @@ def create_onnx_friendly_decomposition_table(
     built-in aten-to-aten decomposition.
 
     Args:
-        registry (registration.OnnxRegistry): The ONNX registry for PyTorch.
+        registry (torch.onnx.OnnxRegistry): The ONNX registry for PyTorch.
 
     Returns:
         Dict[torch._ops.OpOverload, Callable]: A dictionary that maps op overloads to their corresponding

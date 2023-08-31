@@ -68,7 +68,7 @@ class Linear(nnq.Linear):
             self.in_features, self.out_features, self._packed_params.dtype
         )
         if self._packed_params.dtype == torch.qint8:
-            extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
+            extra_repr_str += f', qscheme={self.weight().qscheme()}'
         return extra_repr_str
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,

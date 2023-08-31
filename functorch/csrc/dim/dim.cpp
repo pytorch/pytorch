@@ -880,7 +880,7 @@ mpy::obj<Tensor> Tensor::create_delayed(mpy::object op, mpy::vector_args args, S
     mpy::obj<Tensor> self = Tensor::create();
     self->capture_levels(levels);
     self->has_device_ = has_device;
-    self->delayed_ = std::make_unique<DelayedOperator>(op, args);
+    self->delayed_ = std::make_unique<DelayedOperator>(std::move(op), args);
     return self;
 }
 
@@ -1082,7 +1082,7 @@ PyObject* py_tree_flatten(PyObject *self,
 
 
 
-mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::handle agg) {
+mpy::object tree_map(Arena& A, const std::function<mpy::handle(mpy::handle)>& fn, mpy::handle agg) {
     Slice<mpy::handle> elements;
     auto unflatten = tree_flatten(A, agg, elements);
     for (auto i : elements.enumerate()) {

@@ -898,8 +898,8 @@ class SummaryWriter:
     def _encode(rawstr):
         # I'd use urllib but, I'm unsure about the differences from python3 to python2, etc.
         retval = rawstr
-        retval = retval.replace("%", "%%%02x" % (ord("%")))
-        retval = retval.replace("/", "%%%02x" % (ord("/")))
+        retval = retval.replace("%", f"%{ord('%'):02x}")
+        retval = retval.replace("/", f"%{ord('/'):02x}")
         retval = retval.replace("\\", "%%%02x" % (ord("\\")))
         return retval
 
@@ -953,7 +953,7 @@ class SummaryWriter:
 
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
-        subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
+        subdir = f"{str(global_step).zfill(5)}/{self._encode(tag)}"
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
 
         fs = tf.io.gfile
@@ -964,7 +964,7 @@ class SummaryWriter:
                 )
             else:
                 raise Exception(
-                    "Path: `%s` exists, but is a file. Cannot proceed." % save_path
+                    f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:
             fs.makedirs(save_path)

@@ -147,6 +147,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
+        torch.export,
         torch.eye,
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
@@ -186,6 +187,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_min,
         torch.sym_not,
         torch.sym_constrain_range,
+        torch.sym_constrain_range_for_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -1570,7 +1572,7 @@ def handle_torch_function(
         if result is not NotImplemented:
             return result
 
-    func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
+    func_name = f'{public_api.__module__}.{public_api.__name__}'
     msg = (
         "no implementation found for '{}' on types that implement "
         '__torch_function__: {}'

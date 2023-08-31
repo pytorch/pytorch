@@ -13,6 +13,7 @@
 #include <ATen/native/Math.h>
 
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
 #include <c10/util/Half.h>
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
@@ -191,13 +192,15 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-inline T fetch_value(volatile T *addr) {
+typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
-template <>
-inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
-  return bfloat16(addr->x);
+template <typename T>
+typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
+  return T(addr->x, T::from_bits());
 }
 
 template <typename T>
@@ -255,18 +258,19 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
-    at::vec::Vectorized<bfloat16> src) {
+template <typename scalar_t>
+inline at::vec::Vectorized<float> cvt_lowp_fp_to_fp32(
+    at::vec::Vectorized<scalar_t> src) {
   at::vec::Vectorized<float> res_vec1(0);
   at::vec::Vectorized<float> res_vec2(0);
-  std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
+  std::tie(res_vec1, res_vec2) = at::vec::convert_to_float<scalar_t>(src);
   return res_vec1;
 }
 
-inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> cvt_fp32_to_lowp_fp(
     at::vec::Vectorized<float> src) {
-  auto res = at::vec::convert_float_bfloat16(src, src);
-  return res;
+  return at::vec::convert_from_float<scalar_t>(src, src);
 }
 
 inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
