@@ -761,6 +761,21 @@ void Reducer::all_reduce_local_used_map() {
         local_used_map_tmp.data_ptr() != local_used_map_.data_ptr());
     local_used_map_tmp.copy_(local_used_map_);
     local_used_map_dev_.copy_(local_used_map_tmp, true);
+  } else if (local_used_map_dev_.is_mtia()) {
+    // For MTIA device, it doesn't need to pin host memory. Here we just use
+    // normal way of creating empty tensors.
+    auto local_used_map_tmp = at::native::empty_like(
+        local_used_map_,
+        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        local_used_map_.options().layout_opt(),
+        local_used_map_.options().device_opt());
+    // Paranoid asserts here because in some workloads, the pinned
+    // allocator behaves in a way we don't understand, and may be bugged.
+    // See https://github.com/pytorch/pytorch/pull/54474
+    TORCH_INTERNAL_ASSERT(
+        local_used_map_tmp.data_ptr() != local_used_map_.data_ptr());
+    local_used_map_tmp.copy_(local_used_map_);
+    local_used_map_dev_.copy_(local_used_map_tmp, true);
   } else {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
