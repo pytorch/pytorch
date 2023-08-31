@@ -10,6 +10,9 @@ import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
+# Makes sure that quantized_decomposed ops are registered
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+
 from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
