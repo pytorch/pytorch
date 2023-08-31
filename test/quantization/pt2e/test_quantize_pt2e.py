@@ -374,7 +374,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
-            torch.ao.quantization.pt2e.utils.move_model_to_eval(model_pt2e)
+            torch.ao.quantization.move_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
@@ -2393,7 +2393,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertTrue(dropout_node.args[2])
 
         # Do the subgraph rewriting
-        torch.ao.quantization.pt2e.utils.move_model_to_eval(m)
+        torch.ao.quantization.move_model_to_eval(m)
 
         # Assert that dropout op is now replaced with a clone op
         targets = [n.target for n in m.graph.nodes]

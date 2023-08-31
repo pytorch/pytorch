@@ -1,10 +1,9 @@
 import torch
+from torch._export import capture_pre_autograd_graph
 from torch.fx import (
     GraphModule,
     Node,
 )
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
-import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
@@ -18,7 +17,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
-    "move_model_to_eval",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -241,8 +239,6 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
-    # Avoid circular dependencies
-    from torch._export import capture_pre_autograd_graph
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,
@@ -272,37 +268,6 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
             continue
         if n.target in _MAP:
             n.target = _MAP[n.target]
-
-def _replace_dropout_for_eval(m: GraphModule):
-    """
-    Replace the aten training dropout pattern with a noop, intended for eval.
-
-    For models with dropout torch ops (nn.Dropout, F.dropout), calling model.eval()
-    effectively turns these dropout ops into noops. For exported models, however,
-    this is not done automatically, since the aten dropout patterns previously generated
-    for training remain in the graph. Here we rewrite these dropout patterns with noops
-    to avoid incorrectly applying further dropout during eval.
-
-    See https://github.com/pytorch/pytorch/issues/103681.
-    """
-    def dropout_train(x):
-        return F.dropout(x, p=0.5, training=True)
-
-    def dropout_eval(x):
-        return F.dropout(x, p=0.5, training=False)
-
-    example_inputs = (torch.randn(1),)
-    match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-    replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
-
-    replace_pattern_with_filters(
-        m,
-        match_pattern,
-        replacement_pattern,
-        match_filters=[],
-        ignore_literals=True,
-    )
-    m.recompile()
 
 def _is_literal(arg):
     if isinstance(arg, (int, float)):
@@ -474,15 +439,3 @@ def _replace_literals_with_existing_placeholders(
         new_args = tuple(new_args)
         node.args = new_args
     return gm
-
-# TODO: also support move_model_to_train
-# TODO: also support standalone batchnorm
-def move_model_to_eval(m: GraphModule):
-    """
-    Move an exported GraphModule to eval mode.
-
-    This is equivalent to model.eval() but only for certain special ops like dropout.
-    QAT users should call this before performing inference on the model.
-    """
-    _replace_dropout_for_eval(m)
-    return m
