@@ -979,8 +979,21 @@ class AotCodeCache:
         )
 
         aot_constants = b""
-        for tensor in graph.constants.values():
-            aot_constants += bytes(tensor.untyped_storage().cpu())
+
+        def _to_bytes(t: torch.Tensor) -> bytes:
+            # This serializes the tensor's untyped_storage to bytes by accessing
+            # the raw data of the underlying structure.
+            import ctypes
+
+            t_cpu = t.untyped_storage().cpu()
+            raw_array = ctypes.cast(
+                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
+            )
+
+            return bytes(raw_array.contents)
+
+        for idx, tensor in enumerate(graph.constants.values()):
+            aot_constants += _to_bytes(tensor)
 
         consts_key, consts_path = write(
             aot_constants,

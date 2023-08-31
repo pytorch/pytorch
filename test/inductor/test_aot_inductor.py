@@ -89,6 +89,24 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    def test_large(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(250112, 512, device="cuda")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(1, 250112, device="cuda"),
+            torch.randn(1, 512, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
     def test_with_offset(self):
         class Repro(torch.nn.Module):
             def __init__(self):
