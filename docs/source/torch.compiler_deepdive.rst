@@ -319,7 +319,7 @@ Note that we pass a simple ``my_compiler`` function as the backend compiler, the
    def <resume in toy_example>(b, x):
        return x * b
 
-However, keep in mind that, if we use other backends like the built-in `inductor`, the subgraph code will be compiled CUDA kernels for GPU or C++ code for CPU.
+However, if we use other backends like the built-in ``inductor``, the subgraph code will be compiled CUDA kernels for GPU or C++ code for CPU.
 
 To summarize, the compiled code is conceptually equivalent to the code below:
 
