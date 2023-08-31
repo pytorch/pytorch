@@ -10597,6 +10597,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.max_pool2d',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10663,9 +10664,6 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "native_layer_norm":
                 atol = 1e-4
                 rtol = 1.3e-5
-            elif op.name in ["nn.functional.max_pool2d"]:
-                atol = 1e-3
-                rtol = 1.3e-3
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
