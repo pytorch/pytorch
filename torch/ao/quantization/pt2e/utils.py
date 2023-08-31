@@ -51,6 +51,11 @@ def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
 def find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Tuple[Any, Any]:
+    """
+    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Utils works by finding dq arg of user and ensuring it is connected to
+    producer
+    """
     dq_node = None
     for n in user.args:
         if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
