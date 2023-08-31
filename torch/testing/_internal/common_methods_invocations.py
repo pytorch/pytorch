@@ -13710,9 +13710,6 @@ op_db: List[OpInfo] = [
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
@@ -20015,10 +20012,6 @@ python_ref_db = [
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128),
-                         active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128),
