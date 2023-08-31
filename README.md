@@ -304,6 +304,14 @@ Additional libraries such as
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
+In order to install cuda suppoerted pytorch to your device , First, make sure you have cuda in your machine by using the nvcc --version command .
+
+Use the following command:
+
+```bash 
+pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
+```
+
 
 ```cmd
 cmd
