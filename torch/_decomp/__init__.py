@@ -326,7 +326,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.rrelu_with_noise_,
             aten.rsub.Scalar,
             aten.rsub.Tensor,
-            aten._scaled_dot_product_flash_attention.default,
+            aten.scaled_dot_product_attention.default,
             aten.select_backward,
             aten.select_scatter,
             aten.sgn,
