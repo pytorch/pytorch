@@ -1389,6 +1389,49 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
+    def _expected_inline_normalized(self, actual_code, exp_code):
+        normalized_actual = "".join(actual_code.split())
+        normalized_exp = "".join(exp_code.split())
+        self.assertExpectedInline(normalized_actual, normalized_exp)
+
+    def test_map_unfunc_boolean_tensor_for_nested_map_cond(self):
+        def map_fn(pred, x):
+            def fn(x, pred):
+                return control_flow.cond(pred, lambda x: x * 2, lambda x: x / 2 , (x,))
+            return control_flow.map(fn, x, pred)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
+        exp_graph = """\
+def forward(self, pred_1, x_1):
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
+  body_graph_0 = x_1 = pred_1 = None
+    getitem = map_impl[0];  map_impl = None
+    return getitem
+"""
+        exp_body_graph = """\
+def forward(self, arg0_1, arg1_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0,\
+ [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    return [conditional]
+"""
+        self._expected_inline_normalized(gm.code, exp_graph)
+        self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
+
 
 if __name__ == '__main__':
     run_tests()
