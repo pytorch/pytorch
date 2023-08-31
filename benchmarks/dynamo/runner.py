@@ -93,7 +93,9 @@ TABLE = {
         ),
         "torchscript-onnx": "--inference -n5 --torchscript-onnx ",
         "dynamo-onnx": "--inference -n5 --dynamo-onnx ",
-        "dort": "--inference -n5 --backend=onnxrt "
+        "dynamo-onnx-dynamic": "--inference -n5 --dynamo-onnx --dynamic_shapes",
+        "dort": "--inference -n5 --backend=onnxrt ",
+        "dort-dynamic": "--inference -n5 --backend=onnxrt --dynamic_shapes",
     },
 }
 

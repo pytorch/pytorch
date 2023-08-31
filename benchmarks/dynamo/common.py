@@ -33,8 +33,9 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-from typing_extensions import Self
 from unittest.mock import MagicMock
+
+from typing_extensions import Self
 
 if TYPE_CHECKING:
     from torch.onnx._internal.fx import diagnostics
@@ -934,7 +935,13 @@ def speedup_experiment_onnx(
                 onnx_model.run_with_iobinding(iobinding, outputs)
             except Exception as e:
                 err_msg = str(e)
-                oom_msgs = ("out of memory", "CUDNN_STATUS_NOT_INITIALIZED", "CUBLAS_STATUS_ALLOC_FAILED", "CUBLAS", "CUDNN")
+                oom_msgs = (
+                    "out of memory",
+                    "CUDNN_STATUS_NOT_INITIALIZED",
+                    "CUBLAS_STATUS_ALLOC_FAILED",
+                    "CUBLAS",
+                    "CUDNN",
+                )
                 if any(msg in err_msg for msg in oom_msgs):
                     # Fallback to CPU
                     print(f"{err_msg}\nFalling back to CPUProvider`!")
@@ -1287,7 +1294,8 @@ class OnnxModelFromTorchScript:
         torch.bool: np.bool_,
     }
 
-    def __init__(self, output_directory, model, example_inputs):
+    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+        assert not dynamic_shapes, "NYI dynamic shapes for OnnxModelFromTorchScript"
         self.model_path = self._generate_onnx_model_path(output_directory)
         self._export(
             model,
@@ -1462,10 +1470,11 @@ class OnnxModelFromTorchScript:
 class OnnxModelFromDynamo(OnnxModelFromTorchScript):
     """Dynamo and Fx based export. `torch.onnx.dynamo_export`."""
 
-    def __init__(self, output_directory, model, example_inputs):
+    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         self.model_path = self._generate_onnx_model_path(
             output_directory, "bench_dynamo_onnx_model"
         )
+        self._dynamic_shapes = dynamic_shapes
         self._export_output = self._export(model, example_inputs, self.model_path)
         self.onnx_session = self._init_ort_session(self.model_path)
 
@@ -1473,7 +1482,7 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ExportOutput:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        options = torch.onnx.ExportOptions()
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         export_output = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
@@ -1545,10 +1554,15 @@ class _OnnxPatch:
         # This is needed for ONNX CPU fallback benchmark, where PyTorch eager is run on GPU.
         # Assuming outputs from a single run are always on same device!
         devices = [x.device for x in correct_result if isinstance(x, torch.Tensor)]
-        assert devices and all(x == devices[0] for x in devices), "All tensors must be on same device!"
+        assert devices and all(
+            x == devices[0] for x in devices
+        ), "All tensors must be on same device!"
         device = devices[0]
         new_result = pytree.tree_flatten(new_result)[0]
-        new_result = pytree.tree_map(lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x, new_result)
+        new_result = pytree.tree_map(
+            lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x,
+            new_result,
+        )
         fp64_outputs = pytree.tree_flatten(fp64_outputs)[0]
 
         return correct_result, new_result, fp64_outputs
@@ -1586,7 +1600,7 @@ class OnnxExportErrorRow:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
-class OnnxExportErrorParser(object):
+class OnnxExportErrorParser:
     def __init__(self, device: str, model_name: str, batch_size: int):
         self.device = device
         self.model_name = model_name
@@ -1661,7 +1675,11 @@ def optimize_onnx_ctx(
                     outputs = onnx_model.run(inputs)
                 except Exception as e:
                     err_msg = str(e)
-                    oom_msgs = ("out of memory", "CUDNN_STATUS_NOT_INITIALIZED", "CUBLAS_STATUS_ALLOC_FAILED")
+                    oom_msgs = (
+                        "out of memory",
+                        "CUDNN_STATUS_NOT_INITIALIZED",
+                        "CUBLAS_STATUS_ALLOC_FAILED",
+                    )
                     if any(msg in err_msg for msg in oom_msgs):
                         # Fallback to CPU
                         print(f"{err_msg}\nFalling back to CPUProvider`!")
