@@ -245,8 +245,9 @@ class Optimizer:
         """
 
         if len(groups) != len(saved_groups):
-            raise ValueError("loaded state dict has a different number of "
-                             "parameter groups")
+            raise ValueError(f"loaded state dict has {len(saved_groups)} parameter groups "
+                             f"but the optimizer being loaded into has {len(groups)} "
+                             "parameter groups. They should be equal.")
         param_lens = (len(g['params']) for g in groups)
         saved_lens = (len(g['params']) for g in saved_groups)
         if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
@@ -284,8 +285,7 @@ class Optimizer:
                 return value
 
         # Cast state tensors to appropriate types in the state_dict
-        for k in state_dict['state']:
-            v = state_dict['state'][k]
+        for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
                 state_dict['state'][k] = _cast(param, v, param_id=k, param_groups=saved_groups)
