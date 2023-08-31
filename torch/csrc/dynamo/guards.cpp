@@ -35,10 +35,10 @@ class TensorCheck {
         device_index_(v.device().index()),
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
-        strides_(std::move(dynamic_dims_strides)),
-        dim_(static_cast<int64_t>(sizes_.size())) {
+        strides_(std::move(dynamic_dims_strides)) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
+    dim_ = sizes_.size();
   }
 
   // See note in guards.py [Note - On Export Tensor Guards]
@@ -54,8 +54,8 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sym_sizes();
-    const auto& strides = v.sym_strides();
+    const auto& sizes = v.sizes();
+    const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -113,8 +113,8 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sym_sizes();
-    const auto& strides = v.sym_strides();
+    const auto& sizes = v.sizes();
+    const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -157,9 +157,9 @@ typedef struct {
 } TensorGuards;
 
 static void TensorGuards_dealloc(TensorGuards* self) {
-  if (self->checks != nullptr) {
+  if (self->checks != NULL) {
     delete self->checks;
-    self->checks = nullptr;
+    self->checks = NULL;
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -169,7 +169,7 @@ static PyObject* TensorGuards_new(
     PyObject* args,
     PyObject* kwds) {
   TensorGuards* self = (TensorGuards*)type->tp_alloc(type, 0);
-  if (self != nullptr) {
+  if (self != NULL) {
     self->checks = new ChecksList();
   }
   return (PyObject*)self;
@@ -191,7 +191,7 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
     if (item == Py_None) {
-      vec.emplace_back(std::nullopt);
+      vec.push_back(std::nullopt);
     } else {
       int64_t value = PyLong_AsLongLong(item);
       if (value == -1 && PyErr_Occurred()) {
@@ -200,7 +200,7 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
             "Size or stride list item is not a valid integer.");
         TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
       }
-      vec.emplace_back(value);
+      vec.push_back(value);
     }
   }
   return vec;
@@ -231,13 +231,13 @@ static int TensorGuards_init(
   // Top level structure is List[List[Union[int, None]]]
   PyObject* dynamic_dims_sizes_py =
       PyDict_GetItemString(kwds, "dynamic_dims_sizes");
-  if (dynamic_dims_sizes_py == nullptr) {
+  if (dynamic_dims_sizes_py == NULL) {
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_sizes=...");
     return -1;
   }
   PyObject* dynamic_dims_strides_py =
       PyDict_GetItemString(kwds, "dynamic_dims_strides");
-  if (dynamic_dims_strides_py == nullptr) {
+  if (dynamic_dims_strides_py == NULL) {
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_strides=...");
     return -1;
   }
@@ -263,11 +263,11 @@ static int TensorGuards_init(
     }
     auto tensor = THPVariable_Unpack(item);
     std::vector<std::optional<int64_t>> tensor_dims_size =
-        per_tensor_dynamic_dims_sizes.empty()
+        per_tensor_dynamic_dims_sizes.size() == 0
         ? wrapIntegersInOptional(tensor.sizes())
         : per_tensor_dynamic_dims_sizes[i];
     std::vector<std::optional<int64_t>> tensor_dims_stride =
-        per_tensor_dynamic_dims_strides.empty()
+        per_tensor_dynamic_dims_strides.size() == 0
         ? wrapIntegersInOptional(tensor.strides())
         : per_tensor_dynamic_dims_strides[i];
     checks.emplace_back(
@@ -280,22 +280,17 @@ static int TensorGuards_init(
   return 0;
 }
 
-PyObject* TensorGuards_check(
-    TensorGuards* self,
-    PyObject* args,
-    PyObject* kwargs) {
+PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return nullptr;
+    return NULL;
   }
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
 
-  // kwargs is just ignored here
-
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
-    return nullptr;
+    return NULL;
   }
 
   LocalState state;
@@ -330,26 +325,26 @@ PyObject* TensorGuards_check_verbose(
     PyObject* kwargs) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return nullptr;
+    return NULL;
   }
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
 
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
-    return nullptr;
+    return NULL;
   }
 
   PyObject* tensor_check_names_py =
       PyDict_GetItemString(kwargs, "tensor_check_names");
-  if (tensor_check_names_py == nullptr) {
+  if (tensor_check_names_py == NULL) {
     PyErr_SetString(PyExc_TypeError, "missing tensor_check_names kwarg");
-    return nullptr;
+    return NULL;
   }
 
   if (!PyList_Check(tensor_check_names_py)) {
     PyErr_SetString(PyExc_TypeError, "tensor_check_names kwarg must be a list");
-    return nullptr;
+    return NULL;
   }
 
   auto names_size = PyList_Size(tensor_check_names_py);
@@ -357,7 +352,7 @@ PyObject* TensorGuards_check_verbose(
     PyErr_SetString(
         PyExc_TypeError,
         "tensor_check_names should be the same size as # tensors");
-    return nullptr;
+    return NULL;
   }
 
   std::vector<std::string> tensor_check_names;
@@ -367,7 +362,7 @@ PyObject* TensorGuards_check_verbose(
     if (!PyUnicode_Check(value)) {
       PyErr_SetString(
           PyExc_TypeError, "tensor_check_names must only contain strings");
-      return nullptr;
+      return NULL;
     }
     tensor_check_names.emplace_back(PyUnicode_AsUTF8(value));
   }
@@ -407,29 +402,26 @@ PyObject* TensorGuards_check_verbose(
   Py_RETURN_TRUE;
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef TensorGuards_methods[] = {
-    {"check",
-     (PyCFunction)(void*)TensorGuards_check,
-     METH_VARARGS | METH_KEYWORDS,
-     ""},
+    {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
     {"check_verbose",
      (PyCFunction)(void*)TensorGuards_check_verbose,
      METH_VARARGS | METH_KEYWORDS,
      "verbose fail reasons for failed checks"},
-    {nullptr} /* Sentinel */
+    {NULL} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject TensorGuardsType = {
+    // NOLINTNEXTLINE
+    PyVarObject_HEAD_INIT(NULL, 0)};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
-  PyObject* obj = nullptr;
-  unsigned long long expected = 0;
+  PyObject* obj;
+  unsigned long long expected;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
-    return nullptr;
+    return NULL;
   }
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   if (Py_TYPE(obj) == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
@@ -439,12 +431,11 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
-  PyObject* obj = nullptr;
-  unsigned long long expected = 0;
+  PyObject* obj;
+  unsigned long long expected;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
-    return nullptr;
+    return NULL;
   }
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   if (obj == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
@@ -457,25 +448,25 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
    Assert that a given tensor has a given size/stride, but ignore strides
    of size==1 dimensions.  Implemented in C++ as this is on the hot path.
   */
-  PyObject* item = nullptr;
-  PyObject* size = nullptr;
-  PyObject* stride = nullptr;
+  PyObject* item;
+  PyObject* size;
+  PyObject* stride;
   if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
-    return nullptr;
+    return NULL;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
     PyErr_SetString(PyExc_TypeError, "expected Tensor()");
-    return nullptr;
+    return NULL;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return nullptr;
+    return NULL;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
-    return nullptr;
+    return NULL;
   }
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
@@ -489,18 +480,17 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
       msg << "expected size " << actual_size << "==" << want_size << ", stride "
           << actual_stride << "==" << want_stride << " at dim=" << i;
       PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-      return nullptr;
+      return NULL;
     }
   }
   Py_RETURN_TRUE;
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
-    {"check_type_id", check_type_id, METH_VARARGS, nullptr},
-    {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
-    {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"check_type_id", check_type_id, METH_VARARGS, NULL},
+    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
@@ -523,18 +513,19 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_init = (initproc)TensorGuards_init;
   TensorGuardsType.tp_new = TensorGuards_new;
 
+  PyObject* m;
   if (PyType_Ready(&TensorGuardsType) < 0)
-    return nullptr;
+    return NULL;
 
-  auto m = PyModule_Create(&_module);
-  if (m == nullptr)
-    return nullptr;
+  m = PyModule_Create(&_module);
+  if (m == NULL)
+    return NULL;
 
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
     Py_DECREF(m);
-    return nullptr;
+    return NULL;
   }
 
   return m;

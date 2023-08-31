@@ -320,11 +320,6 @@ class _ModuleStackMeta:
         """Returns the qualified module class name of the top module."""
         return self.top().qualified_module_class_name
 
-    @property
-    def module_class(self) -> Optional[type]:
-        """Returns the module class of the top module."""
-        return self.top()._module_class
-
 
 def _module_stack_meta_from_node(node: torch.fx.Node) -> _ModuleStackMeta:
     return _ModuleStackMeta(node.meta.get("nn_module_stack"))
@@ -683,14 +678,7 @@ class _ModuleNode(_IRNode):
                 new_outputs[0] if len(new_outputs) == 1 else new_outputs
             )
 
-        graph_module = torch.fx.GraphModule(
-            self._reference_module, fx_graph, module_class_name
-        )
-        if (module_class := self._stack_meta.module_class) is not None:
-            graph_module.meta["onnx"] = _pass.GraphModuleOnnxMeta(
-                _pass.PackageInfo.from_python_class(module_class)
-            )
-        return graph_module
+        return torch.fx.GraphModule(self._reference_module, fx_graph, module_class_name)
 
 
 class _LeafNode(_IRNode):

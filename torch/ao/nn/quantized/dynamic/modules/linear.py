@@ -105,7 +105,7 @@ class Linear(nnq.Linear):
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
         assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
-            f"dynamic quantized linear are qint8 and float16 got: {dtype}"
+            "dynamic quantized linear are qint8 and float16 got: {}".format(dtype)
         weight_observer(mod.weight)
         if dtype == torch.qint8:
             qweight = _quantize_weight(mod.weight.float(), weight_observer)

@@ -1,6 +1,2 @@
-from torch._higher_order_ops.cond import (  # noqa: F401
-    cond,
-    UnsupportedAliasMutationException,
-)
-
+from ._cond import cond, UnsupportedAliasMutationException  # noqa: F401
 from ._map import map  # noqa: F401

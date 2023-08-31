@@ -100,7 +100,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   initializer {
     dims: 4
     dims: 8

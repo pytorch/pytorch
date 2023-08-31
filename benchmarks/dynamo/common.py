@@ -1145,9 +1145,9 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model_container.h>
+            #include <torch/csrc/inductor/aot_inductor_model.h>
 
-            torch::aot_inductor::AOTInductorModelContainer model(1);
+            torch::aot_inductor::AOTInductorModel model;
 
             void run(
                     const std::vector<at::Tensor>& input_tensors,
@@ -2018,12 +2018,6 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            fp64_outputs = tree_map(
-                lambda x: x.to(torch.float64)
-                if isinstance(x, torch.Tensor) and x.is_floating_point()
-                else x,
-                fp64_outputs,
-            )
         except Exception:
             log.warning(
                 "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
@@ -3008,12 +3002,9 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
+    device_count = torch.cuda.device_count()
     args.use_distributed = (args.ddp or args.fsdp) and args.only
     if args.multiprocess:
-        # NB: Do NOT query device count before CUDA initialization; we're
-        # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
-        # https://github.com/pytorch/pytorch/issues/107300
-        device_count = torch.cuda.device_count()
         if device_count <= 1:
             log.warning(
                 "The use multiprocess flag is set but there are <= 1 devices available."

@@ -132,8 +132,6 @@ class BaseListVariable(VariableTracker):
                     result = BuiltinVariable(operator.or_).call_function(
                         tx, [check, result], {}
                     )
-            if result is None:
-                result = ConstantVariable(None)
             return result
 
         return super().call_method(tx, name, args, kwargs)
@@ -553,12 +551,6 @@ class SizeVariable(TupleVariable):
             assert not kwargs and len(args) == 1
             out = self.get_item_dyn(tx, args[0])
             return out
-        elif name == "numel":
-            result = 1
-            for v in self.items:
-                assert isinstance(v, ConstantVariable)
-                result = result * v.value
-            return ConstantVariable(result).add_options(self)
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
@@ -730,6 +722,8 @@ def _register_dynamo_list_to_tree_spec():
         ListVariable,
         _listvariable_flatten,
         _listvariable_unflatten,
+        pytree._list_to_str,
+        pytree._maybe_str_to_list,
     )
 
     fx_pytree.register_pytree_flatten_spec(
@@ -756,6 +750,8 @@ def _register_dynamo_tuple_to_tree_spec():
         TupleVariable,
         _tuplevariable_flatten,
         _tuplevariable_unflatten,
+        pytree._tuple_to_str,
+        pytree._maybe_str_to_tuple,
     )
 
     fx_pytree.register_pytree_flatten_spec(
@@ -773,7 +769,7 @@ class SetVariable(VariableTracker):
         def __hash__(self) -> int:
             return hash(self.underlying_value)
 
-        def __eq__(self, other: object) -> bool:
+        def __eq__(self, other: Any) -> bool:
             if not isinstance(other, SetVariable.SetElement):
                 return False
             if isinstance(self.vt, variables.TensorVariable):

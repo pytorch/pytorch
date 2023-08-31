@@ -28,7 +28,6 @@ env:
 jobs:
   docker-build:
     runs-on: [self-hosted, linux.2xlarge]
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
     strategy:
       fail-fast: false

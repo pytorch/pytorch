@@ -1,6 +1,5 @@
 import collections
 from typing import Any, Dict, List, Optional, Protocol, Tuple, Union, overload
-from typing_extensions import TypeAlias
 
 import numpy as np
 import google.protobuf.message
@@ -11,9 +10,9 @@ from . import core
 
 # pybind11 will automatically accept either Python str or bytes for C++ APIs
 # that accept std::string.
-_PybindStr: TypeAlias = Union[str, bytes]
-_PerOpEnginePrefType: TypeAlias = Dict[int, Dict[str, List[str]]]
-_EnginePrefType: TypeAlias = Dict[int, List[str]]
+_PybindStr = Union[str, bytes]
+_PerOpEnginePrefType = Dict[int, Dict[str, List[str]]]
+_EnginePrefType = Dict[int, List[str]]
 
 Int8Tensor = collections.namedtuple(
     'Int8Tensor', ['data', 'scale', 'zero_point']
@@ -53,7 +52,7 @@ class Workspace:
     @overload
     def __init__(self) -> None: ...
     @overload
-    def __init__(self, workspace: Workspace) -> None: ...
+    def __init__(self, workspace: "Workspace") -> None: ...
     @property
     def blobs(self) -> Dict[str, Blob]: ...
     def create_blob(self, name: _PybindStr) -> Blob: ...
@@ -87,7 +86,7 @@ class Workspace:
     ) -> bool: ...
     def remove_blob(self, blob: Any) -> None: ...
 
-    current: Workspace
+    current: "Workspace"
 
 
 class Argument:
@@ -101,7 +100,7 @@ class Argument:
 
 class OpSchema:
     @staticmethod
-    def get(key: str) -> OpSchema: ...
+    def get(key: str) -> "OpSchema": ...
     @property
     def args(self) -> List[Argument]: ...
     @property

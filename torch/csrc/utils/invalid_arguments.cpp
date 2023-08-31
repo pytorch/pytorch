@@ -124,7 +124,8 @@ std::vector<std::string> _splitString(
     const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
-  size_t end = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t end;
   while ((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end - start));
     start = end + delim.length();
@@ -373,7 +374,8 @@ std::string format_invalid_args(
 
   bool has_kwargs = given_kwargs && PyDict_Size(given_kwargs) > 0;
   if (has_kwargs) {
-    PyObject *key = nullptr, *value = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *key, *value;
     Py_ssize_t pos = 0;
 
     while (PyDict_Next(given_kwargs, &pos, &key, &value)) {

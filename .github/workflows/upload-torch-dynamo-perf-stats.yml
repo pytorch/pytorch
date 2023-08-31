@@ -24,8 +24,7 @@ jobs:
     needs: get-conclusion
     if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
         github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
-    runs-on: ubuntu-22.04
-    environment: upload-stats
+    runs-on: [self-hosted, linux.2xlarge]
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
@@ -34,19 +33,12 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-          cache: pip
-
       - run: |
           pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
 
       - name: Upload torch dynamo performance stats to S3
         id: upload-s3
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -61,8 +53,6 @@ jobs:
         if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success'
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}

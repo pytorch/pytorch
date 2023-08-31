@@ -85,7 +85,7 @@ class FlatbufferLoader final {
   void registerIValueParser(
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
-  mobile::Module parseModule(mobile::serialization::Module* module, char* end);
+  mobile::Module parseModule(mobile::serialization::Module* module);
 
   void extractJitSourceAndConstants(
       ExtraFilesMap* jit_sources,
@@ -281,8 +281,7 @@ void FlatbufferLoader::parseAndPopulate(
 }
 
 mobile::Module FlatbufferLoader::parseModule(
-    mobile::serialization::Module* module,
-    char* end) {
+    mobile::serialization::Module* module) {
   module_ = module;
   all_ivalues_.clear();
   all_types_.clear();
@@ -292,8 +291,6 @@ mobile::Module FlatbufferLoader::parseModule(
 
   const auto* ivalues = module->ivalues();
   TORCH_CHECK(ivalues != nullptr, "Corrupted ivalues field")
-  TORCH_CHECK(
-      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field")
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
@@ -306,8 +303,6 @@ mobile::Module FlatbufferLoader::parseModule(
 
   for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {
     const auto* ival = ivalues->Get(i);
-    TORCH_CHECK(
-        reinterpret_cast<const char*>(ival) < end, "Corrupted ivalue item")
     parseAndPopulate(i, ival);
   }
   IValue& module_ivalue = getIValue(module->state_obj());
@@ -770,8 +765,7 @@ mobile::Module parse_and_initialize_mobile_module(
   // Flatbuffer doesn't seem to have a way to provide the buffer size when
   // interacting with the buffer.
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  auto* end = static_cast<char*>(data) + size;
-  mobile::Module m = loader.parseModule(flatbuffer_module, end);
+  mobile::Module m = loader.parseModule(flatbuffer_module);
   if (extra_files != nullptr) {
     parseExtraFiles(flatbuffer_module, *extra_files);
   }
@@ -813,8 +807,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
 
   FlatbufferLoader loader;
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  auto* end = static_cast<char*>(data) + size;
-  mobile::Module m = loader.parseModule(flatbuffer_module, end);
+  mobile::Module m = loader.parseModule(flatbuffer_module);
   if (extra_files != nullptr) {
     parseExtraFiles(flatbuffer_module, *extra_files);
   }
@@ -932,8 +925,7 @@ mobile::Module parse_flatbuffer_no_object(
         return static_cast<c10::IValue>(obj);
       });
 
-  auto* end = data.get() + size;
-  mobile::Module m = loader.parseModule(flatbuffer_module, end);
+  mobile::Module m = loader.parseModule(flatbuffer_module);
   m.set_delete_memory(std::move(data));
   return m;
 }

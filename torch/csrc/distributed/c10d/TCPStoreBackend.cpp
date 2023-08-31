@@ -1,3 +1,4 @@
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #include <c10/util/irange.h>
 #include <fcntl.h>
@@ -14,8 +15,6 @@
 #include <poll.h>
 #include <unistd.h>
 #endif
-
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #ifdef _WIN32
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
@@ -56,7 +55,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   ~TCPStoreMasterDaemon() override;
 
-  uint16_t port() const override;
+  std::uint16_t port() const override;
 
  protected:
   void run() override;
@@ -68,7 +67,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
-
   void clearSocketWaitState(int socket);
 
   // The master runs on a single thread so only

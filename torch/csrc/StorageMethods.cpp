@@ -49,15 +49,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // PyLong_FromVoidPtr should not need to mutate the pointer in order
   // to extract a new long object from it.
-
-  auto self_ = THPStorage_Unpack(self);
-  // See Note [Invalid Python Storages]
-  auto invalid = self_.data() == nullptr &&
-      self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;
-  TORCH_CHECK(
-      !invalid,
-      "Attempted to access the data pointer on an invalid python storage.")
-  return PyLong_FromVoidPtr(const_cast<void*>(self_.data()));
+  return PyLong_FromVoidPtr(const_cast<void*>(THPStorage_Unpack(self).data()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -77,12 +69,6 @@ static PyObject* THPStorage_copy_(
 
   at::Storage src = r.storage(0);
   bool non_blocking = r.toBoolOptional(1).value_or(false);
-
-  // See Note [Invalid Python Storages]
-  auto invalid = src.data() == nullptr &&
-      src.device_type() != c10::DeviceType::Meta && src.sym_nbytes() != 0;
-  TORCH_CHECK(
-      !invalid, "Attempted to call copy_() on an invalid python storage.")
 
   TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
 
@@ -117,12 +103,6 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
 static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
-  // See Note [Invalid Python Storages]
-  auto invalid = storage.data() == nullptr &&
-      storage.device_type() != c10::DeviceType::Meta &&
-      storage.sym_nbytes() != 0;
-  TORCH_CHECK(
-      !invalid, "Attempted to call resize_() on an invalid python storage.")
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
@@ -187,12 +167,6 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
-  // See Note [Invalid Python Storages]
-  auto invalid = storage.data() == nullptr &&
-      storage.device_type() != c10::DeviceType::Meta &&
-      storage.sym_nbytes() != 0;
-  TORCH_CHECK(
-      !invalid, "Attempted to call fill_() on an invalid python storage.")
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
       "fill_ expects int, "
@@ -438,12 +412,6 @@ static PyObject* THPStorage_fromFile(
 PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
-  // See Note [Invalid Python Storages]
-  auto invalid = storage.data() == nullptr &&
-      storage.device_type() != c10::DeviceType::Meta &&
-      storage.sym_nbytes() != 0;
-  TORCH_CHECK(
-      !invalid, "Attempted to call _write_file() on an invalid python storage.")
   PyObject* file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
   bool save_size = PyTuple_GetItem(args, 2) == Py_True;

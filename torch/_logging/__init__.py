@@ -9,7 +9,6 @@ from ._internal import (
     _init_logs,
     DEFAULT_LOGGING,
     getArtifactLogger,
-    LazyString,
     set_logs,
     warning_once,
 )

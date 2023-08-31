@@ -8,7 +8,6 @@ import shutil
 import sys
 import tempfile
 import torch
-import uuid
 import warnings
 import zipfile
 from pathlib import Path
@@ -629,18 +628,9 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
-    # We deliberately do not use NamedTemporaryFile to avoid restrictive
-    # file permissions being applied to the downloaded file.
     dst = os.path.expanduser(dst)
-    for seq in range(tempfile.TMP_MAX):
-        tmp_dst = dst + '.' + uuid.uuid4().hex + '.partial'
-        try:
-            f = open(tmp_dst, 'w+b')
-        except FileExistsError:
-            continue
-        break
-    else:
-        raise FileExistsError(errno.EEXIST, 'No usable temporary file name found')
+    dst_dir = os.path.dirname(dst)
+    f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
 
     try:
         if hash_prefix is not None:

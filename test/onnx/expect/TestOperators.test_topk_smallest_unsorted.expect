@@ -46,7 +46,7 @@ graph {
       type: INT
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   input {
     name: "onnx::TopK_0"
     type {

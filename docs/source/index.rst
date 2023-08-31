@@ -66,7 +66,6 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cpu
    cuda
-   torch.cuda.memory <torch_cuda_memory>
    mps
    torch.backends <backends>
    torch.export <export>

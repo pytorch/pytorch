@@ -97,7 +97,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymBoolType::Kind:
-        TORCH_CHECK(!w.value.toSymBool().is_heap_allocated());
+        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:

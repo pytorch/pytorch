@@ -189,8 +189,7 @@ class LayerNorm(Module):
     def reset_parameters(self) -> None:
         if self.elementwise_affine:
             init.ones_(self.weight)
-            if self.bias is not None:
-                init.zeros_(self.bias)
+            init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(

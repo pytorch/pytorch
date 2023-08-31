@@ -523,12 +523,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return tensor_pre_hooks_;
   }
 
-  virtual std::unique_ptr<PostAccumulateGradHook>&
-  tensor_post_acc_grad_hooks() noexcept {
-    static std::unique_ptr<PostAccumulateGradHook> empty = nullptr;
-    return empty;
-  }
-
   std::unordered_map<int, std::unique_ptr<FunctionPreHook>>&
   retains_grad_hooks() noexcept {
     return retains_grad_hooks_;

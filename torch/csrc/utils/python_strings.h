@@ -24,7 +24,8 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
     return std::string(PyBytes_AS_STRING(obj), size);
   }
   if (PyUnicode_Check(obj)) {
-    Py_ssize_t size = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Py_ssize_t size;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
     if (!data) {
       throw std::runtime_error("error unpacking string as utf-8");
@@ -48,7 +49,8 @@ inline c10::string_view THPUtils_unpackStringView(PyObject* obj) {
     return c10::string_view(PyBytes_AS_STRING(obj), size);
   }
   if (PyUnicode_Check(obj)) {
-    Py_ssize_t size = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Py_ssize_t size;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
     if (!data) {
       throw std::runtime_error("error unpacking string as utf-8");

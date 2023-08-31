@@ -287,7 +287,7 @@ void initMonitorBindings(PyObject* module) {
       )DOC");
   m.def(
       "unregister_event_handler",
-      [](const std::shared_ptr<PythonEventHandler>& handler) {
+      [](std::shared_ptr<PythonEventHandler> handler) {
         unregisterEventHandler(handler);
       },
       py::arg("handler"),

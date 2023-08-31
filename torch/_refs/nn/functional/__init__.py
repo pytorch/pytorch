@@ -177,6 +177,7 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
+@register_decomposition(aten.dropout)
 @_inplace_wrapper
 @out_wrapper()
 def dropout(
@@ -604,7 +605,9 @@ def margin_ranking_loss(
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-            f"input1: {input1.shape}, input2: {input2.shape}, target: {target.shape} "
+            "input1: {}, input2: {}, target: {} ".format(
+                input1.shape, input2.shape, target.shape
+            )
         )
     _check_reduction_value(reduction)
     loss = torch.clamp_min(-target * (input1 - input2) + margin, 0)

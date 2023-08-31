@@ -70,7 +70,7 @@ class non_deterministic:
         if isinstance(arg, Type):  # type: ignore[arg-type]
             if not issubclass(arg, IterDataPipe):  # type: ignore[arg-type]
                 raise TypeError("Only `IterDataPipe` can be decorated with `non_deterministic`"
-                                f", but {arg.__name__} is found")
+                                ", but {} is found".format(arg.__name__))
             self.cls = arg  # type: ignore[assignment]
         # 2. Decorator has an argument of a function
         #    This class should behave differently given different inputs. Use this
@@ -103,13 +103,13 @@ class non_deterministic:
         res = self.deterministic_fn(*args, **kwargs)  # type: ignore[call-arg, misc]
         if not isinstance(res, bool):
             raise TypeError("deterministic_fn of `non_deterministic` decorator is required "
-                            f"to return a boolean value, but {type(res)} is found")
+                            "to return a boolean value, but {} is found".format(type(res)))
         global _determinism
         if _determinism and res:
-            raise TypeError(f"{self.cls.__name__} is non-deterministic with the inputs, but you set "  # type: ignore[union-attr]
+            raise TypeError("{} is non-deterministic with the inputs, but you set "
                             "'guaranteed_datapipes_determinism'. You can turn off determinism "
                             "for this DataPipe if that is acceptable for your application"
-                            )
+                            .format(self.cls.__name__))  # type: ignore[union-attr]
         return self.cls(*args, **kwargs)  # type: ignore[call-arg, misc]
 
 
@@ -130,9 +130,9 @@ def argument_validation(f):
                 if not isinstance(value, IterDataPipe):
                     raise TypeError(f"Expected argument '{argument_name}' as a IterDataPipe, but found {type(value)}")
                 if not value.type.issubtype(hint.type):
-                    raise TypeError(f"Expected type of argument '{argument_name}' as a subtype of "
-                                    f"hint {hint.type}, but found {value.type}"
-                                    )
+                    raise TypeError("Expected type of argument '{}' as a subtype of "
+                                    "hint {}, but found {}"
+                                    .format(argument_name, hint.type, value.type))
 
         return f(*args, **kwargs)
 

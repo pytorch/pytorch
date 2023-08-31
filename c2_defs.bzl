@@ -324,28 +324,43 @@ def get_c2_default_cxx_args():
     )
 
 def get_c2_aten_cpu_fbobjc_macosx_deps():
-    return select({
-        "DEFAULT": [],
-        "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
-    }) if is_arvr_mode() else []
+    if is_focus_enabled():
+        # focus2 is broken when using platform deps (T80070498) so in the case
+        # where it's focus2 we just add fbgemm as a standard dep. Otherwise we
+        # use platform deps to select correctly for arm64.
+        return [
+            "fbsource//xplat/deeplearning/fbgemm:fbgemm",
+            "fbsource//xplat/caffe2:cpukernel_avx2",
+        ]
+    else:
+        return select({
+            "DEFAULT": [],
+            "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
+        }) if is_arvr_mode() else []
 
 def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
-    return compose_platform_setting_list([
-        {
-            "cpu": "x86_64",
-            "flags": [
-                "fbsource//xplat/deeplearning/fbgemm:fbgemmAppleMac",
-            ] + ([
-                "fbsource//xplat/caffe2:cpukernel_avx2AppleMac",
-            ] if not is_arvr_mode() else []),
-            "os": "macosx",
-        },
-        {
-            "cpu": "arm64",
-            "flags": ["fbsource//xplat/third-party/XNNPACK:XNNPACKAppleMac"],
-            "os": "macosx",
-        },
-    ])
+    if is_focus_enabled():
+        # focus2 is broken when using platform deps (T80070498) so in the case
+        # where it's focus2 we just add fbgemm as a standard dep. Otherwise we
+        # use platform deps to select correctly for arm64.
+        return []
+    else:
+        return compose_platform_setting_list([
+            {
+                "cpu": "x86_64",
+                "flags": [
+                    "fbsource//xplat/deeplearning/fbgemm:fbgemmAppleMac",
+                ] + ([
+                    "fbsource//xplat/caffe2:cpukernel_avx2AppleMac",
+                ] if not is_arvr_mode() else []),
+                "os": "macosx",
+            },
+            {
+                "cpu": "arm64",
+                "flags": ["fbsource//xplat/third-party/XNNPACK:XNNPACKAppleMac"],
+                "os": "macosx",
+            },
+        ])
 
 def using_protobuf_v3():
     # Consider migrating this to `read_config("protobuf", "use_v3")`
@@ -355,13 +370,10 @@ def using_protobuf_v3():
 def get_c2_protobuf_dep():
     return "fbsource//third-party/protobuf:libprotobuf" if using_protobuf_v3() else "fbsource//xplat/third-party/protobuf:fb-protobuf-lite"
 
-def c2_cxx_library(fbobjc_compiler_flags = [], **kwargs):
+def c2_cxx_library(**kwargs):
     args = get_c2_default_cxx_args()
     args.update(kwargs)
     args.setdefault("platforms", (ANDROID, APPLE, CXX, WINDOWS))
-
-    # Make sure we don't overwrite custom `fbobjc_compiler_flags`
-    args["fbobjc_compiler_flags"] = args.pop("fbobjc_compiler_flags", []) + fbobjc_compiler_flags
 
     fb_xplat_cxx_library(
         labels = [

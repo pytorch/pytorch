@@ -145,11 +145,7 @@ def generate_tag_rst(tag_to_modules):
 
     for tag, modules_rst in tag_to_modules.items():
         doc_contents = f"{tag}\n{'=' * (len(tag) + 4)}\n"
-        full_modules_rst = "\n\n".join(modules_rst)
-        full_modules_rst = re.sub(
-            r"={3,}", lambda match: "-" * len(match.group()), full_modules_rst
-        )
-        doc_contents += full_modules_rst
+        doc_contents += "\n\n".join(modules_rst).replace("=", "-")
 
         with open(os.path.join(EXPORTDB_SOURCE, f"{tag}.rst"), "w") as f:
             f.write(doc_contents)

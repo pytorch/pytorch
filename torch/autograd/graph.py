@@ -224,7 +224,7 @@ class saved_tensors_hooks:
             self.pack_hook, self.unpack_hook
         )
 
-    def __exit__(self, *args: object):
+    def __exit__(self, *args: Any):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
 

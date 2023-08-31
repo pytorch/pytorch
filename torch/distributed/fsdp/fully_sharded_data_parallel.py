@@ -231,13 +231,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         thread in that way prevents over-allocating memory for subsequent
         all-gathers, and it should not actually delay GPU kernel execution.
 
-    .. note::
-        When using ``sharding_strategy=ShardingStrategy.HYBRID_SHARD`` with the
-        sharding process group being intra-node and the replication process
-        group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
-        the all-reduce times over the replication process group for some
-        cluster setups.
-
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
