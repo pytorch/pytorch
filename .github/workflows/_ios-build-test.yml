@@ -6,15 +6,7 @@ on:
       build-environment:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
-      ios-platform:
-        required: true
-        type: string
-        description: Which iOS platform to build for.
-      ios-arch:
-        required: true
-        type: string
-        description: Which iOS arch to build for.
+        description: Top-level label for whats being built/tested.
       sync-tag:
         required: false
         type: string
@@ -31,8 +23,6 @@ on:
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-  IOS_PLATFORM: ${{ inputs.ios-platform }}
-  IOS_ARCH: ${{ inputs.ios-arch }}
 
 jobs:
   filter:
@@ -63,6 +53,13 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    env:
+      IOS_PLATFORM: ${{ matrix.ios_platform }}
+      IOS_ARCH: ${{ matrix.ios_arch }}
+      BUILD_LITE_INTERPRETER: ${{ matrix.use_lite_interpreter }}
+      USE_PYTORCH_METAL: ${{ matrix.use_metal }}
+      USE_COREML_DELEGATE: ${{ matrix.use_coreml }}
+      CUSTOM_OP_LIST: ${{ matrix.use_custom_op_list }}
     timeout-minutes: 240
     steps:
       # [see note: pytorch repo ref]
@@ -70,26 +67,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Populate CI build options
+        shell: bash
         run: |
-          # Most builds use the lite interpreter, if certain builds shouldn't
-          # build the lite interpreter this env variable should get over-written
-          # in the following case statement
-          echo "BUILD_LITE_INTERPRETER=1" >> "${GITHUB_ENV}"
+          set -ex
 
-          case ${BUILD_ENVIRONMENT} in
-            *metal*)
-              echo "USE_PYTORCH_METAL=1" >> "${GITHUB_ENV}"
-              ;;
-            *full_jit*)
-              echo "BUILD_LITE_INTERPRETER=0" >> "${GITHUB_ENV}"
-              ;;
-            *custom*)
-              echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/mobilenetv2.yaml" >> "${GITHUB_ENV}"
-              ;;
-            *coreml*)
-              echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
-              ;;
-          esac
+          if [ -n "${CUSTOM_OP_LIST:-}" ]; then
+            echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/${CUSTOM_OP_LIST}" >> "${GITHUB_ENV}"
+          fi
 
       - name: Install brew dependencies
         uses: nick-fields/retry@v2.8.2
@@ -129,7 +113,7 @@ jobs:
           ${CONDA_RUN} scripts/build_ios.sh
 
       - name: Build TestApp
-        if: inputs.ios-platform == 'SIMULATOR'
+        if: matrix.ios_platform == 'SIMULATOR'
         timeout-minutes: 15
         run: |
           # run the ruby build script
@@ -140,7 +124,7 @@ jobs:
           ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
       - name: Run Simulator Tests
-        if: inputs.ios-platform == 'SIMULATOR'
+        if: matrix.ios_platform == 'SIMULATOR'
         run: |
           # shellcheck disable=SC1091
           # use the pytorch nightly build to generate models
