@@ -1,5 +1,6 @@
 # Owner(s): ["module: nestedtensor"]
 
+import itertools
 import unittest
 from functools import partial
 
@@ -95,6 +96,41 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
         t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
         ts1.append(t1)
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
+
+
+# Alternate approach to generating a random NT.
+# dims should be something like [5, None, 10], with None indicating that a
+# random ragged structure should be used
+def random_nt_from_dims(dims, device=None, dtype=None):
+    sizes = [
+        [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
+        for d in range(dims[0])
+    ]
+    return torch.nested.nested_tensor([
+        torch.randn(*size) for size in sizes
+    ], device=device, dtype=dtype)
+
+
+# Creates an NT matching another NT's number of components and
+# shape / ragged structure for all dims specified to be -1.
+def random_nt_from_similar(other, dims):
+    assert len(dims) == other.dim()
+    assert dims[0] == -1 or dims[0] == other.size(0)
+
+    ret_sizes = []
+    for t in other.unbind():
+        other_size = t.shape
+        ret_size = []
+        for i, d in enumerate(dims[1:]):
+            if d == -1:
+                ret_size.append(other_size[i])
+            else:
+                ret_size.append(d)
+        ret_sizes.append(ret_size)
+
+    return torch.nested.nested_tensor([
+        torch.randn(*size) for size in ret_sizes
+    ], device=other.device)
 
 
 class TestNestedTensor(TestCase):
@@ -510,6 +546,28 @@ class TestNestedTensor(TestCase):
         for nt_ub in nt_like.unbind():
             t_like = func(nt_ub)
             self.assertEqual(nt_ub, t_like)
+
+    def test_cat(self):
+        # === dim=0 case ===
+        # No constraints on ragged structures matching.
+        x = random_nt_from_dims([5, None, 10])
+        y = random_nt_from_dims([3, 4, None])
+        output = torch.cat([x, y], dim=0)
+        for out_component, xy_component in zip(
+                output.unbind(), itertools.chain(x.unbind(), y.unbind())):
+            self.assertEqual(out_component, xy_component)
+
+        # === dim=-1 case ===
+        # Other dims must match.
+        # shape (B, *, D)
+        x = random_nt_from_dims([5, None, 10])
+        # shape (B, *, D'); same structure as x but dim=-1 differs
+        y = random_nt_from_similar(x, dims=[-1, -1, 8])
+        # Not supported yet!
+        with self.assertRaisesRegex(RuntimeError,
+                                    "NestedTensors can only be concatenated along dimension 0"):
+            # should be shape (B, *, D + D') when supported
+            output = torch.cat([x, y], dim=-1)
 
 
 class TestNestedTensorDeviceType(TestCase):
