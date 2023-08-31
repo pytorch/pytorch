@@ -9,6 +9,7 @@ import weakref
 from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, ListType, BaseTy
 
 import torch
+import torch.export
 import torch._C as _C
 import torch.library as library
 
@@ -821,7 +822,7 @@ class AbstractImplCtx:
         self._shape_env = _shape_env
         self._op = _op
 
-    def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
+    def create_unbacked_symint(self, *, min=None, max=None) -> torch.SymInt:
         """Constructs a new symint (symbolic int) representing a data-dependent value.
 
         This is useful for writing the abstract implementation (which is necessary
@@ -829,18 +830,12 @@ class AbstractImplCtx:
         that depends on the data of the input Tensors.
 
         Args:
-            min (int): A statically known inclusive lower bound for this symint.
-                min must be at least 2 due to implementation details of
-                torch.compile. Default: 2.
+            min (Optional[int]): A statically known inclusive lower bound for this symint.
+                Default: None
             max (Optional[int]): A statically known inclusive upper bound for this
                 symint. Default: None
 
         .. warning:
-
-            It is important that the ``min`` and ``max`` (if not None) values are set
-            correctly, otherwise, there will be undefined behavior under
-            torch.compile. The default value of ``min`` is 2 due to torch.compile
-            specializing on 0/1 sizes.
 
             You must also verify that your implementation on concrete Tensors
             (e.g. CPU/CUDA) only returns Tensors where the size that corresponds
@@ -881,22 +876,8 @@ class AbstractImplCtx:
         ):
             raise torch._subclasses.fake_tensor.DynamicOutputShapeException(self._op)
 
-        if isinstance(min, torch.SymInt) or isinstance(max, torch.SymInt):
-            raise ValueError(
-                f"ctx.create_unbacked_symint(min={min}, max={max}): expected "
-                f"min and max to be statically known ints but got SymInt. "
-                f"This is not supported."
-            )
-
-        if min < 2:
-            raise ValueError(
-                f"ctx.create_unbacked_symint(min={min}, ...): expected min to be "
-                f"greater than or equal to 2. PyTorch only supports new "
-                f"data-dependent sizes of >= 2"
-            )
-
         result = self._shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)
+        torch.export.constrain_as_size(result, min=min, max=max)
         return result
 
 
