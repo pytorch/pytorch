@@ -1051,7 +1051,7 @@ class CheckFunctionManager:
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if isinstance(dim, int):
+                    if isinstance(dim, int) or (isinstance(dim, torch.SymInt) and isinstance(dim.node, torch._C._SymNode)):
                         converted.append(dim)
                     else:
                         assert isinstance(dim, torch.SymInt)
@@ -1074,6 +1074,10 @@ class CheckFunctionManager:
                     ]
                 )
                 for t in tensor_check_examples
+                if self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                    "stride"
+                ]
+                is not None
             ]
 
             tensor_guards = TensorGuards(
@@ -1104,13 +1108,21 @@ class CheckFunctionManager:
                 device_index = t.device.index
                 requires_grad = t.requires_grad
                 sizes = dynamic_dims_sizes[i]
-                strides = dynamic_dims_strides[i]
-                add_code_part(
-                    f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
-                    f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
-                    tensor_check_guards[i],
-                    log_only=True,
-                )
+                if not t.is_nested:
+                    strides = dynamic_dims_strides[i]
+                    add_code_part(
+                        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+                        f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
+                        tensor_check_guards[i],
+                        log_only=True,
+                    )
+                else:
+                    add_code_part(
+                        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+                        f"device={device_index}, requires_grad={requires_grad}, size={sizes})",
+                        tensor_check_guards[i],
+                        log_only=True,
+                    )
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -1274,10 +1286,14 @@ def guard_fail_hook(
         if isinstance(fail_reason, str):
             reason = fail_reason
             break
-        elif isinstance(fail_reason, bool) and not fail_reason:
+        elif (
+            isinstance(fail_reason, bool) or isinstance(fail_reason, torch.SymBool)
+        ) and not fail_reason:
             reason = part
             break
-
+        else:
+            # Maybe we should error here or something?
+            pass
     if first:
         stashed_first_fail_reason = reason
 

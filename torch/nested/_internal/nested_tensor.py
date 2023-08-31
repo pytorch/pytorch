@@ -20,6 +20,8 @@ class NestedTensor(torch.Tensor):
     is_jagged: bool
     _size: Tuple[int, int, int]
     nb_tensors: int
+    ragged_size: torch.SymInt
+    is_fake: bool
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -31,6 +33,9 @@ class NestedTensor(torch.Tensor):
         nested_sizes=None,
         offsets=None,
         nb_tensors=None,
+        sym_size=None,
+        raggedness_id=None,
+        is_fake=False,
         **kwargs
     ):
         _kwargs = {}
@@ -43,10 +48,11 @@ class NestedTensor(torch.Tensor):
         _kwargs["extra_dispatch_keys"] = ks
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, (0,), **_kwargs)
-        if r.requires_grad:
-            raise ValueError(
-                "buffer should not require grad when constructing NestedTensor")
-        r.buffer = buffer
+        # TODO: why is buffer requires grad?
+        # if r.requires_grad:
+        #     raise ValueError(
+        #         "buffer should not require grad when constructing NestedTensor")
+        r.buffer = buffer.detach() if buffer.requires_grad else buffer
         return r
 
     def __init__(
@@ -56,6 +62,8 @@ class NestedTensor(torch.Tensor):
         nested_sizes=None,
         offsets=None,
         nb_tensors=None,
+        sym_size=None,
+        raggedness_id=None,
         **kwargs
     ):
         super().__init__()
@@ -71,16 +79,28 @@ class NestedTensor(torch.Tensor):
         assert nb_tensors is not None
         assert nb_tensors == offsets.shape[0] - 1
 
-        # In a later PR, we'll need to accept an additional size argument
-        # to handle dynamic shapes.
-        ragged_dim = get_tensor_id(offsets)
-        D = buffer.shape[1]
-        B = offsets.shape[0] - 1
-        self._size = (B, ragged_dim, D)
+        if sym_size is not None:
+            # Passed during meta utils fakification
+            self._size = sym_size
+            self.raggedness_id = self._size[1]
+        else:
+            # It's not enough to have the same offsets here, because we need to
+            # propagate the symbolic raggedness id.
+            if raggedness_id is not None:
+                self.raggedness_id = raggedness_id
+            else:
+                self.raggedness_id = get_tensor_id(offsets)
+            D = buffer.shape[1]
+            B = offsets.shape[0] - 1
+            self._size = (B, self.raggedness_id, D)
         self.offsets = offsets
         self._nested_sizes = None
         self.nb_tensors = nb_tensors
         return
+
+    def set_raggedness_id(self, id):
+        self.raggedness_id = id
+        self._size = (self._size[0], id, self._size[2])
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -88,6 +108,24 @@ class NestedTensor(torch.Tensor):
         if self.grad_fn :
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
+
+    def __tensor_flatten__(self):
+        return ["buffer", "offsets"], (self.size(1), self.requires_grad,)
+
+    def __tensor_unflatten__(inner_tensors, meta):
+        assert len(inner_tensors) == 2
+        buffer = inner_tensors["buffer"]
+        offsets = inner_tensors["offsets"]
+        symint, requires_grad, = meta
+
+        # This pair of methods gets called during the initial creation and then
+        B = offsets.shape[0] - 1
+        D = buffer.shape[1]
+        sym_size = (B, symint, D)
+
+        return NestedTensor(
+            buffer, offsets=offsets, nb_tensors=B, sym_size=sym_size,
+            requires_grad=requires_grad)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

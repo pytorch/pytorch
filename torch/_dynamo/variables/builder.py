@@ -1272,6 +1272,7 @@ def wrap_fx_proxy_cls(
             if not (
                 isinstance(value, FakeTensor)
                 or _is_functional_tensor_fakified_by_dynamo(value)
+                or value.is_nested
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1578,9 +1579,11 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = _automatic_dynamic(
-            e, tx, source.name(), static_shapes
-        )
+        dynamic_dims, constraint_dims = None, None
+        if not e.is_nested:
+            dynamic_dims, constraint_dims = _automatic_dynamic(
+                e, tx, source.name(), static_shapes
+            )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
@@ -1603,7 +1606,7 @@ def wrap_to_fake_tensor_and_record(
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
-            "stride": fake_e.stride(),
+            "stride": fake_e.stride() if not e.is_nested else None,
         }
         return fake_e
     else:

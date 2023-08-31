@@ -91,6 +91,7 @@ def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets,
         "nb_tensors": arg.nb_tensors,
+        "raggedness_id": arg.raggedness_id,
     }
     return kwargs
 

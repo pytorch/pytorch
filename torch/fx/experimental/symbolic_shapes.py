@@ -192,12 +192,17 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
-        return val.node.expr.free_symbols
+        if hasattr(val.node, "expr"):
+            return val.node.expr.free_symbols
+        else:
+            return set()
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        if val.is_nested:
+            return free_symbols(val.size())
         return (
             free_symbols(val.size()) |
             free_symbols(val.stride()) |
@@ -1450,12 +1455,26 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        # Decay constant SymBool into plain bools
+        if isinstance(self.node, torch._C._SymNode):
+            if isinstance(self, SymBool):
+                return (method_to_operator(method))(self.node.guard_bool("", 0), other)
+        if isinstance(other, SymBool):
+            if isinstance(other.node, torch._C._SymNode):
+                other = other.node.guard_bool("", 0)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method_attr)(other_node))
 
     def rbinary_magic_impl(self, other):
+        # Decay constant SymBool into plain bools
+        if isinstance(self.node, torch._C._SymNode):
+            if isinstance(self, SymBool):
+                return (method_to_operator(method))(self.node.guard_bool("", 0), other)
+        if isinstance(other, SymBool):
+            if isinstance(other.node, torch._C._SymNode):
+                other = other.node.guard_bool("", 0)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
@@ -2302,7 +2321,7 @@ class ShapeEnv:
         # we may have an unnessary shape speciliazation for y.
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt):
+            if isinstance(maybe_sym, SymInt) and not isinstance(maybe_sym.node, torch._C._SymNode):
                 assert maybe_sym.node.shape_env is not self, \
                     "expect the symbol is created from an shape env other than current one."
                 return maybe_sym.node.require_hint()
@@ -2479,7 +2498,7 @@ class ShapeEnv:
 
     def create_unspecified_symbol(
         self,
-        val: int,
+        val: Union[int, SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -2505,7 +2524,11 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            return sympy.Integer(val)
+            if isinstance(val, int):
+                return sympy.Integer(val)
+            else:
+                return sympy.Symbol(str(val))
+
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
             # if it was requested
@@ -2525,7 +2548,10 @@ class ShapeEnv:
             self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
             self.counter["create_symbol"] += 1
             # We always associate vars to vals
-            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            if isinstance(val, int):
+                self.var_to_val[sympy_expr] = sympy.Integer(val)
+            else:
+                self.var_to_val[sympy_expr] = sympy.Symbol(str(val))
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
             # Create a Z3 variable for the new symbol.
@@ -2551,8 +2577,9 @@ class ShapeEnv:
                 self.var_to_range[sympy_expr] &= constraint_dim.vr
 
             vr = self.var_to_range[sympy_expr]
-            if val not in vr:
-                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+            if isinstance(val, int):
+                if val not in vr:
+                    raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
@@ -2725,6 +2752,8 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
+            if isinstance(val, SymInt) and isinstance(val.node, torch._C._SymNode):
+                return
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
                 val = val.node.maybe_as_int()
 
@@ -2803,22 +2832,29 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
+
+            sources_and_tensors = [(source, t)]
             if is_traceable_wrapper_subclass(t):
                 # If our placeholder is a tensor subclass, then the "true" symints
                 # come from the subclass's inner tensors.
                 attrs, _ = t.__tensor_flatten__()
                 from torch._dynamo.source import AttrSource
-                sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
-            else:
-                sources_and_tensors = [(source, t)]
+                inner_sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
+                if t.is_nested:
+                    # For NestedTensors we also need to track the ragged symint
+                    # on the outer tensor
+                    sources_and_tensors.extend(inner_sources_and_tensors)
+                else:
+                    sources_and_tensors = inner_sources_and_tensors
 
             for src, curr_t in sources_and_tensors:
                 for i, ss in enumerate(curr_t.size()):
                     property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
                     track_symint(property_source, ss, constraint[i])
-                for i, ss in enumerate(curr_t.stride()):
-                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
-                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
+                if not t.is_nested:
+                    for i, ss in enumerate(curr_t.stride()):
+                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                    track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

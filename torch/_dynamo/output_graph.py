@@ -529,7 +529,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         def bind_symint(s, prop):
             if not (
-                isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol)
+                (isinstance(s, torch.SymInt) and not isinstance(s.node, torch._C._SymNode)) and isinstance(s.node.expr, sympy.Symbol)
             ):
                 return
             # TODO: don't readd symint if we already have it in graph
@@ -552,14 +552,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             bind_symint(
                 s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
             )
-        for i, s in enumerate(arg.fake_tensor.stride()):
+        if not arg.fake_tensor.is_nested:
+            for i, s in enumerate(arg.fake_tensor.stride()):
+                bind_symint(
+                    s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+                )
             bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+                arg.fake_tensor.storage_offset(),
+                lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
             )
-        bind_symint(
-            arg.fake_tensor.storage_offset(),
-            lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-        )
 
     def count_calls(self):
         return count_calls(self.graph)
