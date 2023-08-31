@@ -45,7 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -419,13 +419,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -1868,7 +1861,7 @@ make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten._scaled_dot_product_efficient_attention)
 make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -2801,7 +2794,7 @@ def scatter_add(x, dim: int, index, src):
 
 @register_lowering(aten.scatter_add_, type_promotion_kind=None)
 def scatter_add_(x, dim: int, index, src):
-    return scatter_reduce_(clone(x), dim, index, src, "sum")
+    return scatter_reduce_(x, dim, index, src, "sum")
 
 
 @register_lowering(aten.scatter_reduce, type_promotion_kind=None)
