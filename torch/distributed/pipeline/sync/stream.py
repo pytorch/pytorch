@@ -95,6 +95,7 @@ def wait_stream(source: AbstractStream, target: AbstractStream) -> None:
 
 def record_stream(tensor: torch.Tensor, stream: AbstractStream) -> None:
     """:meth:`torch.Tensor.record_stream` for either CPU or CUDA stream."""
+    return
     if is_cuda(stream):
         # NOTE(sublee): record_stream() on a shifted view tensor throws
         # RuntimeError in PyTorch 1.1.0, and does nothing in 1.2.0. To safely

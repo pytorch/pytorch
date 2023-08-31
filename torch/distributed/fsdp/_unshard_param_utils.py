@@ -192,8 +192,8 @@ def _unshard_fsdp_state_params(
     free_unsharded_flat_param = handle.needs_unshard()
     # No need to call `wait_stream()` since we unshard in the computation
     # stream directly
-    computation_stream = state._device_handle.current_stream()
-    _unshard(state, handle, computation_stream, computation_stream)
+    # computation_stream = state._device_handle.current_stream()
+    _unshard(state, handle, None, None)
     if with_grads:
         _unshard_grads(handle)
 

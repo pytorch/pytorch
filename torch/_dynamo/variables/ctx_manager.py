@@ -439,7 +439,7 @@ class NullContextVariable(ContextWrappingVariable):
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls
+        from .builder import wrap_fx_proxy_cls, GraphArg
 
         current_stream_method = get_interface_for_device(
             target_value.device

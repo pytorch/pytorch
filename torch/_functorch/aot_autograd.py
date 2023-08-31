@@ -1667,12 +1667,14 @@ def create_joint(
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
+                    print("ABOUT TO RUN BACKWARD OUT")
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
                         allow_unused=True,
                     )
                 else:
+                    print("ABOUT TO RUN BACKWARD OUT")
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -3633,8 +3635,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
-            aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
-            aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
+            gpu_id = int(os.environ.get("LOCAL_RANK", 0))
+            if gpu_id == 0:
+                aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+                aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
             # flat_args at this point might still be subclasses-

@@ -59,13 +59,13 @@ supported_const_comparison_ops = {
 
 def hook_printing_fn(*grad, real_fn):
     print("RUNNING HOOK", real_fn)
+    print("Inputs:")
+    for i, inp in enumerate(grad):
+        print(f"    {i}. {inp}")
     return real_fn(*grad)
 
 def record_hook_fn(tensor, hook_fn):
-    # nonlocal stored_hook_fn
-    # stored_hook_fn = hook_fn.real_fn
     print("RECORD HOOK FN", hook_fn)
-    # breakpoint()
     print("Tensor?", tensor)
     print("Hook?", hook_fn)
     tensor.register_hook(functools.partial(hook_printing_fn, real_fn=hook_fn))
@@ -1100,17 +1100,24 @@ class TypedStorageVariable(VariableTracker):
             #         # **options,
             # )
             # return self.original
-            new_t = wrap_fx_proxy(
-                tx,
+            # self.value().as_proxy()._resize_(args[0])
+            self.original.as_proxy()._typed_storage()._resize_(args[0].value)
+            with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
+                new_t = wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_method",
+                        # torch.resize_storage_,
+                        "resize_storage_",
+                        *proxy_args_kwargs([self.original] + list(args), {}),
+                    ),
+                    allow_none=True,
+                    example_value=self.original.as_proxy().node.meta['example_value'],
+                    # **options,
+                )
                 tx.output.create_proxy(
-                    "call_function",
-                    torch.resize_storage_,
-                    *proxy_args_kwargs([self.original] + list(args), {}),
-                ),
-                allow_none=True,
-                example_value=self.original.as_proxy().node.meta['example_value'],
-                # **options,
-            )
+                    "call_function", torch._C._autograd._unsafe_set_version_counter, (new_t.as_proxy(), 0), {}
+                )
             self.original.mutable_local = MutableLocal()
             return tx.replace_all(self.original, new_t)
             return new_t

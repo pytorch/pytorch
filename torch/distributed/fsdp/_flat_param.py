@@ -1399,9 +1399,9 @@ class FlatParamHandle:
         # it is the default stream. For `NO_SHARD`, only recording for the
         # default stream suffices since the default stream waits for the
         # unshard stream.
-        _no_dispatch_record_stream(
-            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
-        )
+        # _no_dispatch_record_stream(
+        #     self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
+        # )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
     @torch.no_grad()
@@ -1671,9 +1671,9 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(
-            unsharded_flat_param, self._device_handle.current_stream()
-        )
+        # _no_dispatch_record_stream(
+        #     unsharded_flat_param, self._device_handle.current_stream()
+        # )
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
