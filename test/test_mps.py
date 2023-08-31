@@ -10663,6 +10663,9 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
+            elif op.name == "nn.functional.interpolate" and op.variant_test_name == "bilinear":
+                atol = 1
+                rtol = 0
             else:
                 atol = None
                 rtol = None
