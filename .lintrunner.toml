@@ -290,19 +290,16 @@ include_patterns = [
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-    # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
-    # in a follow up PR.
-    # that are not easily converted to accepted c++
+    # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
     'c10/test/**',
     'third_party/**/*',
-    'third_party/fmt/include/fmt/core.h',
-    'torch/csrc/CudaIPCTypes.cpp',
     'torch/csrc/api/**',
     'torch/csrc/autograd/**',
+    'torch/csrc/CudaIPCTypes.cpp',
     'torch/csrc/cuda/**',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
