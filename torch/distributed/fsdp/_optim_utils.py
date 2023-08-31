@@ -1398,11 +1398,11 @@ def _allgather_orig_param_states(
                     begin_idx = idx
                 end_idx = idx
 
-        local_buffer: List[torch.Tensor]
+        local_buffers: List[torch.Tensor] = []
         if begin_idx != -1:
-            local_buffers = buffers[begin_idx : end_idx + 1]
-        else:
-            local_buffers = []
+            for tensor in buffers[begin_idx: end_idx + 1]:
+                assert tensor is not None
+                local_buffers.append(tensor)
         shard_numel_padded = flat_param._sharded_size.numel() - (
             sum(t.numel() for t in local_buffers)
         )
@@ -1550,6 +1550,7 @@ def _convert_state_with_orig_params(
             assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
             with SimpleProfiler.profile("none_fsdp_managed_copy"):
+                param_key = cast(Union[str, int], param_key)
                 fsdp_osd_state[unflat_param_name] = copy.copy(
                     optim_state_dict[param_key]
                 )
