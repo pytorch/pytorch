@@ -199,7 +199,6 @@ exclude_patterns = [
     'torch/_inductor/debug.py',
     'torch/_inductor/hooks.py',
     'torch/_inductor/decomposition.py',
-    'torch/_inductor/optimize_indexing.py',
     'torch/_inductor/bounds.py',
     'torch/_inductor/config.py',
     'torch/_inductor/ir.py',
@@ -2697,6 +2696,6 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.285',
+    'ruff==0.0.286',
 ]
 is_formatter = true

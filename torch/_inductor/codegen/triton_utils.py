@@ -49,8 +49,25 @@ def config_of(args):
                 return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
+    def is_aligned_8(x):
+        """
+        Roughly follow triton code here:
+        https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
+        """
+        if isinstance(x, TensorArg):
+            return False
+        if isinstance(x, SizeArg):
+            # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
+            # _maybe_evaluate_static...
+            if x.name.startswith("load_seed_offset"):
+                return False
+            else:
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, 8)
+        raise NotImplementedError(f"unhandled {type(x)}: {x}")
+
     if config.triton.divisible_by_16:
-        divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+        divisible_by_16 = tuple(i for i, arg in enumerate(args) if is_aligned(arg))
     else:
-        divisible_by_16 = []
-    return instance_descriptor(tuple(divisible_by_16), ())
+        divisible_by_16 = ()
+    divisible_by_8 = tuple(i for i, arg in enumerate(args) if is_aligned_8(arg))
+    return instance_descriptor(divisible_by_16, (), (), divisible_by_8)

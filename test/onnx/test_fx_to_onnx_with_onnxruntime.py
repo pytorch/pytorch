@@ -438,8 +438,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. Name:'n13__5' Status Message:"
-        "slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_zero(self):
         class Model(torch.nn.Module):
@@ -982,6 +983,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
         "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
         "https://github.com/huggingface/transformers/issues/21013"
+        "This can be addressed by using GPT2Config, but it is not now supported by FakeTensor exporting."
     )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -1046,14 +1048,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
-    @pytorch_test_common.xfail(
-        "Constant tensor is not supported in FakeTensorMode export."
-    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
-    )
-    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
-        "HF Bloom model does not need `model.load_state_dict` to work."
     )
     def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
         config = transformers.BloomConfig()

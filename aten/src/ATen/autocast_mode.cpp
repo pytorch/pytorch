@@ -1,5 +1,6 @@
 #include <ATen/autocast_mode.h>
 
+#include <iostream>
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>

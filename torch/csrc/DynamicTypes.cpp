@@ -33,7 +33,7 @@ std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)>
 at::DeprecatedTypeProperties* get_type_properties(
     at::DeviceType device_type,
     at::ScalarType scalarType) {
-  at::Backend backend;
+  at::Backend backend = at::Backend::Undefined;
   if (device_type == at::kCPU) {
     backend = at::Backend::CPU;
   } else if (device_type == at::kCUDA) {
@@ -128,7 +128,7 @@ at::Storage createStorageGetType(
     at::ScalarType& scalar_type,
     bool& is_typed_storage) {
   is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
-  PyObject* untyped_storage_obj;
+  PyObject* untyped_storage_obj = nullptr;
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
@@ -163,7 +163,7 @@ at::Storage createStorageGetType(
 }
 
 at::Storage createStorage(PyObject* obj) {
-  at::ScalarType scalar_type;
+  at::ScalarType scalar_type = at::ScalarType::Undefined;
   bool is_typed_storage = false;
   return createStorageGetType(obj, scalar_type, is_typed_storage);
 }
