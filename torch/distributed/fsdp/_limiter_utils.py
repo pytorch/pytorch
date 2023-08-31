@@ -11,6 +11,7 @@ class EventWithTensor:
     buffer when we ask a new all-gather to wait for a resharding event (hence
     avoiding OOM).
     """
+
     def __init__(
         self,
         event: torch.cuda.Event,

@@ -526,7 +526,7 @@ class FlatParamHandle:
         self._needs_pre_forward_unshard = False
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard = False
-        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        # Was the handle prefetched? Set on successful _prefetch_next_handle and unshard
         self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
