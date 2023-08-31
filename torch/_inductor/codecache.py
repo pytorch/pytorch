@@ -664,6 +664,10 @@ def get_warning_all_flag(warning_all=True):
     return "-Wall" if warning_all else ""
 
 
+def get_glibcxx_abi_build_flags():
+    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
+
+
 def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
@@ -908,6 +912,7 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {get_glibcxx_abi_build_flags()}
             {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
