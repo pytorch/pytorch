@@ -5,6 +5,7 @@ import textwrap
 from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
 
 import torch
+from torch._C import _get_privateuse1_backend_name
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
 from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
@@ -16,6 +17,13 @@ __all__ = ["Timer", "timer", "Language"]
 if torch.backends.cuda.is_built() and torch.cuda.is_available():
     def timer() -> float:
         torch.cuda.synchronize()
+        return timeit.default_timer()
+elif _get_privateuse1_backend_name() != "privateuseone":
+    privateuse1_device_handler = getattr(torch, _get_privateuse1_backend_name(), None) \
+        if _get_privateuse1_backend_name() != "cpu" else None
+    def timer() -> float:
+        if privateuse1_device_handler:
+            privateuse1_device_handler.synchronize()
         return timeit.default_timer()
 else:
     timer = timeit.default_timer
