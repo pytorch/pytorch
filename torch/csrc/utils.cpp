@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdarg>
+#include <cstring>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -287,7 +288,7 @@ char* tensor_repr(at::Tensor tensor) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
   }
-  strncpy(result, buf, bufsize);
+  std::strncpy(result, buf, bufsize);
   result[bufsize] = '\0';
   Py_XDECREF(pytensor);
   Py_XDECREF(repr);
