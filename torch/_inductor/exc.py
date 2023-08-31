@@ -12,7 +12,7 @@ if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
 else:
 
-    def _record_missing_op(target): # type: ignore[misc]
+    def _record_missing_op(target):  # type: ignore[misc]
         pass
 
 
