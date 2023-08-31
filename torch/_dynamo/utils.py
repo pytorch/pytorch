@@ -1049,8 +1049,10 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
-                if math.isnan(ref_error) and fp64_ref.isnan().sum() == 0:
-                    return True
+                if math.isnan(ref_error):
+                    log.warning(
+                        "Found nan in reference. Consider running in higher precision."
+                    )
 
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
