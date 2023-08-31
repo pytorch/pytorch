@@ -331,3 +331,7 @@ To summarize, the compiled code is conceptually equivalent to the code below:
            if guard(L):
                return code(a, b)
        recompile_and_add_another_cache_entry()
+
+The following diagram demonstrates how ``torch.compile`` transforms and optimizes user-written code:
+
+.. image:: _static/img/dynamo/flowchart.jpg
