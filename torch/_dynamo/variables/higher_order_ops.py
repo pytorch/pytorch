@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -907,9 +908,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
-        fake_batched_fn_args = tuple(
-            get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args
-        ) + tuple(get_fake_value(arg.node, tx) for arg in body_lifted_freevars)
+        fake_batched_fn_args = itertools.chain(
+            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
+            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
+        )
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
