@@ -1361,6 +1361,15 @@ class Scheduler:
         if device.type == "cpu":
             return True
 
+        # TODO not fusing WelfordReduction with downstream nodes cause
+        # accuracy issue for AlbertForMaskedLM and AlbertForQuestionAnswering.
+        if any(
+            isinstance(node.node, ir.ComputedBuffer)
+            and isinstance(node.node.data, ir.WelfordReduction)
+            for node in node_list_1
+        ):
+            return True
+
         node_list_2 = node2.get_nodes()
         node_list_fused = node_list_1 + node_list_2
 
