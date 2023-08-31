@@ -674,9 +674,9 @@ def _record_memory_history_legacy(
     _C._cuda_record_memory_history_legacy(
         enabled,
         record_context,
-        record_context_cpp,
         trace_alloc_max_entries,
         trace_alloc_record_context,
+        record_context_cpp,
     )
 
 

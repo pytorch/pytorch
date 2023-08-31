@@ -20,7 +20,7 @@ from enum import Enum
 import itertools
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch.ao.quantization import ObserverBase
-from torch._export import capture_pre_autograd_graph, dynamic_dim
+from torch._export import capture_pre_autograd_graph
 
 class Conv2DType(Enum):
     left = 1
@@ -238,7 +238,6 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         quantizer,
         expected_node_occurrence,
         expected_node_list=None,
-        export_with_dynamic_shape=False,
     ):
         m_eager = model.eval()
 
@@ -247,7 +246,6 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
-            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
         )
 
         export_model = copy.deepcopy(m)
