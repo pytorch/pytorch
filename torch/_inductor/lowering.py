@@ -133,9 +133,9 @@ def decode_dtype(dtype: int):
 
 def value_to_dtype(value: Any) -> torch.dtype:
     if isinstance(value, sympy.Expr):
-        if value.is_integer is True:
+        if value.is_integer:  # type: ignore[attr-defined]
             return torch.long
-        if value.is_real is True:
+        if value.is_real:
             return torch.get_default_dtype()
     return type_to_dtype(type(value))
 
