@@ -16,6 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import DTensor as DistributedTensor, Shard as DShard
+
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
@@ -151,8 +152,8 @@ def _flatten_tensor(
 def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
     result = DistributedTensor.from_local(
         tensor,
-        device_mesh=spec.mesh,
-        placements=spec.placements,
+        spec.mesh,
+        spec.placements,
         run_check=False,
     )
 

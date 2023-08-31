@@ -165,18 +165,17 @@ class TestDTensorCompileE2E(DTensorTestBase):
         tp_model2 = parallelize_module(
             model_copy, twod_mesh, PairwiseParallel(), tp_mesh_dim=1
         )
-        compiled_tp = torch.compile(tp_model2, backend="eager", fullgraph=True)
-
         # TODO: now we first apply torch compile on tp model then use fsdp to wrap it, ideally
         # we should apply torch.compile after fsdp wrap, but the current graph break approach
         # have some issues with the tensor subclass compilation, need to dig into this later
-        compiled_2d = FSDP(
-            compiled_tp,
+        fsdp_2d = FSDP(
+            tp_model2,
             process_group=fsdp_pg,
             device_id=self.rank,
             use_orig_params=True,
         )
 
+        compiled_2d = torch.compile(fsdp_2d, backend="eager")
         compiled_output = compiled_2d(inp)
 
         self.assertEqual(out, compiled_output)

@@ -572,6 +572,7 @@ class TorchVariable(VariableTracker):
         elif is_from_local(self.value):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
+            # TODO: support cases where device_mesh + placements specified as kwargs
             args_as_value = [x.as_python_constant() for x in args[1:]]
 
             def fn_with_prim_types(x, **kwargs):
