@@ -1873,11 +1873,11 @@ class BenchmarkRunner:
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
+        from torch._dynamo.utils import evaluate_model_flops
         try:
-            from .mfu import evaluate_model_flops
             evaluate_model_flops(model, example_inputs)
         except Exception as e:
-            raise NotImplementedError("Eager model failed to run") from e
+            raise NotImplementedError("mfu calculation failed") from e
         
     def memory_bandwidth(self, model, example_inputs, num_samples = 1):
         """
@@ -1886,11 +1886,12 @@ class BenchmarkRunner:
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
+        from torch._dynamo.utils import memory_bandwidth
+
         try:
-            from .mfu import memory_bandwidth
             memory_bandwidth(model, example_inputs, num_samples)
         except Exception as e:
-            raise NotImplementedError("Eager model failed to run") from e
+            raise NotImplementedError("memory bandwidth calculation failed") from e
 
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
