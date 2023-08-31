@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -7,6 +8,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -912,9 +914,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
-        fake_batched_fn_args = tuple(
-            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
-        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
+        fake_batched_fn_args = itertools.chain(
+            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
+            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
+        )
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
@@ -922,7 +925,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # NOTE: `body_graph` might have operators which
         # will create new tensors. So it is required
         # that we run `vmap` under FakeMode.
-        with tx.fake_mode:
+        with tx.fake_mode, enable_python_dispatcher():
             example_value = torch._functorch.vmap.vmap_impl(
                 torch.fx.GraphModule(tx.output.nn_modules, body_graph),
                 actual_in_dims,

@@ -234,6 +234,40 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(expect, actual)
 
     @onlyCPU
+    def test_arithmetic_constant_folding(self, device):
+        def test(fn):
+            cfn = self.compile_fn(fn)
+            expect = fn(3)
+            actual = cfn(3)
+            self.assertEqual(expect, actual)
+
+        def add(x):
+            return x + torch.zeros(3)
+
+        test(add)
+
+        def mul(x):
+            return x * torch.ones(3)
+
+        test(mul)
+
+        def div(x):
+            return x / torch.ones(3)
+
+        test(div)
+
+    @onlyCPU
+    @unittest.expectedFailure
+    # Ref: https://github.com/pytorch/pytorch/issues/108159
+    def test_sub_constant_folding(self, device):
+        def sub(x):
+            return x - torch.zeros(3)
+
+        cfn = self.compile_fn(sub)
+        expect = sub(3)
+        actual = cfn(3)
+        self.assertEqual(expect, actual)
+
     def test_full(self, device):
         def fn(a):
             return torch.full((3,), a)
