@@ -334,15 +334,23 @@ def _multi_tensor_asgd(
 
         if capturable:
             # decay term
-            decay = torch._foreach_add(torch._foreach_mul(etas, -lambd), 1)
-            # update parameter
-            torch._foreach_mul_(grouped_params,
-                                torch._foreach_add(torch._foreach_div(torch._foreach_mul(grouped_grads,
-                                                                                         torch._foreach_mul(etas, -1)),
-                                                                      torch._foreach_mul(grouped_params, decay)),
-                                                   1.0))
+            decay = torch._foreach_mul(etas, -lambd)
+            torch._foreach_add_(decay, 1)
+            grouped_params_decayed = torch._foreach_mul(grouped_params, decay)
+            neg_etas = torch._foreach_mul(etas, -1)
 
-            torch._foreach_add_(grouped_axs, torch._foreach_mul(torch._foreach_sub(grouped_params, grouped_axs), grouped_mus))
+            # update parameter
+            torch._foreach_mul_(grouped_grads, neg_etas)
+            torch._foreach_div_(grouped_grads, grouped_params_decayed)
+            torch._foreach_add_(grouped_grads, 1.0)
+            torch._foreach_mul_(grouped_params, grouped_grads)
+
+            # update grouped_axs
+            grouped_params_copy = torch._foreach_sub(grouped_params, grouped_axs)
+            torch._foreach_mul_(grouped_params_copy, grouped_mus)
+            torch._foreach_add_(grouped_axs, grouped_params_copy)
+
+            # update grouped_mus
             torch._foreach_copy_(grouped_mus,
                                  torch._foreach_reciprocal(torch._foreach_maximum(torch._foreach_sub(grouped_state_steps, t0),
                                                                                   1.0)))
