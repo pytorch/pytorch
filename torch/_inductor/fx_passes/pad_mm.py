@@ -425,7 +425,7 @@ def _pad_mm_init():
             should_pad_addmm,
         ),
     ]:
-        args = [*args, *workaround.values()] # type: ignore[attr-defined]
+        args = [*args, *workaround.values()]  # type: ignore[attr-defined]
         register_replacement(
             pattern,
             replacement,
