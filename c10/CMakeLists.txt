@@ -89,8 +89,6 @@ if(${USE_GLOG})
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
-target_link_libraries(c10 PRIVATE cpuinfo)
-
 find_package(Backtrace)
 if(Backtrace_FOUND)
   target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})

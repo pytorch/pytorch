@@ -11,6 +11,7 @@ from .decorators import (
     graph_break,
     mark_dynamic,
     mark_static,
+    mark_static_address,
     maybe_mark_dynamic,
     run,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "mark_dynamic",
     "maybe_mark_dynamic",
     "mark_static",
+    "mark_static_address",
     "optimize",
     "optimize_assert",
     "export",
@@ -68,6 +70,6 @@ def reset() -> None:
             if hasattr(backend, "reset"):
                 backend.reset()
         cached_backends.clear()
-    eval_frame.guarded_backend_cache.most_recent_backend = None
+    eval_frame.guarded_backend_cache.current_backend = None
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()

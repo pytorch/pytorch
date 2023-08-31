@@ -214,6 +214,8 @@ __all__ = [
     "cumsum",
     "cumprod",
     "mean",
+    "dot",
+    "vdot",
     "std",
     "std_mean",
     "sum",
@@ -330,6 +332,7 @@ __all__ = [
     #
     # Misc
     #
+    "is_complex",
     "renorm",
     "stft",
     "istft",
@@ -338,6 +341,27 @@ __all__ = [
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
+
+
+def is_noncontiguous_supported(device):
+    if device is not None and device.type == "hpu":
+        return False
+    return True
+
+
+def handle_noncontiguous_outputs(input_tlist, output):
+    device = None
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    for t in input_tlist:
+        if isinstance(t, FakeTensor):
+            device = t.fake_device
+            break
+
+    if not is_noncontiguous_supported(device):
+        output = output.new_empty(output.shape)
+
+    return output
 
 
 def _broadcast_shapes(*_shapes):
@@ -436,7 +460,8 @@ def _make_elementwise_unary_reference(
             if extra_meta is not None:
                 extra_meta(a)
 
-            return prim(a)
+            output = prim(a)
+            return handle_noncontiguous_outputs([a], output)
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -532,6 +557,11 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@register_decomposition(aten.is_complex)
+def is_complex(input: TensorLikeType):
+    return utils.is_complex_dtype(input.dtype)
 
 
 @register_decomposition(aten.conj_physical)
@@ -957,7 +987,8 @@ def _make_elementwise_binary_reference(
                 lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
             )
             a, b = _maybe_broadcast(a, b)
-            return prim(a, b)
+            output = prim(a, b)
+            return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -1662,7 +1693,8 @@ def sub(
             # which will mess with type promotion.
             b = b * alpha
 
-    return prims.sub(a, b)
+    output = prims.sub(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
@@ -2923,14 +2955,13 @@ def narrow(
     torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
     dim_length = a.size(dim)
-    # Start being the end is usually invalid since it's out of bounds. So it's
-    # not allowed by canonicalize_dim. But for narrow it's valid as long as
-    # the length is 0, which is handled by the check below.
-    if start != dim_length:
-        # Negative start means indexing from the end of dim.
-        # Note: a dimension isn't being canonicalized here, this reuses
-        # canonicalize_dim because the semantics are similar.
-        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    torch._check_with(
+        IndexError,
+        -dim_length <= start and start <= dim_length,  # type: ignore[arg-type]
+        lambda: f"start out of range (expected to be in range of [{-dim_length}, {dim_length}], but got {start})",
+    )
+    if start < 0:
+        start = start + dim_length
     torch._check(
         start <= dim_length - length,  # type: ignore[arg-type]
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
@@ -4783,8 +4814,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     # make sure the decomposition output's stride is same as non-decomposition path.
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
-        return prims.copy_strided(output, stride)
-    return output
+        output = prims.copy_strided(output, stride)
+
+    return handle_noncontiguous_outputs(inputs, output)
 
 
 @register_decomposition(aten.linspace)
@@ -5744,24 +5776,71 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # TODO: add support for functionalization aten.normal_functional
+# NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=(
+        "mean",
+        "std",
+    ),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def normal(self, mean=0, std=1, generator=None):
+def normal(
+    mean=0,
+    std=1,
+    shape=None,
+    *,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     assert generator is None
-    torch._check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    assert layout is None
+
+    if not isinstance(std, TensorLike):
+        torch._check(
+            std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
+        )
+
+    if shape is None:
+        tensors = tuple(t for t in (mean, std) if isinstance(t, TensorLike))
+        torch._check(
+            len(tensors) > 0,
+            lambda: "normal expects that either mean or std is a tensor, or shape is defined",
+        )
+        torch._check(
+            layout is None and pin_memory is None,
+            lambda: "Cannot pass layout, or pin_memory without shape",
+        )
+
+        shape = _broadcast_shapes(*(t.shape for t in tensors))
+        dtype = tensors[0].dtype
+        device = tensors[0].device
+    else:
+        torch._check(
+            not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
+            lambda: "normal expects mean and std to be scalars when shape is defined",
+        )
+        dtype = torch.get_default_dtype() if dtype is None else dtype
+        device = torch.device("cpu") if device is None else device
+
     normal_samples = prims.normal(
-        self.shape,
+        shape,
         mean=0.0,
         std=1.0,
-        dtype=self.dtype,
-        device=self.device,
+        dtype=dtype,
+        device=device,
         requires_grad=False,
     )
     return std * normal_samples + mean
+
+
+@register_decomposition(aten.normal_)
+def normal_(self, mean=0, std=1, *, generator=None):
+    return normal(mean, std, self.shape, out=self, generator=generator)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -5787,6 +5866,64 @@ def deg2rad(self: TensorLikeType):
 @register_decomposition(aten.count_nonzero)
 def count_nonzero(self, dim: Optional[DimsType] = None):
     return (self != 0).sum(dim)
+
+
+def _dot_check(self, other):
+    torch._check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    torch._check(self.numel() == other.numel(), numel_error)
+
+
+@register_decomposition(aten.dot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    _dot_check(self, other)
+    return (self * other).sum()
+
+
+@register_decomposition(aten.vdot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def vdot(self, other):
+    if not self.is_complex():
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    _dot_check(self, other)
+    # The decomposition fails if you do self.conj()... not sure why
+    return (self.conj_physical() * other).sum()
 
 
 # inplace
@@ -5883,7 +6020,6 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
-normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 

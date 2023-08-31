@@ -1,9 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import functools
-import re
 import unittest
-from unittest.mock import patch
 
 import torch
 import torch._export
@@ -12,8 +10,7 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 
-from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
@@ -23,7 +20,7 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, example_outputs):
+    def load(cls, model, example_inputs, example_outputs, options=None):
         # AOTInductorModel relies on the caller to pass in output_tensors,
         # so we need to explicitly allocate output tensors here.
         output_tensors = []
@@ -35,6 +32,7 @@ class AOTInductorModelRunner:
         so_path, exported = torch._export.aot_compile(
             model,
             example_inputs,
+            options=options,
         )
 
         # Use a utility function for easier testing
@@ -60,10 +58,10 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
-    def run(cls, model, example_inputs, example_outputs):
+    def run(cls, model, example_inputs, example_outputs, options=None):
         example_outputs = copy.deepcopy(example_outputs)
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs
+            model, example_inputs, example_outputs, options
         )
         param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
@@ -136,69 +134,56 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
-    @requires_cuda()
-    @patch("torch._inductor.config.comment_origin", True)
-    def test_inductor_sequence_nr(self):
+    def test_dynamic_smem_above_default_limit(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        model = Repro()
+        # on A100, the generated Triton kernel for this MM
+        # requires 55296 bytes of dynamic SMEM which is above
+        # the A100's default dynamic SMEM limit of 49152 bytes.
+        example_inputs = (
+            torch.randn(10285, 96, device="cuda"),
+            torch.randn(96, 1, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        self.assertTrue(same(actual, expected))
+
+    def test_addmm(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, n, k):
                 super().__init__()
-                self.conv1 = torch.nn.Conv2d(
-                    in_channels=16,
-                    out_channels=16,
-                    kernel_size=(1, 1),
-                    stride=1,
-                    padding="same",
-                    bias=True,
-                )
-                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
-                self.relu1 = torch.nn.ReLU()
-                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
-                self.loss_fn = torch.nn.L1Loss()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
 
-            def forward(self, x, target):
-                y = x
-                x = self.conv1(x)
-                x = self.bn1(x)
-                x = self.relu1(x)
-                x = x + y
-                x = torch.flatten(x)
-                x = self.fc1(x)
-                output = self.loss_fn(x, target)
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
 
-                return (output,)
-
-        def get_triton_codegen(optimized_module, args):
-            def run_with_backward():
-                result = optimized_module(*args)
-                result[0].backward()
-                return result
-
-            res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
-            return fwd_code, bwd_code
-
-        x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
-        target = torch.rand(1, device="cuda")
-        args = [x, target]
-        model = Model().cuda()
-        opt_model = torch.compile(model)
-        fwd_code, bwd_code = get_triton_codegen(opt_model, args)
-
-        bwd_seq_nr_set = set()
-        fwd_seq_nr_set = set()
-        for idx, code in enumerate([fwd_code, bwd_code]):
-            seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
-            prefix = "BWD" if idx > 0 else "FWD"
-            for line in code.split("\n"):
-                if "seq_nr" in line:
-                    res = re.search(r"seq_nr:(\d+)", line)
-                    if res:
-                        seq_nr_set.add(int(res.group(1)))
-        self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
-        return
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    # cpp_extension N/A in fbcode
+    if HAS_CUDA and not TEST_WITH_ROCM and not IS_FBCODE:
         run_tests(needs="filelock")

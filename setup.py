@@ -106,6 +106,9 @@
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
+#   USE_MEM_EFF_ATTENTION=0
+#    disables building memory efficient attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -185,6 +188,9 @@
 #
 #   NVFUSER_SOURCE_DIR
 #     specify nvfuser root directory
+#
+#   NVTOOLSEXT_PATH (Windows only)
+#     specify where nvtoolsext is installed
 #
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
