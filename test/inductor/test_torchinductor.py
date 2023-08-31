@@ -492,7 +492,7 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
                 stmt = line.split(".load")[-1]
             elif "tl.store" in line:
                 stmt = line.split(".store")[-1]
-                stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
+                stmt = ",".join(stmt.split(",")[:-3])  # Remove store value, mask, and cache hints
             elif ".store" in line:
                 stmt = line.split(".store")[-1]
             elif "[" in line:
