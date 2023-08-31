@@ -1115,7 +1115,7 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, eager_forward):
-        key = id(model)
+        key = str(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
@@ -1134,8 +1134,9 @@ class AOTInductorModelCache:
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
-                torch.empty(
+                torch.empty_strided(
                     node.meta["val"].size(),
+                    node.meta["val"].stride(),
                     dtype=node.meta["val"].dtype,
                     layout=node.meta["val"].layout,
                     device=node.meta["val"].device,
