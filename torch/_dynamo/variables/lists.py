@@ -15,10 +15,33 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
+
+
+def _listlike_contains_helper(items, search, tx, options):
+    if search.is_python_constant():
+        result = any(
+            x.as_python_constant() == search.as_python_constant() for x in items
+        )
+        return variables.ConstantVariable(result, **options)
+
+    from .builtin import BuiltinVariable
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable(None)
+    return result
 
 
 class BaseListVariable(VariableTracker):
@@ -112,29 +135,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-
-            search = args[0]
-            if check_constant_args(args, {}) and search.is_python_constant():
-                result = any(
-                    x.as_python_constant() == search.as_python_constant()
-                    for x in self.items
-                )
-                return variables.ConstantVariable(result, **options)
-
-            from .builtin import BuiltinVariable
-
-            result = None
-            for x in self.items:
-                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-                if result is None:
-                    result = check
-                else:
-                    result = BuiltinVariable(operator.or_).call_function(
-                        tx, [check, result], {}
-                    )
-            if result is None:
-                result = ConstantVariable(None)
-            return result
+            return _listlike_contains_helper(self.items, args[0], tx, options)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -904,6 +905,10 @@ class SetVariable(VariableTracker):
             return result
         elif name == "__len__":
             return ConstantVariable(len(self.items)).add_options(options)
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return _listlike_contains_helper(self.items, args[0], tx, options)
         else:
             return super().call_method(tx, name, args, kwargs)
 
