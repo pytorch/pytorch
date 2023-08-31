@@ -2445,6 +2445,7 @@ class TritonScheduling(BaseScheduling):
         kernel.call_kernel(kernel_name)
         kernel.codegen_nan_check()
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2559,6 +2560,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
@@ -2596,6 +2598,7 @@ class TritonScheduling(BaseScheduling):
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
+                V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])

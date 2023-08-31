@@ -1361,15 +1361,6 @@ class Scheduler:
         if device.type == "cpu":
             return True
 
-        # TODO not fusing WelfordReduction with downstream nodes cause
-        # accuracy issue for AlbertForMaskedLM and AlbertForQuestionAnswering.
-        if any(
-            isinstance(node.node, ir.ComputedBuffer)
-            and isinstance(node.node.data, ir.WelfordReduction)
-            for node in node_list_1
-        ):
-            return True
-
         node_list_2 = node2.get_nodes()
         node_list_fused = node_list_1 + node_list_2
 
@@ -1752,7 +1743,7 @@ class Scheduler:
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
                     self.remove_inplace_buffer(name)
-                V.graph.inplaced_to_remove.add(name)
+                V.kernel.inplaced_to_remove.add(name)
             else:
                 self.remove_buffer(name)
 

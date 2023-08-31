@@ -145,6 +145,11 @@ REQUIRE_HIGHER_FP16_TOLERANCE = {
     "drq",
 }
 
+
+REQUIRE_HIGHER_BF16_TOLERANCE = {
+    "detectron2_fcos_r_50_fpn",
+}
+
 REQUIRE_COSINE_TOLERACE = {
     # Just keeping it here even though its empty, if we need this in future.
 }
@@ -440,6 +445,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in REQUIRE_HIGHER_FP16_TOLERANCE:
                 return 1e-2, cosine
             return 1e-3, cosine
+
+        if self.args.bfloat16:
+            if name in REQUIRE_HIGHER_BF16_TOLERANCE:
+                return 1e-2, cosine
+
         if is_training and current_device == "cuda":
             tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:

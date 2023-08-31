@@ -4800,7 +4800,7 @@ class CommonTemplate:
 
     def test_slice_scatter2(self):
         def fn(a, b):
-            return aten.slice_scatter(a, b, 0, 0, 370)
+            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
 
         self.common(
             fn,
@@ -7563,6 +7563,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
                 )
                 stderr = proc.communicate()[1]
                 self.assertTrue(
@@ -7576,8 +7577,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 [sys.executable, test_path, "first_arg", "2", "False", "True"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
             )
             stderr = proc.communicate()[1]
+
             self.assertTrue(
                 any(
                     "index out of bounds" in err.decode("utf-8")
@@ -7585,6 +7588,62 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 ),
                 "first_arg 2 False True",
             )
+
+        @patch("torch._inductor.config.comment_origin", True)
+        def test_inductor_sequence_nr(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = torch.nn.Conv2d(
+                        in_channels=16,
+                        out_channels=16,
+                        kernel_size=(1, 1),
+                        stride=1,
+                        padding="same",
+                        bias=True,
+                    )
+                    self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                    self.relu1 = torch.nn.ReLU()
+                    self.loss_fn = torch.nn.L1Loss()
+
+                def forward(self, x, target):
+                    y = x
+                    x = self.conv1(x)
+                    x = self.bn1(x)
+                    x = self.relu1(x)
+                    x = x + y
+                    x = torch.flatten(x)
+                    output = self.loss_fn(x, target)
+                    return (output,)
+
+            def get_triton_codegen(optimized_module, args):
+                def run_with_backward():
+                    result = optimized_module(*args)
+                    result[0].backward()
+                    return result
+
+                res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
+                return fwd_code, bwd_code
+
+            x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
+            target = torch.rand(1, device="cuda")
+            args = [x, target]
+            model = Model().cuda()
+            opt_model = torch.compile(model)
+            fwd_code, bwd_code = get_triton_codegen(opt_model, args)
+
+            bwd_seq_nr_set = set()
+            fwd_seq_nr_set = set()
+            for idx, code in enumerate([fwd_code, bwd_code]):
+                seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
+                prefix = "BWD" if idx > 0 else "FWD"
+                for line in code.split("\n"):
+                    if "seq_nr" in line:
+                        res = re.search(r"seq_nr:(\d+)", line)
+                        if res:
+                            seq_nr_set.add(int(res.group(1)))
+
+            self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
