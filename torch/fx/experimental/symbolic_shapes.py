@@ -32,6 +32,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -2396,7 +2397,7 @@ class ShapeEnv:
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
-        return sym_sizes, sym_stride, sym_storage_offset
+        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
@@ -2802,12 +2803,22 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            for i, ss in enumerate(t.size()):
-                property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-                track_symint(property_source, ss, constraint[i])
-            for i, ss in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+            if is_traceable_wrapper_subclass(t):
+                # If our placeholder is a tensor subclass, then the "true" symints
+                # come from the subclass's inner tensors.
+                attrs, _ = t.__tensor_flatten__()
+                from torch._dynamo.source import AttrSource
+                sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
+            else:
+                sources_and_tensors = [(source, t)]
+
+            for src, curr_t in sources_and_tensors:
+                for i, ss in enumerate(curr_t.size()):
+                    property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
+                    track_symint(property_source, ss, constraint[i])
+                for i, ss in enumerate(curr_t.stride()):
+                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

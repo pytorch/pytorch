@@ -10515,8 +10515,8 @@ Example::
 
 add_docstr(
     torch.sparse_coo_tensor,
-    r"""
-sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""sparse_coo_tensor(indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10524,7 +10524,9 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 
 .. note::
 
-   This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+   This function returns an :ref:`uncoalesced tensor
+   <sparse-uncoalesced-coo-docs>` when :attr:`is_coalesced` is
+   unspecified or ``None``.
 
 {sparse_factory_device_note}
 
@@ -10549,6 +10551,15 @@ Keyword args:
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
+    is_coalesced (bool, optional): When``True``, the caller is
+        responsible for providing tensor indices that correspond to a
+        coalesced tensor.  If the :attr:`check_invariants` flag is
+        False, no error will be raised if the prerequisites are not
+        met and this will lead to silently incorrect results. To force
+        coalescion please use :meth:`coalesce` on the resulting
+        Tensor.
+        Default: None: except for trivial cases (e.g. nnz < 2) the
+        resulting Tensor has is_coalesced set to ``False```.
 
 Example::
 

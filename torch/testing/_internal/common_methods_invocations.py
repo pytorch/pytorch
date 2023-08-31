@@ -13156,7 +13156,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,

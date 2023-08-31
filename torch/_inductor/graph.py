@@ -790,6 +790,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]

@@ -2067,6 +2067,27 @@ if torch._C._has_mkldnn:
         out = out.to(memory_format=torch.channels_last)
         return out
 
+    @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    def meta_qlinear_pointwise(
+        x,
+        x_scale,
+        x_zp,
+        w,
+        w_scale,
+        w_zp,
+        bias,
+        output_scale,
+        output_zero_point,
+        fp32_output,
+        post_op_name,
+        post_op_args,
+        post_op_algorithm,
+    ):
+        output_shape = list(x.shape)
+        output_shape[-1] = w.shape[0]
+        out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
+        return out
+
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
 def check_dim_size(tensor, dim, dim_size, size):
