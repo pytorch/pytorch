@@ -9,7 +9,6 @@ from .pt2e.qat_utils import (
 from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
-    _replace_dropout_for_eval,
 )
 from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
@@ -99,17 +98,11 @@ def convert_pt2e(
     use_reference_representation: bool = False,
 ) -> GraphModule:
     original_graph_meta = model.meta
-    # TODO: Handle this in export itself, outside of quantization
-    # See https://github.com/pytorch/pytorch/issues/103681.
-    _replace_dropout_for_eval(model)
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
     pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module
 
-    print(model)
-    for node in model.graph.nodes:
-        print(node, node.meta)
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
     if use_reference_representation:
