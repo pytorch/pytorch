@@ -497,12 +497,6 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       other.numel(),
       " elements respectively");
   TORCH_CHECK(
-      self.device() == other.device(),
-      "expected all tensors to be on the same device. Found: ",
-      self.device(),
-      ", ",
-      other.device());
-  TORCH_CHECK(
       (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
           (other.stride(0) <= INT_MAX),
       "dot only supports n, incx, incy with the bound [val] <= %d",
