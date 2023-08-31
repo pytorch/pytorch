@@ -39,7 +39,6 @@ from torch.testing._internal import (
     common_utils,
 )
 from torch.testing._internal.opinfo import core as opinfo_core
-from torch.testing._internal.common_device_type import (toleranceOverride, tol)
 
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
@@ -713,6 +712,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     fp16_low_precision_list = [
         'nn.functional.batch_norm',
+        'native_batch_norm',
     ]
 
     @common_device_type.ops(
