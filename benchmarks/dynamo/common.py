@@ -1869,6 +1869,29 @@ class BenchmarkRunner:
         except Exception as e:
             raise NotImplementedError("Eager model failed to run") from e
 
+    def mfu(self, model, example_inputs):
+        model = self.deepcopy_model(model)
+        example_inputs = clone_inputs(example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
+        try:
+            from .mfu import evaluate_model_flops
+            evaluate_model_flops(model, example_inputs)
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
+        
+    def memory_bandwidth(self, model, example_inputs, num_samples = 1):
+        """
+        TODO: Should we use batch size finder for this?
+        """
+        model = self.deepcopy_model(model)
+        example_inputs = clone_inputs(example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
+        try:
+            from .mfu import memory_bandwidth
+            memory_bandwidth(model, example_inputs, num_samples)
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
+
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
@@ -2335,11 +2358,16 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
+
+            memory_bandwidth = self.memory_bandwidth(model, example_inputs)
+            mfu = self.mfu(model, example_inputs)
+
             if self.args.print_memory:
                 print(
                     f"memory: eager: {eager_peak_mem:.2f} GB, "
                     f"dynamo: {dynamo_peak_mem:.2f} GB, "
-                    f"ratio: {compression_ratio:.2f}"
+                    f"ratio: {compression_ratio:.2f}",
+                    f"memory_bandwidth : {memory_bandwidth}",
                 )
 
             if experiment.func is speedup_experiment:
@@ -2348,6 +2376,8 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                experiment_kwargs["memory_bandwidth"] = memory_bandwidth
+                experiment_kwargs["mfu"] = mfu
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
