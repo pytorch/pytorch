@@ -1398,6 +1398,7 @@ def _allgather_orig_param_states(
                     begin_idx = idx
                 end_idx = idx
 
+        local_buffer: List[torch.Tensor]
         if begin_idx != -1:
             local_buffers = buffers[begin_idx : end_idx + 1]
         else:
@@ -1473,6 +1474,7 @@ def _unflatten_orig_param_states(
                     )
             value = value.cpu()
             gathered_state[state_name] = value
+    return output_states
 
 
 def _gather_all_orig_param_state(
@@ -1520,7 +1522,7 @@ def _convert_state_with_orig_params(
     all_optim_state_keys: List[_OptimStateKey],
     optim_state_key_to_param_key: Dict[_OptimStateKey, Union[int, str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
-    optim_state_dict: Dict[str, Any],
+    optim_state_dict: Dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
 ) -> Dict[str, Any]:
@@ -1579,7 +1581,7 @@ def _convert_state_with_flat_params(
     all_optim_state_keys: List[_OptimStateKey],
     optim_state_key_to_param_key: Dict[_OptimStateKey, Union[int, str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
-    optim_state_dict: Dict[str, Any],
+    optim_state_dict: Dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
 ) -> Dict[str, Any]:
@@ -1697,8 +1699,6 @@ def _optim_state_dict(
     to_save = not rank0_only or dist.get_rank(group) == 0 or shard_state
 
     with SimpleProfiler.profile("preprocessing"):
-        fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
-        fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
         param_to_fqns = _get_param_to_fqns(model)
         flat_param_to_fqn = _get_flat_param_to_fqn(model)
         is_named_optimizer = _is_named_optimizer(optim_state_dict)
