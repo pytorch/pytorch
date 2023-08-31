@@ -67,7 +67,7 @@ void set_params_fprop(FlashFwdParams &params,
                       bool is_deterministic,
                       bool is_using_qloop) {
 
-    auto acc_type = at::kFloat32;
+    auto acc_type = at::kFloat;
     auto data_type = q.dtype();
 
     // Reset the parameters
@@ -183,7 +183,7 @@ void set_params_dgrad(FlashBwdParams &params,
                       bool is_performance_mode,
                       bool is_using_qloop) {
 
-    auto acc_type = at::kFloat32;
+    auto acc_type = at::kFloat;
     auto data_type = q.dtype();
 
     // Reset the parameters
@@ -509,9 +509,9 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         dk_tmp = dk;
         dv_tmp = dv;
     }else{
-        dq_tmp = dq.to(at::kFloat32);
-        dk_tmp = dk.to(at::kFloat32);
-        dv_tmp = dv.to(at::kFloat32);
+        dq_tmp = dq.to(at::kFloat);
+        dk_tmp = dk.to(at::kFloat);
+        dv_tmp = dv.to(at::kFloat);
     }
     
     if (zero_tensors) {
@@ -942,7 +942,7 @@ bool bwd_test(bool do_verification){
     at::Tensor v_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
     at::Tensor y_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);
     at::Tensor z_host = at::empty({batch_size*nheads, seqlen, seqlen}, at::kInt);
-    at::Tensor lse_host = at::empty({batch_size, nheads, seqlen}, at::kFloat32);
+    at::Tensor lse_host = at::empty({batch_size, nheads, seqlen}, at::kFloat);
 
     at::Tensor ygrad_host = at::rand({batch_size*seqlen, nheads, d}, at::kHalf);
     at::Tensor qgrad_host = at::empty({batch_size*seqlen, nheads, d}, at::kHalf);

@@ -9,6 +9,26 @@
 
 #pragma once
 
+#include <ATen/ATen.h>
+#include <ATen/Context.h>
+#include <ATen/NestedTensorImpl.h>
+#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
+#include <ATen/hip/HIPContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/transformers/hip/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
+#include <c10/util/env.h>
+#include <c10/util/irange.h>
+
+#include <c10/core/SymInt.h>
+#include <c10/util/string_view.h>
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,10 +45,6 @@
 #include <ck/library/reference_tensor_operation/cpu/reference_batched_gemm.hpp>
 #include <ck/library/reference_tensor_operation/cpu/reference_softmax.hpp>
 #include <ck/library/reference_tensor_operation/cpu/reference_dropout.hpp>
-
-//#include <c10/core/ScalarType.h>
-//#include <ATen/ATen.h>
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -50,7 +66,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// enum DataType {, kFloat32, kBFloat16, kInt32, kInt8};
+// enum DataType {, kFloat, kBFloat16, kInt32, kInt8};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -87,11 +103,11 @@ static inline size_t get_size_in_bytes( size_t n, dtype_t datatype ){
 /*   return n * 4; */
 /* }; */
 template <>
-static inline size_t get_size_in_bytes( size_t n, at::kBFloat16 datatype ){
+static inline size_t get_size_in_bytes( size_t n, at::BFloat16 datatype ){
   return n * 2;
 };
 template <>
-static inline size_t get_size_in_bytes( size_t n, at::kHalf datatype ){
+static inline size_t get_size_in_bytes( size_t n, at::Half datatype ){
   return n * 2;
 };
 /* template <> */
