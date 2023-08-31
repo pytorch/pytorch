@@ -1290,7 +1290,7 @@ def _allgather_state_info(
 
     processed_state_dict: Dict[str, StateInfo] = {}
     gathered_state_info: List[Dict[str, StateInfo]] = [
-        None for _ in range(fsdp_state.world_size)
+        {} for _ in range(fsdp_state.world_size)
     ]
 
     for fqn, optim_state in input_states.items():
@@ -1400,7 +1400,7 @@ def _allgather_orig_param_states(
 
         local_buffers: List[torch.Tensor] = []
         if begin_idx != -1:
-            for tensor in buffers[begin_idx: end_idx + 1]:
+            for tensor in buffers[begin_idx : end_idx + 1]:
                 assert tensor is not None
                 local_buffers.append(tensor)
         shard_numel_padded = flat_param._sharded_size.numel() - (
