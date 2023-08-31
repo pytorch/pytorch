@@ -221,8 +221,10 @@ def run_query(query):
             f"Query failed to run by returning code of {request.status_code}. {request.json()}"
         )
 
+
 _ERRORS = []
 _MAX_ERROR_LEN = 20
+
 
 def github_data(pr_number):
     query = (
@@ -255,6 +257,7 @@ def github_data(pr_number):
     )
     query = run_query(query)
     if query.get("errors"):
+        global _ERRORS
         _ERRORS.append(query.get("errors"))
         if len(_ERRORS) < _MAX_ERROR_LEN:
             return [], "None", ()
