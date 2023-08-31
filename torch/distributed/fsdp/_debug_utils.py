@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, Iterator, List, Set, Tuple, Union
+from typing import Dict, Iterator, List, Set, Tuple
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleProfiler:
-    class Type(Enum, str):
+    class Type(str, Enum):
         ALL = "all"
         ALLGATHER = "all_gather"
         ALLGATHER_OBJ = "all_gather_object"
