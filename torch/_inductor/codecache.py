@@ -47,11 +47,15 @@ if config.is_fbcode():
     from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
+        log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
 else:
+
+    def log_global_cache_errors(*args, **kwargs):
+        pass
 
     def log_global_cache_stats(*args, **kwargs):
         pass
@@ -238,6 +242,7 @@ class PersistentCache(CacheBase):
 
         log_stats = partial(log_global_cache_stats, self.system, name, inputs)
         log_vals = partial(log_global_cache_vals, self.system, name, inputs)
+        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -263,12 +268,17 @@ class PersistentCache(CacheBase):
                 use_global_cache()
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
-                # re-benchmark everything to try to get consistent numbers from the same machine
-                for choice in choices:
-                    timings[choice] = benchmark(choice)
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
-                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                try:
+                    # re-benchmark everything to try to get consistent numbers from the same machine
+                    for choice in choices:
+                        timings[choice] = benchmark(choice)
+                        local_cache.setdefault(name, {})
+                        local_cache[name].setdefault(inputs, {})
+                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                except RuntimeError as e:
+                    # catch and log autotuning failures
+                    log_errors(e)
+                    raise e
 
                 self.update_local_cache(local_cache)
 
@@ -292,13 +302,13 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra: str = ""):
-    hashing_str = code
+def code_hash(code: Union[str, bytes], extra: str = ""):
+    hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra != "":
-        hashing_str = hashing_str + "||" + extra
+        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
         .decode("utf-8")
         .lower()
     )
@@ -646,6 +656,10 @@ def pick_vec_isa():
     return invalid_vec_isa
 
 
+def get_compile_only(compile_only=True):
+    return "-c" if compile_only else ""
+
+
 def get_shared(shared=True):
     return "-shared -fPIC" if shared else ""
 
@@ -874,6 +888,7 @@ def cpp_compile_command(
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
     aot_mode=False,
+    compile_only=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -903,9 +918,18 @@ def cpp_compile_command(
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
+            {get_compile_only(compile_only)}
             -o {out_name}
         """,
     ).strip()
+
+
+def run_command_and_check(cmd: str):
+    cmd = shlex.split(cmd)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        raise exc.CppCompileError(cmd, e.output) from e
 
 
 class CudaKernelParamCache:
@@ -941,12 +965,29 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
+        if config.is_fbcode():
+            ld_command = build_paths.ld()
+            objcopy_command = build_paths.objcopy()
+        else:
+            ld_command = "ld"
+            objcopy_command = "objcopy"
         key, input_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
             specified_dir=config.aot_inductor_output_path,
         )
+
+        aot_constants = b""
+        for tensor in graph.constants.values():
+            aot_constants += bytes(tensor.untyped_storage().cpu())
+
+        consts_key, consts_path = write(
+            aot_constants,
+            "bin",
+            specified_dir=config.aot_inductor_output_path,
+        )
+
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -956,20 +997,61 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path,
-                            output=output_so,
-                            vec_isa=picked_vec_isa,
-                            cuda=cuda,
-                            aot_mode=graph.aot_mode,
-                        )
+                    output_o = os.path.splitext(input_path)[0] + ".o"
+                    cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_o,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                        compile_only=True,
                     )
-                    log.debug("aot compilation command: %s", " ".join(cmd))
-                    try:
-                        subprocess.check_call(cmd)
-                    except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output) from e
+                    log.debug("aot compilation command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    consts_o = os.path.splitext(consts_path)[0] + ".o"
+                    cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                    run_command_and_check(cmd)
+                    log.debug("aot constant binary command: %s", cmd)
+
+                    cmd = (
+                        f"{objcopy_command} --rename-section"
+                        " .data=.lrodata,alloc,load,readonly,data,contents"
+                        f" {consts_o} {consts_o}"
+                    )
+                    log.debug("aot constant obj command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    cmd = f"rm {consts_path}"
+                    log.debug("aot constant bin removal command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    symbol_list = []
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_size {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+                    )
+                    log.debug(
+                        "aot constant binary redefine symbol: %s", " ".join(symbol_list)
+                    )
+                    for cmd in symbol_list:
+                        run_command_and_check(cmd)
+
+                    cmd = cpp_compile_command(
+                        input=f"{output_o} {consts_o}",
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                    )
+                    log.debug("aot linkage command: %s", cmd)
+                    run_command_and_check(cmd)
                 else:
                     log.debug(
                         "aot_inductor dynamic library already exist: %s", output_so

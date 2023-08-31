@@ -452,6 +452,9 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.nn.Parameter:
             # https://github.com/pytorch/pytorch/issues/99569
             unimplemented("torch.nn.Parameter not supported")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
@@ -655,6 +658,8 @@ class TorchVariable(VariableTracker):
                     return v
 
             return torch.utils._pytree.tree_map(map_fn, tree)
+        elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
+            unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
             unimplemented("TypeError(\"'module' object is not callable\")")
         else:
