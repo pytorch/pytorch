@@ -114,10 +114,11 @@ class AOTInductorModelContainer {
       auto stride = model->constant_stride(i);
       auto offset = model->constant_offset(i);
 
-      auto tensor = at::from_blob(
-          internal_ptr, size, stride, at::device(at::kCUDA).dtype(dtype));
-      tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
-      tensor.unsafeGetTensorImpl()->set_storage_offset(offset);
+      auto tensor = at::for_blob(internal_ptr, size)
+                        .strides(stride)
+                        .storage_offset(offset)
+                        .options(at::device(at::kCUDA).dtype(dtype))
+                        .make_tensor();
       constants_->emplace(std::move(name), tensor);
     }
   }
