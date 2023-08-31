@@ -329,21 +329,28 @@ def _multi_tensor_asgd(
             # Re-use the intermediate memory (grouped_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+                grouped_grads_copy = grouped_grads
+
             else:
-                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+                grouped_grads_copy = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         if capturable:
+            if weight_decay != 0 or maximize:
+                torch._foreach_add_(grouped_grads_copy, grouped_params, alpha=lambd)
+            else:
+                grouped_grads_copy = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
+
             # decay term
-            decay = torch._foreach_mul(etas, -lambd)
+            decay = torch._foreach_mul(grouped_etas, -lambd)
             torch._foreach_add_(decay, 1)
             grouped_params_decayed = torch._foreach_mul(grouped_params, decay)
-            neg_etas = torch._foreach_mul(etas, -1)
 
             # update parameter
-            torch._foreach_mul_(grouped_grads, neg_etas)
-            torch._foreach_div_(grouped_grads, grouped_params_decayed)
-            torch._foreach_add_(grouped_grads, 1.0)
-            torch._foreach_mul_(grouped_params, grouped_grads)
+            neg_etas = torch._foreach_mul(grouped_etas, -1)
+            torch._foreach_mul_(grouped_grads_copy, neg_etas)
+            torch._foreach_div_(grouped_grads_copy, grouped_params_decayed)
+            torch._foreach_add_(grouped_grads_copy, 1.0)
+            torch._foreach_mul_(grouped_params, grouped_grads_copy)
 
             # update grouped_axs
             grouped_params_copy = torch._foreach_sub(grouped_params, grouped_axs)
