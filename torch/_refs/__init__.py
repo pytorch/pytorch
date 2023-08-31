@@ -4427,7 +4427,7 @@ def take_along_dim(
         a.ndim == indices.ndim,
         lambda: (
             "torch.take_along_dim(): input and indices should have the same "
-            f"number of dimensions, bug got {a.ndim} dimensions for input, and "
+            f"number of dimensions, but got {a.ndim} dimensions for input, and "
             f"{indices.ndim} dimensions for indices"
         ),
     )
