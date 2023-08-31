@@ -569,8 +569,9 @@ def _init_param_handle_from_module(
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
+        default_group = _get_default_group()
         _sync_module_params_and_buffers(
-            fully_sharded_module, managed_params, state.process_group
+            fully_sharded_module, managed_params, default_group
         )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
     return state
