@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
@@ -162,6 +163,18 @@ In order to do this, we need implementations for each of the dispatch keys.
 cond_op = HigherOrderOperator("cond")
 
 
+def _maybe_run_with_interpreter(fn):
+    maybe_interpreted_fn = fn
+    if isinstance(fn, torch.fx.GraphModule) and fx_traceback.has_preserved_node_meta():
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with fx_traceback.preserve_node_meta():
+                return torch.fx.Interpreter(fn).run(*args)
+
+        maybe_interpreted_fn = graph_with_interpreter
+    return maybe_interpreted_fn
+
+
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
@@ -171,9 +184,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     ), "Cond operands must be a list of tensors"
 
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(true_fn, pre_dispatch=pre_dispatch)(*operands)
-        false_graph = make_fx(false_fn, pre_dispatch=pre_dispatch)(*operands)
+        true_graph = make_fx(
+            _maybe_run_with_interpreter(true_fn), pre_dispatch=pre_dispatch
+        )(*operands)
+        false_graph = make_fx(
+            _maybe_run_with_interpreter(false_fn), pre_dispatch=pre_dispatch
+        )(*operands)
 
     true_outs = []
     false_outs = []
