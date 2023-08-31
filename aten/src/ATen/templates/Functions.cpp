@@ -38,10 +38,14 @@ Tensor TensorMaker::make_tensor() {
    }
 
    TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizeable=*/resizeable_};
+   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizable=*/resizeable_};
 
+   auto keys = c10::DispatchKeySet({opts_.computeDispatchKey()});
+   if (extra_dispatch_keys_) {
+      keys = keys | *extra_dispatch_keys_;
+   }
    Tensor tensor = detail::make_tensor<TensorImpl>(
-       std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
+       std::move(storage), keys, opts_.dtype());
 
   TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
   if (strides_) {
