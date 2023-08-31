@@ -332,6 +332,6 @@ To summarize, the compiled code is conceptually equivalent to the code below:
                return code(a, b)
        recompile_and_add_another_cache_entry()
 
-The following diagram demonstrates how ``torch.compile`` transforms and optimizes user-written code:
+The following diagram demonstrates how ``torch.compile`` transforms and optimizes user-written code: it first extracts computation graphs from the user-written function, and compiles these graphs into optimized functions, then assembles them into a new function, which is functionally equivalent to the user-written code but optimized to have a good computation speed.
 
 .. image:: _static/img/dynamo/flowchart.jpg
