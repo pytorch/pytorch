@@ -627,8 +627,6 @@ aten::avg_pool3d
 aten::avg_pool3d.out
 aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
-aten::baddbmm
-aten::baddbmm.out
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
@@ -833,8 +831,6 @@ aten::kaiser_window.periodic
 aten::kaiser_window.periodic_out
 aten::kthvalue
 aten::kthvalue.values
-aten::lift_fresh_copy
-aten::lift_fresh_copy.out
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_cross
@@ -1253,8 +1249,6 @@ aten::special_shifted_chebyshev_polynomial_v.out
 aten::special_shifted_chebyshev_polynomial_w
 aten::special_shifted_chebyshev_polynomial_w.n_scalar_out
 aten::special_shifted_chebyshev_polynomial_w.out
-aten::split_copy.Tensor
-aten::split_copy.Tensor_out
 aten::split_with_sizes_copy
 aten::split_with_sizes_copy.out
 aten::squeeze_
@@ -1284,8 +1278,6 @@ aten::transpose_copy.int
 aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unique_consecutive
 aten::unique_consecutive.out
 aten::unique_dim
