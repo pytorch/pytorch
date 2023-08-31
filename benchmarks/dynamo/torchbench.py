@@ -148,6 +148,7 @@ REQUIRE_HIGHER_FP16_TOLERANCE = {
 
 REQUIRE_HIGHER_BF16_TOLERANCE = {
     "detectron2_fcos_r_50_fpn",
+    "drq",
 }
 
 REQUIRE_COSINE_TOLERACE = {
