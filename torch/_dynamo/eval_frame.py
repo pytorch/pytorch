@@ -430,9 +430,6 @@ class OptimizeContext(_TorchDynamoContext):
         def on_enter():
             install_generation_tagging_init()
 
-        compiler_fn = innermost_fn(callback)
-        assert compiler_fn is not None
-
         super().__init__(
             callback=callback,
             on_enter=on_enter,
