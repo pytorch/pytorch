@@ -1644,8 +1644,9 @@ class Module:
         state = self.__dict__.copy()
 
         # Support for slots in child classes
-        for key in self.__slots__:
-            state[key] = getattr(self, key)
+        if getattr(self, "__slots__", None):
+            for key in self.__slots__:
+                state[key] = getattr(self, key)
 
         state.pop("_compiled_call_impl", None)
         return state
@@ -1653,9 +1654,11 @@ class Module:
     def __setstate__(self, state):
 
         # Support for slots in child classes
-        for key in self.__slots__:
-            self.__setattr__(key, state[key])
-            state.pop(key, None)
+        if getattr(self, "__slots__", None):
+            for key in self.__slots__:
+                if key in state:
+                    self.__setattr__(key, state[key])
+                    state.pop(key, None)
 
         self.__dict__.update(state)
 

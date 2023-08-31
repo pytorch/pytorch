@@ -304,6 +304,12 @@ class RNNBase(Module):
         self._update_flat_weights()
         # Don't serialize the weight references.
         state = self.__dict__.copy()
+
+        # Support for slots in child classes
+        if getattr(self, "__slots__", None):
+            for key in self.__slots__:
+                state[key] = getattr(self, key)
+
         del state['_flat_weight_refs']
         return state
 

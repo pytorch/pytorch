@@ -8,6 +8,7 @@ import io
 import itertools
 import warnings
 import pickle
+import tempfile
 from copy import deepcopy
 from itertools import product
 from functools import partial
@@ -7310,6 +7311,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
+
+    def test_save_load_with_slots_in_child_class(self):
+        """
+        Check that saving and loading with with slots in subclasses works fine.
+        """
+
+        obj = TestModule()
+        obj.var = "test_value"
+
+        with tempfile.TemporaryFile() as f:
+            torch.save(obj, f)
+            f.seek(0)
+            m_obj = torch.load(f)
+            self.assertEqual(m_obj.var, "test_value")
+
+
+# Had to move it out as serialization fails on local object
+class TestModule(torch.nn.Module):
+    __slots__ = ['var']
+
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
