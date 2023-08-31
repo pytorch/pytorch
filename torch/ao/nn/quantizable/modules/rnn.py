@@ -392,8 +392,6 @@ class LSTM(torch.nn.Module):
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
                                                          batch_first=False)
-        # TODO: Remove setting observed to eval to enable QAT.
-        observed.eval()
         observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
