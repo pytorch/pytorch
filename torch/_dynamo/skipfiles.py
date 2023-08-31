@@ -137,12 +137,13 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 # Note: These patterns are comprised of torch ops and for internal use only.
 # They are exported to aten graphs before being passed to the FX subgraph rewriter.
 # TODO: find a better way to express this path without having to import
-# `torch.ao.quantization._pt2e`, which interferes with memory profiling
+# `torch.ao.quantization.pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
     _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
+    _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
 }
 
 FILENAME_ALLOWLIST |= {
