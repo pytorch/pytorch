@@ -233,6 +233,7 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "doctr_reco_predictor",
     "Super_SloMo",
     "tts_angular",
+    "pyhpc_turbulent_kinetic_energy",
 }
 
 # models in canary_models that we should run anyway
