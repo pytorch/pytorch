@@ -26,8 +26,8 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
-    QuantizationConfig,
     propagate_annotation,
+    QuantizationConfig,
 )
 
 from torch.fx import Node

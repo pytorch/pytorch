@@ -731,6 +731,7 @@ OP_TO_ANNOTATOR = {
     "gru_io_only": _annotate_gru_io_only,
 }
 
+
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     return op in [
         torch.ops.aten.hardtanh.default,
