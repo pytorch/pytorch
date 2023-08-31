@@ -1275,7 +1275,7 @@ class CosineEmbeddingLoss(_Loss):
         >>> loss = nn.CosineEmbeddingLoss()
         >>> input1 = torch.randn(3, 5, requires_grad=True)
         >>> input2 = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.ones(3)  # To create -1 Tensors: torch.full((3,), fill_value=-1)
+        >>> target = torch.ones(3)
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
