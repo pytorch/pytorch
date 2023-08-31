@@ -50,8 +50,9 @@ unary_ops = [
 print(f"{'op':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
 
 for op in unary_ops:
+
     x = torch.rand((1024, 1024))
-    traced = torch.jit.trace(lambda x: op(x), (x))
+    traced = torch.jit.trace(lambda x, op=op : op(x), (x))
 
     # Warmup.
     warmup_iters = 8
