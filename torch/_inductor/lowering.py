@@ -1475,23 +1475,12 @@ def _warn_complex_not_supported():
     )
 
 
-@functools.lru_cache(None)
-def _warn_float8_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
-    )
-
-
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
-        return True
-    # FP8 Tensors are currently not supported
-    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
-        _warn_float8_not_supported()
         return True
     return False
 
@@ -1880,7 +1869,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten._scaled_mm.default)
 
 make_fallback(aten.view_as_complex, require_contiguous)
 
