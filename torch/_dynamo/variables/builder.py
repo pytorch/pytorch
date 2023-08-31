@@ -411,7 +411,7 @@ class VariableBuilder:
             # store key variables in global location for reconstruction
             for key in value.keys():
                 if self.tensor_can_be_dict_key(key):
-                    self.tx.store_dict_key(global_key_name(key), key)
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
