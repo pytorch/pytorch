@@ -1,13 +1,23 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+isSM90orLaterDevice = (
+    torch.cuda.is_available()
+    and torch.cuda.get_device_capability()
+    >= (
+        9,
+        0,
+    )
+)
 
 torch.set_float32_matmul_precision("high")
 
@@ -15,6 +25,7 @@ torch.set_float32_matmul_precision("high")
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @unittest.skipIf(not isSM90orLaterDevice, "Requires SM90 device")
     def test_eager_fallback(self, dtype: torch.dtype):
         x_shape = (16, 16)
         weight_shape = (32, 16)
