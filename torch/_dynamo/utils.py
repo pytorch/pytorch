@@ -1415,9 +1415,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         # NB: mimic how wrap_fake_exception does it
         from .exc import unimplemented
 
-        raise unimplemented(
-            f"running {op} {node.target}(*{args}, **{kwargs})"
-        ) from e
+        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
 
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
