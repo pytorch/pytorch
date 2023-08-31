@@ -1412,7 +1412,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     torch._disable_functionalization()
             return wrapper
 
-        gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=True))
+        gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
         exp_graph = """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
