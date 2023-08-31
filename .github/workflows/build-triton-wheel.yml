@@ -151,7 +151,7 @@ jobs:
         # if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
         shell: bash
         run: |
-          set -eux
+          set -ex
 
           # reference ends with an RC suffix
           if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
@@ -171,7 +171,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
-          set -eux
+          set -ex
           bash .circleci/scripts/binary_upload.sh
 
   build-conda:
@@ -264,7 +264,7 @@ jobs:
         # if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
         shell: bash
         run: |
-          set -eux
+          set -ex
 
           # reference ends with an RC suffix
           if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
@@ -281,7 +281,7 @@ jobs:
           CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
         shell: bash
         run: |
-          set -eux
+          set -ex
 
           if [[ "${UPLOAD_CHANNEL}" = "nightly" ]]; then
             export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
