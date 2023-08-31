@@ -245,7 +245,7 @@ class _WrappedCall:
     # function, and five lines of context surrounding the faulty
     # line
     @staticmethod
-    def _generate_error_message(frame_summary: traceback.FrameSummary) -> str:
+    def _generate_error_message(frame_summary: traceback.FrameSummary, extra_context: Optional[str]) -> str:
         # auxiliary variables (for readability)
         err_lineno = frame_summary.lineno
         assert err_lineno is not None
@@ -264,7 +264,11 @@ class _WrappedCall:
         err_and_after_err = "\n".join(all_src_lines[err_lineno : err_lineno + 2])
 
         # joined message
-        return "\n".join([tb_repr, custom_msg, before_err, marker, err_and_after_err])
+        msg = [tb_repr, custom_msg, before_err, marker, err_and_after_err]
+        if extra_context is not None:
+            msg.append(extra_context)
+
+        return "\n".join(msg)
 
     def __call__(self, obj, *args, **kwargs):
         try:
@@ -276,8 +280,32 @@ class _WrappedCall:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \
                 traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore[arg-type]
+
+            extra_context = None
             if "eval_with_key" in topmost_framesummary.filename:
-                print(_WrappedCall._generate_error_message(topmost_framesummary),
+                # Find the original node that caused the error.
+                # We track the offset in the function body -> node (0-indexed)
+                offset_to_stack = getattr(obj, "_offset_to_stack", None)
+                if offset_to_stack is not None:
+                    # Find the offset where the body starts.
+                    code = obj.code
+                    body_start_offset = None
+                    for idx, line in enumerate(code.split("\n")):
+                        # Body starts right after the function signature.
+                        if line.startswith("def forward"):
+                            body_start_offset = idx + 1
+                    assert body_start_offset is not None
+
+                    # Now based on the lineno of the exception, compute the offset into the body's source code.
+                    exception_line = topmost_framesummary.lineno
+
+                    # Extra -1 because line numbers are 1-indexed but our offsets are 0-indexed.
+                    offset_in_body = exception_line - body_start_offset - 1  # type: ignore[operator]
+                    stack_trace = offset_to_stack[offset_in_body]
+                    if stack_trace is not None:
+                        extra_context = f"Original user stack trace:\n{stack_trace}"
+
+                print(_WrappedCall._generate_error_message(topmost_framesummary, extra_context),
                       file=sys.stderr)
                 raise e.with_traceback(None)
             else:
@@ -658,6 +686,7 @@ class {module_name}(torch.nn.Module):
             self._out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
+        self._offset_to_stack = python_code._offset_to_stack
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, '_co_fields') else {}

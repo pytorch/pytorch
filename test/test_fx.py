@@ -3774,6 +3774,30 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         copy_m = copy.deepcopy(m)  # finishes
         self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
 
+    def test_codegen_user_stack_trace(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x + x
+                x = x + x
+                x = x + y
+                x = x + x
+                x = x + x
+                return x
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(Module())
+        mod = GraphModule(tracer.root, graph, "Module")
+        with self.capture_stderr() as captured:
+            with self.assertRaises(RuntimeError):
+                mod(torch.rand(4, 5), torch.rand(2, 3))
+
+        self.assertRegex(captured[0], r"Original user stack trace:")
+        self.assertRegex(captured[0], r"x = x \+ y")
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
