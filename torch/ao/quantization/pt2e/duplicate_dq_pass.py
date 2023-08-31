@@ -21,21 +21,17 @@ _DEQUANTIZE_OPS = [
 ]
 
 
-"""
-This API is specifically to replace a specific use of producer node
-ATM, it uses internal API __update_args_kwargs, but ideally we mvoe
-this API to fx.Node.replace_use_with...
-"""
-
-
-def _copy_and_replace_use(
-    gm: torch.fx.GraphModule, producer: torch.fx.Node, user: torch.fx.Node
+def _maybe_duplicate_dq(
+    gm: torch.fx.GraphModule, dq_node: torch.fx.Node, user: torch.fx.Node
 ):
-    with gm.graph.inserting_after(producer):
-        new_node = gm.graph.node_copy(producer)
+    annotation = user.meta.get("quantization_annotation", None)
+    if not is_valid_annotation(annotation):
+        return
+    with gm.graph.inserting_after(dq_node):
+        new_node = gm.graph.node_copy(dq_node)
 
         def maybe_replace_node(n: torch.fx.Node) -> torch.fx.Node:
-            if n == producer:
+            if n == dq_node:
                 return new_node
             else:
                 return n
@@ -46,20 +42,7 @@ def _copy_and_replace_use(
         user.kwargs = new_kwargs
 
 
-def _maybe_duplicate_dq(
-    gm: torch.fx.GraphModule, producer: torch.fx.Node, user: torch.fx.Node
-):
-    annotation = user.meta.get("quantization_annotation", None)
-    if not is_valid_annotation(annotation):
-        return
-    _copy_and_replace_use(gm, producer, user)
-
-
 class DuplicateDQPass(_ExportPassBase):
-    """
-    kk
-    """
-
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             if node.op == "call_function" and node.target in _DEQUANTIZE_OPS:
