@@ -1048,7 +1048,8 @@ def same(
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
-                if math.isnan(ref_error):
+                # ref unable to produce this with stable numerics in this precision, ignore
+                if math.isnan(ref_error) and fp64_ref.isnan().sum() == 0:
                     return True
 
                 res_error = rmse(fp64_ref, res).item()
