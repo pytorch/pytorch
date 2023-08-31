@@ -75,6 +75,8 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
         with torch.set_grad_enabled(False):
             compiled_step()
+            compiled_step()
+            opt_eager.step()
             opt_eager.step()
 
         self.assertEqual(
@@ -165,7 +167,7 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd = make_test(ASGD, kernel_count=2, lr=0.01)
+    test_asgd = make_test(ASGD, kernel_count=2, lr=0.1)
     # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)

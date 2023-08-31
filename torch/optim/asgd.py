@@ -92,8 +92,8 @@ class ASGD(Optimizer):
                         )
                     else:
                         state["step"] = torch.tensor(0.0)
-                        state["eta"] = torch.tensor(group["lr"])
-                        state["mu"] = torch.tensor(1.0)
+                        state["eta"] = torch.tensor(group["lr"], device=p.device)
+                        state["mu"] = torch.ones((), dtype=torch.float, device=p.device)
                         state["ax"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
@@ -325,58 +325,37 @@ def _multi_tensor_asgd(
         # update step
         torch._foreach_add_(grouped_state_steps, 1)
 
-        if weight_decay != 0:
-            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
-            if maximize:
-                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
-                grouped_grads_copy = grouped_grads
+        # intermediate = grad + param * lambd
+        if weight_decay != 0 or maximize:
+            # Re-use the intermediate memory (grouped_grads) already allocated
+            torch._foreach_add_(grouped_grads, grouped_params, alpha=lambd)
+            intermediate = grouped_grads
+        else:
+            intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
 
-            else:
-                grouped_grads_copy = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+        # update param = param - eta * (lambd * param + grad)
+        torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
+
+        # update grouped_axs
+        # averaging: ax = ax + mu * (param - ax)
+        torch._foreach_lerp_(grouped_axs, grouped_params, grouped_mus)
 
         if capturable:
-            if weight_decay != 0 or maximize:
-                torch._foreach_add_(grouped_grads_copy, grouped_params, alpha=lambd)
-            else:
-                grouped_grads_copy = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
-
-            # decay term
-            decay = torch._foreach_mul(grouped_etas, -lambd)
-            torch._foreach_add_(decay, 1)
-            grouped_params_decayed = torch._foreach_mul(grouped_params, decay)
-
-            # update parameter
-            neg_etas = torch._foreach_mul(grouped_etas, -1)
-            torch._foreach_mul_(grouped_grads_copy, neg_etas)
-            torch._foreach_div_(grouped_grads_copy, grouped_params_decayed)
-            torch._foreach_add_(grouped_grads_copy, 1.0)
-            torch._foreach_mul_(grouped_params, grouped_grads_copy)
-
-            # update grouped_axs
-            grouped_params_copy = torch._foreach_sub(grouped_params, grouped_axs)
-            torch._foreach_mul_(grouped_params_copy, grouped_mus)
-            torch._foreach_add_(grouped_axs, grouped_params_copy)
-
             # update grouped_mus
-            torch._foreach_copy_(grouped_mus,
-                                 torch._foreach_reciprocal(torch._foreach_maximum(torch._foreach_sub(grouped_state_steps, t0),
-                                                                                  1.0)))
+            new_mus = torch._foreach_sub(grouped_state_steps, t0)
+            torch._foreach_maximum_(new_mus, 1.0)
+            torch._foreach_reciprocal_(new_mus)
+            torch._foreach_copy_(grouped_mus, new_mus)
+
+            # update eta = lr / (1 + lambd * lr * step^alpha)
+            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
+            torch._foreach_mul_(new_etas, lambd)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_add_(new_etas, 1)
+            torch._foreach_reciprocal_(new_etas)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_copy_(grouped_etas, new_etas)
         else:
-            # decay term
-            eta = _get_value(grouped_etas[0])
-            torch._foreach_mul_(grouped_params, 1 - lambd * eta)
-
-            # update parameter
-            torch._foreach_add_(grouped_params, grouped_grads, alpha=-eta)
-
-
-            # averaging
-            for i in range(len(grouped_axs)):
-                if is_compiling() or grouped_mus[i].item() != 1:
-                    grouped_axs[i].add_(grouped_params[i].sub(grouped_axs[i]).mul(grouped_mus[i]))
-                else:
-                    grouped_axs[i].copy_(grouped_params[i])
-
             # update eta and mu
             for i in range(len(grouped_mus)):
                 new_eta = _to_tensor(
