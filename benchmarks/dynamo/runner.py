@@ -767,7 +767,7 @@ class ParsePerformanceLogs(Parser):
         return f"{df.mean():.2f}"
 
     def geomean(self, compiler, df):
-        cleaned_df = self.get_passing_entries(compiler, df).clip(1)
+        cleaned_df = self.get_passing_entries(compiler, df)
         if cleaned_df.empty:
             return "0.0x"
         return f"{gmean(cleaned_df):.2f}x"
