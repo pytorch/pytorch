@@ -1231,8 +1231,8 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
-    This is used for measuring whether two inputs are similar or dissimilar,
-    using the cosine similarity, and is typically used for learning nonlinear
+    Use (:math:`y=1`) to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
+    This is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
     The loss function for each sample is:
@@ -1269,6 +1269,15 @@ class CosineEmbeddingLoss(_Loss):
         - Input2: :math:`(N, D)` or :math:`(D)`, same shape as Input1.
         - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
+
+    Examples::
+
+        >>> loss = nn.CosineEmbeddingLoss()
+        >>> input1 = torch.randn(3, 5, requires_grad=True)
+        >>> input2 = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.ones(3)
+        >>> output = loss(input1, input2, target)
+        >>> output.backward()
     """
     __constants__ = ['margin', 'reduction']
     margin: float

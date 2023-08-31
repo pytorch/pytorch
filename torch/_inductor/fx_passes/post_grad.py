@@ -626,13 +626,13 @@ def reinplace_scatters(graph):
     Also handles input mutations when there is a corresponding copy node.
     """
 
-    copy_nodes = {}
+    copy_args_to_copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
-            copy_nodes[(node.args[0], node.args[1])] = node
+            copy_args_to_copy_nodes[(node.args[0], node.args[1])] = node
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
@@ -646,7 +646,9 @@ def reinplace_scatters(graph):
                 continue
             shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
             if mutated_arg.op == "placeholder":
-                if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
+                if not (
+                    copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
+                ):
                     continue
 
                 if (
