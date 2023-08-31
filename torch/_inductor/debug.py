@@ -266,7 +266,7 @@ class DebugContext:
         return open(os.path.join(self._path, filename), "w")
 
     def filename(self, suffix):
-        return os.path.join(self._path, suffix) # type: ignore[arg-type]
+        return os.path.join(self._path, suffix)  # type: ignore[arg-type]
 
     def upload_tar(self):
         if config.trace.upload_tar is not None:
