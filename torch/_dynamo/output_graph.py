@@ -276,9 +276,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=self.frame_state[
-                    "capture_dynamic_output_shape_ops"
-                ],
+                allow_dynamic_output_shape_ops=torch._guards.CompileContext.get_capture_dynamic_output_shape_ops(),
                 co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
@@ -1073,11 +1071,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
+            from torch._inductor.exc import LoweringException
+
             if (
-                e.args[0] == "Cannot convert symbols to int"
+                isinstance(e, TypeError)
+                and e.args[0] == "Cannot convert symbols to int"
+                or isinstance(e, LoweringException)
+                and e.args[0].startswith("TypeError: Cannot convert symbols to int")
                 or isinstance(e, GuardOnDataDependentSymNode)
-            ) and self.frame_state["capture_dynamic_output_shape_ops"]:
-                self.frame_state["capture_dynamic_output_shape_ops"] = False
+            ) and torch._guards.CompileContext.get_capture_dynamic_output_shape_ops():
+                torch._guards.CompileContext.set_capture_dynamic_output_shape_ops(False)
                 raise RestartAnalysis() from None
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__

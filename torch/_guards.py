@@ -549,6 +549,7 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        self.capture_dynamic_output_shape_ops = True
 
     @staticmethod
     def current_compile_id():
@@ -565,6 +566,19 @@ class CompileContext:
         if self.compile_id is None:
             return None
         return TraceId(self.compile_id, self.attempt)
+
+    def get_capture_dynamic_output_shape_ops():
+        self = CompileContext.get()
+        if self is None:
+            return None
+        return self.capture_dynamic_output_shape_ops
+
+    @staticmethod
+    def set_capture_dynamic_output_shape_ops(flag: bool):
+        self = CompileContext.get()
+        if self is None:
+            return
+        self.capture_dynamic_output_shape_ops = flag
 
 
 class TracingContext:

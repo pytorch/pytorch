@@ -365,10 +365,6 @@ def convert_frame_assert(
 
         compile_id = CompileId(frame_id, frame_compile_id)
 
-        # Always capture dynamic shape ops in the first attempt.
-        # Switch to graph break if the first attempt failed.
-        frame_state["capture_dynamic_output_shape_ops"] = True
-
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",
