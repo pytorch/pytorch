@@ -275,7 +275,7 @@ Some names referenced in the code are:
 
 - Argument ``L`` of the ``guard`` function. This is a dict mapping the name of arguments of ``toy_example`` to its values. This is only available when the function is called, where the frame evaluation API comes into play. In short, ``L`` is a ``dict`` with structure of ``{'a': value_a, 'b': value_b}``. Therefore, you can see the code uses ``L['a']`` to refer to the input variable ``a``.
 
-The graph break is shown in the code of compiled ``toy_example``, where we have to use python interpreter to select the following graph to execute.
+The graph break is shown in the code of compiled ``toy_example``, where we have to use Python interpreter to select the following graph to execute.
 
 Note that we pass a simple ``my_compiler`` function as the backend compiler, therefore the subgraph code ``__resume_at_38_2``, ``__resume_at_30_1``, and ``__compiled_fn_0`` remain python code. This can also be inspected (please ignore the function name, and only use the function signature and function body code):
 
