@@ -1,7 +1,8 @@
 import torch
+import torch.nn.functional as F
 from torch.fx import GraphModule
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
-import torch.nn.functional as F
+
 
 def _replace_dropout_for_eval(m: GraphModule):
     """
@@ -36,6 +37,7 @@ def _replace_dropout_for_eval(m: GraphModule):
         ignore_literals=True,
     )
     m.recompile()
+
 
 # TODO: also support move_model_to_train
 # TODO: also support standalone batchnorm
