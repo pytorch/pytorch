@@ -2098,7 +2098,7 @@ def get_flops_achieved(f):
     total_flops = sum(flop_counter.get_flop_counts()["Global"].values())
     ms_per_iter = torch._inductor.utils.do_bench(f)
     iters_per_second = 1e3 / ms_per_iter
-    print(f"{iters_per_second * total_flops / 1e12} TF/s")
+    print(f"Model FLOPS: {iters_per_second * total_flops / 1e12} TF/s")
 
 
 def evaluate_model_flops(model, inp):
@@ -2116,7 +2116,7 @@ def evaluate_model_flops(model, inp):
     # compiled_model = torch.compile(model)
     # evaluate_model_flops(compiled_model, inp)
     """
-    get_flops_achieved(lambda: model(inp).sum())
+    get_flops_achieved(lambda: model(*inp))
 
 
 def memory_bandwidth(model, inp, num_samples=1):
@@ -2142,7 +2142,8 @@ def memory_bandwidth(model, inp, num_samples=1):
     )
 
     # Assume batch size is the first dimension
-    batch_size = inp.size(0)
+    # batch_size = inp.size(0)
+    batch_size = 1
 
     total_time = 0.0
 
@@ -2154,7 +2155,7 @@ def memory_bandwidth(model, inp, num_samples=1):
 
         t0 = time.perf_counter()
         with torch.no_grad():
-            _ = model(inp)
+            _ = model(*inp)
 
         if device == torch.device("cuda"):
             torch.cuda.synchronize()
