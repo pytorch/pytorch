@@ -3387,7 +3387,7 @@ def run(runner, args, original_dir=None):
                 name = model.__class__.__name__
                 model = model.to(device=device)
                 example_inputs = tree_map_only(
-                    torch.Tensor, lambda x: x.to(device=device), example_inputs
+                    torch.Tensor, lambda x, device=device : x.to(device=device), example_inputs
                 )
             else:
                 try:
@@ -3440,7 +3440,7 @@ def run(runner, args, original_dir=None):
                 xla_dev = xm.xla_device()
                 model = model.to(device=xla_dev)
                 example_inputs = tree_map_only(
-                    torch.Tensor, lambda x: x.to(device=xla_dev), example_inputs
+                    torch.Tensor, lambda x, xla_dev=xla_dev : x.to(device=xla_dev), example_inputs
                 )
 
             current_name = name
