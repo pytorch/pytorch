@@ -1579,6 +1579,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
 
+    def test_out_variants_with_resizing_on_graph_inputs(self):
+        def fn(x, y):
+            return torch.cosh(x, out=y) + 1
+
+        x = torch.rand(2, 3)
+        y = torch.rand(4)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_dict_mutation_side_effect(self):
         def fn(d):
             d["c"] = d["a"] + d.pop("b")
