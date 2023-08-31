@@ -1445,7 +1445,13 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
-    if isinstance(cls, type) and issubclass(cls, _Union):
+    if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
+        if data is None:
+            return None
+        ty_args = typing.get_args(cls)
+        assert len(ty_args) == 2
+        return _dict_to_dataclass(ty_args[0], data)
+    elif isinstance(cls, type) and issubclass(cls, _Union):
         obj = cls(**data)
         field_type = cls.__annotations__[obj.type]
         setattr(obj, obj.type, _dict_to_dataclass(field_type, obj.value))
