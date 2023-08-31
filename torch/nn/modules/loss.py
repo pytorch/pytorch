@@ -1233,7 +1233,7 @@ class CosineEmbeddingLoss(_Loss):
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
     Use (:math:`y=1`) to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
     This is typically used for learning nonlinear
-    embeddings or semi-supervised learning. 
+    embeddings or semi-supervised learning.
 
     The loss function for each sample is:
 
