@@ -165,7 +165,7 @@ def get_cudnn_version(run_lambda):
         # Use CUDNN_LIBRARY when cudnn library is installed elsewhere.
         cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
     else:
-        cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d -f1 | rev'
+        cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
     if len(out) == 0 or (rc != 1 and rc != 0):
