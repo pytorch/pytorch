@@ -129,7 +129,8 @@ class Repro(torch.nn.Module):
 
     def forward(self, arg0_1):
         log1p = torch.ops.aten.log1p.default(arg0_1);  arg0_1 = None
-        return (log1p,)""",
+        gt = torch.ops.aten.gt.Scalar(log1p, 0);  log1p = None
+        return (gt,)""",
         )
 
         # FP accuracy will refuse to promote the logical_not on the outputs,
