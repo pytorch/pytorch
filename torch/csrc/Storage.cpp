@@ -20,7 +20,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
 
-// NOLINTBEGIN(*narrowing-conversions*)
 template <>
 void THPPointer<c10::StorageImpl>::free() {
   if (ptr) {
@@ -230,25 +229,24 @@ static PyObject* THPStorage_pynew(
 
 static Py_ssize_t THPStorage_length(THPStorage* self) {
   HANDLE_TH_ERRORS
-  return THPStorage_Unpack(self).nbytes();
+  return static_cast<Py_ssize_t>(THPStorage_Unpack(self).nbytes());
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
+  int64_t len = static_cast<int64_t>(storage.nbytes());
   /* Integer index */
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
-      nindex += storage.nbytes();
-    if (nindex < 0 || nindex >= static_cast<int64_t>(storage.nbytes())) {
+      nindex += len;
+    if (nindex < 0 || nindex >= len) {
       PyErr_SetString(
           PyExc_IndexError,
           fmt::format(
-              "index {} out of range for storage of size {}",
-              nindex,
-              storage.nbytes()));
+              "index {} out of range for storage of size {}", nindex, len));
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
@@ -257,7 +255,6 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
-    int64_t len = storage.nbytes();
     if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
       return nullptr;
     }
@@ -322,7 +319,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, step;
-    int64_t len = storage.nbytes();
+    Py_ssize_t len = static_cast<Py_ssize_t>(storage.nbytes());
     if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
       return -1;
     }
@@ -497,4 +494,3 @@ void THPStorage_postInit(PyObject* module) {
   if (!THPStorageClass)
     throw python_error();
 }
-// NOLINTEND(*narrowing-conversions*)
