@@ -1411,12 +1411,13 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
-    except NotImplementedError:
-        from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+    except NotImplementedError as e:
+        # NB: mimic how wrap_fake_exception does it
+        from .exc import unimplemented
 
-        raise UnsupportedFakeTensorException(
+        raise unimplemented(
             f"running {op} {node.target}(*{args}, **{kwargs})"
-        )
+        ) from e
 
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
