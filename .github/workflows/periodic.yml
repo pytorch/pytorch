@@ -118,8 +118,6 @@ jobs:
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-build-test
-      ios-platform: SIMULATOR
-      ios-arch: x86_64
       test-matrix: |
         { include: [
           { config: "default",
