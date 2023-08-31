@@ -87,6 +87,7 @@ from .dicts import (
 from .distributed import (
     DeviceMeshVariable,
     PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
 )
 from .functions import (
@@ -665,6 +666,14 @@ class VariableBuilder:
             # TODO: see if we need to add custom guard instead
             # of a simple ID_MATCH
             return PlacementClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementVariable(
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
