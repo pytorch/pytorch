@@ -148,7 +148,7 @@ jobs:
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        # if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
         shell: bash
         run: |
           set -ex
@@ -261,7 +261,7 @@ jobs:
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        # if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
         shell: bash
         run: |
           set -ex
