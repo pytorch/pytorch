@@ -1,12 +1,10 @@
-import sympy
-
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
 from .common import SizeArg, TensorArg
 
 
-def signature_of(arg):
+def signature_of(arg, *, size_dtype: str):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
@@ -21,8 +19,19 @@ def signature_of(arg):
         else:
             return tye
     if isinstance(arg, SizeArg):
-        return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
+        if size_dtype == "tl.int32":
+            return "i32"
+        elif size_dtype == "tl.int64":
+            return "i64"
+        else:
+            raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
+
+
+def signature_to_meta(signature, *, size_dtype: str):
+    return {
+        i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
+    }
 
 
 def config_of(args):
@@ -32,17 +41,12 @@ def config_of(args):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            if isinstance(x.expr, (int, sympy.Integer)):
-                # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
-                # _maybe_evaluate_static...
-                if x.name.startswith("load_seed_offset"):
-                    return False
-                else:
-                    return V.graph.sizevars.statically_known_multiple_of(
-                        x.expr, ALIGNMENT
-                    )
-            else:
+            # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
+            # _maybe_evaluate_static...
+            if x.name.startswith("load_seed_offset"):
                 return False
+            else:
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:

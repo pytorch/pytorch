@@ -6,6 +6,7 @@ from .ctx_manager import (
     CUDAStreamContextVariable,
     CUDAStreamVariable,
     DeterministicAlgorithmsVariable,
+    DisabledSavedTensorsHooksVariable,
     GradModeVariable,
     WithExitFunctionVariable,
 )
@@ -22,6 +23,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )

@@ -185,12 +185,10 @@ class RNNBase(torch.nn.Module):
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
+                f'input must have {expected_input_dim} dimensions, got {input.dim()}')
         if self.input_size != input.size(-1):
             raise RuntimeError(
-                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    self.input_size, input.size(-1)))
+                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
 
     def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -231,8 +229,8 @@ class RNNBase(torch.nn.Module):
     def set_weight_bias(self, weight_bias_dict):
 
         def weight_bias_name(ihhh, layer, suffix):
-            weight_name = "weight_{}_l{}{}".format(ihhh, layer, suffix)
-            bias_name = "bias_{}_l{}{}".format(ihhh, layer, suffix)
+            weight_name = f"weight_{ihhh}_l{layer}{suffix}"
+            bias_name = f"bias_{ihhh}_l{layer}{suffix}"
             return weight_name, bias_name
 
         num_directions = 2 if self.bidirectional else 1
@@ -286,7 +284,7 @@ class RNNBase(torch.nn.Module):
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
-            raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype for dynamic RNN quantization: {dtype}')
         # RNNBase can be either LSTM or GRU
         qRNNBase: Union[LSTM, GRU]
         if mod.mode == 'LSTM':
@@ -308,8 +306,8 @@ class RNNBase(torch.nn.Module):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def retrieve_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = f'weight_{ihhh}_l{layer}{suffix}'
+                    bias_name = f'bias_{ihhh}_l{layer}{suffix}'
                     weight = getattr(mod, weight_name)
                     bias = getattr(mod, bias_name)
                     return weight, bias
@@ -358,15 +356,15 @@ class RNNBase(torch.nn.Module):
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
-                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'weight_ih_l{layer}{suffix}'
+                key_name2 = f'weight_hh_l{layer}{suffix}'
                 # packed weights are part of torchbind class, CellParamsSerializationType
                 # Within the packed weight class, the weight and bias are accessible as Tensors
                 packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
                 weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
                 weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
-                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'bias_ih_l{layer}{suffix}'
+                key_name2 = f'bias_hh_l{layer}{suffix}'
                 weight_bias_dict['bias'][key_name1] = packed_weight_bias[0].__getstate__()[0][1]
                 weight_bias_dict['bias'][key_name2] = packed_weight_bias[1].__getstate__()[0][1]
                 count = count + 1
@@ -494,7 +492,7 @@ class LSTM(RNNBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LSTM, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -746,7 +744,7 @@ class GRU(RNNBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(GRU, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -825,19 +823,16 @@ class RNNCellBase(torch.nn.Module):
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
-                "input has inconsistent input_size: got {}, expected {}".format(
-                    input.size(1), self.input_size))
+                f"input has inconsistent input_size: got {input.size(1)}, expected {self.input_size}")
 
     def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
         if input.size(0) != hx.size(0):
             raise RuntimeError(
-                "Input batch size {} doesn't match hidden{} batch size {}".format(
-                    input.size(0), hidden_label, hx.size(0)))
+                f"Input batch size {input.size(0)} doesn't match hidden{hidden_label} batch size {hx.size(0)}")
 
         if hx.size(1) != self.hidden_size:
             raise RuntimeError(
-                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
-                    hidden_label, hx.size(1), self.hidden_size))
+                f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     @classmethod
     def from_float(cls, mod):
@@ -860,7 +855,7 @@ class RNNCellBase(torch.nn.Module):
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
-            raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype for dynamic RNN quantization: {dtype}')
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
@@ -1009,12 +1004,12 @@ class RNNCell(RNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
         return ret
 
     @classmethod
     def from_float(cls, mod):
-        return super(RNNCell, cls).from_float(mod)
+        return super().from_float(mod)
 
 
 class LSTMCell(RNNCellBase):
@@ -1057,7 +1052,7 @@ class LSTMCell(RNNCellBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LSTMCell, cls).from_float(mod)
+        return super().from_float(mod)
 
 
 class GRUCell(RNNCellBase):
@@ -1098,4 +1093,4 @@ class GRUCell(RNNCellBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(GRUCell, cls).from_float(mod)
+        return super().from_float(mod)

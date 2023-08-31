@@ -57,11 +57,12 @@ nn/qat/ @jerryzh168
 /torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
 
 # ONNX Export
+/torch/_dynamo/backends/onnxrt.py @bowenbao @abock @thiagocrepaldi @wschin
 /torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
 /torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
 /torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
-/torch/onnx/ @bowenbao @abock @thiagocrepaldi
-/test/onnx/ @bowenbao @abock @thiagocrepaldi
+/torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
+/test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
 # Docker
 /.ci/docker/ @jeffdaily
@@ -121,3 +122,7 @@ test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
 torch/utils/data/ @ejguan
+
+# hipify
+torch/utils/hipify/ @jeffdaily @jithunnair-amd
+tools/amd_build/ @jeffdaily @jithunnair-amd

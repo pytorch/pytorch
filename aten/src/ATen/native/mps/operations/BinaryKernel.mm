@@ -163,7 +163,7 @@ static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, con
   return pso;
 }
 
-void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
+static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
   Tensor input = iter.input(0);
@@ -241,14 +241,14 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
 }
 } // namespace mps
 
-void fmax_mps_kernel(TensorIteratorBase& iter) {
+static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     mps::binary_mps_impl(iter, "fmax");
   } else {
     at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
-void fmin_mps_kernel(TensorIteratorBase& iter) {
+static void fmin_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     mps::binary_mps_impl(iter, "fmin");
   } else {
@@ -256,7 +256,7 @@ void fmin_mps_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void copysign_mps_kernel(TensorIteratorBase& iter) {
+static void copysign_mps_kernel(TensorIteratorBase& iter) {
   mps::binary_mps_impl(iter, "copysign");
 }
 

@@ -11,6 +11,7 @@ import subprocess
 import glob
 
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -19,14 +20,8 @@ from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
 
 
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 
@@ -230,7 +225,7 @@ class TestCppExtensionJIT(common.TestCase):
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
+            '': ([f'{capability[0]}{capability[1]}' for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Volta": (['70'], ['70']),
         }
@@ -246,6 +241,7 @@ class TestCppExtensionJIT(common.TestCase):
             self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if IS_WINDOWS:

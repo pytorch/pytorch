@@ -8,7 +8,7 @@ struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
   const at::Tensor& value;
-  bool has_attn_mask;
+  const c10::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
 };

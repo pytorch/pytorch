@@ -31,7 +31,7 @@ finally:
 TIMM_MODELS = dict()
 filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
-with open(filename, "r") as fh:
+with open(filename) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
@@ -43,7 +43,7 @@ with open(filename, "r") as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 4,
+    "cait_m36_384": 8,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
@@ -92,7 +92,7 @@ def refresh_model_names():
         models = set()
         # TODO - set the path to pytorch-image-models repo
         for fn in glob.glob("../pytorch-image-models/docs/models/*.md"):
-            with open(fn, "r") as f:
+            with open(fn) as f:
                 while True:
                     line = f.readline()
                     if not line:

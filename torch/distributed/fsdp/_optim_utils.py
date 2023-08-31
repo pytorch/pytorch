@@ -29,7 +29,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
-    _module_handles,
+    _module_handle,
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
@@ -155,6 +155,7 @@ def _unflatten_optim_state(
             shard_state,
         )
         for optim_state in unflat_param_state:
+            # We can't use .items() below cuz we'd run into a concurrent modification error
             for key in list(optim_state.keys()):
                 state = optim_state[key]
                 if isinstance(state, torch.Tensor):
@@ -446,7 +447,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name, param_state in unflat_osd_state[fqn].items():
+                for state_name in unflat_osd_state[fqn].keys():
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
@@ -476,7 +477,7 @@ def _flatten_optim_state_dict(
                     len(fqns) == 1
                 ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    state = optim.state.get(param, None)
+                    state = optim.state.get(param, None)  # type: ignore[call-overload]
                     if state is not None:
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:
@@ -633,11 +634,17 @@ def _flatten_optim_state(
             )
             # Shard the flattened tensor immediately to minimize max memory
             # usage
-            sharded_flat_tensor, _ = FlatParamHandle._get_shard(
-                flat_tensor,
-                fsdp_state.rank,
-                fsdp_state.world_size,
-            )
+            if (
+                fsdp_state.world_size != 1
+                and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
+            ):
+                sharded_flat_tensor, _ = FlatParamHandle._get_shard(
+                    flat_tensor,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                )
+            else:
+                sharded_flat_tensor = flat_tensor
             flat_state[state_name] = sharded_flat_tensor
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
@@ -990,7 +997,21 @@ def _get_param_id_to_param_from_optim_input(
     return dict(enumerate(param_id_to_param))
 
 
-def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
+def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[FlatParameter, str]:
+    """
+    Constructs a mapping from ``FlatParameter`` to a cleaned (devoid of prefixes
+    from wrappers) fully qualified name (FQN). Note that this FQN is "non-canonical"
+    because ``FlatParameter``  s do not come from the original module but are
+    registered only after FSDP has been applied. This function returns the FSDP-given
+    name for the ``FlatParameter`` (usually module._flat_param) as opposed to the
+    canonical FQNs returned for ``FlatParameter`` s in ``_common_utils._get_param_to_fqns(...)``).
+
+    Consequently, this function will only return a non-empty mapping if FSDP was
+    applied with ``use_orig_params=False`` as, otherwise, the original parameters
+    are used within the module and there would be no ``FlatParameter`` s in the module.
+
+    """
+
     def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
@@ -1003,7 +1024,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
     def return_fn(flat_param_to_fqn):
         return flat_param_to_fqn
 
-    flat_param_to_fqn_ret: Dict[torch.nn.Parameter, str] = {}
+    flat_param_to_fqn_ret: Dict[FlatParameter, str] = {}
     return _apply_to_modules(
         model,
         module_fn,
@@ -1018,7 +1039,7 @@ def _get_param_key_to_param(
     model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
     param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
-    flat_param_to_fqn: Optional[Dict[nn.Parameter, str]] = None,
+    flat_param_to_fqn: Optional[Dict[FlatParameter, str]] = None,
 ) -> Dict[Union[int, str], nn.Parameter]:
     """
     Constructs a mapping from parameter keys to parameters. For the regular
@@ -1069,12 +1090,12 @@ def _get_param_to_param_key(
     model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
     param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
-    flat_param_to_fqn: Optional[Dict[nn.Parameter, str]] = None,
+    flat_param_to_fqn: Optional[Dict[FlatParameter, str]] = None,
 ) -> Dict[nn.Parameter, Union[int, str]]:
     """
     Constructs the inverse mapping of :func:`_get_param_key_to_param`. This API
     only supports the case where `optim` is a regular optimizer, not NamedOptimizer.
-    So the parameter keys will be parameter id.
+    So the parameter keys will be parameter ids.
     """
     param_id_to_param = _get_param_key_to_param(
         optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
@@ -1227,10 +1248,16 @@ def _unflatten_param_groups(
 
 
 def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
+    """
+    Returns whether the state_dict is from a NamedOptimizer.
+    This function checks that the keys in the state_dict['state'] are strings
+    (which usually are FQNs) versus integers (which usually refer to param_ids
+    from a vanilla torch.optim.Optimizer).
+    """
     state = optim_state_dict.get("state", None)
     if not state:
         # If we cannot find a state, assume it is not NamedOptimizer as
-        # NamedOptimizer has eagerly initialization.
+        # NamedOptimizer has eager initialization.
         return False
     try:
         key = next(iter(state.keys()))
@@ -1279,10 +1306,10 @@ def _optim_state_dict(
     For a regular optim.Optimizer, states for those empty parameters will
     not be initialized. So, when aggregating the FQNs across ranks, no assert
     will be raised on a rank even if it does not have all the states -- it is
-    valid and FSDP know how to aggregate them. However, FSDP has to ignore
+    valid and FSDP knows how to aggregate them. However, FSDP has to ignore
     handling those parameters that are not managed by FSDP and do not exist on
-    the local rank -- it is managed by other parallelism and FSDP does not
-    know ho to handle/aggregate them.
+    the local rank -- those are managed by other parallelisms and FSDP does not
+    know how to handle/aggregate them.
 
     Args:
         model (nn.Module): Root module (which may or may not be a
@@ -1304,7 +1331,8 @@ def _optim_state_dict(
         then nonzero ranks return an empty :class:`dict`.
     """
     _reset_flat_param_grad_info_if_needed(traversal_utils._get_fsdp_handles(model))
-    to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
+    to_save = not rank0_only or dist.get_rank(group) == 0 or shard_state
+
     fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
     param_to_fqns = _get_param_to_fqns(model)
@@ -1389,32 +1417,36 @@ def _optim_state_dict(
                 if torch.is_tensor(value):
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
-    if to_save:
-        flat_param_fqns = set(flat_param_to_fqn.values())
-        for key, value in optim_state_dict["state"].items():
-            if key in fsdp_osd_state:
-                continue
-            if key in flat_param_fqns:
-                continue
-            if key in param_key_to_param:
-                continue
-            # This key is not recognized by FSDP. It may be a user-defined state
-            # or some parameters state that FSDP is unable to map from
-            # ``optim.param_groups``.
-            warnings.warn(
-                f"Found a optim state, {key}, that FSDP cannot process. FSDP "
-                "will directly copy everything to the returned state_dict. In "
-                "most cases, this is a user-defined state that is not "
-                "associated with any particular parameter. Another possible "
-                "case is this state is managed by TorchRec. Otherwise, there may "
-                " be a mismatched assumption of optim_state_dict of this mode."
-            )
-            fsdp_osd_state[key] = value
+    # At this point, communication is complete and ranks can return early if nothing
+    # will be saved on that rank.
+    if not to_save:
+        return fsdp_osd
 
-        if "param_groups" in optim_state_dict:
-            fsdp_osd["param_groups"] = _unflatten_param_groups(
-                optim_state_dict, param_key_to_param, param_to_fqns
-            )
+    flat_param_fqns = set(flat_param_to_fqn.values())
+    for key, value in optim_state_dict["state"].items():
+        if key in fsdp_osd_state:
+            continue
+        if key in flat_param_fqns:
+            continue
+        if key in param_key_to_param:
+            continue
+        # This key is not recognized by FSDP. It may be a user-defined state
+        # or some parameters state that FSDP is unable to map from
+        # ``optim.param_groups``.
+        warnings.warn(
+            f"Found a optim state, {key}, that FSDP cannot process. FSDP "
+            "will directly copy everything to the returned state_dict. In "
+            "most cases, this is a user-defined state that is not "
+            "associated with any particular parameter. Another possible "
+            "case is this state is managed by TorchRec. Otherwise, there may "
+            " be a mismatched assumption of optim_state_dict of this mode."
+        )
+        fsdp_osd_state[key] = value
+
+    if "param_groups" in optim_state_dict:
+        fsdp_osd["param_groups"] = _unflatten_param_groups(
+            optim_state_dict, param_key_to_param, param_to_fqns
+        )
 
     return fsdp_osd
 
@@ -1422,9 +1454,11 @@ def _optim_state_dict(
 def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     """
     Construct the mapping from a param's fqn to its corresponding ``FSDPParamInfo``
-    if the param is managed by FSDP. ``FlatParameter._fqns`` only stores the first
-    FQN of a shared parameter. So the keys in the mapping are guaranteed to map
-    to unique parameters.
+    if the param is managed by FSDP. Shared parameters, or original parameters that
+    are shared across multiple nn.Modules, are required to belong to one and only
+    one FSDP instance and thus correspond to one ``FlatParameter``. Within the one
+    ``FlatParameter``, ``FlatParameter._fqns`` only stores the first FQN of a shared
+    parameter. Thus, the keys in the mapping are guaranteed to map to unique parameters.
     """
 
     def module_fn(module, prefix, tree_level, fqn_to_param_info):
@@ -1432,13 +1466,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)
-        handles = _module_handles(fsdp_state, module)
-        assert (
-            len(handles) < 2
-        ), f"Assumes at most 1 FlatParamHandle but got {len(handles)} handles"
-        if not handles:
+        handle = _module_handle(fsdp_state, module)
+        if not handle:
             return
-        handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         # NOTE: `idx` indexes into the data structures *without* padding
@@ -1591,7 +1621,7 @@ def _gather_orig_param_state(
     fsdp_state = fsdp_param_info.state
     assert (
         fsdp_state._use_orig_params
-    ), "_gather_orig_param_state only support use_orig_params=True case"
+    ), "_gather_orig_param_state only supports use_orig_params=True case"
     flat_param = fsdp_param_info.handle.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
     if (

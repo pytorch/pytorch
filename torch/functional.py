@@ -117,8 +117,7 @@ def broadcast_shapes(*shapes):
             if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
-                        raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
-                                           .format(shape[i], shape[i]))
+                        raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
                     if shape[i] == 1 or shape[i] == result[i]:
                         continue
                     if result[i] != 1:
@@ -1507,7 +1506,8 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     #     For a more compact implementation see the relevant function in `_refs/__init__.py`
 
     # We don't do this for MPS or sparse tensors
-    if input.layout == torch.strided and input.device.type in ("cpu", "cuda", "meta"):
+    if input.layout == torch.strided and input.device.type in \
+            ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
             if isinstance(dim, int):
                 _dim = [dim]

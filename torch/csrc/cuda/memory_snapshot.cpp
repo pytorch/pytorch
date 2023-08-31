@@ -5,15 +5,13 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
 using c10::cuda::CUDACachingAllocator::BlockInfo;
-using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
@@ -106,17 +104,71 @@ void _record_memory_history(
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
     bool record_cpp_context) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = nullptr;
-  if (record_context) {
-    if (record_cpp_context) {
-      recorder = gather_with_cpp;
-    } else {
-      recorder = gather;
+  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  if (enabled && record_cpp_context) {
+    recorder = gather_with_cpp;
+    // warm up C++ stack unwinding
+    unwind::unwind();
+  }
+  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  if (trace_alloc_record_context) {
+    when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+  } else if (record_context) {
+    when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+  }
+  at::globalContext().lazyInitCUDA();
+  c10::cuda::CUDACachingAllocator::recordHistory(
+      enabled, recorder, trace_alloc_max_entries, when);
+}
+
+static void checkOptionIn(
+    const std::string& option,
+    std::initializer_list<std::string> valid,
+    const char* error) {
+  TORCH_CHECK(
+      valid.end() != std::find(valid.begin(), valid.end(), option), error);
+}
+
+void _record_memory_history(
+    c10::optional<std::string> enabled,
+    c10::optional<std::string> context,
+    std::string stacks,
+    size_t max_entries) {
+  if (enabled) {
+    checkOptionIn(
+        *enabled,
+        {"state", "all"},
+        "expected state to be 'state', 'all', or None");
+  }
+  if (context) {
+    checkOptionIn(
+        *context,
+        {"state", "alloc", "all"},
+        "expected context to be 'state', 'alloc', 'all', or None");
+  }
+  checkOptionIn(
+      stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
+
+  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  if (enabled && stacks == "all") {
+    recorder = gather_with_cpp;
+    // warm up C++ stack unwinding
+    unwind::unwind();
+  }
+  max_entries = (enabled && *enabled == "all") ? max_entries : 1;
+  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  if (context) {
+    if (context == "all") {
+      when = c10::cuda::CUDACachingAllocator::RecordContext::ALL;
+    } else if (context == "alloc") {
+      when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+    } else if (context == "state") {
+      when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
     }
   }
   at::globalContext().lazyInitCUDA();
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, trace_alloc_record_context);
+      enabled.has_value(), recorder, max_entries, when);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -137,12 +189,10 @@ std::string _memory_snapshot_pickled() {
   IValue active_pending_free_s = "active_pending_free";
   IValue inactive_s = "inactive";
   IValue addr_s = "addr";
-  IValue real_size_s = "real_size";
   IValue filename_s = "filename";
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
-  IValue history_s = "history";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
 
@@ -150,6 +200,16 @@ std::string _memory_snapshot_pickled() {
 
   std::vector<CapturedTraceback*> frame_tracebacks;
   std::vector<Dict<IValue, IValue>> frame_dict;
+
+  auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
+                           const std::shared_ptr<c10::GatheredContext>& ctx) {
+    if (ctx) {
+      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_dict.push_back(d);
+    } else {
+      d.insert(frames_s, empty_frames);
+    }
+  };
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
@@ -167,6 +227,8 @@ std::string _memory_snapshot_pickled() {
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
+    add_frame_key(segmentDict, segmentInfo.context_when_allocated);
+
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
@@ -177,20 +239,8 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      if (blockInfo.history.size()) {
-        auto history = new_list();
-        for (const History& h : blockInfo.history) {
-          auto history_entry = new_dict();
-          history_entry.insert(addr_s, (int64_t)h.addr);
-          history_entry.insert(real_size_s, (int64_t)h.real_size);
-          if (h.context) {
-            frame_tracebacks.push_back(getFromContext(h.context));
-            frame_dict.push_back(history_entry);
-          }
-          history.push_back(std::move(history_entry));
-        }
-        blockDict.insert(history_s, std::move(history));
-      }
+      add_frame_key(blockDict, blockInfo.context_when_allocated);
+
       blocks.push_back(blockDict);
     }
     segmentDict.insert(blocks_s, blocks);
@@ -274,5 +324,4 @@ std::string _memory_snapshot_pickled() {
 
   return write_pickle(result);
 }
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda

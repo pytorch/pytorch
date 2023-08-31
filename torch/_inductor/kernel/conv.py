@@ -299,7 +299,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_static_shapes(
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
     ndim = len(kernel_shape)
@@ -364,7 +364,7 @@ def convolution(
         args = (x, weight, bias)
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.guard_static_shapes(bias.get_size())
+        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
 
     choices = [
         aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)

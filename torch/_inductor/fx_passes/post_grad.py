@@ -2,6 +2,9 @@ import functools
 import itertools
 import logging
 import operator
+from typing import List, Optional, Union
+
+from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -25,9 +28,11 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
+    remove_extra_clones,
     stable_topological_sort,
 )
 from ..virtualized import V
+from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
 log = logging.getLogger(__name__)
@@ -60,6 +65,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+
+        group_batch_fusion_post_grad_passes(gm.graph)
+        remove_extra_clones(gm.graph)
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
@@ -144,7 +152,103 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+
+
+def cuda_and_enabled_mixed_mm(match):
+    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
+        match.kwargs["mat1"].meta.get("val"), "is_cuda", False
+    )
+
+
+def cuda_and_enabled_mixed_mm_and_not_int8(match):
+    return (
+        cuda_and_enabled_mixed_mm(match)
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+        and getattr(match.kwargs["mat2"].meta.get("val"), "dtype", torch.int8)
+        != torch.int8
+    )  # bitshift numerics in triton and pytorch don't match for torch.int8
+
+
+"""
+    this is intended to be used to unpack a [K,N] int4 tensor from a [K/2, N] uint4x2 tensor
+    (where the int4 and uint4x2 are represented with int8 and uint8 respectively)
+    where every other row of the int4 is packed with the row above it as:
+    uint4x2[k,n] = (8+int4[2*k,n])+(8+int4[2*k+1,n])<<4
+
+    unpack formulas:
+    int4[2*k,n]=(uint4x2[k,n] & 0xF) - 8
+    int4[2*k+1,n]=(uint4x2[k,n] >> 4) - 8
+
+    thus matching on unpack formula:
+    torch.mm(mat1, torch.cat((mat2 & 0xF, mat2>>4),1).reshape(mat2_mm_shape).to(mat2_dtype).sub(8))
+
+    note: although the unpack formula in pytorch and the triton kernel is designed for a uint8 mat2, the behavior
+    of the kernel matches the pytorch formula for all dtypes except torch.int8
+    where the bitwise numerics in triton do not match those in pytorch.
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm.default,
+        KeywordArg("mat1"),
+        CallFunction(
+            aten.sub.Tensor,
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(
+                    aten.reshape.default,
+                    CallFunction(
+                        aten.cat.default,
+                        ListOf(
+                            CallFunction(
+                                aten.bitwise_and.Scalar,
+                                KeywordArg("mat2"),
+                                0xF,
+                            ),
+                            CallFunction(
+                                aten.__rshift__.Scalar,
+                                KeywordArg("mat2"),
+                                4,
+                            ),
+                        ),
+                        1,
+                    ),
+                    KeywordArg("mat2_mm_shape"),
+                ),
+                KeywordArg("mat2_dtype"),
+            ),
+            8,
+        ),
+    ),
+    extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
+)
+def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
+        mat1, mat2, mat2_mm_shape, mat2_dtype
+    )
+
+
+"""
+    torch.mm(mat1, mat2.to(mat2_dtype))
+"""
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("mat2"),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=cuda_and_enabled_mixed_mm,
+)
+def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
@@ -220,7 +324,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size = None
+    new_size: Optional[Union[List[Expr], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -237,6 +341,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         offsets_start.append(new_size[dim] - shape[dim])
         offsets_end.append(new_size[dim])
 
+    assert new_size is not None
     dtype = functools.reduce(
         torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
     )

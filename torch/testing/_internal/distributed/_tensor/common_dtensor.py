@@ -344,7 +344,7 @@ class DTensorConverter:
                     r = DTensor(
                         t,
                         mesh,
-                        placements,
+                        tuple(placements),
                         size=t.size(),
                         dtype=torch.bool,
                         requires_grad=t.requires_grad,
