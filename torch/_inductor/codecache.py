@@ -981,6 +981,8 @@ class AotCodeCache:
         aot_constants = b""
 
         def _to_bytes(t: torch.Tensor) -> bytes:
+            # This serializes the tensor's untyped_storage to bytes by accessing
+            # the raw data of the underlying structure.
             import ctypes
 
             t_cpu = t.untyped_storage().cpu()
