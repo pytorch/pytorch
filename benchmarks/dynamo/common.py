@@ -34,6 +34,7 @@ import torch._export
 import torch.distributed
 import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
+import torch.nn as nn
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
@@ -304,6 +305,74 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "doctr_det_predictor",
     "dlrm",
 }
+
+# HF accelerate init_on_device
+@contextmanager
+def init_on_device(device: torch.device, include_buffers: bool = None):
+    """
+    A context manager under which models are initialized with all parameters on the specified device.
+
+    Args:
+        device (`torch.device`):
+            Device to initialize all parameters on.
+        include_buffers (`bool`, *optional*):
+            Whether or not to also put all buffers on the meta device while initializing.
+
+    Example:
+
+    ```python
+    import torch.nn as nn
+    from accelerate import init_on_device
+
+    with init_on_device(device=torch.device("cuda")):
+        tst = nn.Liner(100, 100)  # on `cuda` device
+    ```
+    """
+    old_register_parameter = nn.Module.register_parameter
+    if include_buffers:
+        old_register_buffer = nn.Module.register_buffer
+
+    def register_empty_parameter(module, name, param):
+        old_register_parameter(module, name, param)
+        if param is not None:
+            param_cls = type(module._parameters[name])
+            kwargs = module._parameters[name].__dict__
+            module._parameters[name] = param_cls(module._parameters[name].to(device), **kwargs)
+
+    def register_empty_buffer(module, name, buffer, persistent=True):
+        old_register_buffer(module, name, buffer, persistent=persistent)
+        if buffer is not None:
+            module._buffers[name] = module._buffers[name].to(device)
+
+    # Patch tensor creation
+    if include_buffers:
+        tensor_constructors_to_patch = {
+            torch_function_name: getattr(torch, torch_function_name)
+            for torch_function_name in ["empty", "zeros", "ones", "full"]
+        }
+    else:
+        tensor_constructors_to_patch = {}
+
+    def patch_tensor_constructor(fn):
+        def wrapper(*args, **kwargs):
+            kwargs["device"] = device
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    try:
+        nn.Module.register_parameter = register_empty_parameter
+        if include_buffers:
+            nn.Module.register_buffer = register_empty_buffer
+        for torch_function_name in tensor_constructors_to_patch.keys():
+            setattr(torch, torch_function_name, patch_tensor_constructor(getattr(torch, torch_function_name)))
+        yield
+    finally:
+        nn.Module.register_parameter = old_register_parameter
+        if include_buffers:
+            nn.Module.register_buffer = old_register_buffer
+        for torch_function_name, old_torch_function in tensor_constructors_to_patch.items():
+            setattr(torch, torch_function_name, old_torch_function)
 
 
 def model_specified_by_path(path_and_class_str):
@@ -1953,6 +2022,17 @@ class BenchmarkRunner:
                 size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
             )
 
+            # hardcode reset_parameters to zeros (this can have accuracy implications)
+            def apply_custom_reset_parameters(module):
+                def reset_parameters(module):
+                    for param in module.parameters():
+                        param.data.zero_()
+
+                if isinstance(module, nn.Module):
+                    if not hasattr(module, 'reset_parameters'):
+                        module.reset_parameters = lambda: reset_parameters(module)
+            model.apply(apply_custom_reset_parameters)
+
             model = FSDP(
                 model,
                 use_orig_params=True,
@@ -3407,17 +3487,16 @@ def run(runner, args, original_dir=None):
                             )
                         else:
                             if args.fsdp:
-                                # Always load model on cpu for fsdp
-                                # When initializing FSDP, we will use the cuda device if args.cuda is set
-                                (
-                                    _,
-                                    name,
-                                    model,
-                                    example_inputs,
-                                    batch_size,
-                                ) = runner.load_model(
-                                    "cpu", model_name, batch_size=batch_size
-                                )
+                                with init_on_device(torch.device("meta")):
+                                    (
+                                        _,
+                                        name,
+                                        model,
+                                        example_inputs,
+                                        batch_size,
+                                    ) = runner.load_model(
+                                        device, model_name, batch_size=batch_size
+                                    )
                             else:
                                 (
                                     device,

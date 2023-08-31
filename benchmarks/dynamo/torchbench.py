@@ -396,7 +396,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
-        self.validate_model(model, example_inputs)
+        # TODO: skip initial validation for model if it is on meta device for now
+        if next(model.parameters()).device != torch.device("meta"):
+            self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
