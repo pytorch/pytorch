@@ -32,7 +32,6 @@ jobs:
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
     strategy:
       matrix:

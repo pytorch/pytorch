@@ -353,7 +353,6 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
-    use_libuv=False
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
@@ -366,7 +365,7 @@ def create_tcp_store(
         )
     else:
         return c10d.TCPStore(
-            addr, port, world_size, is_master, wait_for_workers=wait_for_workers, use_libuv=use_libuv
+            addr, port, world_size, is_master, wait_for_workers=wait_for_workers
         )
 
 

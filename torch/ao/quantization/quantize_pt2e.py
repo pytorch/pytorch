@@ -16,6 +16,9 @@ from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.quantizer import (  # noqa: F401
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
     Quantizer,
     QuantizationSpecBase,
     QuantizationSpec,
@@ -23,6 +26,18 @@ from torch.ao.quantization.quantizer import (  # noqa: F401
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
     QuantizationAnnotation,
+    XNNPACKQuantizer,
+    EmbeddingQuantizer,
+    ComposableQuantizer,
+)
+from torch.ao.quantization.quantizer.utils import (  # noqa: F401
+    get_bias_qspec,
+    get_input_act_qspec,
+    get_output_act_qspec,
+    get_weight_qspec,
+)
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (  # noqa: F401
+    get_symmetric_quantization_config,
 )
 from torch.ao.quantization.backend_config import BackendConfig
 
@@ -60,7 +75,6 @@ def prepare_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
-    original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -70,14 +84,12 @@ def prepare_pt2e(
     quantizer.validate(model)
     propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
-    model.meta.update(original_graph_meta)
     return model
 
 def prepare_qat_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
-    original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
@@ -87,14 +99,12 @@ def prepare_qat_pt2e(
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
     model = prepare(model, node_name_to_scope, is_qat=True)
-    model.meta.update(original_graph_meta)
     return model
 
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
 ) -> GraphModule:
-    original_graph_meta = model.meta
     # TODO: Handle this in export itself, outside of quantization
     # See https://github.com/pytorch/pytorch/issues/103681.
     _replace_dropout_for_eval(model)
@@ -102,6 +112,4 @@ def convert_pt2e(
     model = _fold_conv_bn_qat(model)
     if use_reference_representation:
         model = reference_representation_rewrite(model)
-
-    model.meta.update(original_graph_meta)
     return model

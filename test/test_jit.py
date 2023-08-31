@@ -5810,19 +5810,19 @@ a")
                 raise RuntimeError('Unknown dtype')
 
             if binary:
-                code = f'''
+                code = '''
                     graph(%3 : Tensor, %4 : Tensor):
-                        %2 : {dtype_str}(*, *) = aten::{op}(%3, %4)
-                        %1 : {dtype_str}(*, *) = aten::relu(%2)
+                        %2 : {dtype}(*, *) = aten::{op}(%3, %4)
+                        %1 : {dtype}(*, *) = aten::relu(%2)
                         return (%1)
-                '''
+                '''.format(op=op, dtype=dtype_str)
             else:
-                code = f'''
+                code = '''
                     graph(%3 : Tensor):
-                        %2 : {dtype_str}(*, *) = aten::{op}(%3)
-                        %1 : {dtype_str}(*, *) = aten::relu(%2)
+                        %2 : {dtype}(*, *) = aten::{op}(%3)
+                        %1 : {dtype}(*, *) = aten::relu(%2)
                         return (%1)
-                '''
+                '''.format(op=op, dtype=dtype_str)
 
             graph = parse_ir(code)
             inputs = (2 if binary else 1) * [torch.rand(26, 2048, dtype=dtype)]
@@ -14936,7 +14936,7 @@ dedent """
         value = torch.rand((src_l, bsz, embed_size))
 
         mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, 0.0).to(torch.get_default_dtype())
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).to(torch.get_default_dtype())
 
         jit_out = jit_multihead_attn_forward(query, key, value,
                                              embed_size, nhead,

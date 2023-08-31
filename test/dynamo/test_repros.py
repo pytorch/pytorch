@@ -30,12 +30,7 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import (
-    CompileCounter,
-    expectedFailureDynamic,
-    rand_strided,
-    same,
-)
+from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -2658,6 +2653,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
+        with self.assertRaisesRegex(RuntimeError, "First dim need to be 3"):
+            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
@@ -2692,7 +2690,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
-            exported(torch.Tensor([5, 6, 7]))
+            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
 
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
@@ -3445,18 +3443,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
-
-    # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
-    # due to bad empty list handling
-    def test_empty_list_contains_with_jump(self):
-        def fn(x, l):
-            if x in l:
-                return x.cos()
-            return x.sin()
-
-        counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)(torch.randn([2, 2]), [])
-        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

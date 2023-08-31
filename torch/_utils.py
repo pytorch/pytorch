@@ -1,5 +1,4 @@
 import copyreg
-import functools
 import sys
 import traceback
 import warnings
@@ -229,7 +228,7 @@ def _validate_loaded_sparse_tensors():
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size(), t.is_coalesced()
+                    t._indices(), t._values(), t.size()
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -276,9 +275,9 @@ def _rebuild_sparse_tensor(layout, data):
             is_coalesced = None
         else:
             indices, values, size, is_coalesced = data
-        result = torch.sparse_coo_tensor(
-            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
-        )
+        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
+        if is_coalesced is not None:
+            result._coalesced_(is_coalesced)
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -840,13 +839,3 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
-
-
-@functools.lru_cache(2)
-def _get_device_module(device_type: str):
-    device_module = getattr(torch, device_type, None)
-    if device_module is None:
-        raise RuntimeError(
-            f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
-        )
-    return device_module

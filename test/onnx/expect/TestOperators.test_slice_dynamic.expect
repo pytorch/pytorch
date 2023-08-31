@@ -93,7 +93,7 @@ graph {
       type: INT
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   input {
     name: "onnx::Slice_0"
     type {

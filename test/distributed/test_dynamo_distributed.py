@@ -700,13 +700,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         Note: comptime prints the guards before the time they get installed or not installed, so in both cases
         (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
         with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
-        guard source 'local_nn_module'.
+        guard source 'local_fsdp_module'.
         """
         global GUARDS_FILE
         GUARDS_FILE = StringIO()
 
         for skip_guards, expected_guard_source in (
-            (True, "local_nn_module"),
+            (True, "local_fsdp_module"),
             (False, "local")
         ):
             torch._dynamo.reset()

@@ -62,7 +62,6 @@ dimnameListT = BaseCppType("at", "DimnameList")
 dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
-deviceIndexT = BaseCppType("at", "DeviceIndex")
 scalarT = BaseCppType("at", "Scalar")
 optionalScalarRefT = BaseCppType("at", "OptionalScalarRef")
 memoryFormatT = BaseCppType("at", "MemoryFormat")
@@ -112,7 +111,6 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
-    BaseTy.DeviceIndex: deviceIndexT,
     BaseTy.Scalar: scalarT,
     BaseTy.MemoryFormat: memoryFormatT,
     BaseTy.QScheme: qschemeT,

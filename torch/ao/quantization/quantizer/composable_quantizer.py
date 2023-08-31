@@ -6,7 +6,7 @@ import torch
 
 from torch.fx import Node
 
-from .quantizer import QuantizationAnnotation, Quantizer
+from .quantizer import OperatorConfig, QuantizationAnnotation, Quantizer
 
 __all__ = [
     "ComposableQuantizer",
@@ -69,3 +69,7 @@ class ComposableQuantizer(Quantizer):
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
+
+    @classmethod
+    def get_supported_operators(cls) -> List[OperatorConfig]:
+        return []

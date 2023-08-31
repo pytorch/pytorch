@@ -1076,10 +1076,7 @@ class CUDAGraphNode:
         with preserve_rng_state(), torch.cuda.device(
             self.device
         ), clear_cublas_manager(), torch.cuda.graph(
-            self.graph,
-            stream=self.stream,
-            pool=self.cuda_graphs_pool,
-            capture_error_mode="thread_local",
+            self.graph, stream=self.stream, pool=self.cuda_graphs_pool
         ), get_history_recording():
             static_outputs = model(inputs)
 
@@ -1689,7 +1686,6 @@ class CUDAGraphTreeManager:
                 self.graph,
                 pool=self.cuda_graphs_thread_pool,
                 stream=self.stream,
-                capture_error_mode="thread_local",
             ):
                 pass
 

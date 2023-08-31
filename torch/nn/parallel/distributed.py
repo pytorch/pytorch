@@ -697,7 +697,9 @@ class DistributedDataParallel(Module, Joinable):
             self._log_and_throw(
                 ValueError,
                 "DistributedDataParallel's input module must be on "
-                f"the same type of devices, but input module parameters locate in {distinct_device_types}.",
+                "the same type of devices, but input module parameters locate in {}.".format(
+                    distinct_device_types
+                ),
             )
 
         self.device_type = list(distinct_device_types)[0]

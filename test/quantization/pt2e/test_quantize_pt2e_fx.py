@@ -38,7 +38,6 @@ import unittest
 
 
 # TODO: remove after quantizer API is more mature
-@unittest.skip("TODO: delete")
 @skipIfNoQNNPACK
 class TestQuantizePT2EFX(QuantizationTestCase):
     def test_qconfig_none(self):
@@ -242,7 +241,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 self.assertEqual(n.args[_QUANT_MIN_INDEX], -127)
                 self.assertEqual(n.args[_QUANT_MAX_INDEX], 127)
 
-@unittest.skip("TODO: delete")
 class TestQuantizePT2EFXModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK

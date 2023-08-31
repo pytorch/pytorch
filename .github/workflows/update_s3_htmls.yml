@@ -9,7 +9,6 @@ on:
 jobs:
   update-html:
     runs-on: ubuntu-22.04
-    environment: s3-html-updater
     if: ${{ github.repository == 'pytorch/pytorch' }}
     strategy:
       matrix:

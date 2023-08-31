@@ -11,7 +11,6 @@
 #include <c10/util/Optional.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymBool.h>
-#include <c10/core/Device.h>
 
 #include <array>
 #include <memory>
@@ -1865,13 +1864,6 @@ struct getTypePtr_<c10::complex<double>> final {
 };
 template <>
 struct getTypePtr_<int64_t> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-
-template <>
-struct getTypePtr_<DeviceIndex> final {
   static decltype(auto) call() {
     return IntType::get();
   }

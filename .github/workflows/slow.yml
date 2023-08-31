@@ -103,6 +103,9 @@ jobs:
       build-environment: linux-focal-rocm5.6-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.test-matrix }}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   linux-jammy-py3_9-clang12-asan-build:
     name: linux-jammy-py3.9-clang12-asan

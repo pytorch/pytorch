@@ -34,17 +34,5 @@ struct PyFunctionPostHook : public FunctionPostHook {
   PyObject* dict;
 };
 
-// PyFunctionTensorPostAccGradHooks is a dictionary of PostAccumulateGradHooks,
-// and it is understandable if you are confused by why it's a subclass. We are
-// simply following the precedent of PyFunctionPreHook and PyFunctionPostHook
-// above to easily enroll into existing infrastructure.
-struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
-  PyFunctionTensorPostAccGradHooks(PyObject* dict);
-  ~PyFunctionTensorPostAccGradHooks() override;
-  void operator()(const Variable& tensor) override;
-  // fall back to the compiled_args of PostAccumulateGradHook superclass
-  PyObject* dict;
-};
-
 } // namespace autograd
 } // namespace torch

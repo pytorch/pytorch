@@ -334,14 +334,17 @@ def augment_many_model_functions_with_bundled_inputs(
 
         # Add to the high level helper methods
         inputs_info = repr(info[function]) if info and function in info else '[]'
-        get_bundled_inputs_functions_and_info_template += f"""
+        get_bundled_inputs_functions_and_info_template += """
             temp_dict : Dict[str,List[str]] = {{}}
-            info: List[str] = {inputs_info}
+            info: List[str] = {info}
 
             temp_dict['info'] = info
-            temp_dict['get_inputs_function_name'] = ['get_all_bundled_inputs_for_{function_name}']
-            all_inputs['{function_name}'] = temp_dict
-            """
+            temp_dict['get_inputs_function_name'] = ['get_all_bundled_inputs_for_{name}']
+            all_inputs['{name}'] = temp_dict
+            """.format(
+            name=function_name,
+            info=inputs_info,
+        )
 
         # To ensure backwards compatibility and a streamlined api for forward these wrappers are provided
         if function_name == 'forward':

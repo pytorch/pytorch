@@ -35,12 +35,10 @@ void initThroughputBenchmarkBindings(PyObject* module) {
           })
       .def(
           "run_once",
-          [](ThroughputBenchmark& self,
-             py::args args,
-             const py::kwargs& kwargs) {
+          [](ThroughputBenchmark& self, py::args args, py::kwargs kwargs) {
             // Depending on this being ScriptModule of nn.Module we will release
             // the GIL or not further down in the stack
-            return self.runOnce(std::move(args), kwargs);
+            return self.runOnce(std::move(args), std::move(kwargs));
           })
       .def(
           "benchmark",

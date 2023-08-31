@@ -1,4 +1,4 @@
-ir_version: 8
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -38,7 +38,7 @@ graph {
       type: INTS
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   input {
     name: "onnx::AveragePool_0"
     type {
@@ -85,5 +85,5 @@ graph {
   }
 }
 opset_import {
-  version: 17
+  version: 14
 }

@@ -52,7 +52,7 @@ graph {
       type: STRING
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   input {
     name: "onnx::BitShift_0"
     type {

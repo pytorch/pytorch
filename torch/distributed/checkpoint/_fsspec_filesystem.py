@@ -18,7 +18,6 @@ import fsspec
 import torch
 from fsspec.core import url_to_fs
 from torch import Tensor
-from torch._utils import _get_device_module
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
@@ -115,7 +114,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Union[None, io.RawIOBase, torch.Stream] = None,
+        stream: Union[None, io.RawIOBase, torch._C._CudaStreamBase] = None,
         inflight_threshhold: int = 1_000_000,
     ):
         self.resolve_fun = resolve_fun
@@ -125,11 +124,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = stream.device_type if stream else torch.device("cuda").type
-        self.device_module = _get_device_module(self.device_type)
-        self.stream = stream or self.device_module.current_stream()
-        if self.stream != self.device_module.current_stream():
-            self.stream.wait_stream(self.device_module.current_stream())
+        self.stream = stream or torch.cuda.current_stream()
+        if self.stream != torch.cuda.current_stream():
+            self.stream.wait_stream(torch.cuda.current_stream())
 
     @property
     def _done(self):
@@ -146,7 +143,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with self.device_module.stream(self.stream):
+        with torch.cuda.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -154,7 +151,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.device.type == self.device_type:
+                if tensor.is_cuda:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
@@ -235,7 +232,7 @@ def _split_by_size_and_type(
 
 
 def _write_item(
-    stream: Optional[Union[io.RawIOBase, torch.Stream]],
+    stream: Optional[Union[io.RawIOBase, torch._C._CudaStreamBase]],
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
@@ -297,7 +294,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert tensor.is_cpu
+                    assert not tensor.is_cuda
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )

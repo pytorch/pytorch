@@ -253,9 +253,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
-    def _create_store_with_ws(self, addr, world_size):
-        return create_tcp_store(addr, world_size, wait_for_workers=False)
-
     def test_address_already_in_use(self):
         err_msg_reg = "^The server socket has failed to listen on any local "
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
@@ -364,7 +361,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
-        server_store = self._create_store_with_ws(addr, world_size)
+        server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
 
@@ -400,17 +397,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         v0, v1 = store.multi_get(["foo", "bar"])
         self.assertEqual(b"po", v0)
         self.assertEqual(b"tato", v1)
-
-class LibUvTCPStoreTest(TCPStoreTest):
-
-    def _create_store(self):
-        store = create_tcp_store(use_libuv=True)
-        store.set_timeout(timedelta(seconds=300))
-        return store
-
-    def _create_store_with_ws(self, addr, world_size):
-        return create_tcp_store(addr, world_size, wait_for_workers=False, use_libuv=True)
-
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -711,9 +697,7 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         dist.HashStore(),
         dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
         create_tcp_store(),
-        create_tcp_store(use_libuv=True),
-        dist.PrefixStore("pre", create_tcp_store()),
-        dist.PrefixStore("pre", create_tcp_store(use_libuv=True)),
+        dist.PrefixStore("pre", create_tcp_store())
     ]
 
     @property
@@ -724,8 +708,8 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    # Iterates over self.stores, keep 7 in sync with len(self.stores).
-    @parametrize("i", range(7))
+    # Iterates over self.stores, keep 5 in sync with len(self.stores).
+    @parametrize("i", range(5))
     def test_wait(self, i):
         store = self.stores[i]
         store.set_timeout(timedelta(seconds=2))

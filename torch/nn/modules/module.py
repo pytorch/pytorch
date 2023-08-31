@@ -461,8 +461,8 @@ class Module:
                             "".format(type(self).__name__, next(iter(kwargs))))
 
         if self.call_super_init is False and bool(args):
-            raise TypeError(f"{type(self).__name__}.__init__() takes 1 positional argument but {len(args) + 1} were"
-                            " given")
+            raise TypeError("{}.__init__() takes 1 positional argument but {} were"
+                            " given".format(type(self).__name__, len(args) + 1))
 
         """
         Calls super().__setattr__('a', a) instead of the typical self.a = a
@@ -537,9 +537,9 @@ class Module:
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
-            raise TypeError(f"cannot assign '{torch.typename(tensor)}' object to buffer '{name}' "
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
-                            )
+                            .format(torch.typename(tensor), name))
         else:
             for hook in _global_buffer_registration_hooks.values():
                 output = hook(self, name, tensor)
@@ -580,15 +580,15 @@ class Module:
         if param is None:
             self._parameters[name] = None
         elif not isinstance(param, Parameter):
-            raise TypeError(f"cannot assign '{torch.typename(param)}' object to parameter '{name}' "
+            raise TypeError("cannot assign '{}' object to parameter '{}' "
                             "(torch.nn.Parameter or None required)"
-                            )
+                            .format(torch.typename(param), name))
         elif param.grad_fn:
             raise ValueError(
-                f"Cannot assign non-leaf Tensor to parameter '{name}'. Model "
-                f"parameters must be created explicitly. To express '{name}' "
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
+                "parameters must be created explicitly. To express '{0}' "
                 "as a function of another Tensor, compute the value in "
-                "the forward() method.")
+                "the forward() method.".format(name))
         else:
             for hook in _global_parameter_registration_hooks.values():
                 output = hook(self, name, param)
@@ -1143,7 +1143,7 @@ class Module:
         if dtype is not None:
             if not (dtype.is_floating_point or dtype.is_complex):
                 raise TypeError('nn.Module.to only accepts floating point or complex '
-                                f'dtypes, but got desired dtype={dtype}')
+                                'dtypes, but got desired dtype={}'.format(dtype))
             if dtype.is_complex:
                 warnings.warn(
                     "Complex modules are a new feature under active development whose design may change, "
@@ -1712,9 +1712,9 @@ class Module:
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
-                raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
+                raise TypeError("cannot assign '{}' as parameter '{}' "
                                 "(torch.nn.Parameter or None expected)"
-                                )
+                                .format(torch.typename(value), name))
             self.register_parameter(name, value)
         else:
             modules = self.__dict__.get('_modules')
@@ -1730,9 +1730,9 @@ class Module:
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
-                    raise TypeError(f"cannot assign '{torch.typename(value)}' as child module '{name}' "
+                    raise TypeError("cannot assign '{}' as child module '{}' "
                                     "(torch.nn.Module or None expected)"
-                                    )
+                                    .format(torch.typename(value), name))
                 for hook in _global_module_registration_hooks.values():
                     output = hook(self, name, value)
                     if output is not None:
@@ -1742,9 +1742,9 @@ class Module:
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
-                        raise TypeError(f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
+                        raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
-                                        )
+                                        .format(torch.typename(value), name))
                     for hook in _global_buffer_registration_hooks.values():
                         output = hook(self, name, value)
                         if output is not None:
@@ -2000,10 +2000,10 @@ class Module:
             if key in state_dict:
                 input_param = state_dict[key]
                 if not torch.overrides.is_tensor_like(input_param):
-                    error_msgs.append(f'While copying the parameter named "{key}", '
+                    error_msgs.append('While copying the parameter named "{}", '
                                       'expected torch.Tensor or Tensor-like object from checkpoint but '
-                                      f'received {type(input_param)}'
-                                      )
+                                      'received {}'
+                                      .format(key, type(input_param)))
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
@@ -2039,11 +2039,11 @@ class Module:
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append(f'While copying the parameter named "{key}", '
-                                      f'whose dimensions in the model are {param.size()} and '
-                                      f'whose dimensions in the checkpoint are {input_param.size()}, '
-                                      f'an exception occurred : {ex.args}.'
-                                      )
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'whose dimensions in the model are {} and '
+                                      'whose dimensions in the checkpoint are {}, '
+                                      'an exception occurred : {}.'
+                                      .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
 

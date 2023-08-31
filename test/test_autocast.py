@@ -67,7 +67,7 @@ class TestAutocastCPU(TestCase):
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = compare(output, output_method)
-                self.assertTrue(comparison, f"torch.{op} result did not match Tensor.{op} result")
+                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.

@@ -1483,8 +1483,10 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                f"Attempting to slice a tensor but a start index in {start_indices} is greater than"
-                f" the length of its corresponding dimension in shape {a.shape}"
+                "Attempting to slice a tensor but a start index in {} is greater than"
+                " the length of its corresponding dimension in shape {}".format(
+                    start_indices, a.shape
+                )
             )
             raise ValueError(msg)
 
@@ -1494,14 +1496,16 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                f"Attempting to slice a tensor but a stop index in {limit_indices} is greater than the length of "
-                f" its corresponding dimension in shape {a.shape}"
+                "Attempting to slice a tensor but a stop index in {} is greater than the length of "
+                " its corresponding dimension in shape {}".format(
+                    limit_indices, a.shape
+                )
             )
             raise ValueError(msg)
         if x < z:
             msg = (
-                f"Attempting to slice a tensor but a start index in {x} is greater than "
-                f" its corresponding stop index {z}"
+                "Attempting to slice a tensor but a start index in {} is greater than "
+                " its corresponding stop index {}".format(x, z)
             )
 
     for x in _strides:

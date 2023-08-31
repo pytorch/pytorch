@@ -137,19 +137,6 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
-class Where(sympy.Function):
-    """
-    Good ol' ternary operator
-    """
-
-    nargs = (3,)
-
-    @classmethod
-    def eval(cls, c, p, q):
-        if c == sympy.true:
-            return p
-        elif c == sympy.false:
-            return q
 
 class Mod(sympy.Function):
     """

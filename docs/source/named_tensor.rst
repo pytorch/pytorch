@@ -204,9 +204,9 @@ and :meth:`~Tensor.reshape`, but have more semantic meaning to someone reading t
     >>> named_flat_imgs.names
     ('N', 'features')
 
-    >>> unflattened_named_imgs = named_flat_imgs.unflatten('features', [('C', 3), ('H', 128), ('W', 128)])
-    >>> unflattened_named_imgs.names
-    ('N', 'C', 'H', 'W')
+    >>> unflattened_imgs = imgs.view(32, 3, 128, 128)
+    >>> unflattened_named_imgs = named_flat_imgs.unflatten(
+            'features', [('C', 3), ('H', 128), ('W', 128)])
 
 .. _named_tensors_autograd-doc:
 

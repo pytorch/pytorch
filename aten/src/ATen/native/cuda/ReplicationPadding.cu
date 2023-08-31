@@ -449,7 +449,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad1d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -557,7 +557,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
   // const auto padR = paddingSize[1]; // This padding is ignored here
   const auto padT = paddingSize[2];
   // const auto padB = paddingSize[3]; // This padding is ignored here
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad2d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -649,7 +649,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad3d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;

@@ -112,8 +112,8 @@ def _retrieve_device(module: nn.Module) -> torch.device:
             device = parameter.device
         elif device != parameter.device:
             raise ValueError(
-                f'nn.Module: {module}, should have all parameters on a single device,'
-                ' please use .to() to place the module on a single device')
+                'nn.Module: {}, should have all parameters on a single device,'
+                ' please use .to() to place the module on a single device'.format(module))
 
     return device if device is not None else torch.device("cpu")
 

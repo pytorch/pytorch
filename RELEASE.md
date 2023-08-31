@@ -32,7 +32,6 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
-- [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
@@ -330,10 +329,6 @@ the size restrictions for publishing on PyPI so the default version that is publ
 
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
-
-# Submitting Tutorials
-
-Tutorials in support of a release feature must be submitted to the [pytorch/tutorials](https://github.com/pytorch/tutorials) repo at least two weeks before the release date to allow for editorial and technical review. There is no cherry-pick process for tutorials. All tutorials will be merged around the release day and published at [pytorch.org/tutorials](https://pytorch.org/tutorials/).
 
 # Special Topics
 

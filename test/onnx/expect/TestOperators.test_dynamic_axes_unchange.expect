@@ -37,7 +37,7 @@ graph {
       type: INTS
     }
   }
-  name: "main_graph"
+  name: "torch_jit"
   input {
     name: "input"
     type {

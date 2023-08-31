@@ -24,3 +24,9 @@ Diagnostic Rules
     :glob:
 
     generated/onnx_diagnostics_rules/*
+
+API Reference
+-------------
+
+.. autoclass:: torch.onnx._internal.diagnostics.TorchScriptOnnxExportDiagnostic
+    :members:

@@ -149,10 +149,6 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_export/constraints.py",
 }
 
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_higher_order_ops/cond.py",
-}
-
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),

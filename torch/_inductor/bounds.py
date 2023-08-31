@@ -1,4 +1,3 @@
-import operator
 from functools import partial
 from typing import Dict, Optional
 
@@ -30,8 +29,7 @@ class BoundVars:
         self.unbounded_vars = dominated_nodes(
             node
             for node in self.loop_body.get_nodes()
-            if node.target in ["load", "reduction", operator.getitem]
-            or "masked_subblock" in node.target
+            if node.target in ["load", "reduction"] or "masked_subblock" in node.target
         )
         # To access this variable call `get_bounds()`
         self._bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = {}
@@ -43,7 +41,7 @@ class BoundVars:
         # Initialize the environment with the unbounded variables
         for node in self.unbounded_vars:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
-            if not isinstance(node.target, str) or (
+            if (
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
             ):

@@ -3,10 +3,7 @@ import operator
 import types
 from typing import Dict, List
 
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
+import numpy as np
 
 import sympy
 
@@ -482,10 +479,6 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
-            if not config.trace_numpy:
-                unimplemented("Tensor.numpy(). config.trace_numpy is False")
-            if not np:
-                unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:

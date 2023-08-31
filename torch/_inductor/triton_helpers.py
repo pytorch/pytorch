@@ -92,19 +92,7 @@ def max_with_index(value, index, dim):
 
 
 @triton.jit
-def welford_reduce(value, mean, m2, weight):
-    delta = value - mean
-    new_weight = weight + 1
-    new_mean = mean + delta / new_weight
-    return (
-        new_mean,
-        m2 + delta * (value - new_mean),
-        new_weight,
-    )
-
-
-@triton.jit
-def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
+def _welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
     delta = mean_2 - mean_1
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
@@ -117,7 +105,7 @@ def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
 
 @triton.jit
 def welford(mean, m2, weight, dim):
-    return tl.reduce((mean, m2, weight), dim, welford_combine)
+    return tl.reduce((mean, m2, weight), dim, _welford_combine)
 
 
 @triton.jit

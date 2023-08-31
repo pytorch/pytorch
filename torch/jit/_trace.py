@@ -254,8 +254,10 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             out = (out,)
         if loss_fn == torch.sum and len(out) != 1:
             raise ValueError(
-                f"Model returns {len(out)} outputs, but default loss function "
-                "(torch.sum) can only handle a single output"
+                (
+                    "Model returns {} outputs, but default loss function "
+                    "(torch.sum) can only handle a single output"
+                ).format(len(out))
             )
         out_vars, _ = _flatten(out)
         saved_outs = [

@@ -369,7 +369,7 @@ void profilerStep() {
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().step();
   } else {
-    VLOG(1) << "Profiler is not initialized: skipping step() invocation";
+    LOG(WARNING) << "Profiler is not initialized: skipping step() invocation";
   }
 #endif // USE_KINETO
 }

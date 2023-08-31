@@ -33,6 +33,14 @@ on:
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
 
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
+        required: true
+        description: access key id for test stats upload
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
+        required: true
+        description: secret acess key for test stats upload
+
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
