@@ -121,7 +121,7 @@ jobs:
         shell: bash -e -l {0}
         run: |
           # reference ends with an RC suffix
-          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
 
