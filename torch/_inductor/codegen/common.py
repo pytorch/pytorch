@@ -640,7 +640,16 @@ class KernelArgs:
             if self._buffer_is_marked_removed(inplaced):
                 continue
             for other in inplaced.other_names:
-                if other in (V.graph.inplaced_to_remove | V.kernel.inplaced_to_remove):
+                # For cpu codegen, aliases method may be called in CppScheduling.flush
+                # where we can no longer access the kernel object. It does not matter
+                # that much since the inplaced_to_remove object recorded in the
+                # kernel object should have already being merged to
+                # V.graph.inplaced_to_remove.
+                # We just need handle the case that V.kernel is null gracefully here.
+                if other in (
+                    V.graph.inplaced_to_remove
+                    | getattr(V.kernel, "inplaced_to_remove", set())
+                ):
                     continue
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
