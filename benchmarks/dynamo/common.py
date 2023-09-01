@@ -1145,9 +1145,9 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model_container.h>
+            #include <torch/csrc/inductor/aot_inductor_model.h>
 
-            torch::aot_inductor::AOTInductorModelContainer model(1);
+            torch::aot_inductor::AOTInductorModel model;
 
             void run(
                     const std::vector<at::Tensor>& input_tensors,
