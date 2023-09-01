@@ -45,7 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -419,13 +419,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -1482,12 +1475,23 @@ def _warn_complex_not_supported():
     )
 
 
+@functools.lru_cache(None)
+def _warn_float8_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
+    )
+
+
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
+        return True
+    # FP8 Tensors are currently not supported
+    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
+        _warn_float8_not_supported()
         return True
     return False
 
@@ -1868,7 +1872,7 @@ make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten._scaled_dot_product_efficient_attention)
 make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -1876,6 +1880,7 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten._scaled_mm.default)
 
 make_fallback(aten.view_as_complex, require_contiguous)
 
@@ -2801,7 +2806,7 @@ def scatter_add(x, dim: int, index, src):
 
 @register_lowering(aten.scatter_add_, type_promotion_kind=None)
 def scatter_add_(x, dim: int, index, src):
-    return scatter_reduce_(clone(x), dim, index, src, "sum")
+    return scatter_reduce_(x, dim, index, src, "sum")
 
 
 @register_lowering(aten.scatter_reduce, type_promotion_kind=None)
