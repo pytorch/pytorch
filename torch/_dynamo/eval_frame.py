@@ -91,7 +91,7 @@ guarded_backend_cache = threading.local()
 
 
 @contextlib.contextmanager
-def backend_cache_wapper(backend: CompilerFn):
+def backend_cache_wrapper(backend: CompilerFn):
     def _set_current_backend(backend: CompilerFn):
         if not hasattr(guarded_backend_cache, "current_backend"):
             guarded_backend_cache.current_backend = None
@@ -273,7 +273,7 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
-        self.backend_cache_manager = backend_cache_wapper(innermost_fn(self.callback))
+        self.backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
         self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
@@ -345,7 +345,7 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
-            backend_cache_manager = backend_cache_wapper(innermost_fn(self.callback))
+            backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
             backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
