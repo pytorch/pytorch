@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+
+import unittest
 from typing import List
 
 import torch
@@ -14,8 +16,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTA
 from torch.fx import Node
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
-
-import unittest
 
 
 class TestHelperModules:
