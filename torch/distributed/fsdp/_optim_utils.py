@@ -124,6 +124,7 @@ def _unflatten_optim_state(
     flat_param_state: Dict[str, Any],
     to_save: bool,
     shard_state: bool,
+    cpu_offload: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
@@ -162,9 +163,11 @@ def _unflatten_optim_state(
         )
         for optim_state in unflat_param_state:
             # We can't use .items() below cuz we'd run into a concurrent modification error
-            for key in list(optim_state.keys()):
-                state = optim_state[key]
-                if isinstance(state, torch.Tensor):
+            if cpu_offload:
+                for key in list(optim_state.keys()):
+                    state = optim_state[key]
+                    if not isinstance(state, torch.Tensor):
+                        continue
                     optim_state[key] = state.cpu()
         return unflat_param_state
     else:
@@ -1326,6 +1329,7 @@ def _unflatten_orig_param_states(
     state_name: str,
     shard_state: bool,
     to_save: bool,
+    cpu_offload: bool,
 ) -> None:
     """
     Given a output state dict, ``output_states``, which the keys are FQNs to the
@@ -1366,8 +1370,13 @@ def _unflatten_orig_param_states(
                 value = _ext_chunk_dtensor(
                     value, fsdp_state.rank, fsdp_state._device_mesh
                 )
-        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
-            value = value.cpu()
+        elif not cpu_offload:
+            with SimpleProfiler.profile("clone"):
+                value = value.detach.clone()
+
+        if cpu_offload:
+            with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+                value = value.cpu()
         gathered_state[state_name] = value
 
     logger.warning(
@@ -1381,6 +1390,7 @@ def _allgather_orig_param_states(
     input_states: Dict[str, Any],
     shard_state: bool,
     to_save: bool,
+    cpu_offload: bool,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API allgather
@@ -1493,9 +1503,10 @@ def _allgather_orig_param_states(
             state_name,
             shard_state,
             to_save,
+            cpu_offload,
         )
-    del gathered_tensor
 
+    del gathered_tensor
     return output_states
 
 
@@ -1504,6 +1515,7 @@ def _gather_all_orig_param_state(
     input_states: Dict[str, Any],
     shard_state: bool,
     to_save: bool,
+    cpu_offload: bool,
 ) -> Dict[str, Any]:
     """
     Given a optimizer state dict, ``input_states``, which the keys are FQNs to the
@@ -1522,7 +1534,12 @@ def _gather_all_orig_param_state(
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER_OBJ):
             gathered_state_info = _allgather_state_info(fsdp_state, input_states)
         output_states = _allgather_orig_param_states(
-            fsdp_param_info, gathered_state_info, input_states, shard_state, to_save
+            fsdp_param_info,
+            gathered_state_info,
+            input_states,
+            shard_state,
+            to_save,
+            cpu_offload,
         )
     if to_save:
         assert set(output_states.keys()) == set(fsdp_param_info.param_indices.keys())
@@ -1538,6 +1555,7 @@ def _convert_state_with_orig_params(
     optim_state_dict: Dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
+    cpu_offload: bool = True,
 ) -> Dict[str, Any]:
     fsdp_osd_state: Dict[str, Any] = {}
     all_states: Dict[int, Dict[str, Any]] = {}
@@ -1567,10 +1585,12 @@ def _convert_state_with_orig_params(
                 fsdp_osd_state[unflat_param_name] = copy.copy(
                     optim_state_dict[param_key]
                 )
-                for state_name, value in sorted_items(
-                    fsdp_osd_state[unflat_param_name]
-                ):
-                    if torch.is_tensor(value):
+                if cpu_offload:
+                    for state_name, value in sorted_items(
+                        fsdp_osd_state[unflat_param_name]
+                    ):
+                        if not torch.is_tensor(value):
+                            continue
                         fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     # Instead of gathering the state of each parameter individually, we perform
@@ -1585,6 +1605,7 @@ def _convert_state_with_orig_params(
                 _all_states,
                 shard_state,
                 to_save,
+                cpu_offload,
             )
         )
 
@@ -1598,6 +1619,7 @@ def _convert_state_with_flat_params(
     optim_state_dict: Dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
+    cpu_offload: bool,
 ) -> Dict[str, Any]:
     fsdp_osd_state: Dict[str, Any] = {}
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
@@ -1623,6 +1645,7 @@ def _convert_state_with_flat_params(
                 optim_state_dict[param_key],
                 to_save,
                 shard_state,
+                cpu_offload,
             )
             if to_save:
                 assert len(unflat_state) == len(optim_state_key.unflat_param_names)
@@ -1635,8 +1658,12 @@ def _convert_state_with_flat_params(
             assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
             fsdp_osd_state[unflat_param_name] = copy.copy(optim_state_dict[param_key])
-            for state_name, value in sorted_items(fsdp_osd_state[unflat_param_name]):
-                if torch.is_tensor(value):
+            if cpu_offload:
+                for state_name, value in sorted_items(
+                    fsdp_osd_state[unflat_param_name]
+                ):
+                    if not torch.is_tensor(value):
+                        continue
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     return fsdp_osd_state
@@ -1658,6 +1685,7 @@ def _optim_state_dict(
     group: Optional[dist.ProcessGroup],
     using_optim_input: bool,
     use_orig_params: bool = False,
+    cpu_offload: bool = True,
 ) -> Dict[str, Any]:
     """
     Consolidates the optimizer state and returns it as a :class:`dict`
@@ -1756,6 +1784,7 @@ def _optim_state_dict(
             optim_state_dict["state"],
             to_save,
             shard_state,
+            cpu_offload,
         )
 
     # At this point, communication is complete and ranks can return early if nothing
