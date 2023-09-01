@@ -113,7 +113,7 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
 
-            return iter_contains(self.items, args[0], tx.options)
+            return iter_contains(self.items, args[0], tx, options)
 
         return super().call_method(tx, name, args, kwargs)
 

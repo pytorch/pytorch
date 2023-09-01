@@ -333,7 +333,7 @@ class DictView(VariableTracker):
         if name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx.options)
+            return iter_contains(self.items, args[0], tx, options)
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable(len(self.dv_dict.items), **options)
