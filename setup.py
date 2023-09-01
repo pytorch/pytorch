@@ -1076,10 +1076,6 @@ def add_triton(install_requires, extras_require) -> None:
     """
     Add triton package as a dependency when it's needed
     """
-    # Triton is only available on Linux atm
-    if platform.system() != "Linux":
-        return
-
     # NB: If the installation requirments list already includes triton dependency,
     # there is no need to add it one more time as an extra dependency. In nightly
     # or when release PyTorch, that is done by setting PYTORCH_EXTRA_INSTALL_REQUIREMENTS
@@ -1180,9 +1176,11 @@ def main():
 
     extras_require = {
         "opt-einsum": ["opt-einsum>=3.3"],
-        "dynamo": ["jinja2"],
     }
-    add_triton(install_requires=install_requires, extras_require=extras_require)
+    # Triton is only available on Linux atm
+    if platform.system() == "Linux":
+        extras_require["dynamo"] = ["jinja2"]
+        add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
