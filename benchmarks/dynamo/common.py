@@ -318,6 +318,8 @@ NON_DETERMINISTIC_MODELS = {
     "sam",
 }
 
+DO_NOT_CAST_INPUTS = {"stable_diffusion"}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -3484,8 +3486,12 @@ def run(runner, args, original_dir=None):
                 torch.cuda.set_per_process_memory_fraction(
                     args.per_process_memory_fraction
                 )
+            if model_name in DO_NOT_CAST_INPUTS:
+                model, _ = runner.cast_based_on_args(model, example_inputs)
 
-            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            else:
+                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+
             runner.run_one_model(
                 name,
                 model,
