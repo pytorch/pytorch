@@ -753,8 +753,6 @@ mobile::Module parse_and_initialize_mobile_module(
     c10::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
-  TORCH_CHECK(
-      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): If not copying, enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
 
@@ -763,6 +761,9 @@ mobile::Module parse_and_initialize_mobile_module(
   TORCH_CHECK(
       mobile::serialization::VerifyModuleBuffer(verifier),
       "Malformed Flatbuffer module");
+
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
 
   FlatbufferLoader loader;
   loader.setShouldCopyTensorMemory(should_copy_tensor_memory);
