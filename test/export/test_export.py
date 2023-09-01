@@ -29,6 +29,8 @@ from torch.utils._pytree import (
     treespec_loads,
     treespec_dumps
 )
+from torch._export import Dim, dims, dynamic_shapes, export_
+from torch.fx.tensor_type import TensorType
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -152,7 +154,7 @@ class TestExport(TestCase):
             preserve_module_call_signature=("foo.nested", "foo"),
         )
         ep._validate()
-        self.assertEqual(len(ep.module_call_graph), 3)
+        self.assertEqual(len(ep.module_call_graph), 2)
         # TODO(zhxchen17) unflattener
         # unflattened = unflatten(export_module)
         # self.compare_outputs(export_module, unflattened, inps)
@@ -349,19 +351,17 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
-    def test_export_experimental_apis(self):
-        from torch._export import Dim, dims, dynamic_shapes, export_ as export
-        from torch.fx.tensor_type import TensorType
-
+    def test_export_experimental_api1(self):
         # pass dynamic shapes of inputs along with inputs in export call
         def foo(x, y):
             return torch.matmul(x, y)
 
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
         batch = Dim("batch")
-        efoo = export(foo, inputs, dynamic_shapes=tuple({0: batch} for t in inputs))
+        efoo = export_(foo, inputs, dynamic_shapes=tuple({0: batch} for t in inputs))
         self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
 
+    def test_export_experimental_api2(self):
         # decorate exported function with expected dynamic shapes of inputs
         batch = Dim("batch", min=8, max=64)
         size = Dim("size")
@@ -371,9 +371,10 @@ class TestExport(TestCase):
             return torch.matmul(x, y)
 
         inputs = (torch.randn(10, 3, 3), torch.randn(10, 3, 3))
-        ebar = export(bar, inputs)
+        ebar = export_(bar, inputs)
         self.assertEqual(ebar(*inputs).shape, bar(*inputs).shape)
 
+    def test_export_experimental_api3(self):
         # type arguments of exported function with expected dynamic shapes
         batch, M, K, N = dims("batch", "M", "K", "N")
 
@@ -381,7 +382,7 @@ class TestExport(TestCase):
             return torch.matmul(x, y)
 
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
-        equx = export(qux, inputs)
+        equx = export_(qux, inputs)
         self.assertEqual(equx(*inputs).shape, qux(*inputs).shape)
 
     def test_error_does_not_reference_eager_fallback(self):

@@ -1752,7 +1752,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
-        '_refs.is_complex',
         '_refs.to',
         '_refs.mvlgamma',
         '_refs.ones',
@@ -1892,7 +1891,7 @@ class TestRefsOpsInfo(TestCase):
         else:
             # Intentionally don't use assertIn to avoid printing the
             # (very large) container
-            self.assertTrue(op in self.ref_db_names, msg=f"{op} not in ref_db_names")
+            self.assertTrue(op in self.ref_db_names, msg="{op} not in ref_db_names")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):

@@ -1981,6 +1981,7 @@ make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
+make_fallback(aten.vdot)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -2768,13 +2769,6 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
-        or (
-            fn == "aten.scatter_reduce_"
-            and reduce == "sum"
-            and isinstance(src, TensorBox)
-            and src.get_device() == torch.device("cpu")
-            and config.cpp.fallback_scatter_reduce_sum
-        )
         or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
     ):
