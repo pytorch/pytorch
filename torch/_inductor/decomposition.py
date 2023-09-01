@@ -119,9 +119,10 @@ def clamp(x, min=None, max=None):
 
 @register_decomposition([aten.full])
 def full(size, fill_value, **kwargs):
-    if "dtype" not in kwargs:
-        dtype = type_to_dtype(type(fill_value))
-        return aten.full(size, fill_value, dtype=dtype, **kwargs)
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
     return NotImplemented
 
 
