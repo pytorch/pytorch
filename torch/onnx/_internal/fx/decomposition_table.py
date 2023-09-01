@@ -18,17 +18,17 @@ from torch.onnx._internal.fx import registration
 @_beartype.beartype
 def _create_onnx_supports_op_overload_table(
     registry,
-) -> Set[Union[torch._ops.OpOverload, Callable]]:
+) -> Set[Union[torch._ops.OperatorBase, Callable]]:
     """
-    Creates a set of OpOverload and Callable objects that represent ONNX-supported PyTorch operations.
+    Creates a set of OperatorBase and Callable objects that represent ONNX-supported PyTorch operations.
 
     Args:
         registry (OnnxRegistry): The ONNX registry for PyTorch.
 
     Returns:
-        A collection of OpOverload and Callable objects representing ONNX-supported PyTorch operations.
+        A collection of OperatorBase and Callable objects representing ONNX-supported PyTorch operations.
     """
-    table: Set[Union[torch._ops.OpOverload, Callable]] = set()
+    table: Set[Union[torch._ops.OperatorBase, Callable]] = set()
 
     # Some ops in `torch.ops.aten` are not discoverable through `dir(torch.ops.aten)`,
     # but retrievable via explicit lookup.
@@ -80,7 +80,7 @@ def _create_onnx_supports_op_overload_table(
 @_beartype.beartype
 def create_onnx_friendly_decomposition_table(
     registry,
-) -> Dict[torch._ops.OpOverload, Callable]:
+) -> Dict[torch._ops.OperatorBase, Callable]:
     """
     This function creates a dictionary of op overloads and their decomposition functions
     for ops that do not have ONNX symbolic functions. If an op already has an ONNX symbolic function,
@@ -91,10 +91,10 @@ def create_onnx_friendly_decomposition_table(
         registry (torch.onnx.OnnxRegistry): The ONNX registry for PyTorch.
 
     Returns:
-        Dict[torch._ops.OpOverload, Callable]: A dictionary that maps op overloads to their corresponding
+        Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
+    decomposition_table: Dict[torch._ops.OperatorBase, Callable] = {}
     # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
     # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
     _ONNX_SUPPORT_OP_OVERLOADS = _create_onnx_supports_op_overload_table(registry)
