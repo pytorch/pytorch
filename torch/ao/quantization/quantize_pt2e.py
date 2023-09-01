@@ -26,6 +26,9 @@ from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple
 
+from torch.fx.passes.infra.pass_manager import PassManager
+from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
+
 __all__ = [
     "prepare_pt2e",
     "prepare_qat_pt2e",
@@ -93,6 +96,9 @@ def convert_pt2e(
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
+    pm = PassManager([DuplicateDQPass()])
+    model = pm(model).graph_module
+
     if use_reference_representation:
         model = reference_representation_rewrite(model)
 
