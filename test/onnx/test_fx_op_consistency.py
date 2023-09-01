@@ -672,6 +672,9 @@ def _run_test_output_match(
                     # Relax atol and rtol for float32 based on empirical results
                     rtol = 1e-5
                     atol = 2e-5
+                elif dtype == torch.float16 and op.name in test_suite.fp16_low_precision_list:
+                    rtol = 2e-3
+                    atol = 1e-5
                 else:
                     rtol = None
                     atol = None
@@ -706,6 +709,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+
+    fp16_low_precision_list = [
+        'nn.functional.batch_norm',
+        'native_batch_norm',
+    ]
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
