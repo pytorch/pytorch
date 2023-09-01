@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from typing import Set
 
 import torch
-from functorch.experimental import control_flow
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
@@ -61,7 +60,7 @@ class Verifier:
     def valid_builtin_funcs(self):
         return [
             operator.getitem,
-            control_flow.cond,
+            torch.ops.higher_order.cond,
             torch.ops.map_impl,
         ]
 
@@ -126,8 +125,8 @@ class ATenDialectVerifier(Verifier):
             )
 
         if (
-            torch.Tag.core not in op.tags  # type: ignore[attr-defined]
-            and torch.Tag.view_copy not in op.tags  # type: ignore[attr-defined]
+            torch.Tag.core not in op.tags
+            and torch.Tag.view_copy not in op.tags
         ):
             # NOTE(qihan): whether view_copy operators are marked as canonical is still under
             #            discussion.

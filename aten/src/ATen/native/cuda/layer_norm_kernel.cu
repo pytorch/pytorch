@@ -225,33 +225,40 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     auto i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
     WelfordDataLN wd = compute_stats(block_row, N, s_data);
+
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
+    const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+    const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     const int n_vec_to_read = N/vec_size;
+
     T_ACC rstd_val = c10::cuda::compat::rsqrt(wd.sigma2 + eps);
-    //no tail, N is guaranteed to be multiple of vec size
+
+    // No tail, N is guaranteed to be multiple of vec size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
       vec_t out;
-      //computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
-      if (gamma != nullptr && beta != nullptr) {
+
+      // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
+      if (gamma_vec != nullptr && beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
-          + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+            + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
-      } else if (gamma != nullptr) {
+      } else if (gamma_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
         }
-      } else if (beta != nullptr) {
+      } else if (beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
       } else {
         #pragma unroll
@@ -294,36 +301,6 @@ __global__ __inline__ void vectorized_layer_norm_kernel(
   T* Y){
     vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
   }
-
-template <typename T>
-__global__ void ComputeInternalGradientsCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-  __shared__ T_ACC db_shared[C10_WARP_SIZE];
-  const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    sum1 +=
-        static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
-    sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
-  }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  if (threadIdx.x == 0) {
-    ds[i] = sum1;
-    db[i] = sum2;
-  }
-}
 
 
 template<typename T, typename T_ACC>
@@ -405,51 +382,6 @@ __global__ void layer_norm_grad_input_kernel(
 
     compute_gI(dY, X, mean, rstd, gamma, dX, N, buf);
   }
-
-
-template <typename T, typename T_ACC>
-__global__ void ComputeGradientFusedParamsCUDAKernel(
-    int64_t M,
-    int64_t N,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c1,
-    acc_type<T, true>* c2) {
-  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index < M) {
-    const T_ACC s = T_ACC(1) / static_cast<T_ACC>(N);
-    const T_ACC a = (db[index] * static_cast<T_ACC>(mean[index]) - ds[index]) *
-        static_cast<T_ACC>(rstd[index]) * static_cast<T_ACC>(rstd[index]) *
-        static_cast<T_ACC>(rstd[index]) * s;
-    c1[index] = a;
-    c2[index] =
-        -(a * static_cast<T_ACC>(mean[index]) +
-          db[index] * static_cast<T_ACC>(rstd[index]) * s);
-  }
-}
-
-template <typename T, typename T_ACC>
-__global__ void LayerNormBackwardCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    const T_ACC* a,
-    const acc_type<T, true>* b,
-    const acc_type<T, true>* c,
-    T* dX) {
-  const int64_t i = blockIdx.x;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    dX[index] =
-        static_cast<T_ACC>(a[i]) * static_cast<T_ACC>(dY[index]) * gamma_v +
-        b[i] * static_cast<T_ACC>(X[index]) + c[i];
-  }
-}
 
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
@@ -715,14 +647,20 @@ void LayerNormKernelImplInternal(
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+
   // check if can take fast path - all tensors are properly aligned, N is less than 2^24 (to use float count),
   // N is multiple of vec_size (so that all rows are aligned if tensor is aligned)
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
+  bool can_vec_X = can_vectorize(X_data, alignment);
+  bool can_vec_Y = can_vectorize(Y_data, alignment);
+  bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
+  bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
+
   if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
-  can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
+  can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();

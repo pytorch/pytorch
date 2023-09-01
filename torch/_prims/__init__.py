@@ -13,7 +13,6 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.debug_prims import register_debug_prims
-from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     Dim,
@@ -323,8 +322,9 @@ def _make_prim(
 
 class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
-    ALWAYS_BOOL = (2,)
-    COMPLEX_TO_FLOAT = (3,)
+    INT_TO_FLOAT = (2,)
+    ALWAYS_BOOL = (3,)
+    COMPLEX_TO_FLOAT = (4,)
 
 
 # TODO: implement dtype validation here, too, or on the corresponding refs
@@ -396,6 +396,9 @@ def _elementwise_meta(
             dtype = dtype
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
+        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
+            if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
+                dtype = torch.get_default_dtype()
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)
@@ -1480,10 +1483,8 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a start index in {} is greater than"
-                " the length of its corresponding dimension in shape {}".format(
-                    start_indices, a.shape
-                )
+                f"Attempting to slice a tensor but a start index in {start_indices} is greater than"
+                f" the length of its corresponding dimension in shape {a.shape}"
             )
             raise ValueError(msg)
 
@@ -1493,16 +1494,14 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a stop index in {} is greater than the length of "
-                " its corresponding dimension in shape {}".format(
-                    limit_indices, a.shape
-                )
+                f"Attempting to slice a tensor but a stop index in {limit_indices} is greater than the length of "
+                f" its corresponding dimension in shape {a.shape}"
             )
             raise ValueError(msg)
         if x < z:
             msg = (
-                "Attempting to slice a tensor but a start index in {} is greater than "
-                " its corresponding stop index {}".format(x, z)
+                f"Attempting to slice a tensor but a start index in {x} is greater than "
+                f" its corresponding stop index {z}"
             )
 
     for x in _strides:
@@ -2031,6 +2030,7 @@ convert_element_type = _make_prim(
     impl_aten=_convert_element_type_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_convert_element_type_doc,
+    tags=(torch.Tag.pointwise,),
 )
 
 
@@ -2964,6 +2964,5 @@ fft_c2r = _make_prim(
     doc=_fft_c2r_doc,
 )
 
-register_nvprims()
 register_rng_prims()
 register_debug_prims()

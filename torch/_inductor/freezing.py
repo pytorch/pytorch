@@ -1,12 +1,13 @@
 import collections
 import itertools
+import logging
 
 import weakref
 from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
@@ -18,6 +19,8 @@ aten = torch.ops.aten
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+log = logging.getLogger(__name__)
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -94,6 +97,15 @@ class ConstantFolder(torch.fx.Interpreter):
             else return_true
         )
 
+    def is_impure(self, node: torch.fx.node.Node):
+        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+            # -> quantized_decomposed.dequantize_per_channel.default
+            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+            return True
+        return False
+
     def run_node(self, node):
         aten = torch.ops.aten
         args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -135,6 +147,9 @@ class ConstantFolder(torch.fx.Interpreter):
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             if not self.insertable_tensor_check(out):
                 return out
+
+            if self.is_impure(node):
+                return self.unknown_value
 
             self.node_replacements[node] = out
 
@@ -228,6 +243,9 @@ def freeze(
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
+
+    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+
     return aot_autograd_gm, preserved_arg_indices
 
 

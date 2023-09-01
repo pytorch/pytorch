@@ -5,8 +5,8 @@ import pickle
 import torch
 import torch.nn as nn
 from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
-from torch.nn import Buffer, Parameter
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
+from torch.nn import Parameter
+from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, TEST_PRIVATEUSE1
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
@@ -47,29 +47,29 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_module_buffer(self):
         module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         state_dict = module.state_dict()
         self.assertIsInstance(state_dict['test_buffer'], UninitializedBuffer)
         new_module = LazyModule()
         # An error is raised when there is an attempt to replace an existing parameter
         # with an uninitialized one
-        new_module.test_buffer = Buffer(torch.ones(5, 5))
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             new_module.load_state_dict(state_dict)
         # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
-        new_module.test_buffer = Buffer(torch.ones(5, 5))
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
         self.assertEqual(module.test_buffer, torch.ones((5, 5)))
 
         # Uninitialized parameters are left unchanged
         module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
 
         new_module = LazyModule()
-        new_module.test_buffer = UninitializedBuffer()
+        new_module.register_buffer('test_buffer', UninitializedBuffer())
         module.load_state_dict(new_module.state_dict())
         module.load_state_dict(new_module.state_dict())
         self.assertTrue(module.has_uninitialized_params())
@@ -85,7 +85,7 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_module_jit_buffer(self):
         module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
             torch.jit.script(module)
@@ -101,7 +101,7 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_share_memory_buffer(self):
         module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
             module.share_memory()
@@ -528,18 +528,22 @@ class TestLazyModules(TestCase):
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.dtype == torch.float16)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), 'CUDA and PRIVATEUSE1 not available')
     @suppress_warnings
     def test_materialize_device(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.device.type == 'cpu')
+        if TEST_CUDA:
+            device = 'cuda'
+        elif TEST_PRIVATEUSE1:
+            device = torch._C._get_privateuse1_backend_name()
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
-        module.cuda()
+        module.to(device)
         module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == 'cuda')
+        self.assertTrue(module.test_param.device.type == device)
 
     @suppress_warnings
     def test_chained_initialization(self):

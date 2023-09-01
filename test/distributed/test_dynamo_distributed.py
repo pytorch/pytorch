@@ -700,13 +700,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         Note: comptime prints the guards before the time they get installed or not installed, so in both cases
         (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
         with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
-        guard source 'local_fsdp_module'.
+        guard source 'local_nn_module'.
         """
         global GUARDS_FILE
         GUARDS_FILE = StringIO()
 
         for skip_guards, expected_guard_source in (
-            (True, "local_fsdp_module"),
+            (True, "local_nn_module"),
             (False, "local")
         ):
             torch._dynamo.reset()
@@ -760,8 +760,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self._param = torch.randn((3,), device="cuda")
-                self._buf = torch.nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda"))
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use `_param` and `_buf` each twice in this compiled forward
@@ -788,8 +789,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self._buf = nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda")
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -801,7 +802,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self._param = nn.Parameter(torch.randn((1,), device="cuda"))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
-                self._buf = self._buf_module._buf
+                self.register_buffer("_buf", self._buf_module._buf)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use the same buffer tensor twice in the compiled forward,

@@ -68,6 +68,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
@@ -329,6 +330,8 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    @skipIfNoDynamoSupport
+    @unittest.expectedFailure
     def test_control_flow_tracing(self):
         def true(x, y):
             return x + y
@@ -817,7 +820,7 @@ class TestFX(JitTestCase):
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.lin = torch.nn.Linear(d_hid, d_hid)
-                self.buffer = torch.nn.Buffer(torch.randn(bs + 100, d_hid))
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
 
             def forward(self, x):
                 x = torch.mm(x, self.mm_param)
@@ -2660,7 +2663,7 @@ class TestFX(JitTestCase):
         class GetItemBase(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.pe = torch.nn.Buffer(torch.randn(8, 8))
+                self.register_buffer('pe', torch.randn(8, 8))
 
         class GetItem1(GetItemBase):
             def forward(self, x):
@@ -3026,7 +3029,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
-                self.buf = torch.nn.Buffer(torch.randn(2, 3))
+                self.register_buffer("buf", torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -3196,7 +3199,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.buffer = torch.nn.Buffer(torch.ones(1))
+                self.register_buffer('buffer', torch.ones(1))
 
             def forward(self, x):
                 return self.l1(x) + self.buffer
