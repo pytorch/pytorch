@@ -1,5 +1,6 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <iostream>
 #include <stdexcept>
 #include <vector>

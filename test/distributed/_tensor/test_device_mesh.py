@@ -183,6 +183,30 @@ class InitDeviceMeshTest(DTensorTestBase):
         two_d_mesh = init_device_mesh(self.device_type, mesh_shape)
         self.assertEqual(two_d_mesh, ref_mesh)
 
+    @with_comms
+    def test_raises_duplicate_mesh_dim_names(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Each mesh_dim_name must be uqique.",
+        ):
+            mesn = init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=["dp", "dp"],
+            )
+
+    @with_comms
+    def test_raises_mesh_shape_mesh_dim_names_mismatch(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "mesh_shape and mesh_dim_names should have same length!",
+        ):
+            mesh = init_device_mesh(
+                self.device_type,
+                (8,),
+                mesh_dim_names=["dp", "tp"],
+            )
+
 
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property

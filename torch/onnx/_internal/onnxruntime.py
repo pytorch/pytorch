@@ -2,25 +2,35 @@ import dataclasses
 import importlib
 import logging
 
-from functorch.compile import min_cut_rematerialization_partition
+from typing import (
+    Any,
+    Dict,
+    Final,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
+
+from typing_extensions import TypeAlias
 
 import torch
 import torch._C
 import torch._ops
 import torch._prims.executor
 import torch.fx
-from torch._dynamo.backends.common import aot_autograd
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
 
 try:
     # Use try-except to initialize package-dependent global variables.
-    from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
-
     import onnx
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
@@ -35,7 +45,6 @@ try:
     import torch.onnx._internal.exporter
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
-    from torch.onnx._internal.exporter import ExportOptions
     from torch.onnx._internal.fx import fx_onnx_interpreter
     from torch.onnx._internal.fx.type_utils import (
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
@@ -46,9 +55,39 @@ try:
 except ImportError:
     _SUPPORT_ONNXRT = False
 
+__all__ = [
+    "is_onnxrt_backend_supported",
+    "torch_compile_backend",
+    "OrtExecutionProvider",
+    "OrtBackendOptions",
+    "OrtBackend",
+]
 
-def has_onnxruntime():
+
+def is_onnxrt_backend_supported() -> bool:
+    """Returns ``True`` if ONNX Runtime dependencies are installed and usable
+    to support TorchDynamo backend integration; ``False`` otherwise.
+
+    Example::
+
+        # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+        >>> import torch
+        >>> if torch.onnx.is_onnxrt_backend_supported():
+        ...     @torch.compile(backend="onnxrt")
+        ...     def f(x):
+        ...             return x * x
+        ...     print(f(torch.randn(10)))
+        ... else:
+        ...     print("pip install onnx onnxscript-preview onnxruntime")
+        ...
+    """
     return _SUPPORT_ONNXRT
+
+
+def _infer_default_eps() -> Sequence[str]:
+    # TODO: select a good default based on the capabilities of the host
+    # e.g. DML on Windows, etc.
+    return ["CPUExecutionProvider"]
 
 
 def _nvtx_range_push(name: str):
@@ -205,14 +244,6 @@ def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
                          args={[arg.meta for arg in node.args]}, kwargs={node.kwargs}"
                 )
     fx_module.recompile()
-
-
-def _create_onnx_session(onnx_proto, eps: Tuple[str, ...], session_options):
-    # TODO(wschin): enable external allocators.
-    # See https://github.com/pytorch/pytorch/issues/106867
-    return onnxruntime.InferenceSession(
-        onnx_proto, providers=eps, sess_options=session_options
-    )
 
 
 def _infer_ep_from_device(*args) -> Tuple[str, ...]:
@@ -489,6 +520,79 @@ class OrtExecutionInfoForAllGraphModules:
             self.execution_info_per_graph_module[graph_module].append(info)
 
 
+OrtExecutionProvider: TypeAlias = Union[str, Tuple[str, Mapping[str, Any]]]
+"""Either the name of an ONNX Runtime execution provider as a string or
+a 2-tuple of the name and a dictionary of execution provider options.
+
+Examples::
+
+    >>> "CPUExecutionProvider"
+
+    >>> ("CUDAExecutionProvider", {"device_id": 3})
+
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+@compatibility(is_backward_compatible=False)
+class OrtBackendOptions:
+    """Options for constructing an ``OrtBackend``, the ONNX Runtime
+    backend (``"onnxrt"``) for ``torch.compile``.
+
+    Example::
+
+        >>> @torch.compile(
+        ...     backend="onnxrt",
+        ...     options=torch.onnx._OrtBackendOptions(...),
+        ... )
+        ... def ort_function(x):
+        ...     return x ** x
+    """
+
+    preferred_execution_providers: Optional[Sequence[OrtExecutionProvider]] = None
+    """An optional sequence of execution providers to be prioritized ahead of any
+    execution providers that may be inferred (see ``infer_execution_providers``).
+    """
+
+    infer_execution_providers: bool = True
+    """Whether to infer an execution provider from ``torch.device`` bound to inputs or found in the graph."""
+
+    default_execution_providers: Optional[Sequence[OrtExecutionProvider]] = None
+    """The default fallback execution providers. If not specified, one will be
+    be selected based on the host environment (most likely ``"CPUExecutionProvider"``).
+    """
+
+    # preallocate_output allows for allocating output torch Tensor buffers and feeding them to InferenceSession
+    # in order to avoid internal allocation of output buffers in InferenceSession.
+    # If output ortvalue returned from InferenceSession is allocated internally,
+    # it needs to be converted to torch Tensor for return, and the torch Tensor should hold the ownership.
+    # When a custom torch device is used with a custom aten allocator, the conversion from ortvalue to torch Tensor
+    # should be supported, which is currently done through dlpack. Note that dlpack might not support a custom torch device.
+    # It can be avoided by allowing for preallocation for output buffers allocated by a custom aten allocator,
+    # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
+    # TODO(wschin): Make it to inference session level flag.
+    # See https://github.com/pytorch/pytorch/issues/106869.
+    preallocate_output: bool = False
+    """If ``True``, allocate memory for ONNX Runtime's outputs on the PyTorch side."""
+
+    use_aot_autograd: bool = True
+    """Whether to wrap the ``OrtBackend`` with TorchDynamo's aot_autograd backend
+    to support training (i.e., backward graphs are also sent to ``OrtBackend``).
+
+    Symbolic execution is used to capture the forward pass and backward passes as a single graph.
+    Then, a selected graph partition algorithm (``min_cut_rematerialization_partition``) is used
+    to split the entire graph into forward sub-graph and backward sub-graph. Finally, both
+    sub-graphs are compiled by ``OrtBackend``.
+    """
+
+    export_options: Optional["torch.onnx.ExportOptions"] = None
+    """Options for the TorchDynamo-based ONNX exporter used by the ``OrtBackend``."""
+
+    ort_session_options: Optional["onnxruntime.SessionOptions"] = None
+    """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
+
+
+@compatibility(is_backward_compatible=False)
 class OrtBackend:
     """A backend compiles (sub-)graphs in torch.fx.GraphModule to onnxruntime.InferenceSession calls.
 
@@ -499,34 +603,28 @@ class OrtBackend:
         3. Inside _ort_accelerated_call, it creates onnxruntime.InferenceSession and calls it to execute the sub-graph.
     """
 
-    def __init__(
-        self,
-        # Default execution provider when we can't find any device information
-        # from arguments or the graph module captured by dynamo.
-        ep: str = "CPUExecutionProvider",
-        # Allocate memory for ORT's outputs on PyTorch side if True. Otherwise, False.
-        preallocate_output: bool = False,
-        session_options=None,
-        onnx_exporter_options: Optional[
-            "torch.onnx._internal.exporter.ExportOptions"
-        ] = None,
-    ):
-        # onnx_exporter_options contains information shared between exporter and DORT.
+    def __init__(self, options: Optional[OrtBackendOptions] = None):
+        self._options: Final = OrtBackendOptions() if options is None else options
+
+        # options.export_options contains information shared between exporter and DORT.
         # For example, they should use the same decomposition table when
         #  1. capturing FX graph in torch.compile (see how we create aot_ort in register_backend.py)
         #  2. call exporter's API to convert `torch.fx.GraphModule` to ONNX model
         #     (see onnxfunction_dispatcher passed to FxOnnxInterpreter.run below).
-        if onnx_exporter_options is None:
-            onnx_exporter_options = torch.onnx._internal.exporter.ExportOptions()
+        #
         # Convert user-facing option to internal option used by ONNX exporter
         # to access required information.
         # Some useful fields:
         # - Decomposition table for decomposing FX operators in exporter is
-        #   self.resolved_onnx_exporter_options.decomposition_table.
-        # - self.resolved_onnx_exporter_options.onnx_registry records what
+        #   self._resolved_onnx_exporter_options.decomposition_table.
+        # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
-        self.resolved_onnx_exporter_options = (
-            torch.onnx._internal.exporter.ResolvedExportOptions(onnx_exporter_options)
+        self._resolved_onnx_exporter_options = (
+            torch.onnx._internal.exporter.ResolvedExportOptions(
+                torch.onnx.ExportOptions()
+                if self._options.export_options is None
+                else self._options.export_options
+            )
         )
 
         #  Given DORT's computation flow:
@@ -539,9 +637,9 @@ class OrtBackend:
         #  supported by exporter, exporter will fails in step 2 since the selected graphs may
         #  contains unsupported operators such as aten::_who_you_are.
         #  This restriction is automatically done since DORT and exporter shares the same
-        #  self.resolved_onnx_exporter_options.
+        #  self._resolved_onnx_exporter_options.
         support_dict = torch.onnx._internal.fx.decomposition_table._create_onnx_supports_op_overload_table(
-            self.resolved_onnx_exporter_options.onnx_registry
+            self._resolved_onnx_exporter_options.onnx_registry
         )
 
         extra_support_dict: Dict[str, Any] = {
@@ -571,30 +669,47 @@ class OrtBackend:
 
         self._assert_allclose_to_baseline = False
 
-        # Default execution provider such as "CUDAExecutionProvider" or "CPUExecutionProvider".
-        # It's used to create a new inference session when we can't find any device information
-        # from arguments or the graph module captured by dynamo.
-        self.ep = ep
-        self.session_options = session_options
         self.execution_count = 0
 
-        # preallocate_output allows for allocating output torch Tensor buffers and feeding them to InferenceSession
-        # in order to avoid internal allocation of output buffers in InferenceSession.
-        # If output ortvalue returned from InferenceSession is allocated internally,
-        # it needs to be converted to torch Tensor for return, and the torch Tensor should hold the ownership.
-        # When a custom torch device is used with a custom aten allocator, the conversion from ortvalue to torch Tensor
-        # should be supported, which is currently done through dlpack. Note that dlpack might not support a custom torch device.
-        # It can be avoided by allowing for preallocation for output buffers allocated by a custom aten allocator,
-        # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
-        # TODO(wschin): Make it to inference session level flag.
-        # See https://github.com/pytorch/pytorch/issues/106869.
-        self.preallocate_output = preallocate_output
         # Function which invokes ORT do to the real computation.
         self.run = (
             _run_onnx_session_with_ortvaluevector
             if hasattr(ORTC, "push_back_batch")
             else _run_onnx_session_with_fetch
         )
+
+    def _select_eps(
+        self, graph_module: torch.fx.GraphModule, *args
+    ) -> Sequence[Tuple[str, Mapping[str, Any]]]:
+        inferred_eps: Tuple[str, ...] = tuple()
+        if self._options.infer_execution_providers:
+            if eps_from_args := _infer_ep_from_device(*args):
+                # If user feeds CUDA tensor as input argument,
+                # we want to use CUDA EP.
+                # Thus, `eps_from_args` (deduced from input arguments)
+                # has highest priority.
+                inferred_eps = eps_from_args
+            elif eps_from_graph_module := _infer_ep_from_graph_module(graph_module):
+                # If there is no EP in input arguments, we deduce EP from
+                # graph_module's outputs. Those outputs may come from
+                # FakeTensorProp or Dynamo's built-in symbolic shape inference.
+                inferred_eps = eps_from_graph_module
+
+        selected_eps = []
+
+        for ep in (
+            *(self._options.preferred_execution_providers or []),
+            *_sort_eps(inferred_eps),
+            *(self._options.default_execution_providers or _infer_default_eps()),
+        ):
+            if isinstance(ep, str):
+                ep = (ep, {})
+            elif isinstance(ep, tuple) and ep[1] is None:
+                ep = (ep[0], {})
+            if ep is not None and ep not in selected_eps:
+                selected_eps.append(ep)
+
+        return selected_eps
 
     def _ort_acclerated_call(self, graph_module: torch.fx.GraphModule, *args, **kwargs):
         """This function replaces GraphModule._wrapped_call in compiled model.
@@ -620,7 +735,7 @@ class OrtBackend:
             # (type: onnxruntime.InferenceSession) for it.
 
             graph_module = torch.onnx._internal.fx.passes.MovePlaceholderToFront(
-                self.resolved_onnx_exporter_options.diagnostic_context,
+                self._resolved_onnx_exporter_options.diagnostic_context,
                 graph_module,
             ).run()
             # Generate reference outputs. They are used to indicate output
@@ -629,7 +744,7 @@ class OrtBackend:
             # WARNING: The downstream code should not change prim_outputs and
             # this backend should always produces output with schema identical to prim_outputs'.
 
-            if self.resolved_onnx_exporter_options.dynamic_shapes:
+            if self._resolved_onnx_exporter_options.dynamic_shapes:
                 # No pre-allocation when dynamic shape is enabled.
                 self.preallocate_output = False
                 extracted_outputs = _extract_graph_module_outputs(graph_module)
@@ -662,51 +777,41 @@ class OrtBackend:
             # Create the object to iterate through the nodes in graph one-by-one
             # and calls the corresponding ONNX exporter for each node.
             fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-                diagnostic_context=self.resolved_onnx_exporter_options.diagnostic_context
+                diagnostic_context=self._resolved_onnx_exporter_options.diagnostic_context
             )
             # Cast FX variables if they will result schema-mismatch when searching
             # for ONNX operator. E.g., add(double_tensor, int_tensor) is fine in PyTorch,
             # but ONNX expects add(double_tensor, double_tensor).
             graph_module = torch.onnx._internal.fx.passes.InsertTypePromotion(
-                self.resolved_onnx_exporter_options.diagnostic_context, graph_module
+                self._resolved_onnx_exporter_options.diagnostic_context, graph_module
             ).run()
             # Start the per-node exporting process. It's conceptually a for loop
             # scanning through the nodes in the graph.
             exported = fx_interpreter.run(
                 fx_graph_module=graph_module,
-                onnxfunction_dispatcher=self.resolved_onnx_exporter_options.onnxfunction_dispatcher,
-                op_level_debug=self.resolved_onnx_exporter_options.op_level_debug,
+                onnxfunction_dispatcher=self._resolved_onnx_exporter_options.onnxfunction_dispatcher,
+                op_level_debug=self._resolved_onnx_exporter_options.op_level_debug,
             )
             # Convert the exported result to ONNX ModelProto.
             onnx_model = exported.to_model_proto(
-                opset_version=self.resolved_onnx_exporter_options.onnx_registry.opset_version,
+                opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
             # same device, but it's subject to change (very likely with
             # dynamic shape support), so we add execution providers
-            # based on the all inputs/outputs plus a default OrtBackend.ep.
-            eps_from_args = _infer_ep_from_device(args)
-            eps_from_graph_module = _infer_ep_from_graph_module(graph_module)
-            if eps_from_args:
-                # If user feeds CUDA tensor as input argument,
-                # we want to use CUDA EP.
-                # Thus, `eps_from_args` (deduced from input arguments)
-                # has highest priority.
-                selected_eps = _sort_eps((*eps_from_args, self.ep))
-            elif eps_from_graph_module:
-                # If there is no EP in input arguments, we deduce EP from
-                # graph_module's outputs. Those outputs may come from
-                # FakeTensorProp or Dynamo's built-in symbolic shape inference.
-                selected_eps = _sort_eps((*eps_from_graph_module, self.ep))
-            else:
-                # No EP found in inputs and outputs, let's use default.
-                selected_eps = (self.ep,)
-
-            onnx_session = _create_onnx_session(
-                onnx_model.SerializeToString(), selected_eps, self.session_options
+            # based on the logic in _select_eps: (explicitly preferred EPs,
+            # EPs inferred from inputs or graph, and the fallback default EP)/
+            #
+            # TODO(wschin): enable external allocators.
+            # See https://github.com/pytorch/pytorch/issues/106867
+            onnx_session = onnxruntime.InferenceSession(
+                path_or_bytes=onnx_model.SerializeToString(),
+                sess_options=self._options.ort_session_options,
+                providers=self._select_eps(graph_module, *args),
             )
+
             # Cache ORT session. It's reused for the same "graph_module".
             # Generate ONNX model and extract its input and output names.
             input_names = tuple(input.name for input in onnx_model.graph.input)
@@ -756,7 +861,7 @@ class OrtBackend:
             output_names,
             normalized_prim_outputs,
             output_devices,
-            self.preallocate_output,
+            self._options.preallocate_output,
         )
         _nvtx_range_pop()
         if self._assert_allclose_to_baseline:
@@ -775,6 +880,12 @@ class OrtBackend:
         return onnx_outputs[0] if is_single_tensor_output else onnx_outputs
 
     def compile(self, graph_module: torch.fx.GraphModule, args) -> torch.fx.GraphModule:
+        # Deferred import since CapabilityBasedPartitioner is not decorated with
+        # @compatibility; importing it at the module level will result in the test
+        # failing: pytest test/test_fx.py -k test_public_api_surface
+        # because this module is imported into torch.onnx.
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+
         # FX graph based partitioning based on ONNX supported ops.
         # Given a graph module
         #  GraphModule0
@@ -828,56 +939,110 @@ class OrtBackend:
     def __call__(
         self, graph_module: torch.fx.GraphModule, args
     ) -> torch.fx.GraphModule:
-        """Interface for dynamo to compile a graph module.
+        """If ``OrtBackendOptions.use_aot_autograd`` is ``True``, the `auto_autograd` compiler
+        will be invoked, wrapping this ``OrtBackend`` instance's ``compile`` method. Otherwise,
+        the ``compile`` method is invoked directly."""
+        if self._options.use_aot_autograd:
+            from functorch.compile import min_cut_rematerialization_partition
 
-        All backends/compilers are passed into dynamo as
-        callables following this signature (mapping from
-        (torch.fx.GraphModule, args) to torch.fx.GraphModule).
-        """
+            from torch._dynamo.backends.common import aot_autograd
+
+            return aot_autograd(
+                fw_compiler=self.compile,
+                partition_fn=min_cut_rematerialization_partition,
+                decompositions=self._resolved_onnx_exporter_options.decomposition_table,
+            )(graph_module, args)
+
         return self.compile(graph_module, args)
 
+    __instance_cache_max_count: Final = 8
+    __instance_cache: Final[List["OrtBackend"]] = []
 
-def make_aot_ort(dynamic: bool = True):
-    """Wrap OrtBackend as PyTorch's AOT compiler.
+    @staticmethod
+    def get_cached_instance_for_options(
+        options: Optional[Union[OrtBackendOptions, Mapping[str, Any]]] = None,
+    ) -> "OrtBackend":
+        """Returns a possibly cached instance of an ``OrtBackend``. If an existing
+        backend was created previously through this function with the same options,
+        it will be returned. Otherwise a new backend will be created, cached, and
+        returned.
 
-    Example usages:
-         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-         >>> import copy
-         >>> import torch
-         >>> from torch.onnx._internal.onnxruntime import make_aot_ort
-         >>> class MyModel(torch.nn.Module):
-         ... def __init__(self) -> None:
-         ...     super().__init__()
-         ...     self.linear = torch.nn.Linear(2, 2)
-         ... def forward(self, x):
-         ...     out = self.linear(x)
-         ...     return out
-         >>> model = MyModel()
-         >>> aot_ort, _ = make_aot_ort(dynamic = True)
-         >>> compiled_model = torch.compile(copy.deepcopy(model), backend=aot_ort, dynamic=True)
-         >>> x = torch.randn(2, 2, 2)
-         >>> y_baseline = model(x)
-         >>> y_compiled = compiled_model(x)
-         >>> torch.testing.assert_close(y_baseline, y_compiled)
-    """
-    ort_backend = OrtBackend(
-        onnx_exporter_options=ExportOptions(dynamic_shapes=dynamic)
-    )
-    return (
-        # Wrap OrtBackend as dynamo backend to support training
-        # (i.e., backward graphs are also sent to OrtBackend).
-        # In this function, symbolic execution is used to capture
-        # forward pass and backward passes as a single graph.
-        # Then, a selected graph partition algorithm (here
-        # is min_cut_rematerialization_partition) is used to
-        # split the entire graph into forward sub-graph and backward
-        # sub-graph. Finally, both sub-graphs are compiled by OrtBackend.
-        aot_autograd(
-            fw_compiler=ort_backend,
-            partition_fn=min_cut_rematerialization_partition,
-            decompositions=ort_backend.resolved_onnx_exporter_options.decomposition_table,
-        ),
-        # Unlike wrapping using aot_autograd, this backend is inference-only,
-        # because backward graphs are not visible.
-        ort_backend,
-    )
+        Note: if ``options`` sets ``ort_session_options``, a new ``OrtBackend``
+        will always be returned, since ``onnxruntime.SessionOptions`` cannot
+        participate in caching."""
+
+        def reusable(a: OrtBackendOptions, b: OrtBackendOptions):
+            if (
+                a.preferred_execution_providers != b.preferred_execution_providers
+                or a.infer_execution_providers != b.infer_execution_providers
+                or a.default_execution_providers != b.default_execution_providers
+                or a.preallocate_output != b.preallocate_output
+                or a.use_aot_autograd != b.use_aot_autograd
+            ):
+                return False
+
+            # onnxruntime.SessionOptions is a pybind11 object, cannot be pickled,
+            # and holds too much potential state to reasonably check manually;
+            # ort_session_options is provided at all, the backend does not participate
+            # in caching.
+            if a.ort_session_options is not None or b.ort_session_options is not None:
+                return False
+
+            if a.export_options is b.export_options:
+                return True
+
+            # Similarly, some objects in ExportOptions are too stateful to use for
+            # caching. We should revisit this.
+            if a.export_options is not None and b.export_options is not None:
+                return (
+                    a.export_options.dynamic_shapes == b.export_options.dynamic_shapes
+                    and a.export_options.op_level_debug
+                    == b.export_options.op_level_debug
+                    and a.export_options.diagnostic_options
+                    == b.export_options.diagnostic_options
+                    and a.export_options.onnx_registry is b.export_options.onnx_registry
+                    and a.export_options.fake_context is b.export_options.fake_context
+                )
+
+            # We can't account for how the two option sets may differ, so it's not safe to reuse.
+            return False
+
+        if not isinstance(options, OrtBackendOptions):
+            options = OrtBackendOptions(**(options or {}))
+
+        backend = next(
+            (b for b in OrtBackend.__instance_cache if reusable(b._options, options)),
+            None,
+        )
+
+        if backend is None:
+            assert (
+                len(OrtBackend.__instance_cache) < OrtBackend.__instance_cache_max_count
+            ), (
+                f"No more than {OrtBackend.__instance_cache_max_count} instances of "
+                f"{OrtBackend} allowed. Please instantiate `{OrtBackend}` explicitly "
+                "to pass to `torch.compile`. "
+                "See https://github.com/pytorch/pytorch/pull/107973#discussion_r1306144795 "
+                "for discussion."
+            )
+            OrtBackend.__instance_cache.append(backend := OrtBackend(options))
+
+        return backend
+
+    @staticmethod
+    def clear_cached_instances():
+        OrtBackend.__instance_cache.clear()
+
+    @staticmethod
+    def get_cached_instances():
+        return tuple(OrtBackend.__instance_cache)
+
+
+@compatibility(is_backward_compatible=False)
+def torch_compile_backend(
+    graph_module: torch.fx.GraphModule,
+    args,
+    *,
+    options: Optional[Union[OrtBackendOptions, Mapping[str, Any]]] = None,
+):
+    return OrtBackend.get_cached_instance_for_options(options)(graph_module, args)
