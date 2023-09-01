@@ -1342,6 +1342,7 @@ def _unflatten_orig_param_states(
     )
     flat_param = fsdp_param_info.handle.flat_param
     fsdp_state = fsdp_param_info.state
+    numel = 0
     for fqn, gathered_state in output_states.items():
         value = gathered_state[state_name]
 
@@ -1349,6 +1350,7 @@ def _unflatten_orig_param_states(
         value = value[: flat_param._numels[param_idx]].reshape(
             flat_param._shapes[param_idx]
         )
+        numel += value.numel()
         if shard_state:
             if not fsdp_state._optim_state_dict_config.use_dtensor:
                 assert fsdp_state.process_group is not None
@@ -1367,6 +1369,10 @@ def _unflatten_orig_param_states(
         with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
             value = value.cpu()
         gathered_state[state_name] = value
+
+    logger.warning(
+        "The total elements of FSDP managed optimizer state %s is %d", state_name, numel
+    )
 
 
 def _allgather_orig_param_states(
