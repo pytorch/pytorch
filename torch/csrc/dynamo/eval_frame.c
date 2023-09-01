@@ -1,5 +1,5 @@
 #define PY_SSIZE_T_CLEAN
-#include <ATen/record_function.h>
+#include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
@@ -936,13 +936,9 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-
-    PyObject* maybe_cached_code = NULL;
-    {
-      at::RecordFunction guard(at::RecordScope::FUNCTION);
-      guard.before("TorchDynamo Cache Lookup");
-      maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-    }
+    _PytorchRecordFunctionState rf = _pytorch_record_function_enter("TorchDynamo Cache Lookup");
+    PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+    _pytorch_record_function_exit(&rf);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -965,12 +961,9 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyObject* maybe_cached_code = NULL;
-  {
-    at::RecordFunction guard(at::RecordScope::FUNCTION);
-    guard.before("TorchDynamo Cache Lookup");
-    maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-  }
+  _PytorchRecordFunctionState rf = _pytorch_record_function_enter("TorchDynamo Cache Lookup");
+  PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+  _pytorch_record_function_exit(&rf);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
