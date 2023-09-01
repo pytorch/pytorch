@@ -29,6 +29,7 @@ from torch.distributed.fsdp._common_utils import (
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _get_orig_buffer_dtypes,
@@ -250,8 +251,11 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            buffer_clean_fqns.append(clean_key)
-            buffers.append(state_dict[fqn])
+            # skip upcasting for ignored buffers
+            if clean_key not in fsdp_state._ignored_buffer_names:
+                buffer_clean_fqns.append(clean_key)
+                buffers.append(state_dict[fqn])
+
     if buffers:
         mixed_precision_enabled_for_buffers = (
             fsdp_state._mixed_precision_enabled_for_buffers()
@@ -350,7 +354,8 @@ def _full_pre_load_state_dict_hook(
         _is_composable(fsdp_state)
         and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
     ):
-        _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+        with SimpleProfiler.profile("_enter_unshard_params_ctx"):
+            _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
     # Add FSDP_PREFIX only for wrapper-based FSDP.
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
@@ -363,7 +368,8 @@ def _full_post_load_state_dict_hook(
         _is_composable(fsdp_state)
         and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
     ):
-        _exit_unshard_params_ctx(module, fsdp_state)
+        with SimpleProfiler.profile("_exit_unshard_params_ctx"):
+            _exit_unshard_params_ctx(module, fsdp_state)
 
 
 def _local_pre_state_dict_hook(
@@ -563,7 +569,8 @@ def _sharded_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
     if _has_fsdp_params(fsdp_state, module):
-        _exit_unshard_params_ctx(module, fsdp_state)
+        with SimpleProfiler.profile("_exit_unshard_params_ctx"):
+            _exit_unshard_params_ctx(module, fsdp_state)
 
 
 @no_type_check
@@ -617,7 +624,8 @@ def _sharded_pre_load_state_dict_hook(
                 local_tensor = shards[0].tensor.flatten()
                 pg_device = _get_pg_default_device(fsdp_state.process_group)
                 if local_tensor.device.type != pg_device.type:
-                    local_tensor = local_tensor.to(pg_device)
+                    with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                        local_tensor = local_tensor.to(pg_device)
                 num_padding = chunk_size - local_tensor.numel()
                 if num_padding > 0:
                     local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -629,16 +637,25 @@ def _sharded_pre_load_state_dict_hook(
                 device=device,
             )
             if local_tensor.is_cpu:
+                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
+                # Convert to CPU so all_gather can work.
+                tensor_dev = tensor.device
+                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                    tensor = tensor.cpu()
                 tensor_list = list(
                     torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
                 )
-                dist.all_gather(
-                    tensor_list, local_tensor, group=fsdp_state.process_group
-                )
+                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                    dist.all_gather(
+                        tensor_list, local_tensor, group=fsdp_state.process_group
+                    )
+                with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+                    tensor.to(tensor_dev)
             else:
-                dist.all_gather_into_tensor(
-                    tensor, local_tensor, group=fsdp_state.process_group
-                )
+                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                    dist.all_gather_into_tensor(
+                        tensor, local_tensor, group=fsdp_state.process_group
+                    )
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             state_dict[fqn_from_global_root] = tensor
         else:
@@ -650,7 +667,8 @@ def _sharded_pre_load_state_dict_hook(
             )
             state_dict[fqn_from_global_root] = param.to_local()
 
-    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+    with SimpleProfiler.profile("_enter_unshard_params_ctx"):
+        _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
 
 
 @contextlib.contextmanager
@@ -781,6 +799,10 @@ def _pre_load_state_dict_hook(
     else:
         context = contextlib.nullcontext()
 
+    _lazy_init(fsdp_state, module)
+    if fsdp_state._is_root:
+        SimpleProfiler.reset()
+
     with context:
         _pre_load_state_dict_hook_fn = {
             StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
@@ -822,6 +844,9 @@ def _post_load_state_dict_hook(
         # Dispatch into state_dict type specific implementation of post-hook for
         # loading state_dict.
         _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+
+    if fsdp_state._is_root:
+        SimpleProfiler.dump_and_reset("FSDP model load_state_dict profiling: ")
 
 
 def _register_all_state_dict_hooks(state: _FSDPState):

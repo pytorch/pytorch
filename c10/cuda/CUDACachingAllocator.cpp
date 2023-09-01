@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/static_tracepoint.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -32,6 +33,9 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+TORCH_SDT_DEFINE_SEMAPHORE(malloc)
+TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
@@ -180,10 +184,18 @@ struct BlockPool {
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
+
+  // Do not insert a Block to blocks directly; use insert_into_blocks(),
+  // instead.
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
   const bool is_small;
   PrivatePool* owner_PrivatePool;
+  int64_t get_free_blocks_call_count{0};
+
+  // Add a Block into blocks set with updating gc counter.
+  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
+      Block* block);
 };
 
 struct ExpandableSegment;
@@ -205,8 +217,7 @@ struct Block {
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding CUDA events
-  int gc_count{0}; // counter for prioritizing older / less useful blocks for
-                   // garbage collection
+  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
   std::shared_ptr<GatheredContext> context_when_allocated;
   // only set for the first block in the segment (when prev == null)
   // this records the frame information when cudaMalloc was called
@@ -228,7 +239,8 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {}
+        ptr(ptr),
+        gc_count_base(pool->get_free_blocks_call_count) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -237,6 +249,10 @@ struct Block {
         stream_uses(),
         size(size),
         requested_size(0) {}
+
+  size_t gc_count() {
+    return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
+  }
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -254,6 +270,12 @@ struct Block {
     next = after;
   }
 };
+
+std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
+    insert_into_blocks(Block* block) {
+  block->gc_count_base = get_free_blocks_call_count;
+  return blocks.insert(block);
+}
 
 struct SegmentRange {
   char* ptr;
@@ -566,7 +588,7 @@ struct BlockState {
   size_t size = 0;
   void* ptr = nullptr;
   bool allocated = false;
-  int gc_count = 0;
+  int gc_count_base = 0;
   // maintain invariant that event_count == 0 ;
   // history will be left alone in checkpoint
 
@@ -729,7 +751,7 @@ BlockState::BlockState(Block* block)
       size(block->size),
       ptr(block->ptr),
       allocated(block->allocated),
-      gc_count(block->gc_count) {
+      gc_count_base(block->gc_count_base) {
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
@@ -1107,7 +1129,7 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
 
   if (used_cudaMallocAsync && used_native_specific_option) {
     TORCH_WARN(
-        "backend:cudaMallocAsync ignores max_split_size_mb, roundup_bypass_threshold_mb,"
+        "backend:cudaMallocAsync ignores max_split_size_mb,"
         "roundup_power2_divisions, and garbage_collect_threshold.");
   }
 }
@@ -1210,7 +1232,7 @@ class DeviceCachingAllocator {
   bool record_history = false;
   std::atomic<CreateContextFn> context_recorder_;
   size_t alloc_trace_next = 0;
-  bool alloc_trace_record_context_ = false;
+  RecordContext record_context_ = RecordContext::NEVER;
   size_t alloc_trace_max_entries_ = 1;
   std::vector<TraceEntry>*
       alloc_trace; // pointer because we need to intentionally leak this on
@@ -1249,12 +1271,13 @@ class DeviceCachingAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) {
+      RecordContext when) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
-    alloc_trace_record_context_ = alloc_trace_record_context;
+    record_context_ = enabled ? when : RecordContext::NEVER;
     alloc_trace_next = 0;
     alloc_trace->clear();
   }
@@ -1293,9 +1316,11 @@ class DeviceCachingAllocator {
   }
 
   // Must be called outside of `mutex` or deadlocks are possible with Python
-  std::shared_ptr<GatheredContext> maybeGatherContext() {
-    CreateContextFn context_recorder = context_recorder_.load();
-    return context_recorder ? context_recorder() : nullptr;
+  std::shared_ptr<GatheredContext> maybeGatherContext(RecordContext level) {
+    if (record_context_ < level) {
+      return nullptr;
+    }
+    return context_recorder_.load()();
   }
 
   // All public methods (except the above) acquire the allocator mutex.
@@ -1304,7 +1329,7 @@ class DeviceCachingAllocator {
   Block* malloc(int device, size_t orig_size, cudaStream_t stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
-    auto context = maybeGatherContext();
+    auto context = maybeGatherContext(RecordContext::STATE);
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -1319,7 +1344,7 @@ class DeviceCachingAllocator {
       //    Dumb simple solution: defer reclaiming these allocations until after
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
-      process_events();
+      process_events(context);
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -1349,7 +1374,8 @@ class DeviceCachingAllocator {
           || (release_available_cached_blocks(params) &&
               alloc_block(params, false, context))
           // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
+          || (C10_LIKELY(captures_underway == 0) &&
+              release_cached_blocks(context) &&
               alloc_block(params, true, context));
     }
 
@@ -1486,7 +1512,7 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
-      bool inserted = pool->blocks.insert(remaining).second;
+      bool inserted = pool->insert_into_blocks(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
       if (already_split && !block->expandable_segment_) {
@@ -1558,6 +1584,8 @@ class DeviceCachingAllocator {
   }
 
   void free(Block* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     block->allocated = false;
@@ -1580,7 +1608,7 @@ class DeviceCachingAllocator {
           int64_t(block->ptr),
           block->requested_size,
           block->stream,
-          block->context_when_allocated);
+          context ? context : block->context_when_allocated);
     }
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
@@ -1596,7 +1624,7 @@ class DeviceCachingAllocator {
         insert_events(block);
       }
     } else {
-      free_block(block);
+      free_block(block, context);
     }
 
     c10::reportMemoryUsageToProfiler(
@@ -1648,8 +1676,9 @@ class DeviceCachingAllocator {
 
   /** returns cached blocks to the system allocator **/
   void emptyCache() {
+    auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks();
+    release_cached_blocks(context);
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -1905,9 +1934,8 @@ class DeviceCachingAllocator {
     // following `done outside the lock because we don't know what locks the
     // recorder needs to have...`
 
-    CreateContextFn context_recorder = context_recorder_.load();
     std::shared_ptr<GatheredContext> context =
-        context_recorder ? context_recorder() : nullptr;
+        maybeGatherContext(RecordContext::STATE);
 
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
@@ -2285,7 +2313,7 @@ class DeviceCachingAllocator {
     try_merge_blocks(to_map, to_map->prev, pool);
     try_merge_blocks(to_map, to_map->next, pool);
 
-    pool.blocks.insert(to_map);
+    pool.insert_into_blocks(to_map);
 
     // update statistics
     total_allocated_memory += mapped_range.size;
@@ -2342,7 +2370,9 @@ class DeviceCachingAllocator {
   }
 
   /** moves a block into a pool of cached free blocks */
-  void free_block(Block* block) {
+  void free_block(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
@@ -2352,9 +2382,9 @@ class DeviceCachingAllocator {
           int64_t(block->ptr),
           block->requested_size,
           block->stream,
-          block->context_when_allocated);
-      block->context_when_allocated = nullptr;
+          context ? context : block->context_when_allocated);
     }
+    block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
 
@@ -2375,7 +2405,7 @@ class DeviceCachingAllocator {
     active_blocks.erase(block);
     // Makes sure the Block* isn't already present in the pool we're freeing it
     // back into.
-    bool inserted = pool.blocks.insert(block).second;
+    bool inserted = pool.insert_into_blocks(block).second;
     TORCH_INTERNAL_ASSERT(inserted);
 
     if (block->is_split()) {
@@ -2505,9 +2535,7 @@ class DeviceCachingAllocator {
             set_fraction &&
             CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
-      for (auto& b : pool.blocks) {
-        ++b->gc_count;
-      }
+      ++pool.get_free_blocks_call_count;
     }
     auto it = pool.blocks.lower_bound(&p.search_key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
@@ -2555,7 +2583,6 @@ class DeviceCachingAllocator {
         ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
-    (*it)->gc_count = 0; // Denote this block has been used
     pool.blocks.erase(it);
     return true;
   }
@@ -2590,7 +2617,7 @@ class DeviceCachingAllocator {
     int freeable_block_count = 0;
     for (auto& b : large_blocks.blocks) {
       if (!b->is_split()) {
-        total_age += b->gc_count;
+        total_age += b->gc_count();
         ++freeable_block_count;
       }
     }
@@ -2614,10 +2641,10 @@ class DeviceCachingAllocator {
       while (it != large_blocks.blocks.end()) {
         Block* block = *it;
         ++it;
-        if (!block->is_split() && block->gc_count >= age_threshold) {
+        if (!block->is_split() && block->gc_count() >= age_threshold) {
           block_freed = true;
           gc_reclaimed += block->size;
-          total_age -= block->gc_count; // Decrement the age
+          total_age -= block->gc_count(); // Decrement the age
           freeable_block_count--; // One less block that can be freed
           release_block(block);
         }
@@ -2755,10 +2782,10 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool release_cached_blocks() {
+  bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context) {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
-    synchronize_and_free_events();
+    synchronize_and_free_events(context);
 
     // Free all non-split cached blocks to system allocator
     release_blocks(large_blocks);
@@ -2848,7 +2875,7 @@ class DeviceCachingAllocator {
           block->device, block->stream, before_size, block->pool, block->ptr);
       before_free->expandable_segment_ = block->expandable_segment_;
       before_free->splice(block->prev, block);
-      block->pool->blocks.insert(before_free);
+      block->pool->insert_into_blocks(before_free);
     }
 
     auto after_size = block->size - (before_size + unmapped.size);
@@ -2862,7 +2889,7 @@ class DeviceCachingAllocator {
           static_cast<char*>(unmapped.ptr) + unmapped.size);
       after_free->expandable_segment_ = block->expandable_segment_;
       after_free->splice(block, block->next);
-      block->pool->blocks.insert(after_free);
+      block->pool->insert_into_blocks(after_free);
     }
 
     block->ptr = unmapped.ptr;
@@ -2918,7 +2945,8 @@ class DeviceCachingAllocator {
     return event_pool->get(idx);
   }
 
-  void synchronize_and_free_events() {
+  void synchronize_and_free_events(
+      const std::shared_ptr<GatheredContext>& context) {
     // Synchronize on outstanding events and then free associated blocks.
 
     // This function syncs, so capture should not be underway. Might as well
@@ -2935,7 +2963,7 @@ class DeviceCachingAllocator {
 
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
       }
     }
@@ -2973,7 +3001,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  void process_events() {
+  void process_events(const std::shared_ptr<GatheredContext>& context) {
     insert_events_deferred_until_no_capture();
 
     // Process outstanding cudaEvents. Events that are completed are
@@ -3003,7 +3031,7 @@ class DeviceCachingAllocator {
 
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
         it->second.pop_front();
       }
@@ -3037,7 +3065,7 @@ class DeviceCachingAllocator {
         addr,
         size,
         stream,
-        alloc_trace_record_context_ ? std::move(context) : nullptr);
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
     if (alloc_trace->size() < alloc_trace_max_entries_) {
       alloc_trace->emplace_back(te);
     } else {
@@ -3162,13 +3190,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
+      RecordContext when) override {
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
-          enabled,
-          context_recorder,
-          alloc_trace_max_entries,
-          alloc_trace_record_context);
+          enabled, context_recorder, alloc_trace_max_entries, when);
     }
   }
 
@@ -3187,9 +3212,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
+    for (auto& allocator : device_allocator) {
+      allocator->attachOutOfMemoryObserver(std::move(observer));
+    }
   }
 
   void emptyCache() override {
@@ -3300,6 +3325,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
+      if (TORCH_SDT_IS_ENABLED(malloc)) {
+        TORCH_SDT_WITH_SEMAPHORE(malloc, &r, device, size, 0);
+      }
+
       // Allocator declars allocate const!?
       const_cast<NativeCachingAllocator*>(this)->malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
@@ -3477,6 +3506,10 @@ class NativeCachingAllocator : public CUDAAllocator {
 NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
+  if (TORCH_SDT_IS_ENABLED(free)) {
+    TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+  }
+
   allocator.free(ptr);
 }
 

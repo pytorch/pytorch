@@ -483,3 +483,8 @@ is_multithreading_enabled = torch._C._is_multithreading_enabled
 torch._C._add_docstr(
     is_multithreading_enabled, "Returns True if multithreading is currently enabled."
 )
+
+is_view_replay_enabled = torch._C._is_view_replay_enabled
+torch._C._add_docstr(
+    is_view_replay_enabled, "Returns True if view-replay is currently enabled."
+)

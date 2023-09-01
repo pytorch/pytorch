@@ -394,7 +394,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
-        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        xfail('nn.functional.scaled_dot_product_attention'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -476,7 +476,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
         xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
-        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        xfail('nn.functional.scaled_dot_product_attention'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
@@ -604,7 +604,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
-        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
+        xfail('nn.functional.scaled_dot_product_attention'),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -682,7 +682,7 @@ class TestOperators(TestCase):
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
-        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
@@ -1264,7 +1264,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
-        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention'),
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -1387,7 +1387,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
-        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention'),
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
