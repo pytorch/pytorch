@@ -405,12 +405,12 @@ def cond_func(pred, true_fn, false_fn, inputs):
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input!"
                 )
 
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input!"
                 )
 
         cond_return = cond_op(
@@ -443,12 +443,12 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
         for branch in [functional_true_fn, functional_false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input!"
                 )
 
         cond_return = cond_op(
