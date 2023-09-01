@@ -5,6 +5,7 @@ from typing import Set
 import torch
 import torch._guards
 from torch._inductor.constant_folding import ConstantFolder
+from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
 from ..pattern_matcher import (
@@ -16,7 +17,6 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
 from .replace_random import replace_random_passes
 
 log = logging.getLogger(__name__)

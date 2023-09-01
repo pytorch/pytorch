@@ -8,7 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
-from torch._inductor.constant_folding import constant_fold
+from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
@@ -21,33 +21,6 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
-
-
-def replace_node_with_constant(gm, node, constant):
-    g = gm.graph
-
-    if not hasattr(gm, "_frozen_param_count"):
-        gm._frozen_param_count = 0
-
-    i = gm._frozen_param_count
-
-    while True:
-        qualname = f"_frozen_param{i}"
-        if not hasattr(gm, qualname):
-            break
-        i += 1
-
-    gm._frozen_param_count = i + 1
-
-    with g.inserting_before(node):
-        new_input_node = g.create_node("get_attr", qualname, (), {})
-        node.replace_all_uses_with(new_input_node)
-        new_input_node.meta.update(node.meta)
-        g.erase_node(node)
-
-    # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
-    gm.register_buffer(qualname, constant)
-    setattr(gm, qualname, constant)
 
 
 def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
@@ -73,10 +46,6 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     # is this necessary ?
     gm.recompile()
     return preserved_arg_indices
-
-
-def return_true(*args, **kwargs):
-    return True
 
 
 def freeze(
