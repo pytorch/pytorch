@@ -40,20 +40,32 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 
 void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
-  sizes_and_strides_.resize(public_dims);
+  if (value_.is_nested()) {
+    sizes_and_strides_.resize(public_dims);
+    storage_offset_= value_.storage_offset();
+    refresh_numel();
+    refresh_contiguous();
+  } else {
+    c10::SymDimVector new_sizes;
+    c10::SymDimVector new_strides;
+    new_sizes.reserve(public_dims);
+    new_strides.reserve(public_dims);
 
-  if (!value_.is_nested()) {
-    const auto value_sizes = value_.sizes();
-    const auto value_strides = value_.strides();
+    // update size, strides and storage_offset
+    // for tensor with symbolic size and strides
+    const auto value_sizes = value_.sym_sizes();
+    const auto value_strides = value_.sym_strides();
+
     for (const auto dim : c10::irange(0, public_dims)) {
       auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-      sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-      sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+      new_sizes.push_back(value_sizes.at(actual_dim));
+      new_strides.push_back(value_strides.at(actual_dim));
     }
+
+    // `set_sizes_and_strides` takes care of calling `refresh_numel` and
+    // `refresh_contiguous`
+    set_sizes_and_strides(new_sizes, new_strides, value_.sym_storage_offset());
   }
-  storage_offset_= value_.storage_offset();
-  refresh_numel();
-  refresh_contiguous();
 }
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
@@ -117,7 +129,7 @@ bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) con
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
-  return is_contiguous_;
+  return is_contiguous_default(memory_format);
 }
 
 // The following are some internal inherited methods that we do not support.
@@ -127,9 +139,6 @@ void BatchedTensorImpl::set_size(int64_t dim, int64_t new_size) {
 }
 void BatchedTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_stride for BatchedTensorImpl");
-}
-void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
 }
 #ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {

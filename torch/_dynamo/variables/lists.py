@@ -15,10 +15,33 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
+
+
+def _listlike_contains_helper(items, search, tx, options):
+    if search.is_python_constant():
+        result = any(
+            x.as_python_constant() == search.as_python_constant() for x in items
+        )
+        return variables.ConstantVariable(result, **options)
+
+    from .builtin import BuiltinVariable
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable(None)
+    return result
 
 
 class BaseListVariable(VariableTracker):
@@ -31,6 +54,7 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            collections.deque: DequeVariable,
         }[obj]
 
     def __init__(
@@ -111,27 +135,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-
-            search = args[0]
-            if check_constant_args(args, {}) and search.is_python_constant():
-                result = any(
-                    x.as_python_constant() == search.as_python_constant()
-                    for x in self.items
-                )
-                return variables.ConstantVariable(result, **options)
-
-            from .builtin import BuiltinVariable
-
-            result = None
-            for x in self.items:
-                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-                if result is None:
-                    result = check
-                else:
-                    result = BuiltinVariable(operator.or_).call_function(
-                        tx, [check, result], {}
-                    )
-            return result
+            return _listlike_contains_helper(self.items, args[0], tx, options)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -436,6 +440,16 @@ class DequeVariable(CommonListMethodsVariable):
                 DequeVariable(list(items), regen_guards=False, **options),
             )
             return result
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -540,6 +554,12 @@ class SizeVariable(TupleVariable):
             assert not kwargs and len(args) == 1
             out = self.get_item_dyn(tx, args[0])
             return out
+        elif name == "numel":
+            result = 1
+            for v in self.items:
+                assert isinstance(v, ConstantVariable)
+                result = result * v.value
+            return ConstantVariable(result).add_options(self)
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
@@ -711,8 +731,6 @@ def _register_dynamo_list_to_tree_spec():
         ListVariable,
         _listvariable_flatten,
         _listvariable_unflatten,
-        pytree._list_to_str,
-        pytree._maybe_str_to_list,
     )
 
     fx_pytree.register_pytree_flatten_spec(
@@ -739,8 +757,6 @@ def _register_dynamo_tuple_to_tree_spec():
         TupleVariable,
         _tuplevariable_flatten,
         _tuplevariable_unflatten,
-        pytree._tuple_to_str,
-        pytree._maybe_str_to_tuple,
     )
 
     fx_pytree.register_pytree_flatten_spec(
@@ -758,7 +774,7 @@ class SetVariable(VariableTracker):
         def __hash__(self) -> int:
             return hash(self.underlying_value)
 
-        def __eq__(self, other: Any) -> bool:
+        def __eq__(self, other: object) -> bool:
             if not isinstance(other, SetVariable.SetElement):
                 return False
             if isinstance(self.vt, variables.TensorVariable):
@@ -889,8 +905,18 @@ class SetVariable(VariableTracker):
             return result
         elif name == "__len__":
             return ConstantVariable(len(self.items)).add_options(options)
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return _listlike_contains_helper(self.items, args[0], tx, options)
         else:
             return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]

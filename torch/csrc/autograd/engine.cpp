@@ -1369,6 +1369,9 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
+  if (the_compiled_autograd.load() == fn) {
+    return;
+  }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,

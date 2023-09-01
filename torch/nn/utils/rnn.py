@@ -327,8 +327,8 @@ def pad_packed_sequence(
         if total_length < max_seq_length:
             raise ValueError("Expected total_length to be at least the length "
                              "of the longest sequence in input, but got "
-                             "total_length={} and max sequence length being {}"
-                             .format(total_length, max_seq_length))
+                             f"total_length={total_length} and max sequence length being {max_seq_length}"
+                             )
         max_seq_length = total_length
     padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
@@ -347,9 +347,9 @@ def pad_sequence(
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
-    and pads them to equal length. For example, if the input is list of
-    sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
-    otherwise.
+    and pads them to equal length. For example, if the input is a list of
+    sequences with size ``L x *`` and ``batch_first`` is False, the output is
+    of size ``T x B x *``.
 
     `B` is batch size. It is equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.
