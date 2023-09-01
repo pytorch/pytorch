@@ -209,6 +209,8 @@ def mps_ops_grad_modifier(ops):
 def mps_ops_modifier(ops):
     # Supported complex OPS
     SUPPORTED_COMPLEX_OPS = [
+        '__radd__',
+        'add',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
@@ -243,6 +245,7 @@ def mps_ops_modifier(ops):
         'split',
         'squeeze',
         'squeezemultiple',
+        'sub',
         't',
         'unflatten',
         'unsafe_split',
