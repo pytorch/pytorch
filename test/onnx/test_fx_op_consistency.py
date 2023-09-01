@@ -672,7 +672,10 @@ def _run_test_output_match(
                     # Relax atol and rtol for float32 based on empirical results
                     rtol = 1e-5
                     atol = 2e-5
-                elif dtype == torch.float16 and op.name in test_suite.fp16_low_precision_list:
+                elif (
+                    dtype == torch.float16
+                    and op.name in test_suite.fp16_low_precision_list
+                ):
                     rtol = 1e-2
                     atol = 1e-3
                 else:
