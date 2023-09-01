@@ -15,6 +15,9 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
 
 
+# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
+torch.set_default_dtype(torch.float32)
+
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
 _variant_ops = partial(ops, dtypes=OpDTypes.supported,

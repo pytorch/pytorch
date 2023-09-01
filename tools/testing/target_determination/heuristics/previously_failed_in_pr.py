@@ -20,7 +20,9 @@ class PreviouslyFailedInPR(HeuristicInterface):
         # Tests must always be returned in a deterministic order.
         # Otherwise it breaks our test sharding logic
         critical_tests = sorted(_get_previously_failing_tests())
-        test_rankings = TestPrioritizations(highly_relevant=critical_tests)
+        test_rankings = TestPrioritizations(
+            tests_being_ranked=tests, high_relevance=critical_tests
+        )
 
         return test_rankings
 

@@ -47,11 +47,15 @@ if config.is_fbcode():
     from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
+        log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
 else:
+
+    def log_global_cache_errors(*args, **kwargs):
+        pass
 
     def log_global_cache_stats(*args, **kwargs):
         pass
@@ -238,6 +242,7 @@ class PersistentCache(CacheBase):
 
         log_stats = partial(log_global_cache_stats, self.system, name, inputs)
         log_vals = partial(log_global_cache_vals, self.system, name, inputs)
+        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -263,12 +268,17 @@ class PersistentCache(CacheBase):
                 use_global_cache()
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
-                # re-benchmark everything to try to get consistent numbers from the same machine
-                for choice in choices:
-                    timings[choice] = benchmark(choice)
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
-                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                try:
+                    # re-benchmark everything to try to get consistent numbers from the same machine
+                    for choice in choices:
+                        timings[choice] = benchmark(choice)
+                        local_cache.setdefault(name, {})
+                        local_cache[name].setdefault(inputs, {})
+                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                except RuntimeError as e:
+                    # catch and log autotuning failures
+                    log_errors(e)
+                    raise e
 
                 self.update_local_cache(local_cache)
 

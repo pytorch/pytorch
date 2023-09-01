@@ -575,6 +575,7 @@ Tensor class reference
     Tensor.reciprocal_
     Tensor.record_stream
     Tensor.register_hook
+    Tensor.register_post_accumulate_grad_hook
     Tensor.remainder
     Tensor.remainder_
     Tensor.renorm
