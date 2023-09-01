@@ -3000,7 +3000,7 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    args.use_distributed = (args.ddp or args.fsdp) and args.only
+    args.use_distributed = args.multiprocess
     if args.multiprocess:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
@@ -3384,6 +3384,10 @@ def run(runner, args, original_dir=None):
             else:
                 try:
                     with tqdm(desc="loading model"):
+                        extra_args = []
+                        if hasattr(args, "rank") and hasattr(args, "world_size"):
+                            extra_args += ["--rank", str(args.rank), "--world_size", str(args.world_size)]
+
                         if args.part:
                             (
                                 device,
@@ -3396,6 +3400,7 @@ def run(runner, args, original_dir=None):
                                 model_name,
                                 batch_size=batch_size,
                                 part=args.part,
+                                extra_args=extra_args
                             )
                         else:
                             if args.fsdp:
@@ -3408,7 +3413,7 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    "cpu", model_name, batch_size=batch_size
+                                    "cpu", model_name, batch_size=batch_size, extra_args=extra_args
                                 )
                             else:
                                 (
@@ -3418,7 +3423,7 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    device, model_name, batch_size=batch_size
+                                    device, model_name, batch_size=batch_size, extra_args=extra_args
                                 )
                 except NotImplementedError as e:
                     print(e)
