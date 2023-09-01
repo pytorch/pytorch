@@ -2714,14 +2714,13 @@ class ShapeEnv:
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
 
         if equalities_inputs:
-            fake_index = {}
+            source_index = {}
             for i, src in enumerate(sources):
-                fake_index[src.name()] = i
-            def get_symbol(src):
-                a_src = src.base
-                f = placeholders[fake_index[a_src.name()]]
-                idx = src.idx
-                symint = f.shape[idx]
+                source_index[src.name()] = i
+
+            def get_symbol(tensor_dim_src):
+                fake = placeholders[source_index[tensor_dim_src.base.name()]]
+                symint = fake.shape[tensor_dim_src.idx]
                 assert isinstance(symint, torch.SymInt)
                 return symint.node.expr
 
@@ -2729,7 +2728,11 @@ class ShapeEnv:
                 s1, s2 = get_symbol(src1), get_symbol(src2)
                 concrete_val = self.evaluate_expr(sympy.Eq(s1, s2))
                 if not concrete_val:
-                    raise ConstraintViolationError(f"{src1.name()} = {self.var_to_val[s1]} is not equal to {src2.name()} = {self.var_to_val[s2]}")
+                    raise ConstraintViolationError(
+                        f"{src1.name()} = {self.var_to_val[s1]}"
+                        " is not equal to "
+                        f"{src2.name()} = {self.var_to_val[s2]}"
+                    )
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the

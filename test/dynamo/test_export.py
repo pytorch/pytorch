@@ -2378,6 +2378,44 @@ def forward(self, x):
                 foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
             )
 
+    def test_enforce_equalities(self):
+        def bar(x, y):
+            return torch.matmul(x, y)
+
+        def specify_constraints(x, y):
+            return [
+                dynamic_dim(x, 0) == dynamic_dim(y, 0),
+                dynamic_dim(x, 1) == dynamic_dim(x, 2),
+                dynamic_dim(x, 2) == dynamic_dim(y, 1),
+                dynamic_dim(y, 1) == dynamic_dim(y, 2),
+            ]
+
+        x = torch.randn(10, 3, 3)
+        y = torch.randn(10, 3, 4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            ".*y.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+        ):
+            torch._export.export(
+                bar,
+                (x, y),
+                constraints=specify_constraints(x, y),
+            )
+        y = torch.randn(10, 3, 3)
+        ebar = torch._export.export(
+            bar,
+            (x, y),
+            constraints=specify_constraints(x, y),
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in ebar.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+        )
+
     @config.patch(
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
