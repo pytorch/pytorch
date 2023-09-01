@@ -73,7 +73,8 @@ def get_artifacts_urls(results, suites):
 
 
 def normalize_suite_filename(suite_name):
-    subsuite = suite_name.split("_")[1]
+    strs = suite_name.split("_")
+    subsuite = strs[2] if strs[0] == "aot" else strs[1]
     if "timm" in subsuite:
         subsuite = subsuite.replace("timm", "timm_models")
 
