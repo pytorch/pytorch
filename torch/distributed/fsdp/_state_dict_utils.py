@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import logging
 import math
 import warnings
@@ -539,7 +538,7 @@ def _sharded_post_state_dict_hook(
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
-        if not fsdp_state._state_dict_config._use_dtensor:
+        if not fsdp_state._state_dict_config.use_dtensor:
             sharded_tensor = _ext_chunk_tensor(
                 tensor=param,
                 rank=fsdp_state.rank,
@@ -602,7 +601,7 @@ def _sharded_pre_load_state_dict_hook(
             fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
 
-        if not fsdp_state._state_dict_config._use_dtensor:
+        if not fsdp_state._state_dict_config.use_dtensor:
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
 
@@ -653,11 +652,9 @@ def _sharded_pre_load_state_dict_hook(
         else:
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
-            placements = list(copy.deepcopy(param.placements))
-            placements[-1] = Replicate()
+
             param = param.redistribute(
-                device_mesh=param.device_mesh,
-                placements=placements,
+                device_mesh=param.device_mesh, placements=[Replicate()]
             )
             state_dict[fqn_from_global_root] = param.to_local()
 
