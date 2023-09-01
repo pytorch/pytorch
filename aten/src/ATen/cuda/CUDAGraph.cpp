@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 
 namespace at::cuda {
 
@@ -114,6 +115,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
+
+#ifdef USE_C10D_NCCL
+  // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
+  // the graph capture, so we wait for all pending work to be completed.
+  c10d::ProcessGroupNCCL::waitForAllPendingWorks();
+#endif
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See

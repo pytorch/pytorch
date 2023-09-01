@@ -41,6 +41,8 @@ def remove_no_ops(
     graph = gm.graph
 
     def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
+        if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
+            return False
         for field in fields:
             if getattr(t1, field) != getattr(t2, field):
                 return False
@@ -114,6 +116,7 @@ class UniformValueConstantFolder(ConstantFolder):
     Runs constant folding and replaces tensors that have a unifrom value
     with a tensor constructor call: aten.full([shape], value, ...)
     """
+
     def __init__(self, gm, skip_constructors=False):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}

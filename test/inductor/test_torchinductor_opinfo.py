@@ -279,7 +279,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16, f32, f64},
 }
 
 
