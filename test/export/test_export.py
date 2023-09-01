@@ -363,7 +363,7 @@ class TestExport(TestCase):
         self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
 
         # decorate exported function with expected dynamic shapes of inputs
-        batch = Dim("batch")
+        batch = Dim("batch", min=8, max=64)
         size = Dim("size")
 
         @dynamic_shapes((batch, size, size), (batch, size, size))

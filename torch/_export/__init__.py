@@ -66,24 +66,39 @@ from torch.fx.tensor_type import TensorType
 
 
 class Dim:
-  def __init__(self, name, *, min=None, max=None):
-    self._name = name
-    self._min = 0 if min is None else min
-    self._max = sys.maxsize if max is None else max
+    """
+    Object describing possible values of a tensor dimension.
+    Like a symbolic integer with a range.
+    Can be shared by different dimensions of the same tensor, or of different tensors.
+    """
+    def __init__(self, name, *, min=None, max=None):
+        self._name = name
+        self._min = 0 if min is None else min
+        self._max = sys.maxsize if max is None else max
 
-  @property
-  def name(self):
-    return self._name
+    @property
+    def name(self):
+        return self._name
 
 
 def dims(*names: str):
+    """
+    Util to create multiple Dim objects.
+    """
     return tuple(Dim(name) for name in names)
 
 
-_DynamicShape = Union[Tuple[Optional[Dim], ...], Dict[int, Dim], TensorType]
+# Different ways of specifying dynamic shapes.
+# 1. TensorType[dim0, None, dim2]
+# 2. (dim0, None, dim2)
+# 3. {0: dim0, 2: dim2}
+_DynamicShape = Union[TensorType, Tuple[Optional[Dim], ...], Dict[int, Dim]]
 
 
 def dynamic_shapes(*shapes: _DynamicShape):
+    """
+    Function decorator to specify expected dynamic shapes of arguments.
+    """
     def wrap(f):
         f._dynamic_shapes = shapes
         return f
@@ -98,6 +113,12 @@ def export_(
     *,
     dynamic_shapes: Optional[Tuple[_DynamicShape, ...]] = None,
 ) -> ExportedProgram:
+    """
+    API for different ways of exporting with dynamic shape specifications.
+    1. Either pass dynamic shapes of inputs along with inputs in export call.
+    2. Or decorate exported function with expected dynamic shapes of inputs.
+    3. Or type arguments of exported function with expected dynamic shapes.
+    """
     assert all(isinstance(arg, torch.Tensor) for arg in args)
     assert kwargs is None
 
