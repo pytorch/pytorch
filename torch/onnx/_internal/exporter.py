@@ -1149,8 +1149,8 @@ def dynamo_export(
         message = (
             f"Failed to export the model to ONNX. Generating SARIF report at '{sarif_report_path}'. "
             f"SARIF is a standard format for the output of static analysis tools. "
-            f"SARIF log can be loaded in VS Code SARIF viewer extension, "
-            f"or SARIF web viewer(https://microsoft.github.io/sarif-web-component/)."
+            f"SARIF logs can be loaded in VS Code SARIF viewer extension, "
+            f"or SARIF web viewer (https://microsoft.github.io/sarif-web-component/). "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
         raise OnnxExporterError(
