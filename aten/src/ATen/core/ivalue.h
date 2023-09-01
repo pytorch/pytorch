@@ -80,8 +80,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
 // Similar to ComplexHolder, for StreamData3
 struct StreamData3Holder : c10::intrusive_ptr_target {
   public:
-    StreamData3Holder(struct c10::StreamData3 d) {
-      val = d;
+    StreamData3Holder(struct c10::StreamData3 d):val(d) {
     }
     StreamData3Holder() = delete;
     struct c10::StreamData3 val;
@@ -585,7 +584,7 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) {
+  IValue(const c10::SymInt& i) {
     if (auto mi = i.maybe_as_int()) {
       tag = Tag::Int;
       payload.u.as_int = *mi;
@@ -602,7 +601,7 @@ public:
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
-  IValue(c10::SymFloat i) {
+  IValue(const c10::SymFloat& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -619,7 +618,7 @@ public:
   c10::SymFloat toSymFloat() &&;
   c10::SymFloat toSymFloat() const&;
 
-  IValue(c10::SymBool i) {
+  IValue(const c10::SymBool& i) {
      if (auto mi = i.maybe_as_bool()) {
       tag = Tag::Bool;
       payload.u.as_int = *mi;
