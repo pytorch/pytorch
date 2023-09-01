@@ -596,7 +596,10 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
 
   ExtraState* extra = get_extra_state(code);
   CacheEntry* current_node = extract_cache_entry(extra);
-
+  if (current_node == NULL)
+  {
+    Py_RETURN_NONE;
+  }
   return current_node;
 }
 
