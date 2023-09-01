@@ -477,8 +477,8 @@ class MinMaxObserver(UniformQuantizationObserverBase):
             eps=eps,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
-        self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs))
+        self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs).detach())
+        self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs).detach())
         if (
             self.qscheme == torch.per_tensor_symmetric
             and self.reduce_range
