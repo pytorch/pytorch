@@ -1114,10 +1114,12 @@ def add_triton(
             triton_pin = f.read().strip()
         with open(triton_version_file) as f:
             triton_version = f.read().strip()
-        extras_require["dynamo"] = [
-            triton_package_name + "==" + triton_version + "+" + triton_pin[:10],
-            "jinja2",
-        ]
+
+        if "dynamo" not in extras_require:
+            extras_require["dynamo"] = []
+        extras_require["dynamo"].append(
+            triton_package_name + "==" + triton_version + "+" + triton_pin[:10]
+        )
 
 
 # post run, warnings, printed at the end to make them more visible
@@ -1178,7 +1180,10 @@ def main():
 
     install_requires += extra_install_requires
 
-    extras_require = {"opt-einsum": ["opt-einsum>=3.3"]}
+    extras_require = {
+        "opt-einsum": ["opt-einsum>=3.3"],
+        "dynamo": ["jinja2"],
+    }
     add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
