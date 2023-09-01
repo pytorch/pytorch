@@ -23,6 +23,7 @@ def _is_share_obs_or_fq_op(op: Callable) -> bool:
         torch.ops.aten.view_copy.default,
         torch.ops.aten.view.default,
         torch.ops.aten.slice_copy.Tensor,
+        torch.ops.aten.flatten.using_ints,
     ]
 
 

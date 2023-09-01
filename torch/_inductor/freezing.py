@@ -97,6 +97,15 @@ class ConstantFolder(torch.fx.Interpreter):
             else return_true
         )
 
+    def is_impure(self, node: torch.fx.node.Node):
+        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+            # -> quantized_decomposed.dequantize_per_channel.default
+            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+            return True
+        return False
+
     def run_node(self, node):
         aten = torch.ops.aten
         args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -138,6 +147,9 @@ class ConstantFolder(torch.fx.Interpreter):
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             if not self.insertable_tensor_check(out):
                 return out
+
+            if self.is_impure(node):
+                return self.unknown_value
 
             self.node_replacements[node] = out
 
@@ -210,13 +222,19 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    fw_metadata = torch._guards.TracingContext.get().fw_metadata
-    params_flat = torch._guards.TracingContext.get().params_flat
-    assert fw_metadata is not None and params_flat is not None
+    if torch._guards.TracingContext.get():
+        fw_metadata = torch._guards.TracingContext.get().fw_metadata
+        params_flat = torch._guards.TracingContext.get().params_flat
+        assert fw_metadata is not None and params_flat is not None
 
-    preserved_arg_indices = replace_params_with_constants(
-        aot_autograd_gm, params_flat, fw_metadata
-    )
+        preserved_arg_indices = replace_params_with_constants(
+            aot_autograd_gm, params_flat, fw_metadata
+        )
+    else:
+        inputs = [
+            node for node in aot_autograd_gm.graph.nodes if node.op == "placeholder"
+        ]
+        preserved_arg_indices = list(range(len(inputs)))
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)

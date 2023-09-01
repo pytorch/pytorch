@@ -43,9 +43,9 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_inductor_model_container.h>
 
-        torch::aot_inductor::AOTInductorModel model;
+        torch::aot_inductor::AOTInductorModelContainer model(1);
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,
@@ -69,12 +69,10 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs, options
         )
-        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
+        optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
@@ -88,6 +86,30 @@ class AotInductorTests(TestCase):
 
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
+    def test_with_offset(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
+                self.tensor = self.orig_tensor[5:, :]
+
+            def forward(self, x, y):
+                return (
+                    x
+                    + torch.nn.functional.linear(y, self.orig_tensor[:10, :])
+                    + self.tensor
+                )
 
         model = Repro()
         example_inputs = (
@@ -224,6 +246,28 @@ class AotInductorTests(TestCase):
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
+        self.assertTrue(same(actual, expected))
+
+    @requires_cpp_extension()
+    def test_addmm(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k):
+                super().__init__()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
 

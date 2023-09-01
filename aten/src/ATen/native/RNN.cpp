@@ -91,7 +91,8 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   };
   return input.options().backend() == at::Backend::CPU &&
       is_cpu_backend(params) && is_cpu_backend(hx) &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      input.numel() != 0;
 #endif
   return false;
 }
