@@ -37,7 +37,7 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
-from .dicts import ConstDictVariable
+from .dicts import ConstDictVariable, DictView
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -1350,8 +1350,8 @@ class BuiltinVariable(VariableTracker):
         # x = torch.randn([3, 3])
         # x.size() == (3, 3) # True
         # (3, 3) == x.size() # True
-        if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(
-            right, (TupleVariable, SizeVariable)
+        if isinstance(left, (SizeVariable, TupleVariable, DictView)) and isinstance(
+            right, (TupleVariable, SizeVariable, DictView)
         ):
             return BaseListVariable.list_compare(tx, op, left, right)
 

@@ -878,6 +878,28 @@ def enum_repr(value, local):
     return local_name
 
 
+def iter_contains(items, v, tx, options):
+    """Implements items.__contains__(v) for items an interable"""
+    if check_constant_args([v], {}) and v.is_python_constant():
+        result = any(x.as_python_constant() == v.as_python_constant() for x in items)
+        return variables.ConstantVariable(result, **options)
+
+    from .builtin import BuiltinVariable
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, v], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable(None)
+    return result
+
+
 def dict_param_key_ids(value):
     return {
         id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))

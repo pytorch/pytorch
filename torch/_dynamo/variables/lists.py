@@ -15,7 +15,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import get_fake_value, guard_if_dyn, iter_contains, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -113,28 +113,7 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
 
-            search = args[0]
-            if check_constant_args(args, {}) and search.is_python_constant():
-                result = any(
-                    x.as_python_constant() == search.as_python_constant()
-                    for x in self.items
-                )
-                return variables.ConstantVariable(result, **options)
-
-            from .builtin import BuiltinVariable
-
-            result = None
-            for x in self.items:
-                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-                if result is None:
-                    result = check
-                else:
-                    result = BuiltinVariable(operator.or_).call_function(
-                        tx, [check, result], {}
-                    )
-            if result is None:
-                result = ConstantVariable(None)
-            return result
+            return iter_contains(self.items, args[0], tx.options)
 
         return super().call_method(tx, name, args, kwargs)
 

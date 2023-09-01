@@ -2,7 +2,7 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
@@ -11,11 +11,15 @@ from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
 from .. import variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_instruction,
+)
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
-from ..utils import global_key_name, istensor
+from ..utils import global_key_name, istensor, iter_contains
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
@@ -77,7 +81,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, SetVariable, TupleVariable
+        from . import ConstantVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
@@ -106,23 +110,10 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return SetVariable(
-                tx=tx,
-                items=[
-                    ConstDictVariable._key_to_var(
-                        tx,
-                        k,
-                        **options,
-                    )
-                    for k in val.keys()
-                ],
-                mutable_local=MutableLocal(),
-                **options,
-            )
-
+            return DictKeys(self, **options)
         elif name == "values":
             assert not (args or kwargs)
-            return TupleVariable(list(val.values()), **options)
+            return DictValues(self, **options)
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable(len(self.items), **options)
@@ -295,6 +286,74 @@ class DefaultDictVariable(ConstDictVariable):
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
+
+
+class DictView(VariableTracker):
+    """
+    Models _PyDictViewObject
+
+    This is an "abstract" class. Subclasses will override kv
+    """
+
+    kv: Optional[str] = None
+
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs):
+        assert isinstance(dv_dict, ConstDictVariable)
+        super().__init__(**kwargs)
+        self.dv_dict = dv_dict
+
+    @property
+    def items(self):
+        return getattr(self.dv_dict.items, self.kv)()
+
+    def as_proxy(self):
+        return getattr(self.dv_dict.as_proxy(), self.kv)()
+
+    def as_python_constant(self):
+        return getattr(self.dv_dict.as_python_constant(), self.kv)()
+
+    def python_type(self):
+        raise NotImplementedError(f"Cannot instantiate {self.__class__}")
+
+    def reconstruct(self, codegen):
+        codegen(self.dv_dict)
+        return [
+            create_instruction("LOAD_METHOD", argval=self.kv),
+            *create_call_method(0),
+        ]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return iter_contains(self.items, args[0], tx.options)
+        elif name == "__len__":
+            assert not (args or kwargs)
+            return ConstantVariable(len(self.dv_dict.items), **options)
+
+
+class DictKeys(DictView):
+    kv = "keys"
+    # TODO Implement intersect / union
+    # FIXME Eager allows to use tensors as keys. dynamo doesn't
+
+    def unpack_var_sequence(self, tx):
+        # TODO(lezcano): Why does ConstantDict is unpacked into a list of keys
+        return self.dv_dict.unpack_var_sequence(tx)
+
+
+class DictValues(DictView):
+    kv = "values"
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]
 
 
 class DataClassVariable(ConstDictVariable):
