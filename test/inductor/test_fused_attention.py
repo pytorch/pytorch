@@ -4,6 +4,7 @@ import math
 
 import torch
 import torch._inductor.config
+import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -14,6 +15,13 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+
+def checkpoint_wrapper(fn):
+    def inner(*args):
+        return torch.utils.checkpoint.checkpoint(fn, *args)
+
+    return inner
 
 
 @config.patch(fallback_random=True)
@@ -93,6 +101,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         self._check_common(dot_prod_attention)
+        self._check_common(checkpoint_wrapper(dot_prod_attention))
 
     def _test_pattern_fails_with_reuse(self):
         """
@@ -134,6 +143,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         self._check_common(dot_prod_attention)
+        self._check_common(checkpoint_wrapper(dot_prod_attention))
 
     def _test_sdpa_rewriter_3(self):
         def dot_prod_attention(
@@ -147,6 +157,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             ).matmul(value)
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
+        )
 
     def _test_sdpa_rewriter_4(self):
         def dot_prod_attention(
@@ -160,6 +173,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             ).matmul(value)
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
+        )
 
     def _test_sdpa_rewriter_5(self):
         def sfdp_pattern_5_v1(query, key, value):
@@ -187,7 +203,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             return attn_weight @ value
 
         self._check_common(sfdp_pattern_5_v1, contains=False)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_5_v1), contains=False)
         self._check_common(sfdp_pattern_5_v2, contains=False)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_5_v2), contains=False)
 
     @skipIfRocm
     def _test_sdpa_rewriter_6(self):
@@ -206,6 +224,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             return attn_weight @ value
 
         self._check_common(sfdp_pattern_6, contains=False, has_dropout=True)
+        self._check_common(
+            checkpoint_wrapper(sfdp_pattern_6), contains=False, has_dropout=True
+        )
 
     @skipIfRocm
     def _test_sdpa_rewriter_7(self):
@@ -226,8 +247,16 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-
         self._check_common(sfdp_pattern_7, args, contains=SM80OrLater, atol=2e-3)
+
+        args = (
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+        self._check_common(
+            checkpoint_wrapper(sfdp_pattern_7), args, contains=SM80OrLater, atol=2e-3
+        )
 
     @skipIfRocm
     def _test_sdpa_rewriter_8(self):
@@ -246,8 +275,14 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-
         self._check_common(sfdp_pattern_8, args, atol=2e-3)
+
+        args = (
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
 
     @skipIfRocm
     def _test_sdpa_rewriter_9(self):
@@ -269,8 +304,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-
         self._check_common(sfdp_pattern_9, args, contains=SM80OrLater, atol=2e-3)
+        args = (
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+        self._check_common(
+            checkpoint_wrapper(sfdp_pattern_9), args, contains=SM80OrLater, atol=2e-3
+        )
 
     @skipIfRocm
     def _test_sdpa_rewriter_10(self):
@@ -290,8 +332,14 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-
         self._check_common(sfdp_pattern_10, args, atol=2e-3)
+
+        args = (
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+        self._check_common(checkpoint_wrapper(sfdp_pattern_10), args, atol=2e-3)
 
     def _test_pattern_fails_with_tensor_factor(self):
         # https://github.com/pytorch/pytorch/issues/99124

@@ -19,6 +19,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state,
     _is_composable,
+    _log_post_backward_hook,
     _no_dispatch_record_stream,
     clean_tensor_name,
     TrainingState,
@@ -734,7 +735,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    _log_post_backward_hook(state, handle)
+    _log_post_backward_hook(state, handle, log)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -787,22 +788,6 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
-
-
-@no_type_check
-def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
-    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
-    # Below logging of module names this post-bwd hook fires for can help debug certain
-    # cases where hooks don't fire, such as under certain activation checkpoint configs.
-    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
-        param_to_fqn = state._exec_order_data.param_to_fqn
-        handle_params = handle.flat_param._params  # only populated for use_orig_params
-        param_fqns = [
-            param
-            for param_list in [param_to_fqn[p] for p in handle_params]
-            for param in param_list
-        ]
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
 def _post_backward_reshard(

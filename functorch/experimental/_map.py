@@ -8,6 +8,12 @@ from torch._functorch.eager_transforms import (
     _wrap_all_tensors_to_functional,
     functionalize,
 )
+
+from torch._higher_order_ops.cond import (
+    _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
+    UnsupportedAliasMutationException,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -20,12 +26,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
-)
-
-from ._cond import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
-    UnsupportedAliasMutationException,
 )
 
 
@@ -74,9 +74,15 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
 
             def from_fun(t):
                 if isinstance(t, torch.Tensor):
-                    return torch.empty_strided(
-                        t.size(), t.stride(), requires_grad=t.requires_grad
-                    )
+                    if t.dtype != torch.bool:
+                        return torch.empty_strided(
+                            t.size(),
+                            t.stride(),
+                            dtype=t.dtype,
+                            requires_grad=t.requires_grad,
+                        )
+                    else:
+                        return t.clone()
                 return t
 
             example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
