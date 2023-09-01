@@ -312,14 +312,21 @@ def _multi_tensor_asgd(
         torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
-        if weight_decay != 0 or maximize:
-            # Re-use the intermediate memory (grouped_grads) already allocated
-            torch._foreach_add_(grouped_grads, grouped_params, alpha=lambd)
-            intermediate = grouped_grads
+        if weight_decay != 0:
+            if maximize:
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = grouped_grads
+            else:
+                intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+
+            torch._foreach_add_(intermediate, grouped_params, alpha=lambd)
         else:
             intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
 
-        # update param = param - eta * intermediate
+        # update param
+        # param * (1 - lambd * eta) - eta * grad
+        # => param - param * lambd * eta - eta * grad
+        # => param - eta * intermediate
         torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
 
         # update grouped_axs
