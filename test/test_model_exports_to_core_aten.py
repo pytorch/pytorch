@@ -31,8 +31,7 @@ class TestQuantizePT2EModels(TestCase):
         example_inputs = (torch.randn(input_shape),)
         m = export.capture_pre_autograd_graph(m, copy.deepcopy(example_inputs))
         m(*example_inputs)
-        with patch("torch._export.DECOMP_TABLE", core_aten_decompositions()):
-            m = export.export(m, copy.deepcopy(example_inputs))
+        m = export.export(m, copy.deepcopy(example_inputs))
         ops = _get_ops_list(m.graph_module)
         non_core_aten_op_found = False
         for op in ops:
