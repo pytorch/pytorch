@@ -159,20 +159,18 @@ struct PYBIND11_EXPORT PythonArgParser {
   std::vector<std::string> get_signatures() const;
 
  private:
-  [[noreturn]]
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  void
-  print_error(
+  [[noreturn]] void print_error(
       PyObject* self,
       PyObject* args,
       PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* parsed_args[]);
   void check_deprecated(const FunctionSignature& signature);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   PythonArgs raw_parse(
       PyObject* self,
       PyObject* args,
       PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -187,11 +185,11 @@ struct PYBIND11_EXPORT PythonArgParser {
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   bool parse(
       PyObject* self,
       PyObject* args,
       PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* dst[],
       std::vector<PyObject*>& overloaded_args,
       bool raise_exception);
@@ -414,7 +412,6 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Scalar> res(size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -445,7 +442,6 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> res(size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -465,7 +461,6 @@ inline torch::List<c10::optional<at::Tensor>> PythonArgs::
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::List<c10::optional<at::Tensor>> res;
   res.reserve(size);
   for (const auto idx : c10::irange(size)) {
@@ -634,7 +629,6 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> res(size2);
   for (const auto idx : c10::irange(size2)) {
     PyObject* obj =
@@ -700,7 +694,6 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<double> res(size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj =
@@ -805,7 +798,8 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(c10::DeviceType::CUDA, device_index);
+    return at::Device(
+        c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -841,7 +835,6 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Dimname> res;
   res.reserve(size);
   for (const auto idx : c10::irange(size)) {
@@ -1056,12 +1049,9 @@ inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
 }
 
 inline c10::complex<double> PythonArgs::toComplex(int i) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  c10::complex<double> default_value = *const_cast<c10::complex<double>*>(
-      reinterpret_cast<const c10::complex<double>*>(
-          signature.params[i].default_complex));
   if (!args[i])
-    return default_value;
+    return *(reinterpret_cast<const c10::complex<double>*>(
+        signature.params[i].default_complex));
   return THPUtils_unpackComplexDouble(args[i]);
 }
 
@@ -1121,7 +1111,7 @@ inline c10::Stream PythonArgs::stream(int i) {
   }
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
-      ((THPStream*)args[i])->device_index,
+      static_cast<c10::DeviceIndex>(((THPStream*)args[i])->device_index),
       static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
 }
 

@@ -724,7 +724,7 @@ unsigned VariableHooks::_register_hook(
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
     torch::autograd::impl::create_cpp_hook(
-        self, /*is_retains_grad_hook=*/false);
+        self, /*is_retains_grad_hooks=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);

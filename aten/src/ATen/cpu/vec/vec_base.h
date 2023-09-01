@@ -21,6 +21,7 @@
 #include <functional>
 #include <cmath>
 #include <type_traits>
+#include <bitset>
 #include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
