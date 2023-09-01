@@ -234,12 +234,12 @@ class TestDeserialize(TestCase):
                             else:
                                 self.assertEqual(str(s1), str(s2))
                         self.assertEqual(val1.dtype, val2.dtype)
-                    elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
+                    elif isinstance(val1, list) and isinstance(val2, list):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
-                        for v1, v2 in zip(val1, val2):
-                            self.assertEqual(v1.shape, v2.shape)
-                            self.assertEqual(v1.dtype, v2.dtype)
+                        self.assertTrue(len(val1) == 1 and len(val2) == 1)
+                        self.assertEqual(val1[0].shape, val2[0].shape)
+                        self.assertEqual(val1[0].dtype, val2[0].dtype)
                     else:
                         # For expressions like 's0 < 10' can only compare through string
                         self.assertEqual(str(val1), str(val2))
@@ -268,11 +268,10 @@ class TestDeserialize(TestCase):
                     node1.op not in ("get_attr", "placeholder", "output")
                 ):
                     # Check "nn_module_stack" metadata
-                    # TODO nn_module_stack is not roundtrippable.
-                    # self.assertEqual(
-                    #     node1.meta.get("nn_module_stack", None),
-                    #     node2.meta.get("nn_module_stack", None),
-                    # )
+                    self.assertEqual(
+                        node1.meta.get("nn_module_stack", None),
+                        node2.meta.get("nn_module_stack", None),
+                    )
                     # Check "source_fn" metadata
                     self.assertEqual(
                         node1.meta.get("source_fn", None),
@@ -488,15 +487,14 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([0.1, 0.1]),)
         linear = torch.nn.Linear(2, 2)
 
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                x = x + 1
-                y = x.t()
-                y = y.relu()
-                y = linear(y)
-                return y
+        def f(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
 
-        ep = export(Module(), inp)
+        ep = export(f, inp)
 
         buffer = io.BytesIO()
         save(ep, buffer)

@@ -37,8 +37,6 @@ UnflattenFunc = Callable[[List, Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", List[str]], str]
-MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
 
 # A NodeDef holds two callables:
 # - flatten_fn should take the collection and return a flat list of values.
@@ -74,8 +72,6 @@ def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
@@ -97,11 +93,6 @@ def _register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
-    if to_str_fn is not None or maybe_from_str_fn is not None:
-        warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
-        )
 
     node_def = NodeDef(
         typ,
