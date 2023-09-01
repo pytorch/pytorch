@@ -94,6 +94,8 @@ DONT_WRAP_FILES = {
 }
 
 
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
 CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
