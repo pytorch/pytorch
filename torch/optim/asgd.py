@@ -83,7 +83,7 @@ class ASGD(Optimizer):
                 if len(state) == 0:
                     state["step"] = torch.zeros((), dtype=torch.float, device=p.device)
                     state["eta"] = torch.tensor(group["lr"], dtype=torch.float, device=p.device)
-                    state["mu"] = torch.ones((), dtype=torch.float, device=p.device)
+                    state["mu"] = torch.ones((), dtype=torch.float64, device=p.device)
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -319,7 +319,7 @@ def _multi_tensor_asgd(
         else:
             intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
 
-        # update param = param - eta * (lambd * param + grad)
+        # update param = param - eta * intermediate
         torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
 
         # update grouped_axs
