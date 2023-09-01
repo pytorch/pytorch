@@ -3295,6 +3295,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
+    @set_default_dtype(torch.double)
     def test_transformerdecoderlayer_gelu(self):
         # this is a deterministic test for TransformerDecoderLayer with gelu activation
         d_model = 4
@@ -7271,6 +7272,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
             self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
+
+    def test_layer_norm_eps(self):
+        # test for https://github.com/pytorch/pytorch/issues/108072
+        x = torch.Tensor([[[2.0, 2.0], [14.0, 14.0]], [[2.0, 2.0], [14.0, 14.0]]])
+        ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
+        self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)

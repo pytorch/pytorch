@@ -24,7 +24,7 @@ class TestPassInfra(TestCase):
         ep = export(f, (torch.ones(3, 2),))
         old_nodes = ep.graph.nodes
 
-        ep = ep.transform(NullPass())
+        ep = ep._transform(NullPass())
         new_nodes = ep.graph.nodes
 
         for node in new_nodes:
@@ -60,7 +60,7 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y)).transform(_ExportPassBase())
+        _ = export(mod, (torch.tensor(True), x, y))._transform(_ExportPassBase())
 
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
@@ -91,7 +91,7 @@ class TestPassInfra(TestCase):
         ep_before = export(m, inps)
 
         # No op transformation that doesn't perform any meaningful changes to node
-        ep_after = ep_before.transform(_ExportPassBase())
+        ep_after = ep_before._transform(_ExportPassBase())
 
         for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
             self.assertEqual(before_node.name, after_node.name)
@@ -140,7 +140,7 @@ class TestPassInfra(TestCase):
                 return new_ret
 
 
-        ep_after = ep_before.transform(ModifyInputOutputPass())
+        ep_after = ep_before._transform(ModifyInputOutputPass())
         new_signature = ep_after.graph_signature
 
         for inp in (
