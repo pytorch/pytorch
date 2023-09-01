@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import collections
 import contextlib
 import copy
@@ -20,7 +21,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from typing import Any, Callable, Mapping, Optional, Tuple, Type
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -58,11 +59,6 @@ except ImportError:
     # ignore the error if torch_xla is not installed
     pass
 
-
-from arg_parser import parse_args
-from ci_skip import CI_SKIP, CI_SKIP_DYNAMIC_BATCH_ONLY, CI_SKIP_OPTIMIZER, NON_DETERMINISTIC_MODELS, CI
-from .dist_util import maybe_init_distributed
-
 log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
@@ -78,6 +74,249 @@ current_batch_size = None
 output_filename = None
 
 MAX_DOWNLOAD_ATTEMPTS = 5
+
+
+class CI(NamedTuple):
+    backend: str  # aot_eager or inductor
+    training: bool
+    dynamic: bool = False
+    device: str = "cuda"
+
+
+CI_SKIP = collections.defaultdict(list)
+
+
+# Skips for dynamic=False
+
+# Here eager really means dynamo+eager
+CI_SKIP[CI("eager", training=False)] = [
+    # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
+    "hf_BigBird",  # fail_accuracy
+    # TypeError: pad_center() takes 1 positional argument but 2 were given
+    "tacotron2",
+    # Huggingface
+    "DebertaV2ForQuestionAnswering",  # OOM
+]
+
+CI_SKIP[CI("eager", training=True)] = [
+    *CI_SKIP[CI("eager", training=False)],
+    # TorchBench
+    "BERT_pytorch",  # accuracy
+    "Background_Matting",  # fp64_OOM
+    "hf_BigBird",  # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
+    "llama",  # Accuracy failed: allclose not within tol=0.001
+    "vision_maskrcnn",  # The size of tensor a (29) must match the size of tensor b (33) (doesn't repro)
+    # Huggingface
+    "XGLMForCausalLM",  # OOM
+    # TIMM
+    "cait_m36_384",  # fp64_OOM
+    "convit_base",  # fp64_OOM
+    "mobilenetv2_100",  # accuracy
+    "xcit_large_24_p8_224",  # fp64_OOM,
+]
+
+CI_SKIP[CI("aot_eager", training=False)] = [
+    *CI_SKIP[CI("eager", training=False)],
+    # all dynamic shapes errors for detectron variants
+    "demucs",  # OOM
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_BigBird",  # OOM
+    "tacotron2",  # AssertionError: Deduped args out of bounds
+    # Huggingface
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
+    # Torchbench
+    "speech_transformer",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_isoneutral_mixing",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_turbulent_kinetic_energy",  # https://github.com/pytorch/pytorch/issues/99893
+]
+
+CI_SKIP[CI("aot_eager", training=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    # TorchBench
+    "Background_Matting",  # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # fp64_OOM
+    "resnet50_quantized_qat",  # fp64_OOM
+    "pytorch_struct",
+    # Huggingface
+    "MBartForConditionalGeneration",  # OOM
+    "M2M100ForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # OOM
+    # TIMM
+    "cait_m36_384",  # fp64_OOM
+    "convit_base",  # fp64_OOM
+    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
+    "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "lcnet_050",  # Accuracy (blocks.1.0.bn2.weight.grad)
+    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
+    "xcit_large_24_p8_224",  # fp64_OOM,
+]
+
+CI_SKIP[CI("inductor", training=False)] = [
+    # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
+    "demucs",  # OOM
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    # TorchBench
+    "detectron2",
+    "densenet121",  # flaky accuracy
+    "hf_T5",  # accuracy
+    "hf_BigBird",  # accuracy
+    "hf_GPT2_large",  # OOM
+    "maml",  # accuracy
+    "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
+    "pytorch_struct",  # Test eval is not implemented
+    "pyhpc_equation_of_state",  # Accuracy
+    "pyhpc_turbulent_kinetic_energy",  # Accuracy
+    "tacotron2",
+]
+
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "doctr_det_predictor",  # requires newer gcc
+    "doctr_reco_predictor",  # requires newer gcc
+    "gat",  # does not work with fp32
+    "gcn",  # does not work with fp32
+    "hf_Bert_large",  # OOM
+    "hf_GPT2_large",  # Intermittent failure on CI
+    "hf_T5_base",  # OOM
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    "sage",  # does not work with fp32
+    # Huggingface
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "cait_m36_384",  # Accuracy
+    "pnasnet5large",  # OOM
+    "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
+    "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
+]
+
+CI_SKIP[CI("inductor", training=True)] = [
+    *CI_SKIP[CI("inductor", training=False)],
+    # TorchBench
+    "Background_Matting",  # fp64_OOM
+    "hf_T5_base",  # accuracy
+    "mobilenet_v3_large",  # accuracy
+    "resnet50_quantized_qat",  # Eager model failed to run
+    "AlbertForQuestionAnswering",  # accuracy
+    "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
+    "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
+    "mobilevit_s",
+    "pit_b_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "vit_base_patch16_224",
+    "xcit_large_24_p8_224",
+]
+
+# Skips for dynamic=True
+
+CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
+    # https://github.com/pytorch/pytorch/issues/103760
+    "hf_T5_generate",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+]
+
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "llama",  # AssertionError: cannot compute free_symbols of True
+    "torchrec_dlrm",  # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+]
+
+CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False)],
+    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
+]
+
+CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
+    # NB: Intentionally omitting for symmetry with dynamic=False
+    # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=True)],
+    "levit_128",  # Accuracy fails on A10G, passes on A100
+    "sebotnet33ts_256",  # Flaky accuracy failed
+]
+
+CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    *CI_SKIP[CI("inductor", training=False, device="cpu")],
+    "pyhpc_isoneutral_mixing",
+    "dpn107",
+]
+
+CI_SKIP_OPTIMIZER = {
+    # TIMM
+    "convmixer_768_32",  # accuracy
+    "hrnet_w18",  # Stack issue in fx
+    # HF
+    "pnasnet5large",  # Stack issue in fx
+    "MobileBertForMaskedLM",  # Stack issue in fx
+    "MobileBertForQuestionAnswering",  # Stack issue in fx
+    "PegasusForConditionalGeneration",  # OOM
+}
+
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+    # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
+    # It iterates over the batch, which is dynamic, and dynamo chokes
+    # We should be able to graphbreak there.
+    "doctr_det_predictor",
+    "dlrm",
+}
+
+NON_DETERMINISTIC_MODELS = {
+    "alexnet",
+    "Background_Matting",
+    "pytorch_CycleGAN_and_pix2pix",
+    "pytorch_unet",
+    "Super_SloMo",
+    "vgg16",
+    # https://github.com/pytorch/pytorch/issues/96724
+    "Wav2Vec2ForCTC",
+    "Wav2Vec2ForPreTraining",
+    "sam",
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -184,61 +423,54 @@ def summarize_graph_break(filename):
 
 
 def print_summary(filename, print_dataframe=False):
-    if not filename or not os.path.exists(filename):
+    if not (filename and os.path.exists(filename)):
         return
-
     data = pd.read_csv(filename)
-
     if "tag" in data.columns:
-        tags = [tag for tag in data.tag.unique() if tag != "0.0000"]
-        for tag in tags:
+        for tag in data.tag.unique():
+            if tag == "0.0000":
+                continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
-            subset_data = data[data.tag == tag]
-            print_summary_table(subset_data, print_dataframe)
+            print_summary_table(data[data.tag == tag], print_dataframe=print_dataframe)
     else:
-        print_summary_table(data, print_dataframe)
-
+        print_summary_table(data, print_dataframe=print_dataframe)
     summarize_graph_break(filename)
-
-
-def print_data_frame(data):
-    pd.options.display.max_rows = 1000
-    pd.options.display.max_columns = 1000
-    pd.options.display.width = 2000
-    print(data)
-
-
-def print_column_summary(data, col, width):
-    col_print_map = {
-        "pct_ops": (f"{data[col].mean():.3%}",),
-        "pct_time": (f"{data[col].mean():.3%}",),
-        "graphs": (f"{data[col].mean():.3f}",),
-        "graph_calls": (f"{data[col].mean():.3f}",),
-        "captured_ops": (f"{data[col].mean():.3f}",),
-        "total_ops": (f"{data[col].mean():.3f}",),
-        "compilation_latency": (f"mean={data[col].mean():.3f} seconds",),
-        "compression_ratio": (f"mean={data[col].mean():.3f}x",),
-        "mfu": (f"mean={data[col].mean():.3f} TF/s",),
-        "memory_bandwidth": (f"mean={data[col].mean():.3f} GB/s",),
-        "accuracy": (f"pass_rate={100*(data[col] == 'pass').mean():.2f}%",),
-    }
-
-    if col in col_print_map:
-        print(col.ljust(width), *col_print_map[col])
-    elif col not in ("dev", "name", "batch_size", "tag"):
-        cdata = data[col]
-        # Assuming gmean is a function available in the code
-        print(col.ljust(width), f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x")
 
 
 def print_summary_table(data, print_dataframe=False):
     if print_dataframe:
-        print_data_frame(data)
-
+        pd.options.display.max_rows = 1000
+        pd.options.display.max_columns = 1000
+        pd.options.display.width = 2000
+        print(data)
     width = max(map(len, data.columns))
-
     for col in data.columns:
-        print_column_summary(data, col, width)
+        try:
+            if col in ("dev", "name", "batch_size", "tag"):
+                continue
+            elif col in ("pct_ops", "pct_time"):
+                print(col.ljust(width), f"{data[col].mean():.3%}")
+            elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
+                print(col.ljust(width), f"{data[col].mean():.3f}")
+            elif col in ("compilation_latency"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
+            elif col in ("compression_ratio"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f}x")
+            elif col in ("mfu"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} TF/s")
+            elif col in ("memory_bandwidth"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} GB/s")
+            elif col in ("accuracy"):
+                pass_rate = (data[col] == "pass").mean()
+                print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
+            else:
+                cdata = data[col]
+                print(
+                    col.ljust(width),
+                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
+                )
+        except Exception as e:
+            pass
 
 
 def tensor_is_on_xla(tensors):
@@ -1386,6 +1618,22 @@ def cast_to(dtype, model, inputs):
     return model, inputs
 
 
+def cast_to_bf16(model, inputs):
+    return cast_to(torch.bfloat16, model, inputs)
+
+
+def cast_to_fp16(model, inputs):
+    return cast_to(torch.float16, model, inputs)
+
+
+def cast_to_fp64(model, inputs):
+    return cast_to(torch.float64, model, inputs)
+
+
+def cast_to_fp32(model, inputs):
+    return cast_to(torch.float32, model, inputs)
+
+
 def reset_rng_state(use_xla=False):
     torch.manual_seed(1337)
     random.seed(1337)
@@ -1440,6 +1688,20 @@ def maybe_fresh_cache(fn, is_cold_start):
     return inner
 
 
+@contextmanager
+def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789"):
+    try:
+        if should_init_distributed:
+            torch.cuda.set_device(rank)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = port
+            torch.distributed.init_process_group(
+                "nccl", rank=rank, world_size=world_size
+            )
+        yield
+    finally:
+        if should_init_distributed:
+            torch.distributed.destroy_process_group()
 
 
 class BenchmarkRunner:
@@ -1576,7 +1838,7 @@ class BenchmarkRunner:
         if self.args.float32 or self.args.only in self.fp32_only_models:
             if not self.args.float32:
                 log.warning("Model %s supports float32 only", self.args.only)
-            model, example_inputs = cast_to(torch.float32, model, example_inputs)
+            model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             if self.args.only in self.force_amp_for_fp16_bf16_models:
                 log.warning(
@@ -1586,7 +1848,7 @@ class BenchmarkRunner:
                 self.args.amp = True
                 self.setup_amp()
             else:
-                model, example_inputs = cast_to(torch.float16, model, example_inputs)
+                model, example_inputs = cast_to_fp16(model, example_inputs)
         elif self.args.bfloat16:
             if self.args.only in self.force_amp_for_fp16_bf16_models:
                 log.warning(
@@ -1596,7 +1858,7 @@ class BenchmarkRunner:
                 self.args.amp = True
                 self.setup_amp()
             else:
-                model, example_inputs = cast_to(torch.bfloat16, model, example_inputs)
+                model, example_inputs = cast_to_bf16(model, example_inputs)
 
         return model, example_inputs
 
@@ -1784,7 +2046,7 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            model_fp64, inputs_fp64 = cast_to(torch.float64,
+            model_fp64, inputs_fp64 = cast_to_fp64(
                 self.deepcopy_and_maybe_ddp(model),
                 clone_inputs(example_inputs),
             )
@@ -2116,6 +2378,7 @@ class BenchmarkRunner:
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
                 experiment_kwargs["memory_bandwidth"] = memory_bandwidth
                 experiment_kwargs["mfu"] = max_flop_utilization
+            breakpoint()
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
                 results = []
@@ -2250,11 +2513,507 @@ class BenchmarkRunner:
             Stats.print_summary()
 
 
+def help(fn):
+    return fn.__doc__
+
+
 diff_branch_default = "DIFF-BRANCH-DEFAULT"
 
 
 def should_diff_branch(args):
     return args.diff_branch != diff_branch_default
+
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--filter", "-k", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--exclude", "-x", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--exclude-exact", action="append", help="filter benchmarks with exact match"
+    )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        default=1,
+        choices=range(1, 10),
+        help="Total number of partitions we want to divide the benchmark suite into",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        default=0,
+        help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
+    )
+    parser.add_argument(
+        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+    )
+    parser.add_argument("--device-index", help="CUDA device index")
+    parser.add_argument(
+        "--repeat", "-n", type=int, default=30, help="number of timing runs"
+    )
+    iterations_per_run_help = """
+        Run this may iterations for each time measurement. This is mainly used for
+        XLA training. We want to run multiple iterations per measurement so the
+        tracing and computation for different iteartions can overlap with each
+        other. This makes sure we have an accurate xla baseline.
+    """
+    parser.add_argument(
+        "--iterations-per-run", type=int, default=1, help=iterations_per_run_help
+    )
+    parser.add_argument(
+        "--randomize-input",
+        action="store_true",
+        help="Whether to randomize the input values. Dimensions will be kept the same.",
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        help="number of threads to use for eager and inductor",
+    )
+    parser.add_argument(
+        "--nopython", action="store_true", help="Turn graph breaks into errors"
+    )
+    parser.add_argument(
+        "--no-skip",
+        action="store_true",
+        help="run models that are in the global SKIP list",
+    )
+    parser.add_argument(
+        "--prims-nvfuser", action="store_true", help="user prims + nvfuser backend"
+    )
+    parser.add_argument(
+        "--dump-raw-metrics",
+        action="store_true",
+        help="dump raw timing metrics from speedup experiment",
+    )
+    parser.add_argument(
+        "--log-operator-inputs",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--channels-last",
+        action="store_true",
+        default=False,
+        help="use channels last format",
+    )
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=2, help="how many iterations to run"
+    )
+    parser.add_argument(
+        "--batch-size-file", type=str, help="String to load batch size from"
+    )
+    parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
+    parser.add_argument(
+        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
+    )
+    parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
+        "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--dynamic-ci-skips-only",
+        action="store_true",
+        help=(
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
+            "Implies --dynamic-shapes and --ci"
+        ),
+    )
+    parser.add_argument(
+        "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
+    )
+    parser.add_argument(
+        "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"
+    )
+    parser.add_argument(
+        "--fast", "-f", action="store_true", help="skip slow benchmarks"
+    )
+    parser.add_argument(
+        "--only",
+        help="""Run just one model from torchbench. Or
+        specify the path and class name of the model in format like:
+        --only=path:<MODEL_FILE_PATH>,class:<CLASS_NAME>
+
+        Due to the fact that dynamo changes current working directory,
+        the path should be an absolute path.
+
+        The class should have a method get_example_inputs to return the inputs
+        for the model. An example looks like
+        ```
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+            def get_example_inputs(self):
+                return (torch.randn(2, 10),)
+        ```
+    """,
+    )
+    parser.add_argument(
+        "--multiprocess",
+        action="store_true",
+        help="Create n processes based on the number of devices (distributed use case).",
+    )
+    parser.add_argument(
+        "--ddp",
+        action="store_true",
+        help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
+    )
+    parser.add_argument(
+        "--fsdp",
+        action="store_true",
+        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
+    """,
+    )
+    parser.add_argument(
+        "--no-optimize-ddp",
+        action="store_true",
+        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+    )
+    parser.add_argument(
+        "--distributed-master-port",
+        default="6789",
+        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
+    )
+    parser.add_argument(
+        "--dynamic-shapes",
+        action="store_true",
+        help="Runs a dynamic shapes version of the benchmark, if available.",
+    )
+    parser.add_argument(
+        "--dynamic-batch-only",
+        action="store_true",
+        help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
+    )
+    parser.add_argument(
+        "--specialize-int", action="store_true", help="Run with specialize_int=True."
+    )
+    parser.add_argument(
+        "--use-eval-mode",
+        action="store_true",
+        help="sets model.eval() to reduce randomness",
+    )
+    parser.add_argument(
+        "--skip-accuracy-check",
+        action="store_true",
+        help="keeps running even when accuracy fails",
+    )
+    parser.add_argument(
+        "--generate-aot-autograd-stats",
+        action="store_true",
+        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+    )
+    parser.add_argument(
+        "--inductor-settings",
+        action="store_true",
+        help="Use same settings as --inductor for baseline comparisons",
+    )
+    parser.add_argument(
+        "--suppress-errors",
+        action="store_true",
+        help="Suppress errors instead of raising them",
+    )
+    parser.add_argument(
+        "--output",
+        help="Overrides the output filename",
+    )
+    parser.add_argument(
+        "--output-directory",
+        help="Overrides the directory to place output files.",
+    )
+    parser.add_argument(
+        "--baseline",
+        help="Compare with a prior --output",
+    )
+    parser.add_argument(
+        "--part",
+        default=None,
+        help="Specify the part of the model to run.",
+    )
+    parser.add_argument(
+        "--export-profiler-trace",
+        action="store_true",
+        help="exports trace of kineto profiler",
+    )
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
+    parser.add_argument(
+        "--diff-branch",
+        default=diff_branch_default,
+        help="delta current branch against given branch.",
+    )
+    parser.add_argument(
+        "--tag", default=None, help="Specify a tag to be included in csv files."
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="print some graph/op statistics during the run, similar to .explain()",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="print graph counter stats",
+    )
+    parser.add_argument(
+        "--print-memory",
+        action="store_true",
+        help="print extra memory statistics",
+    )
+    parser.add_argument(
+        "--print-dataframe-summary",
+        action="store_true",
+        help="print dataframe result used for calculating accuracy",
+    )
+    parser.add_argument(
+        "--cold-start-latency",
+        "--cold_start_latency",
+        action="store_true",
+        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
+    )
+    parser.add_argument(
+        "--disable-cudagraphs",
+        action="store_true",
+        help="Disables cudagraphs for Inductor",
+    )
+    parser.add_argument(
+        "--disable-split-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-persistent-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-divisible-by-16",
+        action="store_true",
+        help="Disables divisible by 16 hint to Triton for Inductor",
+    )
+    parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
+    parser.add_argument(
+        "--print-graph-breaks",
+        action="store_true",
+        help="Show a warning whenever graph break",
+    )
+    parser.add_argument(
+        "--log-graph-breaks",
+        action="store_true",
+        help="log graph breaks in a file",
+    )
+    parser.add_argument(
+        "--trace-on-xla",
+        action="store_true",
+        help="Whether to trace the model on XLA or on eager device",
+    )
+    parser.add_argument(
+        "--xla-tolerance",
+        type=float,
+        default=1e-2,
+        help="XLA needs a loose tolerance to pass the correctness check",
+    )
+    parser.add_argument(
+        "--collect-outputs",
+        action="store_true",
+        help="""Whether to collect outputs for training. Set this to true if we
+        want to verify the numerical correctness of graidents. But that may
+        cause time measurement not accurate""",
+    )
+    parser.add_argument(
+        "--enable-activation-checkpointing",
+        action="store_true",
+        help="Enables activation checkpointing for HF models",
+    )
+    parser.add_argument("--timing", action="store_true", help="Emits phase timing")
+
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print n/k models message between each model run.",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=2000,
+        help="timeout (second) for benchmarking.",
+    )
+
+    parser.add_argument(
+        "--per_process_memory_fraction",
+        type=float,
+        default=1,
+        help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
+    )
+
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_true",
+        help="Disable translation validation for accuracy builds.",
+    )
+
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help="Enable minification when failure is below tolerance. Save repro script for each model.",
+    )
+
+    group_fuser = parser.add_mutually_exclusive_group()
+    # --nvfuser is now the default, keep the option to not break scripts
+    group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
+    group_fuser.add_argument("--nnc", action="store_true", help="enable NNC for GPUs")
+
+    group_prec = parser.add_mutually_exclusive_group()
+    group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
+    group_prec.add_argument(
+        "--bfloat16", action="store_true", help="cast model to bf16"
+    )
+    group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
+    group_prec.add_argument(
+        "--amp", action="store_true", help="use automatic mixed precision"
+    )
+
+    group_printout = parser.add_mutually_exclusive_group()
+    group_printout.add_argument(
+        "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
+    )
+    group_printout.add_argument(
+        "--quiet", "-q", action="store_true", help="suppress debug printouts"
+    )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
+    )
+    group.add_argument(
+        "--overhead", action="store_true", help=help(overhead_experiment)
+    )
+    group.add_argument(
+        "--speedup-dynamo-ts",
+        action="store_true",
+        help="TorchDynamo frontend with torchscript backend",
+    )
+    group.add_argument(
+        "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
+    )
+    group.add_argument(
+        "--speedup-fx2trt-fp16",
+        action="store_true",
+        help=help(speedup_experiment_fx2trt),
+    )
+    group.add_argument(
+        "--print-fx",
+        action="store_true",
+        help="Print fx traces captured from model",
+    )
+    group.add_argument(
+        "--print-aten-ops",
+        action="store_true",
+        help="Print traces of aten ops captured by AOT autograd",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
+        "--export",
+        action="store_true",
+        help="Measure pass rate with export",
+    )
+    group.add_argument(
+        "--export-aot-inductor",
+        action="store_true",
+        help="Measure pass rate with Export+AOTInductor",
+    )
+    group.add_argument(
+        "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
+    )
+    group.add_argument(
+        "--torchscript-onnx",
+        "--torchscript_onnx",
+        action="store_true",
+        help="Measure speedup with TorchScript ONNX, i.e. `torch.onnx.export`",
+    )
+    group.add_argument(
+        "--dynamo-onnx",
+        "--dynamo_onnx",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
+        "--backend",
+        choices=torch._dynamo.list_backends(exclude_tags=None),
+        help="measure speedup with a given backend",
+    )
+    group.add_argument("--nothing", action="store_true", help=help(null_experiment))
+    group.add_argument(
+        "--log-conv-args",
+        action="store_true",
+        help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
+    )
+    group.add_argument(
+        "--recompile-profiler",
+        "--recompile_profiler",
+        action="store_true",
+        help="Run the dynamo recompilation profiler on each model.",
+    )
+    group.add_argument(
+        "--find-batch-sizes",
+        action="store_true",
+        help="finds the largest batch size that could fit on GPUs",
+    )
+
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
+        "--accuracy",
+        action="store_true",
+        help="Checks accuracy with small batch size and eval mode",
+    )
+    mode_group.add_argument(
+        "--performance", action="store_true", help="Measures performance speedup"
+    )
+    mode_group.add_argument(
+        "--tolerance",
+        action="store_true",
+        help="extracts the tolerance for each model with small batch size and eval mode",
+    )
+    run_mode_group = parser.add_mutually_exclusive_group(required=True)
+    run_mode_group.add_argument(
+        "--training",
+        action="store_true",
+        help="Performs training",
+    )
+    run_mode_group.add_argument(
+        "--inference", action="store_true", help="Performs inference"
+    )
+    return parser.parse_args(args)
 
 
 def process_entry(rank, runner, original_dir, args):
@@ -2273,7 +3032,6 @@ def process_entry(rank, runner, original_dir, args):
 def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
-
     args = parse_args()
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)

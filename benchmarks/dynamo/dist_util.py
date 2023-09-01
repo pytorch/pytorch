@@ -2,7 +2,6 @@ import argparse
 import functools
 import importlib
 import os
-from contextlib import contextmanager
 
 import torch
 import torch.distributed as dist
@@ -147,18 +146,3 @@ def apply_fsdp(args, model, use_checkpointing=False, use_wrap_policy=True):
     if use_checkpointing:
         fsdp_checkpointing_base(model, blocks)
     return model
-
-@contextmanager
-def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789"):
-    try:
-        if should_init_distributed:
-            torch.cuda.set_device(rank)
-            os.environ["MASTER_ADDR"] = "localhost"
-            os.environ["MASTER_PORT"] = port
-            torch.distributed.init_process_group(
-                "nccl", rank=rank, world_size=world_size
-            )
-        yield
-    finally:
-        if should_init_distributed:
-            torch.distributed.destroy_process_group()
