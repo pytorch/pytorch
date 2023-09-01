@@ -20,17 +20,17 @@ from torch.ao.quantization.observer import (
 
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
-from torch.fx import Node
+from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
-from .quantizer import (
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
+    propagate_annotation,
     QuantizationConfig,
-    QuantizationSpec,
-    Quantizer,
 )
 
-from .xnnpack_quantizer_utils import OP_TO_ANNOTATOR
+from torch.fx import Node
 
 
 __all__ = [
@@ -312,6 +312,7 @@ class XNNPACKQuantizer(Quantizer):
             model = self._annotate_for_dynamic_quantization_config(model)
         else:
             model = self._annotate_for_static_quantization_config(model)
+        propagate_annotation(model)
         return model
 
     def _annotate_all_patterns(
@@ -330,6 +331,8 @@ class XNNPACKQuantizer(Quantizer):
         self._annotate_conv2d_patterns(model, config, filter_fn)
         self._annotate_max_pool2d(model, config, filter_fn)
         self._annotate_add_patterns(model, config, filter_fn)
+        OP_TO_ANNOTATOR["mul_relu"](model, config, filter_fn)
+        OP_TO_ANNOTATOR["mul"](model, config, filter_fn)
         self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
         self._annotate_gru_io_only(model, config, filter_fn)
         return model

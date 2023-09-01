@@ -1,6 +1,7 @@
 import functools
 import operator
 from functools import reduce
+from typing import Any, Tuple
 
 import torch
 
@@ -20,7 +21,10 @@ from ..pattern_matcher import (
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-
+from .quantization import (
+    _register_quantization_lowerings,
+    _register_quantization_weight_pack_pass,
+)
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -283,6 +287,7 @@ if torch._C._has_mkldnn:
             ):
                 matched = False
             else:  # inp is a Number
+                assert max_value is not None
                 matched = min_value <= max_value
             if is_bf16:
                 dtype1 = kwargs.get("to_float")
@@ -655,17 +660,38 @@ if torch._C._has_mkldnn:
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
+            assert isinstance(reshape_1, list)
+            assert isinstance(reshape_2, list)
+            assert len(reshape_1) == 2
+            dynamic_shapes = not all(
+                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
+            )
+
             graph = match.graph
-            node = match.output_node()
-            if reshape_1[0] == reduce(lambda x, y: x * y, reshape_2[:-1]):
+            reshape_2_node = match.output_node()
+            linear_input_node = reshape_2_node.args[0].args[0].args[0]
+            # check linear's input's shape[:-1] == reshape_2[:-1]
+            # and check product(reshape_2[:-1]) == reshape_1[0]
+            if dynamic_shapes:
+                # TODO: Haozhe investigate how add guard here
+                return
+            else:
+                can_remove_reshape = linear_input_node.meta.get("val").shape[
+                    :-1
+                ] == torch.Size(reshape_2[:-1])
+                can_remove_reshape = can_remove_reshape and (
+                    reduce(lambda x, y: x * y, reshape_2[:-1]) == reshape_1[0]
+                )
+
+            if can_remove_reshape:
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
-                repl.meta.update(node.meta)
-                node.replace_all_uses_with(repl)
-                old_linear_node = node.args[0]
+                repl.meta.update(reshape_2_node.meta)
+                reshape_2_node.replace_all_uses_with(repl)
+                old_linear_node = reshape_2_node.args[0]
                 reshape_1_node = old_linear_node.args[0]
-                graph.erase_node(node)
+                graph.erase_node(reshape_2_node)
                 graph.erase_node(old_linear_node)
-                if reshape_1_node.users == 0:
+                if len(reshape_1_node.users) == 0:
                     graph.erase_node(reshape_1_node)
 
         def is_linear_add_bias(match):
@@ -990,7 +1016,7 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs = (input, packed_weight_node)
+                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
@@ -1048,9 +1074,11 @@ if torch._C._has_mkldnn:
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
+            _register_quantization_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
+            _register_quantization_weight_pack_pass()

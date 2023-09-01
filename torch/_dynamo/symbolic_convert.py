@@ -43,6 +43,7 @@ from .bytecode_transformation import (
     is_generator,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
@@ -409,6 +410,9 @@ def break_graph_if_unsupported(*, push):
                     assert isinstance(ctx, GenericContextWrappingVariable)
                     unimplemented(f"Graph break under {ctx}")
 
+                if isinstance(excp, exc.UncapturedHigherOrderOpError):
+                    raise
+
                 if not self.should_compile_partial_graph():
                     raise
 
@@ -692,6 +696,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
+
             log.debug("step triggered compile", exc_info=True)
 
         # generate code from checkpoint
@@ -1850,7 +1855,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             lookup_line=False,
         )
 
-    def store_dict_key(self, name, value):
+    def store_global_weakref(self, name, value):
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
@@ -2029,45 +2034,48 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             )
 
-            # symbolic_locals contains the mapping from original f_locals to the
-            # Variable objects. During the Variable building phase, each object also
-            # has its associated guards. At the end, we will accumulate these
-            # guards.
-            #
-            # One way of handling these guards is to just accumulate all of them
-            # right now. However, many f_locals might not be used in the frame and
-            # thus can unnecessarily increase guard execution overhead.  Therefore,
-            # we selectively update output.guards as we run the Python Bytecode
-            # instruction by instruction.
-            #
-            # An exception here is list/dict variables. Guards related to these
-            # variables have indexed access, like Tensor_match on args[0], and if
-            # args is not used in this frame, we will miss a LIST_LENGTH check like
-            # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-            # next invocation when args is not a list, and args[0] is a runtime
-            # error. Therefore, we recursively add guards for list/dict variable here.
-            for val in self.symbolic_locals.values():
-                if isinstance(
-                    val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-                ):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    index_guards = [
-                        guard
-                        for guard in local_guards
-                        if guard.create_fn
-                        in (
-                            GuardBuilder.LIST_LENGTH,
-                            GuardBuilder.DICT_KEYS,
-                            GuardBuilder.ODICT_KEYS,
-                            GuardBuilder.TUPLE_ITERATOR_LEN,
-                        )
-                    ]
-                    self.output.guards.update(index_guards)
+            self.init_local_index_guards_hack()
 
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def init_local_index_guards_hack(self):
+        # symbolic_locals contains the mapping from original f_locals to the
+        # Variable objects. During the Variable building phase, each object also
+        # has its associated guards. At the end, we will accumulate these
+        # guards.
+        #
+        # One way of handling these guards is to just accumulate all of them
+        # right now. However, many f_locals might not be used in the frame and
+        # thus can unnecessarily increase guard execution overhead.  Therefore,
+        # we selectively update output.guards as we run the Python Bytecode
+        # instruction by instruction.
+        #
+        # An exception here is list/dict variables. Guards related to these
+        # variables have indexed access, like Tensor_match on args[0], and if
+        # args is not used in this frame, we will miss a LIST_LENGTH check like
+        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+        # next invocation when args is not a list, and args[0] is a runtime
+        # error. Therefore, we recursively add guards for list/dict variable here.
+        for val in self.symbolic_locals.values():
+            if isinstance(
+                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+            ):
+                local_guards = VariableTracker.propagate(val)["guards"]
+                index_guards = [
+                    guard
+                    for guard in local_guards
+                    if guard.create_fn
+                    in (
+                        GuardBuilder.LIST_LENGTH,
+                        GuardBuilder.DICT_KEYS,
+                        GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
+                    )
+                ]
+                self.output.guards.update(index_guards)
 
     def run(self):
         super().run()
@@ -2135,6 +2143,14 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
         )
+
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", None
+        )
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)[
+                "orig_graphmodule"
+            ] = orig_graphmodule_maybe
 
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
@@ -2266,6 +2282,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
+
+        # if we're calling a GraphModule method, then add the GraphModule
+        # to its forward function's context
+        self_maybe = func.fn.__self__ if func.has_self() else None
+        if self_maybe and isinstance(self_maybe, torch.fx.GraphModule):
+            code_context.get_context(self_maybe.forward.__code__)[
+                "orig_graphmodule"
+            ] = self_maybe
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2446,3 +2470,50 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable(None))
+
+    def GET_YIELD_FROM_ITER(self, inst):
+        tos = self.stack[-1]
+        if not isinstance(tos, ListIteratorVariable):
+            self.pop()
+            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            self.push(res)
+        return self.YIELD_FROM(inst)
+
+    def YIELD_FROM(self, inst):
+        while True:
+            tos = self.stack[-1]
+            if isinstance(tos, ConstantVariable) and tos.value is None:
+                self.pop()
+                return
+            if isinstance(tos, ListIteratorVariable):
+                self.output.guards.update(tos.guards)
+                try:
+                    val, next_iter = tos.next_variables()
+                    self.replace_all(tos, next_iter)
+                    self.push(val)
+                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                    self.YIELD_VALUE(inst)
+                    self.pop()
+                    self.push(next_iter)
+                except StopIteration:
+                    return
+            else:
+                unimplemented(f"YIELD_FROM {typestr(tos)}")
+
+    def SEND(self, inst):
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if isinstance(tos, ListIteratorVariable):
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.push(val)
+                self.instruction_pointer = self.indexof[inst.target]
+            else:
+                # invoke send
+                # Unreachable code - if you hit this, you are implementing generator support and have
+                # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+                # subgenerator and lines up with this line in Python 3.11
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
+                unimplemented("Unreachable sub-generator code")
+        else:
+            unimplemented(f"SEND {typestr(tos)}")

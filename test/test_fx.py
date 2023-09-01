@@ -68,6 +68,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
@@ -329,6 +330,8 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    @skipIfNoDynamoSupport
+    @unittest.expectedFailure
     def test_control_flow_tracing(self):
         def true(x, y):
             return x + y

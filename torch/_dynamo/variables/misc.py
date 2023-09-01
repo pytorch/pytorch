@@ -8,7 +8,7 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
@@ -275,7 +275,7 @@ class AutogradFunctionVariable(VariableTracker):
         if (
             requires_grad
             and torch.is_grad_enabled()
-            and torch._dynamo.config.capture_autograd_function
+            and config.capture_autograd_function
         ):
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
@@ -714,6 +714,43 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif self.value is itertools.accumulate and not kwargs:
+            from .builtin import BuiltinVariable
+
+            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+
+                def func(tx, item, acc):
+                    return BuiltinVariable(sum).call_function(tx, [item, acc], {})
+
+            elif (
+                len(args) == 2
+                and args[0].has_unpack_var_sequence(tx)
+                and args[1].is_callable(tx)
+            ):
+                seq = args[0].unpack_var_sequence(tx)
+                func = args[1].call_function
+
+            else:
+                raise unimplemented("Unsupported arguments for itertools.accumulate")
+
+            items = []
+            acc = None
+            for item in seq:
+                if acc is None:
+                    acc = item
+                else:
+                    try:
+                        acc = func(tx, item, acc)
+                    except Exception:
+                        raise unimplemented(
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
+                        )
+                items.append(acc)
+
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
         elif (
             self.value is itertools.combinations
             and not kwargs
@@ -818,6 +855,9 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        if not config.trace_numpy:
+            unimplemented(f"numpy.{self.value}()")
+
         from ..utils import numpy_to_tensor_wrapper
 
         from .tensor import NumpyNdarrayVariable
@@ -863,7 +903,7 @@ class NumpyVariable(VariableTracker):
     def as_proxy(self):
         # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
         #  into NumpyVariable for instances/objects and NumpyVariable for types.
-        if isinstance(self.value, type):
+        if config.trace_numpy and isinstance(self.value, type):
             # retrieve attribute str. E.g., "float32" if given np.float32
 
             attr = self.value.__name__

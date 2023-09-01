@@ -10,7 +10,17 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Union,
+)
 
 import sympy
 
@@ -40,6 +50,7 @@ from .bytecode_transformation import (
     Instruction,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
 from .exc import (
@@ -102,6 +113,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
@@ -263,28 +275,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
                 co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        # Register a SHAPE_ENV guard to make sure we setup shape guards
-        # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
-        )
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
+        self.init_ambient_guards()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -308,6 +305,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
+
+        # A list of register_finalizer_fns to apply to the output graph module
+        self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
@@ -348,14 +348,24 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
 
-        self._orig_gm_meta = None
-        self._orig_gm_lineno_map = None
-        func_context = getattr(frame.f_func, "_torchdynamo_context", None)
-        if func_context is not None:
-            module = func_context.get("orig_graphmodule", None)
-            if module and isinstance(module, torch.fx.GraphModule):
-                self._orig_gm_meta = [nd.meta for nd in module.graph.nodes]
-                self._orig_gm_lineno_map = module._lineno_map
+    # This gets its own helper function so guards DEBUG logs are more
+    # informative
+    def init_ambient_guards(self):
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        )
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
     @property
     def root_tracer(self):
@@ -483,6 +493,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             list(self.tracked_fakes),
             guards_graph_state,
             module_state,
+            list(self.register_finalizer_fns),
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
@@ -499,6 +510,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             module_state,
+            self.register_finalizer_fns,
             global_state,
             self.param_name_to_source,
             self.side_effects,
@@ -597,13 +609,34 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
+    @staticmethod
+    def module_key_name(*names):
+        # create a new unique name
+        name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        return name
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
+        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
+        # but route here fore registration of children.
+        if is_dynamic_nn_module(target) and not getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -611,6 +644,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
+
+        if is_dynamic_nn_module(target) and getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
+            name = "_".join(map(str, names))
+            base = name
+            for i in itertools.count():
+                if name not in self.nn_modules:
+                    self.nn_modules[name] = target
+                    break
+                name = f"{base}_{i}"
+            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
+            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
+            vt = variables.nn_module.FSDPManagedNNModuleVariable(
+                target,
+                name,
+                **options,
+            )
+            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
@@ -700,17 +752,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # Strip the guard lookup L/G access
-        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
-        if not name or not name[0].isalpha():
-            name = "sub" + name
+        name = OutputGraph.module_key_name(*names)
+
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
@@ -952,6 +996,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        for register_finalizer in self.register_finalizer_fns:
+            register_finalizer(gm)
+
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
@@ -1131,9 +1178,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.register_finalizer_fns.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
+
+    def add_graph_finalizer(
+        self, register_finalizer: Callable[[fx.GraphModule], None]
+    ) -> None:
+        self.register_finalizer_fns.append(register_finalizer)
 
 
 class SubgraphTracer(fx.Tracer):
@@ -1178,6 +1231,10 @@ class SubgraphTracer(fx.Tracer):
         # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
         self.prev_inst = None
+
+        self._cur_code = None
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
 
     def create_proxy(
         self,
@@ -1256,16 +1313,28 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
+        # update reference to original meta if we're tracing a new code object
+        if tx.f_code is not self._cur_code:
+            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                "orig_graphmodule", None
+            )
+            if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                self._orig_gm_meta = [
+                    nd.meta for nd in orig_graphmodule_maybe.graph.nodes
+                ]
+                self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
+            else:
+                self._orig_gm_meta = None
+                self._orig_gm_lineno_map = None
+
         # preserve original meta if it is available
-        if self.output_graph._orig_gm_meta:
+        if self._orig_gm_meta and self._orig_gm_lineno_map:
             lineno = tx.current_instruction.starts_line
             node_idx = None
             if lineno is not None:
-                node_idx = self.output_graph._orig_gm_lineno_map[
-                    lineno - tx.f_code.co_firstlineno
-                ]
+                node_idx = self._orig_gm_lineno_map[lineno - tx.f_code.co_firstlineno]
             if node_idx is not None:
-                meta = self.output_graph._orig_gm_meta[node_idx]
+                meta = self._orig_gm_meta[node_idx]
                 for key in ("nn_module_stack", "source_fn", "stack_trace"):
                     if key in meta:
                         rv.node.meta[key] = meta[key]

@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import re
 from collections import namedtuple
 from itertools import chain
@@ -196,6 +197,9 @@ class DataTypePropagation:
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
+        if node.target == operator.getitem:
+            return self.deduce_node_dtype(node.args[0])
+
         assert isinstance(node.target, str)
 
         if node.target == "reduction":
@@ -310,6 +314,12 @@ class ExprPrinter(Printer):
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
 
+    def _print_GreaterThan(self, expr):
+        # GreaterThan:          >=
+        # StrictlyGreaterThan:  >
+        # Go figure...
+        return " >= ".join(map(self.paren, map(self._print, expr.args)))
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -412,8 +422,13 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
+        # V.kernel may be null since this method may be called for the
+        # wrapper codegen where there is no specific kernel.
         if (
-            self.name not in V.graph.removed_buffers
+            self.name
+            not in (
+                V.graph.removed_buffers | getattr(V.kernel, "removed_buffers", set())
+            )
             and self.name not in V.graph.inplaced_to_remove
         ):
             return self.line
@@ -801,9 +816,10 @@ class Kernel(CodeGen):
     load_format = None
     store_format = None
 
-    def __init__(self, args=None):
+    def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
-        metrics.generated_kernel_count += 1
+        if increase_kernel_count:
+            metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
@@ -814,6 +830,12 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+
+        self.removed_buffers = set()
+        # key: the buffer to write
+        # value: the buffer to read and whose memory can be reused for
+        #   the buffer specified by key
+        self.inplace_update_buffers = dict()
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -984,6 +1006,10 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Note that V.graph.scheduler can be None when codegening triton template
+        kernels.
+        """
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)

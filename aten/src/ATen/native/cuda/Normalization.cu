@@ -161,7 +161,7 @@ void batch_norm_elementwise(
       using acc_t = at::acc_type<scalar_t, true>;
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t input, acc_t weight, acc_t bias,
                                       acc_t mean, acc_t invstd) -> scalar_t {
-        return ((input - mean) * invstd) * weight + bias;
+        return (input - mean) * weight * invstd + bias;
       });
     });
     return;
