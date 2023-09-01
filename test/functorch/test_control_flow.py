@@ -1407,7 +1407,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x * x.sin()
 
         def foo(x):
-            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
         inp = torch.randn([4, 3])
         gm, _ = torch._dynamo.export(foo)(inp)
 
