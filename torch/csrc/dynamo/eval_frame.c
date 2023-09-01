@@ -180,6 +180,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 bool is_dynamo_compiling = false;
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
+const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 // Points to the extra scratch space on the code object
 static Py_ssize_t extra_index = -1;
@@ -936,7 +937,7 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-    _PytorchRecordFunctionState rf = _pytorch_record_function_enter("TorchDynamo Cache Lookup");
+    _PytorchRecordFunctionState rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
     _pytorch_record_function_exit(&rf);
 
@@ -961,7 +962,7 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  _PytorchRecordFunctionState rf = _pytorch_record_function_enter("TorchDynamo Cache Lookup");
+  _PytorchRecordFunctionState rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
   _pytorch_record_function_exit(&rf);
   if (maybe_cached_code == NULL) {

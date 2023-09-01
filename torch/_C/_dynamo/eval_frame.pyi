@@ -1,11 +1,6 @@
 import types
 
-from torch._dynamo.types import (
-    DynamoCallback,
-    DynamoGuardHook,
-    ProfilerEndHook,
-    ProfilerStartHook,
-)
+from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...

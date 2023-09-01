@@ -5,7 +5,7 @@ extern "C" {
 #endif
 
 typedef struct _PytorchRecordFunctionState {
-    void* guard;
+  void* guard;
 } _PytorchRecordFunctionState;
 
 _PytorchRecordFunctionState _pytorch_record_function_enter(const char* name);
