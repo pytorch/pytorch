@@ -10,4 +10,5 @@ class RAdam(Optimizer):
         betas: Tuple[float, float] = ...,
         eps: float = ...,
         weight_decay: float = ...,
+        decoupled_weight_decay: bool = ...,
     ) -> None: ...

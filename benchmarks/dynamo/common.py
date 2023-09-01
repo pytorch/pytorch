@@ -2018,6 +2018,12 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+            fp64_outputs = tree_map(
+                lambda x: x.to(torch.float64)
+                if isinstance(x, torch.Tensor) and x.is_floating_point()
+                else x,
+                fp64_outputs,
+            )
         except Exception:
             log.warning(
                 "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",

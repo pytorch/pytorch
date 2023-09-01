@@ -212,15 +212,6 @@ function test_torch_deploy(){
  popd
 }
 
-function install_huggingface() {
-  local version
-  version=$(get_pinned_commit huggingface)
-  pip_install pandas
-  pip_install scipy
-  pip_install z3-solver
-  pip_install "transformers==${version}"
-}
-
 function install_timm() {
   local commit
   commit=$(get_pinned_commit timm)

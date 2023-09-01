@@ -101,9 +101,9 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {} outside lower domain boundary"
-                        " {} produced {}, not nan!"
-                    ).format(lower_tensor.item(), low, result.item()),
+                        f"input of {lower_tensor.item()} outside lower domain boundary"
+                        f" {low} produced {result.item()}, not nan!"
+                    ),
                 )
 
         if high is not None:
@@ -120,9 +120,9 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {} outside upper domain boundary"
-                        " {} produced {}, not nan!"
-                    ).format(higher_tensor.item(), high, result.item()),
+                        f"input of {higher_tensor.item()} outside upper domain boundary"
+                        f" {high} produced {result.item()}, not nan!"
+                    ),
                 )
 
     # Helper for comparing torch tensors and numpy arrays
@@ -245,9 +245,9 @@ class TestUnaryUfuncs(TestCase):
             if t.numel() < 10:
                 msg = (
                     "Failed to produce expected results! Input tensor was"
-                    " {}, torch result is {}, and reference result is"
-                    " {}."
-                ).format(t, actual, expected)
+                    f" {t}, torch result is {actual}, and reference result is"
+                    f" {expected}."
+                )
             else:
                 msg = None
 

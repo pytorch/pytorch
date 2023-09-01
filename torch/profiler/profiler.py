@@ -145,11 +145,10 @@ class _KinetoProfile:
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
 
-            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
-            is_cuda11_or_lower = (torch.version.cuda is not None) and (
-                [int(x) for x in torch.version.cuda.split(".")] < [12, 0]
-            )
-            if is_cuda11_or_lower and hasattr(torch, "_inductor"):
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes.
+            # This is a known issue in CUDA 11 but we have also occasionally
+            # observed it in CUDA 12
+            if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
 
                 if inductor_config.triton.cudagraphs:
@@ -603,13 +602,11 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
-        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
