@@ -242,31 +242,97 @@ class TestFP8MatmulCuda(TestCase):
 @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability(0)[0] != 8, "mixed dtypes MM only supported on SM 8.x")
 class TestMatmulMixedDtypes(TestCase):
     def test_fp16_int8_mm(self, device: str = "cuda"):
+        def preprocess_weights_for_mixed_gemm(inp):
+            assert(inp.dtype == torch.int8)
+            assert inp.dim() == 2
+
+            nrows, ncols = inp.shape
+            assert nrows % 64 == 0
+            assert ncols % 64 == 0
+
+            # permute_B_rows_for_mixed_gemm
+            outp = torch.empty_like(inp)
+            outp[0::16] = inp[0::16]
+            outp[1::16] = inp[1::16]
+            outp[2::16] = inp[8::16]
+            outp[3::16] = inp[9::16]
+            outp[4::16] = inp[2::16]
+            outp[5::16] = inp[3::16]
+            outp[6::16] = inp[10::16]
+            outp[7::16] = inp[11::16]
+            outp[8::16] = inp[4::16]
+            outp[9::16] = inp[5::16]
+            outp[10::16] = inp[12::16]
+            outp[11::16] = inp[13::16]
+            outp[12::16] = inp[6::16]
+            outp[13::16] = inp[7::16]
+            outp[14::16] = inp[14::16]
+            outp[15::16] = inp[15::16]
+
+            # subbyte_transpose
+            outp = outp.T.contiguous()
+
+            # interleave_column_major_tensor
+            magic0 = 2
+            magic1 = 16
+
+            tmp0 = (torch.arange(0, ncols // magic0, device=device) * (nrows // 4 * magic0)).view(-1, 1).repeat(1, nrows // 4 * magic0).view(-1)
+            tmp1 = (torch.arange(0, nrows // 4 // magic1, device=device) * (magic0 * magic1)).view(-1, 1).repeat(1, magic1).view(-1).repeat(ncols)
+            tmp2 = (torch.arange(0, magic0, device=device) * magic1).view(-1, 1).repeat(1, nrows // 4).view(-1).repeat(ncols // magic0)
+            tmp3 = torch.arange(0, magic1, device=device).repeat(nrows // 4 * ncols // magic1)
+
+            outp_offsets = tmp0 + tmp1 + tmp2 + tmp3
+
+            tmp = outp.view(-1).view(torch.int32)
+            outp = torch.zeros_like(tmp)
+            outp.scatter_(0, outp_offsets, tmp)
+            outp = outp.view(inp.dtype).view(inp.shape)
+
+            # add_bias_and_interleave_quantized_tensor_inplace
+            tmp = outp.view(-1)
+
+            outp = torch.empty_like(tmp)
+            outp[0::4] = tmp[0::4]
+            outp[1::4] = tmp[2::4]
+            outp[2::4] = tmp[1::4]
+            outp[3::4] = tmp[3::4]
+            outp = (outp.to(torch.int) + 128).to(tmp.dtype)
+
+            return outp.view(inp.shape)
+
         def run_test(m, n, k, device):
-            fp16_low, fp16_high = 0.5, 1.5
-            ui8_low, ui8_high = 129, 130  # FIXME: make this range broader
+            val_lo, val_hi = -1, 1
             a = make_tensor(
-                m, k, low=fp16_low, high=fp16_high, dtype=torch.float16, device=device
+                m, k, low=val_lo, high=val_hi, dtype=torch.float16, device=device
             )
-            b = make_tensor(
-                k, n, low=ui8_low, high=ui8_high, dtype=torch.uint8, device=device
-            )
+            b = make_tensor(k, n, low=-2, high=2, dtype=torch.int8, device=device)
             scale = make_tensor(
-                (1, n), low=fp16_low, high=fp16_high, dtype=a.dtype, device=device
+                (1, n), low=val_lo, high=val_hi, dtype=a.dtype, device=device
             )
             bias = make_tensor(
-                (1, n), low=fp16_low, high=fp16_high, dtype=a.dtype, device=device
+                (1, n), low=val_lo, high=val_hi, dtype=a.dtype, device=device
             )
 
-            weights = (b.to(a.dtype) - 128) * scale.expand((k, n))
+            weights = b.to(a.dtype) * scale.expand((k, n))
 
             c_ref = torch.addmm(bias, a, weights)
 
-            c = torch.ops.aten._fp16_uint8_mm(a, b, scale, bias)
+            c = torch.ops.aten._fp16_uint8_mm(a, preprocess_weights_for_mixed_gemm(b).view(torch.uint8), scale, bias)
 
             torch.testing.assert_close(c, c_ref, rtol=1e-3, atol=0)
 
-        shapes = [[32, 32, 128], [32, 64, 128], [64, 32, 128], [64, 64, 128]]
+        shapes = [
+            [8, 64, 64],
+            [8, 64, 128],
+            [8, 128, 64],
+            [8, 128, 128],
+            [8, 128, 192],
+            [8, 192, 128],
+            [8, 128, 256],
+            [8, 256, 128],
+            [8, 256, 384],
+            [8, 384, 256],
+        ]
         for m, n, k in shapes:
             run_test(m, n, k, device)
         
