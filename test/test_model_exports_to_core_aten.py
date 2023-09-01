@@ -1,17 +1,12 @@
+# Owner(s): ["oncall: mobile"]
+import copy
 
 import torch
 import torch._export as export
-import copy
-from torch._decomp import core_aten_decompositions, get_decompositions
-from unittest.mock import patch
 
-from torch.testing._internal.common_quantization import (
-    NodeSpec as ns,
-    QuantizationTestCase,
-    skip_if_no_torchvision,
-    skipIfNoQNNPACK,
-)
+from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import TestCase
+
 
 def _get_ops_list(m: torch.fx.GraphModule):
     op_list = []
@@ -20,11 +15,12 @@ def _get_ops_list(m: torch.fx.GraphModule):
             op_list.append(n.target)
     return op_list
 
-class TestQuantizePT2EModels(TestCase):
 
+class TestQuantizePT2EModels(TestCase):
     @skip_if_no_torchvision
     def test_vit_aten_export(self):
         from torchvision.models import vit_b_16  # @manual
+
         m = vit_b_16(weights="IMAGENET1K_V1")
         m = m.eval()
         input_shape = (1, 3, 224, 224)
