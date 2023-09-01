@@ -1,15 +1,14 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import copy
 import itertools
 
 import torch
-import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
@@ -97,10 +96,9 @@ class TestPatternMatcherBase(TestCase):
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
             with torch.no_grad():
-                export_model, guards = torchdynamo.export(
+                export_model = capture_pre_autograd_graph(
                     mod,
-                    *copy.deepcopy(inputs),
-                    aten_graph=True,
+                    inputs,
                 )
                 quantizer = X86InductorQuantizer()
                 quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())

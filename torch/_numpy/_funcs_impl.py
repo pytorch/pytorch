@@ -1226,7 +1226,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
     # Move working axis to the end of the shape
     a = torch.moveaxis(a, axisa, -1)
     b = torch.moveaxis(b, axisb, -1)
-    msg = "incompatible dimensions for cross product\n" "(dimension must be 2 or 3)"
+    msg = "incompatible dimensions for cross product\n(dimension must be 2 or 3)"
     if a.shape[-1] not in (2, 3) or b.shape[-1] not in (2, 3):
         raise ValueError(msg)
 
