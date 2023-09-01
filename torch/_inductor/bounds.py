@@ -47,7 +47,7 @@ class BoundVars:
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
             ):
-                self._bounds[node] = ValueRanges.unknown()  # type: ignore
+                self._bounds[node] = ValueRanges.unknown()  # type: ignore[index]
 
         with V.set_ops_handler(ValueRangeAnalysis()):
             interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)
@@ -63,7 +63,7 @@ class BoundVars:
                 subblock = self.loop_body.subblocks[key]
                 # The result within the lambda will reference to the final
                 # set of modules at the end of the for-loop as it stores a reference to it
-                result[key] = lambda mask, value: self.masked_subblock(  # type: ignore
+                result[key] = lambda mask, value: self.masked_subblock(  # type: ignore[misc, assignment]
                     subblock, self._bounds, mask, value, result
                 )
             else:
