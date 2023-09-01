@@ -40,7 +40,6 @@ class ConstantFolder(torch.fx.Interpreter):
         gm,
         skip_constructors=False,
     ):
-        # we are going to do our own garbage collection
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
         self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
