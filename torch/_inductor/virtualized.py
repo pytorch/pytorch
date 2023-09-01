@@ -83,7 +83,7 @@ class MockHandler:
     @classmethod
     def _init_cls(cls):
         def make_handler(format_string):
-            @staticmethod
+            @staticmethod  # type: ignore[misc]
             def inner(*args):
                 return format_string.format(*args)
 
@@ -121,7 +121,7 @@ class KernelFormatterHandler:
                 )
                 formatter.output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(
+        with V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)
@@ -274,7 +274,7 @@ class _V:
     set_interpreter_handler = _interpreter._set_handler
 
     @property
-    def ops(self) -> MockHandler:
+    def ops(self) -> MockHandler:  # type: ignore[valid-type]
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 

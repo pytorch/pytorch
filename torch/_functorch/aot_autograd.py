@@ -159,14 +159,14 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_seq_nr(seq_nr, bwd=True)
+            fx_traceback.set_grad_fn_seq_nr(seq_nr)
 
         return prehook
 
     def get_posthook(special_stack_, seq_nr):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
-            fx_traceback.set_seq_nr(-1, bwd=True)
+            fx_traceback.reset_grad_fn_seq_nr()
 
         return posthook
 
@@ -742,7 +742,10 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        def valid_input(a):
+            # Insanely sus, talk to folks about this
+            return isinstance(a, KNOWN_TYPES) or callable(flat_args[-1])
+        assert all(valid_input(a) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []

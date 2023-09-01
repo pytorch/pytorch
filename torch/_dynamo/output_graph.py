@@ -10,7 +10,17 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Union,
+)
 
 import sympy
 
@@ -102,6 +112,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
@@ -261,28 +272,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
                 co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        # Register a SHAPE_ENV guard to make sure we setup shape guards
-        # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
-        )
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
+        self.init_ambient_guards()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -306,6 +302,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
+
+        # A list of register_finalizer_fns to apply to the output graph module
+        self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
@@ -345,6 +344,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+    # This gets its own helper function so guards DEBUG logs are more
+    # informative
+    def init_ambient_guards(self):
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        )
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
     @property
     def root_tracer(self):
@@ -472,6 +490,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             list(self.tracked_fakes),
             guards_graph_state,
             module_state,
+            list(self.register_finalizer_fns),
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
@@ -488,6 +507,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             module_state,
+            self.register_finalizer_fns,
             global_state,
             self.param_name_to_source,
             self.side_effects,
@@ -586,13 +606,34 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
+    @staticmethod
+    def module_key_name(*names):
+        # create a new unique name
+        name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        return name
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
+        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
+        # but route here fore registration of children.
+        if is_dynamic_nn_module(target) and not getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -600,6 +641,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
+
+        if is_dynamic_nn_module(target) and getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
+            name = "_".join(map(str, names))
+            base = name
+            for i in itertools.count():
+                if name not in self.nn_modules:
+                    self.nn_modules[name] = target
+                    break
+                name = f"{base}_{i}"
+            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
+            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
+            vt = variables.nn_module.FSDPManagedNNModuleVariable(
+                target,
+                name,
+                **options,
+            )
+            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
@@ -689,17 +749,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # Strip the guard lookup L/G access
-        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
-        if not name or not name[0].isalpha():
-            name = "sub" + name
+        name = OutputGraph.module_key_name(*names)
+
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
@@ -795,26 +847,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
-        def install_remaining_hooks(curr_pass):
-            # This is a tricky bit of logic, lets go over it.
-            # At this point, we will already have installed hooks for outputs.
-            # So, remaining hooks are hooks with sources - specifically, we want to avoid installing hooks
-            # on intermediaries, as that will accrue a new output value in the graph, which we do not want.
-            # So, we iterate over all known hooked tensors, and install their hooks if there is a source (meaning, )
-            # this is an input or a known attr. If there is not a source, it can still be hooked if this intermediary
-            # value is used in output (Hence the False check, that value should only be False if there have been)
-            # no attempts to install this accumulated hook. As such, we have to graph break here, as it would be
-            # unsound to proceed with a hook on a value that is neither an input, nor an output - and it would be
-            # unsound to ignore this hook.
-            for tensor in list(self.side_effects.tensor_hooks):
-                if tensor.source:
-                    self.side_effects.codegen_hooks(curr_pass, tensor)
-                else:
-                    if self.side_effects.tensor_hooks[tensor][1] is False:
-                        unimplemented(
-                            f"Uninstalled hooks, probably on intermediaries {self.side_effects.tensor_hooks.keys()}"
-                        )
-
         # to handle random calls
         if len(tx.random_calls) > 0:
             append_prefix_insts()
@@ -852,7 +884,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
-            install_remaining_hooks(pass1)
+            self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -864,7 +896,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
-            install_remaining_hooks(pass2)
+            self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)
@@ -963,6 +995,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        for register_finalizer in self.register_finalizer_fns:
+            register_finalizer(gm)
+
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
@@ -1105,7 +1140,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
-                    used_symbols |= free_symbols(fake)
+                    if arg.has_symbols:
+                        used_symbols |= free_symbols(fake)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
@@ -1142,9 +1178,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.register_finalizer_fns.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
+
+    def add_graph_finalizer(
+        self, register_finalizer: Callable[[fx.GraphModule], None]
+    ) -> None:
+        self.register_finalizer_fns.append(register_finalizer)
 
 
 class SubgraphTracer(fx.Tracer):

@@ -1,9 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from functorch.compile import nop
+from torch._functorch.aot_autograd import aot_module_simplified
 
 
 def global_hook_0(grad):
@@ -204,10 +208,82 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         out = torch.randn(1, requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = torch._dynamo.optimize(cnts, nopython=False)(f)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(f)
         res = fn(out)
         res.backward()
         self.assertEqual(res, f(out))
-        # NYI!
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(out.grad, torch.Tensor([2.0]))
+
+    def test_intermediary_hooks_same_on_aot_eager(self):
+        def my_hook(grad, k=0):
+            return grad + k
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                y = x.mul(2)
+                hook1 = functools.partial(my_hook, k=3)
+                hook2 = functools.partial(my_hook, k=4)
+                y.register_hook(hook1)
+                y.register_hook(hook2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x0 = torch.ones(4, requires_grad=True)
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(4))
+
+        x1 = torch.ones(4, requires_grad=True)
+        mod_compiled = aot_module_simplified(mod, (x1,), nop)
+        aot_out = mod_compiled(x1)
+        aot_out[0].backward(torch.ones(4))
+
+        x2 = torch.ones(4, requires_grad=True)
+        dynamo_out = torch._dynamo.optimize("aot_eager", nopython=True)(mod)(x2)
+        dynamo_out[0].backward(torch.ones(4))
+
+        self.assertEqual(dynamo_out, aot_out)
+        self.assertEqual(dynamo_out, eager_out)
+
+        self.assertEqual(x0.grad, x1.grad)
+        self.assertEqual(x0.grad, x2.grad)
+
+    def test_no_recompile_on_hook_identity_change(self):
+        def my_hook(grad, k=0):
+            return grad + k
+
+        def my_hook2(grad):
+            return grad * 2
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                y = x.mul(2)
+                y.register_hook(my_hook)
+                y.register_hook(my_hook)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x0 = torch.ones(4, requires_grad=True)
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(4))
+
+        x1 = torch.ones(4, requires_grad=True)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        comp_mod = torch._dynamo.optimize(cnts, nopython=True)(mod)
+        comp_out = comp_mod(x1)
+        comp_out[0].backward(torch.ones(4))
+
+        self.assertEqual(cnts.frame_count, 1)
+        my_hook = my_hook2
+        self.assertEqual(x0.grad, x1.grad)
+
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(4))
+
+        comp_out = comp_mod(x1)
+
+        self.assertEqual(cnts.frame_count, 2)
+        comp_out[0].backward(torch.ones(4))
+        self.assertEqual(x0.grad, x1.grad)

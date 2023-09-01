@@ -4,7 +4,10 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import sympy
 
@@ -480,6 +483,10 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
+            if not config.trace_numpy:
+                unimplemented("Tensor.numpy(). config.trace_numpy is False")
+            if not np:
+                unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:
@@ -621,9 +628,10 @@ class TensorVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
             def redistribute_fn_with_prim_types(x):
-                return x.redistribute(*args_as_value)
+                return x.redistribute(*args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
@@ -638,6 +646,9 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "register_hook":
+            import os
+
+            gpu_id = int(os.environ.get("LOCAL_RANK", 0))
             # see On dynamo tensor_hooks
             assert len(args) == 1
             fn_var = args[0]
@@ -661,7 +672,32 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
-            fn_var.source = tx.store_hook(name, fn)
+            src = tx.store_hook(name, fn)
+            if not self.source:
+                # Intermediary
+                from .builder import GraphArg
+
+                new_name = tx.store_handle("intermed_handle", handle)
+                handle_variable.as_global = new_name
+
+                hook_proxy = tx.output.root_tracer.create_graph_input(
+                    name, type(fn), source=src
+                )
+                grapharg = GraphArg(src, fn, False, None)
+                grapharg.has_symbols = False
+                hook_proxy.node.meta["grapharg"] = grapharg
+                # this is a placeholder implementation for now, the real POR to avoid recompiling on hook identity
+                # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
+                # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
+                self.as_proxy().register_hook(hook_proxy)
+                if fn_var.source:
+                    tx.output.guards.add(
+                        fn_var.source.make_guard(GuardBuilder.ID_MATCH)
+                    )
+            else:
+                fn_var.source = src
+            if gpu_id == 0:
+                print(f"Registering hook with source {self.source}, with fn {fn}")
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
 

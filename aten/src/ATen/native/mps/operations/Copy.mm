@@ -293,7 +293,8 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
     dst.resize_as_(src);
   }
 
-  TORCH_CHECK(dst.dim() >= src.dim());
+  TORCH_CHECK(
+      dst.dim() >= src.dim(), "Destination ", dst.sym_sizes(), " doesn't match the broadcast shape ", src.sym_sizes());
   if (dst.dim() > src.dim()) {
     needs_broadcasting = true;
   } else {

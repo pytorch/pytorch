@@ -16,7 +16,7 @@ from ..allowed_functions import is_allowed
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -177,6 +177,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+
+        elif self.value == functools.partial:
+            subargs = args[1:]
+            subargs_real_values = []
+            subkwargs = {}
+            for subarg in subargs:
+                subargs_real_values.append(subarg.value)
+            for k, v in kwargs.items():
+                subkwargs[k] = v.value
+
+            new_fn = functools.partial(args[0].fn, *subargs_real_values, **subkwargs)
+            return variables.functions.UserFunctionVariable(new_fn, **options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -379,6 +391,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif istype(self.value, functools.partial):
+            from .builder import VariableBuilder
+
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            args_source = AttrSource(self.source, "args")
+            partial_args = []
+            for i, arg in enumerate(self.value.args):
+                args_item_source = GetItemSource(args_source, i)
+                arg_vt = VariableBuilder(tx, args_item_source)(arg)
+                partial_args.append(arg_vt)
+            partial_args.extend(args)
+
+            kwargs_source = AttrSource(self.source, "keywords")
+            partial_kwargs = {}
+            for k, kwarg in enumerate(self.value.keywords.items()):
+                kwargs_item_source = GetItemSource(kwargs_source, k)
+                kwarg_vt = VariableBuilder(tx, kwargs_item_source)(kwarg)
+                partial_kwargs[k] = kwarg_vt
+
+            partial_kwargs.update(kwargs)
+            return variables.UserFunctionVariable(
+                self.value.func, **options
+            ).call_function(tx, partial_args, partial_kwargs)
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
@@ -446,16 +481,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+
+            while dynamic_subobj is subobj and hasattr(subobj, "_torchdynamo_inline"):
+                subobj = subobj._torchdynamo_inline
+                dynamic_subobj = subobj
+                source = AttrSource(source, "_torchdynamo_inline") if source else None
+
             if isinstance(subobj, types.MethodType):
+                if dynamic_subobj.__self__ is not self.value:
+                    unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
                 source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
-            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
-            # Static lookup can't tell us it's a method or function correctly,
-            # so we trigger dynamic lookup here to get the correct type.
-            dynamic_subobj = getattr(self.value, name)
+
             if inspect.ismethod(dynamic_subobj):
                 return variables.UserMethodVariable(
                     func, self, source=source, **options
@@ -534,12 +578,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_options(self, result)
             except KeyError:
                 pass
-        if not self.source:
-            unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)
-        options["guards"].add(
-            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
-        )
+        if self.source:
+            options["guards"].add(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
         if self._check_for_getattribute() or self._check_for_getattr():
             unimplemented("hasattr with custom __getattr__")
 
@@ -571,7 +614,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     def is_matching_object(obj):
         try:
             from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
-        except ImportError:
+        except (ImportError, AttributeError):
             return False
         else:
             return type(obj) is KeyedJaggedTensor
@@ -587,14 +630,23 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 class RemovableHandleVariable(UserDefinedObjectVariable):
     def __init__(
-        self, value, last_seen_name=None, value_type=None, mutable_local=None, **kwargs
+        self,
+        value,
+        last_seen_name=None,
+        as_global=None,
+        value_type=None,
+        mutable_local=None,
+        **kwargs,
     ):
         super().__init__(value, value_type, **kwargs)
         # associated later, see code symbolic_convert and On dynamo tensor_hooks
         self.last_seen_name = last_seen_name
         self.mutable_local = mutable_local
+        self.as_global = as_global
 
     def reconstruct(self, codegen):
+        if self.as_global:
+            return [codegen.create_load_global(self.as_global, False, add=True)]
         if self.last_seen_name:
             # It is an invariant that at this point, a STORE_FAST was executed for this name.
             return [create_instruction("LOAD_FAST", argval=self.last_seen_name)]

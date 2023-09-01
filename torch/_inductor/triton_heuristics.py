@@ -11,9 +11,11 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import List, Set
+from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch
+
+import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
 
 from . import config
@@ -75,6 +77,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
+    xyz_options: Tuple[Tuple[Any, ...], ...]
     configs = []
 
     for hint in hints:
@@ -91,7 +94,7 @@ def autotune_hints_to_configs(
                 )
             for xyz in xyz_options:
                 configs.append(
-                    triton_config(
+                    triton_config(  # type: ignore[misc]
                         size_hints,
                         *xyz,
                         num_elements_per_warp=32,
@@ -153,6 +156,11 @@ class CachingAutotuner(KernelInterface):
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
 
+        # pre-create the profiler context manager to reduce latency
+        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
+            self.meta.get("kernel_name", "triton kernel")
+        )
+
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
             if self.launchers:
@@ -163,7 +171,7 @@ class CachingAutotuner(KernelInterface):
             ]
             self.configs = None
 
-    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: int):
+    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.meta)
         for k, v in cfg.kwargs.items():
@@ -173,6 +181,9 @@ class CachingAutotuner(KernelInterface):
         compile_meta["debug"] = (
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
+
+        # Setting device_type="hip" required on ROCm to pass down to triton
+        compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
             triton.compile(
@@ -216,9 +227,16 @@ class CachingAutotuner(KernelInterface):
                     grid_0, grid_1, grid_2 = grid(grid_meta)
                 else:
                     grid_0, grid_1, grid_2 = grid
-                bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                            stream, bin.cu_function, None, None, None,
-                            {', '.join(call_args)})
+
+                if hasattr(bin, "num_ctas"):
+                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
+                                bin.num_ctas, *bin.clusterDims, bin.shared,
+                                stream, bin.cu_function, None, None, None,
+                                {', '.join(call_args)})
+                else:
+                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
+                                stream, bin.cu_function, None, None, None,
+                                {', '.join(call_args)})
             """.lstrip(),
             scope,
         )
@@ -251,7 +269,7 @@ class CachingAutotuner(KernelInterface):
         def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
-                    {**zip(self.arg_names, args), **launcher.config.kwargs}
+                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
             cloned_args = self.clone_args(*args)
@@ -396,13 +414,27 @@ class CachingAutotuner(KernelInterface):
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
-                {**zip(self.arg_names, args), **launcher.config.kwargs}
+                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
             )
-        return launcher(
-            *args,
-            grid=grid,
-            stream=stream,
-        )
+
+        # guard the record_function_ctx and only call it if profiling is currently
+        # in progress, to reduce latency when profiler is not turned on. Note that
+        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        # it is faster than entering and exiting a context manager, even if the context
+        # manager is a nullcontext.
+        if autograd_profiler._is_profiler_enabled:
+            with self.record_function_ctx:
+                return launcher(
+                    *args,
+                    grid=grid,
+                    stream=stream,
+                )
+        else:
+            return launcher(
+                *args,
+                grid=grid,
+                stream=stream,
+            )
 
 
 def _find_names(obj):
@@ -410,7 +442,7 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):
+    for frame in iter(lambda: frame.f_back, None):  # type: ignore[union-attr]
         frame.f_locals
     obj_names = []
     for referrer in gc.get_referrers(obj):
@@ -421,7 +453,7 @@ def _find_names(obj):
     return obj_names
 
 
-collected_calls = []
+collected_calls: List[Any] = []
 
 
 def start_graph():
@@ -469,7 +501,7 @@ class DebugAutotuner(CachingAutotuner):
             self.cached = (ms, num_gb, gb_per_s, kernel_name)
         else:
             ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
         )
@@ -522,7 +554,7 @@ def load_cached_autotuning(
 
 
 def cached_autotune(
-    size_hints: List[int],
+    size_hints: Optional[List[int]],
     configs: List[Config],
     meta,
     heuristic_type,
@@ -534,6 +566,7 @@ def cached_autotune(
     """
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
+    save_cache_hook: Optional[Callable[[Any, Any], Any]]
 
     # on disk caching logic
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
@@ -668,13 +701,13 @@ def triton_config(
 
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
-    while x < size_hints[0] and (
+    while x < min(size_hints[0], config.triton.max_block["X"]) and (
         x * maxGridSize[0] < size_hints[0] or conditional_product(x, y, z) < target
     ):
         x *= 2
     while (
         y
-        and y < size_hints[1]
+        and y < min(size_hints[1], config.triton.max_block["Y"])
         and (
             y * maxGridSize[1] < size_hints[1] or conditional_product(x, y, z) < target
         )
@@ -682,7 +715,7 @@ def triton_config(
         y *= 2
     while (
         z
-        and z < size_hints[2]
+        and z < min(size_hints[2], config.triton.max_block["Z"])
         and (
             z * maxGridSize[2] < size_hints[2] or conditional_product(x, y, z) < target
         )
