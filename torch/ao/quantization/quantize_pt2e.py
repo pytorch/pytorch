@@ -1,7 +1,6 @@
 from torch.fx import GraphModule
 
 from .pt2e.prepare import prepare
-from .pt2e._propagate_annotation import propagate_annotation
 from .pt2e.qat_utils import (
     _fuse_conv_bn_qat,
     _fold_conv_bn_qat,
@@ -67,7 +66,6 @@ def prepare_pt2e(
     _fuse_conv_bn_(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
     model.meta.update(original_graph_meta)
     return model
@@ -80,7 +78,6 @@ def prepare_qat_pt2e(
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    propagate_annotation(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
