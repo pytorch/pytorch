@@ -50,6 +50,7 @@ tensor_dunder_fns = [
     torch.Tensor.__rmod__,
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
+    torch.Tensor.__rdiv__,
     torch._C._TensorBase.__radd__,
     torch._C._TensorBase.__rmul__,
     torch._C._TensorBase.__ror__,
