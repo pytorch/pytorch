@@ -86,6 +86,8 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def run_node(self, node):
         if node.target == "output":
+            # because we remove nodes from env on last non output use,
+            # re-define them now or we'll get error in interpreter
             for arg in node.args[0]:
                 self.env[arg] = self.unknown_value
 
