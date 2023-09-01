@@ -1072,9 +1072,7 @@ def configure_extension_build():
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
-def add_triton(
-    install_requires: List[str], extras_require: Dict[str, List[str]]
-) -> None:
+def add_triton(install_requires, extras_require) -> None:
     """
     Add triton package as a dependency when it's needed
     """
