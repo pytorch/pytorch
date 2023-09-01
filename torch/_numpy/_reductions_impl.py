@@ -321,7 +321,7 @@ def average(
         if a.shape != weights.shape:
             if axis is None:
                 raise TypeError(
-                    "Axis must be specified when shapes of a and weights " "differ."
+                    "Axis must be specified when shapes of a and weights differ."
                 )
             if weights.ndim != 1:
                 raise TypeError(
