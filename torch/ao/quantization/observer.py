@@ -168,6 +168,7 @@ class UniformQuantizationObserverBase(ObserverBase):
     .. warning::
 
         :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
+               or `torch.int8` or `torch.uint8`
 
     .. warning::
 
@@ -228,12 +229,19 @@ class UniformQuantizationObserverBase(ObserverBase):
         ), "Default Observer only works for per_tensor_affine, \
                 per_tensor_symmetric, per_channel_affine, \
                 per_channel_symmetric and per_channel_float_qparams quantization scheme"
-        assert self.dtype in (
+
+        _ALLOWED_DTYPES = (
             torch.qint8,
             torch.quint8,
             torch.quint4x2,
             torch.qint32,
-        ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+        )
+
+        assert self.dtype in _ALLOWED_DTYPES, f"Default Observer only works for {_ALLOWED_DTYPES} data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             validate_qmin_qmax(quant_min, quant_max)
@@ -330,7 +338,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             max_val_pos = torch.max(-min_val_neg, max_val_pos)
             scale = max_val_pos / (float(quant_max - quant_min) / 2)
             scale = torch.max(scale, self.eps)
-            if self.dtype == torch.quint8:
+            if self.dtype in [torch.quint8, torch.uint8]:
                 if self.has_customized_qrange:
                     # When customized quantization range is used, down-rounded midpoint of the range is chosen.
                     zero_point = zero_point.new_full(
