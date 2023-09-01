@@ -19,8 +19,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <iostream>
-
 namespace torch::jit {
 
 namespace {

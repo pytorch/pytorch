@@ -1783,27 +1783,6 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-def dot_check(self, other):
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-
-@register_meta(aten.dot.default)
-def meta_dot(self, tensor):
-    dot_check(self, tensor)
-    return self.new_empty(())
-
-
 @register_meta([aten.mm.default])
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
@@ -2065,6 +2044,27 @@ if torch._C._has_mkldnn:
         )
         out = x.new_empty(shape_out, dtype=(torch.float32 if fp32_output else None))
         out = out.to(memory_format=torch.channels_last)
+        return out
+
+    @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    def meta_qlinear_pointwise(
+        x,
+        x_scale,
+        x_zp,
+        w,
+        w_scale,
+        w_zp,
+        bias,
+        output_scale,
+        output_zero_point,
+        fp32_output,
+        post_op_name,
+        post_op_args,
+        post_op_algorithm,
+    ):
+        output_shape = list(x.shape)
+        output_shape[-1] = w.shape[0]
+        out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
         return out
 
 
@@ -2645,23 +2645,6 @@ def meta_complex(real, imag):
 @register_meta(aten.view.dtype)
 def view_dtype(self, dtype):
     return utils.clone_preserve_strides(self).to(dtype)
-
-
-@register_meta(aten.vdot.default)
-def vdot(self, other):
-    if not self.is_complex:
-        return torch.dot(self, other)
-
-    if self.is_conj():
-        if other.is_conj():
-            return torch.vdot(other.conj(), self.conj())
-        else:
-            return torch.dot(self.conj(), other)
-    elif other.is_conj():
-        return torch.dot(self, other.conj()).conj()
-
-    dot_check(self, other)
-    return self.new_empty(())
 
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
@@ -5647,6 +5630,12 @@ def activate_meta():
                 activate_meta_table[opo] = registry[opo]
 
     for op_overload, fn in activate_meta_table.items():
+        # Don't register meta for HigherOrderOp's decomp.
+        # We can reconsider this in the future, but in general,
+        # the way you do a meta for a HigherOrderOp is different from
+        # OpOverload.
+        if isinstance(op_overload, torch._ops.HigherOrderOperator):
+            continue
         assert isinstance(op_overload, OpOverload)
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)

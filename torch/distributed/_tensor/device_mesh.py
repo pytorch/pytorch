@@ -384,10 +384,18 @@ def init_device_mesh(
         >>> one_d_mesh = init_device_mesh("cuda", mesh_shape=(8,))
         >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
     """
-    if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
-        raise RuntimeError(
-            f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_shape)}."
-        )
+    if mesh_dim_names is not None:
+        if len(set(mesh_dim_names)) != len(mesh_dim_names):
+            raise RuntimeError(
+                "Each mesh_dim_name must be uqique.",
+                f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
+            )
+
+        if len(mesh_shape) != len(mesh_dim_names):
+            raise RuntimeError(
+                "mesh_shape and mesh_dim_names should have same length!",
+                f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
+            )
 
     mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
     device_mesh = DeviceMesh(
