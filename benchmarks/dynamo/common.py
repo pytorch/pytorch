@@ -2986,7 +2986,24 @@ def process_entry(rank, runner, original_dir, args):
         )(runner, args, original_dir)
 
 
+def run_startup_script():
+    """
+    Follow https://docs.python.org/3/tutorial/appendix.html so people can run
+    a startup script using PYTHONSTARTUP environment variable.
+
+    Handy to use for overriding config, logging level etc.
+    """
+    import os
+
+    filename = os.environ.get("PYTHONSTARTUP")
+    if filename and os.path.isfile(filename):
+        with open(filename) as fobj:
+            startup_file = fobj.read()
+        exec(startup_file)
+
+
 def main(runner, original_dir=None):
+    run_startup_script()
     if original_dir:
         os.chdir(original_dir)
     args = parse_args()
