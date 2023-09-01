@@ -246,6 +246,29 @@ class DTensorTest(DTensorTestBase):
             self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
 
     @with_comms
+    def test_dtensor_new_empty_strided(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local_tensor = torch.randn(8, 8, requires_grad=True, device=self.device_type)
+        my_dtensor = distribute_tensor(local_tensor, device_mesh, [Shard(0)])
+        new_strided_dtensor = my_dtensor.new_empty_strided(
+            (8, 8), (8, 1), requires_grad=True
+        )
+        # test the op produces new dtensor and autograd works
+        self.assertEqual(new_strided_dtensor.shape, my_dtensor.shape)
+        new_strided_dtensor.sum().backward()
+        self.assertIsNotNone(new_strided_dtensor.grad)
+        self.assertIsInstance(new_strided_dtensor.grad, DTensor)
+
+        # test backward new_empty_strided with sharding works correctly
+        my_dtensor.to_local().sum().backward()
+        local_tensor.sum().backward()
+        self.assertEqual(my_dtensor.grad, new_strided_dtensor.grad)
+        self.assertEqual(
+            my_dtensor.grad.redistribute(placements=[Replicate()]).to_local(),
+            local_tensor.grad,
+        )
+
+    @with_comms
     def test_dtensor_async_output(self):
         # Tests that if the output of some dtensor operations  isn't used in any compute,
         # the output should be an AsyncCollectiveTensor (representing the fact that
