@@ -81,9 +81,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.zeros((), dtype=torch.float, device=p.device)
-                    state["eta"] = torch.tensor(group["lr"], dtype=torch.float, device=p.device)
-                    state["mu"] = torch.ones((), dtype=torch.float64, device=p.device)
+                    state["step"] = torch.zeros((), dtype=p.dtype, device=p.device)
+                    state["eta"] = torch.tensor(group["lr"], dtype=p.dtype, device=p.device)
+                    state["mu"] = torch.ones((), dtype=p.dtype, device=p.device)
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -331,7 +331,14 @@ def _multi_tensor_asgd(
 
         # update grouped_axs
         # averaging: ax = ax + mu * (param - ax)
-        torch._foreach_lerp_(grouped_axs, grouped_params, grouped_mus)
+        # Note (mlazos): We can't use lerp here since it requires weight to be float64
+        # and our grouping code requires dtypes to match for all tensors in a group (and it should, since
+        # we use the mus in other places)
+        # all dtypes need to match, so we could introduce a cast in a loop
+        # but since this only adds one additional kernel launch, this looks like the cleaner
+        # and faster solution
+        intermediate = torch._foreach_sub(grouped_params, grouped_axs)
+        torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
 
         # update grouped_mus
         new_mus = torch._foreach_sub(grouped_state_steps, t0)
