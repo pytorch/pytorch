@@ -1,10 +1,8 @@
 import torch
 import torch.nn.functional as F
-from torch.fx import GraphModule
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
 
-def _replace_dropout_for_eval(m: GraphModule):
+def _replace_dropout_for_eval(m: torch.fx.GraphModule):
     """
     Replace the aten training dropout pattern with a noop, intended for eval.
 
@@ -29,6 +27,8 @@ def _replace_dropout_for_eval(m: GraphModule):
     match_pattern = get_aten_graph_module(dropout_train, example_inputs)
     replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
+    from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+
     replace_pattern_with_filters(
         m,
         match_pattern,
@@ -41,7 +41,7 @@ def _replace_dropout_for_eval(m: GraphModule):
 
 # TODO: also support move_model_to_train
 # TODO: also support standalone batchnorm
-def _move_model_to_eval(model: GraphModule):
+def _move_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.
 
