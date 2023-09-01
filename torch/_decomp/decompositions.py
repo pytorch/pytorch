@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -3494,39 +3495,6 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot)
-@out_wrapper()
-@pw_cast_for_opmath
-def dot(self, other):
-    if self.is_complex():
-        if self.is_conj():
-            if other.is_conj():
-                return torch.dot(self.conj(), other.conj()).conj()
-            else:
-                return torch.vdot(self.conj(), other)
-        elif other.is_conj():
-            return torch.vdot(other.conj(), self)
-
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-    torch._check(
-        self.dtype == other.dtype,
-        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-    return (self * other).sum()
-
-
 @register_decomposition(aten.binary_cross_entropy_with_logits)
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
@@ -3826,6 +3794,13 @@ def arange_start(
     return aten.arange.start_step(
         start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+@register_decomposition(out_dtype)
+def out_dtype_decomp(*args, **kwargs):
+    from torch._higher_order_ops.out_dtype import out_dtype_dense
+
+    return out_dtype_dense(*args, **kwargs)
 
 
 @register_decomposition(aten.multi_margin_loss)
