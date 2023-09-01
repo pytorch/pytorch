@@ -1303,6 +1303,17 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
+
+################################################################################
+# Import miscelaneous torch functions
+################################################################################
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -1366,13 +1377,6 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
-
-################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
-################################################################################
-
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python
@@ -1693,6 +1697,10 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
+    # Temporary until we get proper support for python 3.12
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+
     # Decorator mode
     if model is None:
         def fn(model: Callable):

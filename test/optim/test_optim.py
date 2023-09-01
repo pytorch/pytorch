@@ -884,6 +884,8 @@ class TestOptim(TestCase):
             (optim.RAdam, dict(weight_decay=0)),
             (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
+            (optim.RAdam, dict(weight_decay=0, decoupled_weight_decay=True)),
+            (optim.RAdam, dict(weight_decay=1, decoupled_weight_decay=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
@@ -1500,6 +1502,23 @@ class TestOptim(TestCase):
             ],
             constructor_accepts_foreach=True,
         )
+        # RAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.RAdam(
+                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
+            ),
+            [
+                lambda opt: ExponentialLR(opt, gamma=0.9),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+            constructor_accepts_foreach=True,
+        )
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
         ):
@@ -2064,28 +2083,6 @@ class TestOptim(TestCase):
         self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
         self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_get_load_state_dict_cast_hook_handle(self):
-        param = torch.rand(2, 3, requires_grad=True, device="cpu")
-        param.grad = torch.rand_like(param)
-        opt = optim.Adadelta([param], lr=0.001)
-
-        # Simulate saving and loading state_dict after init'ing state with step()
-        opt.step()
-        cpu_state_dict = opt.state_dict()
-
-        param_cuda = torch.rand(2, 3, requires_grad=True, device="cuda")
-        param_cuda.grad = torch.rand_like(param_cuda)
-        opt_cuda = optim.Adadelta([param_cuda], lr=0.001)
-        handle = opt_cuda.get_load_state_dict_cast_hook_handle()
-        handle.remove()
-
-        opt_cuda.load_state_dict(cpu_state_dict)
-
-        # Assert that casting to CUDA did not happen for the param state
-        # since the cast hook has been removed
-        self.assertEqual(opt_cuda.state[param_cuda]["square_avg"].device, torch.device("cpu"))
-
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # Ignored is the list of values in `opt_differentiable_state`, we do this
@@ -2378,6 +2375,17 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.RAdam,
                 {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.RAdam,
+                {"lr": 0.9, "weight_decay": 0.1, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )

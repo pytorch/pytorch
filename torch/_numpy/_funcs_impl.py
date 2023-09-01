@@ -956,19 +956,9 @@ def unique(
     (ar,), axis = _util.axis_none_flatten(ar, axis=axis)
     axis = _util.normalize_axis_index(axis, ar.ndim)
 
-    is_half = ar.dtype == torch.float16
-    if is_half:
-        ar = ar.to(torch.float32)
-
     result = torch.unique(
         ar, return_inverse=return_inverse, return_counts=return_counts, dim=axis
     )
-
-    if is_half:
-        if isinstance(result, tuple):
-            result = (result[0].to(torch.float16),) + result[1:]
-        else:
-            result = result.to(torch.float16)
 
     return result
 
@@ -1236,7 +1226,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
     # Move working axis to the end of the shape
     a = torch.moveaxis(a, axisa, -1)
     b = torch.moveaxis(b, axisb, -1)
-    msg = "incompatible dimensions for cross product\n" "(dimension must be 2 or 3)"
+    msg = "incompatible dimensions for cross product\n(dimension must be 2 or 3)"
     if a.shape[-1] not in (2, 3) or b.shape[-1] not in (2, 3):
         raise ValueError(msg)
 
