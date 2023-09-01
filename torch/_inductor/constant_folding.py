@@ -87,9 +87,10 @@ class ConstantFolder(torch.fx.Interpreter):
         if node.target == "output":
             # because we remove nodes from env on last non output use,
             # re-define them now or we'll get error in interpreter
-            for arg in node.args[0]:
+            def set_env(arg):
                 self.env[arg] = self.unknown_value
 
+            pytree.tree_map_only(torch.fx.Node, set_env, node.args)
             return super().run_node(node)
 
         args, kwargs = self.fetch_args_kwargs_from_env(node)
