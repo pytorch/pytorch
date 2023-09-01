@@ -169,6 +169,7 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
     _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }

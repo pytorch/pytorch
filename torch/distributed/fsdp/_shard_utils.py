@@ -14,6 +14,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 
 
 def _all_gather_sharded_tensor(
@@ -29,8 +30,9 @@ def _all_gather_sharded_tensor(
     pg_device = distributed_c10d._get_pg_default_device(pg)
     if shards:
         local_tensor = shards[0].tensor.flatten()
-        if local_tensor.device.type != pg_device.type:
-            local_tensor = local_tensor.to(pg_device)
+        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -66,10 +68,11 @@ def _gather_state_dict(
                 if tensor.local_shards()
                 else torch.device("cpu")
             )
-            if output_tensor.device != local_shard_device:
-                tensor = output_tensor.to(local_shard_device)
-            else:
-                tensor = output_tensor
+            with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                if output_tensor.device != local_shard_device:
+                    tensor = output_tensor.to(local_shard_device)
+                else:
+                    tensor = output_tensor
         elif isinstance(tensor, DTensor):
             if tensor.device != tensor.device_mesh.device_type:
                 tensor = tensor.to(tensor.device_mesh.device_type)
