@@ -576,9 +576,10 @@ class TorchVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args[1:]]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
-            def fn_with_prim_types(x, **kwargs):
-                return self.value(x, *args_as_value, **kwargs)
+            def fn_with_prim_types(x):
+                return self.value(x, *args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -588,7 +589,7 @@ class TorchVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_with_prim_types,
-                    *proxy_args_kwargs([args[0]], kwargs),
+                    *proxy_args_kwargs([args[0]], {}),
                 ),
                 **options,
             )
