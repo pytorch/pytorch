@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -1048,3 +1049,14 @@ def is_dynamic(*args):
             raise ValueError(f"unexpected type for is_dynamic {type(t)}")
 
     return False
+
+
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
+
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_KRNL_NAME = "DESCRIPTIVE_KRNL_NAME"
