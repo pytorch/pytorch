@@ -35,6 +35,7 @@
 #include <ATen/ops/remainder_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
+#include <ATen/ops/view_as_real.h>
 #include <ATen/ops/xlogy_native.h>
 #endif
 
@@ -411,10 +412,20 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex()) {
+    // Complex add with non-complex alpha is just add over views
+    return mps::add_sub_lerp_template(
+        at::view_as_real(self), at::view_as_real(other), alpha, at::view_as_real(output), "add");
+  }
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex()) {
+    // Complex sub with non-complex alpha is just add over views
+    return mps::add_sub_lerp_template(
+        at::view_as_real(self), at::view_as_real(other), alpha, at::view_as_real(output), "sub");
+  }
   mps::add_sub_lerp_template(self, other, alpha, output, "sub");
 }
 
