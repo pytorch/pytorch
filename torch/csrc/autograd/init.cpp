@@ -160,6 +160,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("Metal", c10::DeviceType::Metal)
       .value("XPU", c10::DeviceType::XPU)
       .value("MPS", c10::DeviceType::MPS)
+      .value("MTIA", c10::DeviceType::MTIA)
       .value("Meta", c10::DeviceType::Meta)
       .value("HPU", c10::DeviceType::HPU)
       .value("VE", c10::DeviceType::VE)

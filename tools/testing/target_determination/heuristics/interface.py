@@ -240,6 +240,8 @@ class AggregatedHeuristics:
         for heuristic_results in self._heuristic_results.values():
             aggregated_priorities.integrate_priorities(heuristic_results)
 
+        aggregated_priorities.print_info()
+
         return aggregated_priorities
 
     def get_test_stats(self, test: str) -> Dict[str, Any]:
