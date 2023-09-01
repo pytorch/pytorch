@@ -1689,8 +1689,14 @@ def main():
         # Actually run the tests
         start_time = time.time()
         for test_batch in test_batches:
-            print(f"Starting test batch '{test_batch.name}'")
-            metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
+            elapsed_time = time.time() - start_time
+            print(
+                f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
+            )
+            print(
+                f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
+            )
+            metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
@@ -1711,19 +1717,21 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
+        all_failures = [failure for batch in test_batches for failure in batch.failures]
+
         if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
-    all_failures = [failure for batch in test_batches for failure in batch.failures]
+            num_tests = len(selected_tests)
+            for test, _ in all_failures:
+                test_stats = aggregated_heuristics.get_test_stats(test)
+                test_stats["num_total_tests"] = num_tests
 
-    num_tests = len(selected_tests)
+                print("Emiting td_test_failure_stats")
+                emit_metric("td_test_failure_stats", test_stats)
+
     if len(all_failures):
-        for test, err in all_failures:
-            test_stats = aggregated_heuristics.get_test_stats(test)
-            test_stats["num_total_tests"] = num_tests
-
-            emit_metric("td_test_failure_stats", test_stats)
-
+        for _, err in all_failures:
             print_to_stderr(err)
 
         # A disabled test is expected to fail, so there is no need to report a failure here
