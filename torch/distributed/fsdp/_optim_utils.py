@@ -1333,10 +1333,11 @@ def _unflatten_orig_param_states(
 
     This function performs the unflattening process in-place.
     """
-    logger.warning(
-        "CUDA Memory Summary before calling to _unflatten_orig_param_states %s",
-        torch.cuda.memory_summary(),
-    )
+    if dist.get_rank() == 0:
+        logger.warning(
+            "CUDA Memory Summary before calling to _unflatten_orig_param_states %s",
+            torch.cuda.memory_summary(),
+        )
     flat_param = fsdp_param_info.handle.flat_param
     fsdp_state = fsdp_param_info.state
     for fqn, gathered_state in output_states.items():
@@ -1392,44 +1393,43 @@ def _allgather_orig_param_states(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
-        for name in all_tensor_states:
+        for state_name in all_tensor_states:
             numels = []
             dtype = torch.float
             _empty_ranks: Set[int] = set()
             for rank, object_state in enumerate(state_info):
                 numels.append(0)
-                info = object_state.tensors.get(name, None)
+                info = object_state.tensors.get(state_name, None)
                 if info is not None:
                     numels[-1] = info.shape.numel()
                     dtype = info.dtype
                 if numels[-1] == 0:
                     _empty_ranks.add(rank)
 
-            if empty_ranks:
-                assert empty_ranks == _empty_ranks
+            assert not empty_ranks or empty_ranks == _empty_ranks
             empty_ranks = _empty_ranks
-            if name not in state_buffers:
-                state_buffers[name] = [None for _ in input_states]
-            local_state = input_states[fqn].get(name, None)
-            state_buffers[name][fsdp_param_info.param_indices[fqn]] = local_state
+            if state_name not in state_buffers:
+                state_buffers[state_name] = [None for _ in input_states]
+            local_state = input_states[fqn].get(state_name, None)
+            state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
         for rank, object_state in enumerate(state_info):
             if rank in empty_ranks:
                 continue
-            for name, non_tensor_value in object_state.non_tensors.items():
-                curr_non_tensor_value = gathered_state.get(name, None)
+            for state_name, non_tensor_value in object_state.non_tensors.items():
+                curr_non_tensor_value = gathered_state.get(state_name, None)
                 assert (
                     curr_non_tensor_value is None
                     or curr_non_tensor_value == non_tensor_value
-                ), f"Different ranks have different values for {name}."
-                gathered_state[name] = non_tensor_value
+                ), f"Different ranks have different values for {state_name}."
+                gathered_state[state_name] = non_tensor_value
 
-            for name, scalar_tensor_value in object_state.scalar_tensors.items():
-                curr_scalar_tensor_value = gathered_state.get(name, None)
+            for state_name, scalar_tensor_value in object_state.scalar_tensors.items():
+                curr_scalar_tensor_value = gathered_state.get(state_name, None)
                 assert curr_scalar_tensor_value is None or torch.equal(
                     scalar_tensor_value, curr_scalar_tensor_value
-                ), f"Different ranks have different values for {name}."
-                gathered_state[name] = scalar_tensor_value
+                ), f"Different ranks have different values for {state_name}."
+                gathered_state[state_name] = scalar_tensor_value
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
     # sharded states. The size of the constructed state will be the same size as
@@ -1449,8 +1449,7 @@ def _allgather_orig_param_states(
         begin_idx = end_idx = -1
         for idx, buffer in enumerate(buffers):
             if buffer is not None:
-                if begin_idx == -1:
-                    begin_idx = idx
+                begin_idx = idx if begin_idx == -1 else begin_idx
                 end_idx = idx
 
         local_buffers: List[torch.Tensor] = []
@@ -1463,7 +1462,6 @@ def _allgather_orig_param_states(
         )
         if shard_numel_padded > 0:
             local_buffers.append(empty_func(shard_numel_padded))
-        assert local_buffers
         local_shard = torch.cat(local_buffers)
         assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
@@ -1477,12 +1475,9 @@ def _allgather_orig_param_states(
         paddings = zip(flat_param._is_padding_mask, flat_param._numels_with_padding)
         for fqn, idx in fsdp_param_info.param_indices.items():
             gathered_state = output_states[fqn]
-            while True:
-                is_padding, numel = next(paddings)
-                if is_padding:
-                    start += numel
-                else:
-                    break
+            is_padding, numel = next(paddings)
+            while is_padding:
+                start += numel
 
             gathered_state[state_name] = gathered_tensor[start : start + numel]
             start += numel
