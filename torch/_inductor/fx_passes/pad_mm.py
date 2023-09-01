@@ -3,7 +3,6 @@ from itertools import chain
 from typing import Optional
 
 import torch
-import triton
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
