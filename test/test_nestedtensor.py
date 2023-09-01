@@ -1706,6 +1706,19 @@ class TestNestedTensorDeviceType(TestCase):
         expect = torch.matmul(torch.nested.to_padded_tensor(nt0, 0.0), torch.nested.to_padded_tensor(nt1, 0.0))
         self.assertEqual(actual, expect)
 
+    # only supported on CUDA for now
+    @dtypes(torch.float, torch.double)
+    def test_matmul_nt_with_broadcasted_t(self, device, dtype):
+        # NT (B, *, C, D) with T (D, E) broadcasting case
+        nt = random_nt_from_dims([3, None, 4, 5], device=device, dtype=dtype)
+        t = torch.randn(5, 6, device=device, dtype=dtype)
+        output = torch.matmul(nt, t)
+
+        # should be equivalent to matmul-ing each component with the dense tensor
+        self.assertEqual(nt.size(0), output.size(0))
+        for component, out_component in zip(nt, output):
+            self.assertEqual(out_component, torch.matmul(component, t))
+
     # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     def test_matmul_noncontiguous(self, device, dtype):
@@ -2021,6 +2034,11 @@ class TestNestedTensorDeviceType(TestCase):
         for dim in range(1, nt.dim()):
             with self.assertRaisesRegex(RuntimeError, "only dim=0 supported for nested tensors"):
                 nt.narrow(dim=dim, start=0, length=1)
+
+        # error case: non-contiguous NT
+        _, nt_noncont = random_nt_noncontiguous_pair((2, 3, 4))
+        with self.assertRaisesRegex(RuntimeError, "only contiguous nested tensors supported"):
+            nt_noncont.narrow(dim=0, start=0, length=1)
 
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
