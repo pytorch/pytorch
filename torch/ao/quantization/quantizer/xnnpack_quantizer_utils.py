@@ -188,6 +188,16 @@ def _annotate_linear(
             # are annotated.
             # This is not specific to linear, so in future diffs we should streamline
             # this.
+            weight_node_users = list(
+                filter((lambda x: (_is_sym_size_node(x) is False)), weight_node.users)
+            )
+            weight_use_node_in_p = set(weight_node_users).intersection(set(p.nodes))
+            if len(weight_use_node_in_p) != 1:
+                raise ValueError(
+                    f"Could not find a valid use of act node. All uses {weight_use_node_in_p}"
+                )
+            weight_use_node = weight_use_node_in_p.pop()
+
             act_node_users = list(
                 filter((lambda x: (_is_sym_size_node(x) is False)), act_node.users)
             )
@@ -206,7 +216,11 @@ def _annotate_linear(
             if bias_node and _is_annotated([bias_node]) is False:
                 _annotate_output_qspec(bias_node, bias_qspec)
             if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                _annotate_output_qspec(weight_node, weight_qspec)
+                _annotate_input_qspec_map(
+                    weight_use_node,
+                    weight_node,
+                    weight_qspec,
+                )
             if _is_annotated([output_node]) is False:
                 _annotate_output_qspec(output_node, output_act_qspec)
             nodes_to_mark_annotated = list(p.nodes)
