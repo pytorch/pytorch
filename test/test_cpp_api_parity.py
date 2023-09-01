@@ -1,5 +1,8 @@
 # Owner(s): ["module: cpp"]
 
+import torch
+# NN tests use double as the default dtype
+torch.set_default_dtype(torch.double)
 
 import os
 

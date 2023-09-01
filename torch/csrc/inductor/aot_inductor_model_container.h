@@ -6,6 +6,30 @@
 
 #include <torch/csrc/inductor/aot_inductor_model.h>
 
+// At codegen time, we write out a binary file called constants.bin.
+// We then turn the raw binary to an object file that exposes this
+// symbol and link it into the final .so.
+// For information on the binary format, see `man objcopy`, under
+// the "binary-architecture" flag:
+// https://man7.org/linux/man-pages/man1/objcopy.1.html
+// todo: use #embed in C++ 23 once available
+extern const uint8_t _binary_constants_bin_start[];
+extern const uint8_t _binary_constants_bin_end[];
+
+#define AOT_CONST_GPU_ALIGNMENT 64
+
+namespace {
+
+using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
+CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
+  void* data_ptr;
+  C10_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { C10_CUDA_CHECK(cudaFree(ptr)); };
+  return CUDAPtr(data_ptr, deleter);
+}
+} // anonymous namespace
+
 namespace torch {
 namespace aot_inductor {
 
@@ -16,10 +40,11 @@ class AOTInductorModelContainer {
               << " model instances";
     TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
 
+    constants_ = std::make_shared<ConstantMap>();
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create());
+      models_.push_back(AOTInductorModel::Create(constants_));
       available_models_.push_back(models_.back().get());
     }
 
@@ -34,18 +59,66 @@ class AOTInductorModelContainer {
     auto* model = available_models_[0];
     size_t num_inputs = model->num_inputs();
     input_names_.reserve(num_inputs);
+    input_dtypes_.reserve(num_inputs);
     max_input_shapes_.reserve(num_inputs);
     for (size_t i = 0; i < num_inputs; i++) {
       input_names_.push_back(model->input_name(i));
+      input_dtypes_.push_back(model->get_input_dtype(i));
       max_input_shapes_.emplace_back(model->max_input_shape(i));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
+    output_dtypes_.reserve(num_outputs);
     max_output_shapes_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.push_back(model->output_name(i));
+      output_dtypes_.push_back(model->get_output_dtype(i));
       max_output_shapes_.emplace_back(model->max_output_shape(i));
+    }
+
+    size_t num_constants = model->num_constants();
+    std::vector<size_t> constants_internal_offset(num_constants);
+    // Compute required blob size with 64-alignment
+    size_t max_blob = 0;
+    for (size_t i = 0; i < num_constants; i++) {
+      size_t data_size = model->constant_data_size(i);
+      if (data_size % AOT_CONST_GPU_ALIGNMENT) {
+        data_size = AOT_CONST_GPU_ALIGNMENT +
+            (data_size / AOT_CONST_GPU_ALIGNMENT) * AOT_CONST_GPU_ALIGNMENT;
+      }
+      constants_internal_offset[i] = max_blob;
+      max_blob += data_size;
+    }
+    constant_blob_ = RAII_cudaMalloc(max_blob);
+
+    constants_->reserve(num_constants);
+    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+    size_t bytes_read = 0;
+    for (size_t i = 0; i < num_constants; i++) {
+      std::string name = model->constant_name(i);
+      size_t data_size = model->constant_data_size(i);
+      auto* internal_ptr = constants_ptr + constants_internal_offset[i];
+      // Copy data to GPU memory
+      // TODO: Handle shared storage case.
+      C10_CUDA_CHECK(cudaMemcpy(
+          internal_ptr,
+          _binary_constants_bin_start + bytes_read,
+          data_size,
+          cudaMemcpyHostToDevice));
+      bytes_read += data_size;
+
+      // Create at::Tensor from copied memory.
+      auto dtype = model->constant_type(i);
+      auto size = model->constant_shape(i);
+      auto stride = model->constant_stride(i);
+      auto offset = model->constant_offset(i);
+
+      auto tensor = at::from_blob(
+          internal_ptr, size, stride, at::device(at::kCUDA).dtype(dtype));
+      tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
+      tensor.unsafeGetTensorImpl()->set_storage_offset(offset);
+      constants_->emplace(std::move(name), tensor);
     }
   }
 
@@ -87,6 +160,14 @@ class AOTInductorModelContainer {
     return output_names_.at(idx).c_str();
   }
 
+  const char* get_input_dtype(size_t idx) const {
+    return input_dtypes_.at(idx).c_str();
+  }
+
+  const char* get_output_dtype(size_t idx) const {
+    return output_dtypes_.at(idx).c_str();
+  }
+
   size_t num_models() const {
     return models_.size();
   }
@@ -102,12 +183,20 @@ class AOTInductorModelContainer {
  private:
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
-
+  std::vector<std::string> input_dtypes_;
+  std::vector<std::string> output_dtypes_;
   // Holds the upper-bound value for each dimension of any input shape.
   std::vector<std::vector<int64_t>> max_input_shapes_;
 
   // Holds the upper-bound value for each dimension of any output shape.
   std::vector<std::vector<int64_t>> max_output_shapes_;
+
+  // Holds the blob storage for constants' at::Tensor.
+  CUDAPtr constant_blob_;
+
+  // Holds the mapping of constants to at::Tensor.
+  // The underlying data of at::Tensor is in constant_blob_.
+  std::shared_ptr<ConstantMap> constants_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;

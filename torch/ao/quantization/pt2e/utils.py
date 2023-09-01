@@ -6,10 +6,10 @@ from torch.fx import (
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
+from torch._export import capture_pre_autograd_graph
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -41,10 +41,18 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv args: input, weight, bias, stride, padding, dilation, transposed, ...
+    # conv2d args: input, weight, bias, stride, padding, dilation, ...
+    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
+    # easy tweaks
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = conv_node.args[6]
+    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
+    # TODO(Leslie): WA to support both graph capture of `torch._export.capture_pre_autograd_graph`
+    # and `torch._dynamo_export` for 2.1 release, remove it after formal support of new graph capture
+    # API in Inductor for X86.
+    if conv_node.target == torch.ops.aten.convolution.default:
+        assert type(conv_node.args[6]) is bool
+        transpose = conv_node.args[6]
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -66,6 +74,12 @@ def fold_bn_weights_into_conv_node(
 
     # update the weight and bias for conv
     conv_args = list(conv_node.args)
+    # TODO(Leslie): Remove the check of node target after formal support of new graph capture
+    # API `torch._export.capture_pre_autograd_graph` in Inductor for X86.
+    # filling in the default bias argument
+    if len(conv_args) == 2 and (conv_node.target == torch.ops.aten.conv2d.default):
+        conv_args.append(None)
+
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
     assert isinstance(weight_attr_name, str)
@@ -107,11 +121,16 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.convolution.default:
+        # TODO(Leslie): Remove the check of node target torch.ops.aten.convolution.default after formal
+        # support of new graph capture API `torch._export.capture_pre_autograd_graph` in Inductor for X86.
+        if n.op != "call_function" or (
+            n.target != torch.ops.aten.conv2d.default
+            and n.target != torch.ops.aten.convolution.default
+        ):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
-        conv_bias_node = conv_node.args[2]
+        conv_bias_node = conv_node.args[2] if len(conv_node.args) > 2 else None
         fold_bn_weights_into_conv_node(conv_node, conv_weight_node, conv_bias_node, bn_node, m)
 
     m.graph.eliminate_dead_code()
@@ -137,15 +156,10 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
-    # Avoid circular imports
-    import torch._dynamo
-    aten_pattern, _ = torch._dynamo.export(
+    aten_pattern = capture_pre_autograd_graph(
         pattern,
-        aten_graph=True,
-        tracing_mode="real",
-    )(
-        *copy.deepcopy(example_inputs),
-        **kwargs,
+        example_inputs,
+        kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()

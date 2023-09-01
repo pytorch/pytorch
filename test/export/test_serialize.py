@@ -422,6 +422,18 @@ class TestDeserialize(TestCase):
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
 
+    def test_get_attr(self) -> None:
+        def f(x):
+            return x + torch.tensor(3)
+
+        self.check_graph(f, (torch.tensor(3),))
+
+    def test_get_attr_list(self) -> None:
+        def f(x):
+            return torch.cat([x, torch.tensor([1, 1])])
+
+        self.check_graph(f, (torch.tensor([1, 1]),))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -466,13 +478,6 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
-)
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_pytree_flatten
-)
-# getattr node in the graph from a torch.tensor call
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_cond_branch_nonlocal_variables
 )
 
 

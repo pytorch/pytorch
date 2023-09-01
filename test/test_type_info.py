@@ -1,6 +1,6 @@
 # Owner(s): ["module: typing"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests, set_default_dtype
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -38,6 +38,7 @@ class TestDTypeInfo(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_finfo(self):
+        initial_default_type = torch.get_default_dtype()
         for dtype in [torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128]:
             x = torch.zeros((2, 2), dtype=dtype)
             xinfo = torch.finfo(x.dtype)
@@ -51,8 +52,8 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.resolution, xninfo.resolution)
             self.assertEqual(xinfo.dtype, xninfo.dtype)
             if not dtype.is_complex:
-                with set_default_dtype(dtype):
-                    self.assertEqual(torch.finfo(dtype), torch.finfo())
+                torch.set_default_dtype(dtype)
+                self.assertEqual(torch.finfo(dtype), torch.finfo())
 
         # Special test case for BFloat16 type
         x = torch.zeros((2, 2), dtype=torch.bfloat16)
@@ -65,8 +66,11 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
         self.assertEqual(xinfo.resolution, 0.01)
         self.assertEqual(xinfo.dtype, "bfloat16")
-        with set_default_dtype(x.dtype):
-            self.assertEqual(torch.finfo(x.dtype), torch.finfo())
+        torch.set_default_dtype(x.dtype)
+        self.assertEqual(torch.finfo(x.dtype), torch.finfo())
+
+        # Restore the default type to ensure that the test has no side effect
+        torch.set_default_dtype(initial_default_type)
 
 if __name__ == '__main__':
     run_tests()
