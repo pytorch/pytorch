@@ -726,7 +726,19 @@ WriteableTensorData getWriteableTensorData(
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    result.tensor_ =
+    if(tensor.is_quantized()){
+      result.tensor_ =
+        at::empty_quantized({0}, tensor)
+            .set_(
+                tensor.storage(),
+                /* storage_offset = */ 0,
+                /* size = */
+                {static_cast<int64_t>(
+                    tensor.storage().nbytes() / tensor.element_size())},
+                /* stride = */ {1})
+            .cpu();
+    }else{
+      result.tensor_ =
         at::empty({0}, tensor.options())
             .set_(
                 tensor.storage(),
@@ -736,6 +748,7 @@ WriteableTensorData getWriteableTensorData(
                     tensor.storage().nbytes() / tensor.element_size())},
                 /* stride = */ {1})
             .cpu();
+    }
     TORCH_CHECK(
         result.tensor_.storage().nbytes() == result.size_,
         "Storage tensor size did not match record size");

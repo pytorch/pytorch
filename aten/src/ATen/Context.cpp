@@ -340,6 +340,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kONEDNN);
 #endif
 
+    engines.push_back(at::kQXPU);
+
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);

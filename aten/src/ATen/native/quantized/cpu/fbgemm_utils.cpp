@@ -457,48 +457,22 @@ int register_linear_params() {
                 c10::optional<at::Tensor> bias;
                 weight = std::move(std::get<0>(state));
                 bias = std::move(std::get<1>(state));
-
-#ifdef USE_FBGEMM
-                if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
-                    at::globalContext().qEngine() == at::QEngine::X86) {
-                  if (weight.scalar_type() == at::kQInt8) {
-                    return PackedLinearWeight::prepack(
-                        std::move(weight), std::move(bias));
-                  } else if (weight.scalar_type() == at::kFloat) {
-                    // NB: fp16 weight is serialized as float
-                    return PackedLinearWeightFp16::prepack(
-                        std::move(weight), std::move(bias));
-                  } else {
+                auto eng = at::globalContext().qEngine();
+                if(weight.scalar_type() == at::kQInt8){
+                  return get_device_linear_prepack_fn(eng)(std::move(weight), std::move(bias));
+                }else if(weight.scalar_type() == at::kFloat){
+                  TORCH_CHECK(eng != at::QEngine::QNNPACK && eng != at::QEngine::ONEDNN,
+                  "Unsupported data type",
+                      c10::toString(weight.scalar_type()),
+                    " in serialized LinearPackedParams object for current QEngine!" );
+                  return get_device_linear_prepack_fn_fp16(eng)(std::move(weight), std::move(bias));
+                }else{
                     TORCH_CHECK(
                         false,
                         "Unsupported data type",
                         c10::toString(weight.scalar_type()),
                         " in serialized LinearPackedParams object!");
-                  }
-                }
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-                if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-                  TORCH_CHECK(
-                      weight.scalar_type() == at::kQInt8,
-                      "QNNPACK only supports INT8 bit width currently. Got ",
-                      c10::toString(weight.scalar_type()));
-                  return PackedLinearWeightsQnnp::prepack(
-                      std::move(weight), std::move(bias));
-                }
-#endif // USE_PYTORCH_QNNPACK
-#if AT_MKLDNN_ENABLED()
-                if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
-                  TORCH_CHECK(
-                      weight.scalar_type() == at::kQInt8,
-                      "ONEDNN only supports INT8 bit width currently. Got ",
-                      c10::toString(weight.scalar_type()));
-                  return PackedLinearWeightsOnednn::prepack(
-                      std::move(weight), std::move(bias));
-                }
-#endif // #if AT_MKLDNN_ENABLED()
-                TORCH_CHECK(false, "Unknown qengine");
-              })
+                }})
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
                    at::Tensor weight;
                    c10::optional<at::Tensor> bias;
@@ -568,11 +542,145 @@ int register_embedding_params() {
   return 0;
 }
 
+int init_conv2d_prepack(){
+#ifdef USE_FBGEMM
+  register_prepack<2>(at::QEngine::FBGEMM, (PackedConvWeight<2>::prepack));
+  register_prepack<2>(at::QEngine::X86, (PackedConvWeight<2>::prepack));
+#endif
+
+#if AT_MKLDNN_ENABLED()
+  register_prepack<2>(at::QEngine::ONEDNN, (PackedConvWeightsOnednn<2>::prepack));
+#endif
+
+#ifdef USE_PYTORCH_QNNPACK
+  register_prepack<2>(at::QEngine::QNNPACK, (PackedConvWeightsQnnp<2>::prepack));
+#endif
+
+  return 0;
+}
+
+TORCH_API int init_conv3d_prepack(){
+#ifdef USE_FBGEMM
+  register_prepack<3>(at::QEngine::FBGEMM, (PackedConvWeight<3>::prepack));
+  register_prepack<3>(at::QEngine::X86, (PackedConvWeight<3>::prepack));
+#endif
+
+#if AT_MKLDNN_ENABLED()
+  register_prepack<3>(at::QEngine::ONEDNN, (PackedConvWeightsOnednn<3>::prepack));
+#endif
+
+#ifdef USE_PYTORCH_QNNPACK
+  register_prepack<3>(at::QEngine::QNNPACK, (PackedConvWeightsQnnp<3>::prepack));
+#endif
+
+  return 0;
+}
+
+int init_linear_prepack(){
+#ifdef USE_PYTORCH_QNNPACK
+  register_linear_prepack(at::QEngine::FBGEMM, PackedLinearWeight::prepack);
+  register_linear_prepack_fp16(at::QEngine::FBGEMM, PackedLinearWeightFp16::prepack);
+  register_linear_prepack(at::QEngine::X86, PackedLinearWeight::prepack);
+  register_linear_prepack_fp16(at::QEngine::X86, PackedLinearWeightFp16::prepack);
+#endif
+
+#ifdef USE_PYTORCH_QNN_PACK
+ register_linear_prepack(at::QEngine::QNNPACK, PackedLinearWeightsQnnp::prepack);
+#endif
+
+#if AT_MKLDNN_ENABLED()
+  register_linear_prepack(at::QEngine::ONEDNN, PackedLinearWeightsOnednn::prepack);
+#endif
+
+  return 0;
+}
+
+template <int kSpatialDim>
+std::map<at::QEngine, prepack_fn<kSpatialDim>>& get_prepack_fns() {
+  static std::map<at::QEngine, prepack_fn<kSpatialDim>> device2prepackfn;
+  return device2prepackfn;
+}
+
+template <int kSpatialDim>
+void register_prepack(at::QEngine device, prepack_fn<kSpatialDim> prepack){
+  get_prepack_fns<kSpatialDim>().insert(std::make_pair(device, prepack));
+}
+
+template <int kSpatialDim>
+prepack_fn<kSpatialDim> get_device_prepack_fn(at::QEngine device){
+  auto fns = get_prepack_fns<kSpatialDim>();
+  auto fn = fns.find(device);
+  if (fn != fns.end()) {
+    return fn->second;
+  } else {
+    TORCH_CHECK(
+        false,
+        "Does not find Prepack function definition for", toString(device), " when deserializing ConvPackedParams<", std::to_string(kSpatialDim), ">");
+    return nullptr;
+  }
+}
+
+std::map<at::QEngine, linear_prepack_fn>& get_linear_prepack_fns() {
+  static std::map<at::QEngine, linear_prepack_fn> device2prepackfn;
+  return device2prepackfn;
+}
+
+TORCH_API void register_linear_prepack(at::QEngine device, linear_prepack_fn prepack){
+  get_linear_prepack_fns().insert(std::make_pair(device, prepack));
+}
+
+linear_prepack_fn get_device_linear_prepack_fn(at::QEngine device){
+  auto fns = get_linear_prepack_fns();
+  auto fn = fns.find(device);
+  if (fn != fns.end()) {
+    return fn->second;
+  } else {
+    TORCH_CHECK(
+        false,
+        "Does not find Prepack function definition for QEngine", toString(device), " during deserializing LinearPackedParamsBase");
+    return nullptr;
+  }
+}
+
+std::map<at::QEngine, linear_prepack_fn>& get_linear_prepack_fns_fp16() {
+  static std::map<at::QEngine, linear_prepack_fn> device2prepackfn;
+  return device2prepackfn;
+}
+
+TORCH_API void register_linear_prepack_fp16(at::QEngine device, linear_prepack_fn prepack){
+  get_linear_prepack_fns().insert(std::make_pair(device, prepack));
+}
+
+linear_prepack_fn get_device_linear_prepack_fn_fp16(at::QEngine device){
+  auto fns = get_linear_prepack_fns_fp16();
+  auto fn = fns.find(device);
+  if (fn != fns.end()) {
+    return fn->second;
+  } else {
+      TORCH_CHECK(
+        false,
+        "Does not find Prepack fp16 function definition for QEngine", toString(device), " during deserializing LinearPackedParamsBase");
+    return nullptr;
+  }
+}
+
+ #define DEFINE_PREPACK_FUNC_BY_DIM(dim) \
+     template TORCH_API std::map<at::QEngine, prepack_fn<dim>>& get_prepack_fns<dim>(); \
+     template TORCH_API void register_prepack<dim>(at::QEngine device, prepack_fn<dim> prepack); \
+     template TORCH_API prepack_fn<dim> get_device_prepack_fn<dim>(at::QEngine device);
+
+DEFINE_PREPACK_FUNC_BY_DIM(2)
+DEFINE_PREPACK_FUNC_BY_DIM(3)
+
 namespace {
 
 static C10_UNUSED auto conv2d_params = register_conv_params<2>();
 static C10_UNUSED auto conv3d_params = register_conv_params<3>();
 static C10_UNUSED auto linear_params = register_linear_params();
 static C10_UNUSED auto embedding_params = register_embedding_params();
+
+static auto sel_2d = init_conv2d_prepack();
+static auto sel_3d = init_conv3d_prepack();
+static auto sel_linear = init_linear_prepack();
 
 } // namespace

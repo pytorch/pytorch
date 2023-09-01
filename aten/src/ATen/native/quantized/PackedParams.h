@@ -1,5 +1,7 @@
 #pragma once
+#include <map>
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
 
@@ -145,3 +147,28 @@ struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual int64_t groups() const = 0;
   virtual bool transpose() const = 0;
 };
+template<uint32_t kSpatialDim>
+using prepack_fn = c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> (*)(at::Tensor weight,
+        c10::optional<at::Tensor>,
+        torch::List<int64_t> ,
+        torch::List<int64_t> ,
+        torch::List<int64_t> ,
+        torch::List<int64_t> ,
+        int64_t ,
+        bool );
+
+template <int kSpatialDim>
+TORCH_API std::map<at::QEngine, prepack_fn<kSpatialDim>>& get_prepack_fns();
+template <int kSpatialDim>
+TORCH_API void register_prepack(at::QEngine device, prepack_fn<kSpatialDim> prepack);
+template <int kSpatialDim>
+TORCH_API prepack_fn<kSpatialDim> get_device_prepack_fn(at::QEngine device);
+
+
+using linear_prepack_fn = c10::intrusive_ptr<LinearPackedParamsBase> (*)(at::Tensor ,
+      c10::optional<at::Tensor>);
+
+TORCH_API void register_linear_prepack(at::QEngine device, linear_prepack_fn prepack);
+TORCH_API void register_linear_prepack_fp16(at::QEngine device, linear_prepack_fn prepack);
+TORCH_API linear_prepack_fn get_device_linear_prepack_fn(at::QEngine device);
+TORCH_API linear_prepack_fn get_device_linear_prepack_fn_fp16(at::QEngine device);

@@ -337,86 +337,38 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");
 
   auto& ctx = at::globalContext();
-
-#ifdef USE_FBGEMM
-  if (ctx.qEngine() == at::QEngine::X86) {
-#if AT_MKLDNN_ENABLED()
+  auto eng = ctx.qEngine();
+  if(eng == at::QEngine::X86 || eng == at::QEngine::FBGEMM){
+  #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
         weight.value(), transpose, groups, output_padding);
-    if (use_onednn) {
-      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
-        weight.value(),
-        bias,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        groups,
-        transpose
-      );
+    if(use_onednn){
+      return get_device_prepack_fn<kSpatialDim>(at::QEngine::ONEDNN)(weight.value(),
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose);
     }
-#endif
-    return PackedConvWeight<kSpatialDim>::prepack(
-      weight.value(),
+  #endif
+    return get_device_prepack_fn<kSpatialDim>(at::QEngine::FBGEMM)(weight.value(),
       bias,
       stride,
       padding,
       output_padding,
       dilation,
       groups,
-      transpose
-    );
-  } // x86
-#endif
-
-#ifdef USE_FBGEMM
-  if (ctx.qEngine() == at::QEngine::FBGEMM) {
-    return PackedConvWeight<kSpatialDim>::prepack(
-      weight.value(),
+      transpose);
+  }else{
+    return get_device_prepack_fn<kSpatialDim>(eng)(weight.value(),
       bias,
       stride,
       padding,
       output_padding,
       dilation,
       groups,
-      transpose
-    );
+      transpose);
   }
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-  if (ctx.qEngine() == at::QEngine::QNNPACK) {
-    TORCH_CHECK(
-        kSpatialDim == 2,
-        "prepack/__setstate__: QNNPACK only supports Conv2d "
-        "now.");
-    return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
-  }
-#endif // USE_PYTORCH_QNNPACK
-#if AT_MKLDNN_ENABLED()
-  if (ctx.qEngine() == at::QEngine::ONEDNN) {
-    return PackedConvWeightsOnednn<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
-  }
-#endif // AT_MKLDNN_ENABLED()
-TORCH_CHECK(
-  false,
-  "Didn't find engine for when deserializing ConvPackedParams: ",
-  toString(ctx.qEngine()));
 }

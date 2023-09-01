@@ -606,8 +606,7 @@ PickleOpCode Unpickler::readInstruction() {
 
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
-        tensor = at::_empty_affine_quantized({}, options, 0, 0)
-                     .set_(storage, 0, {}, {});
+        tensor = at::_empty_affine_quantized({}, options, 0, 0).set_(storage);
       } else {
         tensor = at::empty({0}, options).set_(storage);
       }
