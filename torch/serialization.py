@@ -1346,7 +1346,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
                       "to avoid this behavior please use "
                       "torch.serialization.set_default_load_endianness to set "
                       "the desired default load endianness",
-                      DeprecationWarning)
+                      UserWarning)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
