@@ -94,6 +94,16 @@ CLOSURE_VARS = collections.OrderedDict(
             torch.are_deterministic_algorithms_enabled,
         ),
         ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
+        (
+            "___current_backend",
+            lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend,
+        ),
+        (
+            "___lookup_backend",
+            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
+                backend_obj_id
+            ],
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -592,6 +602,14 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(
             guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         )
+
+    def BACKEND_MATCH(self, guard: Guard):
+        """Guard on backend matching based on id of current_backend"""
+        assert guard.source is GuardSource.GLOBAL
+        code = [
+            f"___current_backend() == ___lookup_backend({id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)})"
+        ]
+        self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
