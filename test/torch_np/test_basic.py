@@ -11,7 +11,7 @@ import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_equal
+from torch._numpy.testing import assert_allclose, assert_equal
 
 # These function receive one array_like arg and return one array_like result
 one_arg_funcs = [
@@ -569,3 +569,17 @@ def test_ndarrays_to_tensors():
     assert len(out) == 2
     assert isinstance(out[0], tuple) and len(out[0]) == 2
     assert isinstance(out[0][0], torch.Tensor)
+
+
+def test_f16_on_cuda():
+    # make sure operations with float16 tensors give same results on CUDA and on CPU
+    t = torch.arange(5, dtype=torch.float16)
+    assert_allclose(w.vdot(t.cuda(), t.cuda()), w.vdot(t, t))
+    assert_allclose(w.inner(t.cuda(), t.cuda()), w.inner(t, t))
+    assert_allclose(w.matmul(t.cuda(), t.cuda()), w.matmul(t, t))
+    assert_allclose(w.einsum("i,i", t.cuda(), t.cuda()), w.einsum("i,i", t, t))
+
+    assert_allclose(w.mean(t.cuda()), w.mean(t))
+
+    assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
+    assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())

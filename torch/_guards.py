@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 
 import dataclasses
@@ -24,6 +26,7 @@ from typing import (
 )
 
 import torch
+from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +38,19 @@ torch._guards is the definitional source of truth for general purpose guard stru
 An important thing to keep in mind here is the preservation of layering. There should be no dynamo notions,
 and no guard installation notions here.
 """
+
+
+class CompileId(NamedTuple):
+    frame_id: int
+    # This id is per-frame, and counts how many times we've compiled this
+    # frame.  This could have been a global id but having this be per-frame
+    # gives you a better intuitive sense for how many recompiles have occurred
+    # so far.
+    frame_compile_id: int
+    # TODO: consider also tracking the recompilation count
+
+    def __str__(self):
+        return f"{self.frame_id}/{self.frame_compile_id}"
 
 
 class GuardSource(enum.Enum):
@@ -112,30 +128,30 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
-    # TODO: store this in slightly less formatted form
-    stack: str
+    stack: CapturedTraceback
 
 
 @dataclasses.dataclass
 class Guard:
-    # The name of a Guard specifies what exactly it is the guard is guarding
-    # on.  The meaning of the name is dependent on the create_fn; you must
-    # look at the use-site inside create_fn to know what name means.
+    # originating_source is the source that called the make_guard method to
+    # construct this guard object. The property name specifies what exactly it
+    # is the guard is guarding on.  The meaning of the name is dependent on the
+    # create_fn; you must look at the use-site inside create_fn to know what
+    # name means.
     #
     # That being said, although you might think this is just a "name", name is
     # usually an arbitrary Python expression that will be evaluated with all
     # globals (and locals, if you create a LOCAL guard) to extract the Python
     # object that we want to perform guard tests on.  This evaluation
     # typically happens in GuardBuilder.eval.  In these cases, name is
-    # typically produced by Source.name() (not to be confused with
-    # GuardSource)--morally, we could have stored a Source here.
+    # typically produced by originating_source.name() (not to be confused with
+    # GuardSource - the property source).
     #
     # Occasionally, name is not a valid Python expression; sometimes
     # it is meaningless.  Example create_fns that are like this include
     # GRAD_MODE and SHAPE_ENV.
-    name: str
-    source: GuardSource
-    create_fn: Callable[[GuardBuilderBase, "Guard"], None]
+    originating_source: Source
+    create_fn: Callable[[GuardBuilderBase, Guard], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -143,6 +159,9 @@ class Guard:
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
+
+    stack = None
+    user_stack = None
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
@@ -163,6 +182,14 @@ class Guard:
             return self.create_fn.func
         else:
             return self.create_fn
+
+    @property
+    def name(self) -> str:
+        return self.originating_source.name()
+
+    @property
+    def source(self) -> GuardSource:
+        return self.originating_source.guard_source()
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -271,8 +298,8 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_source_a: "Source"
-    input_source_b: "Source"
+    input_source_a: Source
+    input_source_b: Source
 
     def __post_init__(self):
         assert self.input_source_a != self.input_source_b
@@ -428,17 +455,55 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
 
 
+# Like a Set[Guard] but will record the user stack on all guards at the
+# time they were installed at their destination
+class GuardsSet:
+    def __init__(self, inner=None):
+        if inner is None:
+            inner = set()
+        self.inner = inner
+
+    def __iter__(self):
+        return iter(self.inner)
+
+    def __len__(self):
+        return len(self.inner)
+
+    # Subtraction along with bool is typically used to determine the delta of
+    # added guards between checkpoints for higher order ops
+    def __sub__(self, other):
+        return GuardsSet(self.inner - other.inner)
+
+    def __bool__(self):
+        return bool(self.inner)
+
+    def add(self, guard: Guard, *, skip=0):
+        if guard in self.inner:
+            return
+        if guard.stack is None:
+            guard.stack = CapturedTraceback.extract(skip=1 + skip)
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
+        self.inner.add(guard)
+
+    def update(self, *others: Set[Guard]):
+        for o in others:
+            for g in o:
+                self.add(g, skip=1)
+
+
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
-        self.dynamo_guards: Set[Guard] = set()
+        self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
-        return GuardsCheckpointState(set(self.dynamo_guards))
+        return GuardsCheckpointState(set(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state):
+        # NB: "steals" the passed in state
         assert isinstance(state, GuardsCheckpointState)
-        self.dynamo_guards = state.dynamo_guards
+        self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
 _TLS = threading.local()
@@ -448,10 +513,6 @@ TracingContext is the source of truth for all currently accumulated information
 needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
 are open to managing their own TracingContext with that in mind.
 
-Currently, only guards live on the TracingContext, in the form of a GuardsContext.
-However, future implementations will move FakeTensorMode (and its owned ShapeEnv), as well
-as other structures into it.
-
 The purpose of TracingContext is not to be a dumping ground, or god object, but rather to avoid
 having to plumb complex subsystems across multiple verticals.
 
@@ -459,7 +520,28 @@ Ex: A common example is guard accumulation between dynamo, shape_env, aot_autogr
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
 to plumb objects back up to where frame interpretation happened.
+
+Note that you can end up with multiple TracingContext for a single compilation
+of a frame, as we reset the TracingContext whenever we restart analysis.
+CompileContext is a more overarching context that encompasses multiple restarts.
 """
+
+
+class CompileContext:
+    @staticmethod
+    def get() -> Optional[CompileContext]:
+        return getattr(_TLS, "compile_context", None)
+
+    def __init__(self, compile_id):
+        assert compile_id is None or isinstance(compile_id, CompileId)
+        self.compile_id = compile_id
+
+    @staticmethod
+    def current_compile_id():
+        self = CompileContext.get()
+        if self is None:
+            return None
+        return self.compile_id
 
 
 class TracingContext:
@@ -471,7 +553,7 @@ class TracingContext:
     """
 
     @staticmethod
-    def get() -> Optional["TracingContext"]:
+    def get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, fake_mode):
@@ -594,15 +676,25 @@ class TracingContext:
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
 
 
-"""
-This function installs the passed in tracing context as a dynamic scoped global variable.
-
-Calls to TracingContext.get() while not under a `with tracing()` context will return None.
-"""
+@contextmanager
+def compile_context(context: CompileContext):
+    old_context = getattr(_TLS, "compile_context", None)
+    _TLS.compile_context = context
+    try:
+        yield context
+    finally:
+        _TLS.compile_context = old_context
 
 
 @contextmanager
 def tracing(context: TracingContext):
+    """
+    This function installs the passed in tracing context as a dynamic scoped
+    global variable.
+
+    Calls to TracingContext.get() while not under a `with tracing()` context
+    will return None.
+    """
     old_context = getattr(_TLS, "tracing_context", None)
     _TLS.tracing_context = context
     try:
@@ -612,6 +704,12 @@ def tracing(context: TracingContext):
             e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
+        if (
+            context is not None
+            and context.fake_mode is not None
+            and context.fake_mode.shape_env is not None
+        ):
+            context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
 
 
@@ -631,7 +729,7 @@ class Source:
     def make_guard(self, fn, is_volatile=False) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self.name(), self.guard_source(), fn, is_volatile)
+        return Guard(self, fn, is_volatile)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()

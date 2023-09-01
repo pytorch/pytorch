@@ -3,7 +3,10 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import sympy
 
@@ -479,6 +482,10 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
+            if not config.trace_numpy:
+                unimplemented("Tensor.numpy(). config.trace_numpy is False")
+            if not np:
+                unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:
@@ -620,9 +627,10 @@ class TensorVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
             def redistribute_fn_with_prim_types(x):
-                return x.redistribute(*args_as_value)
+                return x.redistribute(*args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
