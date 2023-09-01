@@ -3060,7 +3060,11 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
+        ] + [
+            (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
+            for maximize, weight_decay in product((False, True), (0.0, 0.1))
         ]
+
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):

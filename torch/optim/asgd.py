@@ -8,9 +8,9 @@ from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
 
-def _to_tensor(x):
+def _to_tensor(x, device=None):
     if not isinstance(x, torch.Tensor):
-        return torch.tensor(x)
+        return torch.tensor(x, device=device)
 
     return x
 
@@ -26,6 +26,7 @@ class ASGD(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -41,6 +42,7 @@ class ASGD(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
@@ -50,6 +52,7 @@ class ASGD(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            group.setdefault("capturable", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -131,6 +134,7 @@ class ASGD(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                capturable=group["capturable"],
             )
 
         return loss
@@ -171,6 +175,7 @@ def asgd(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
     *,
     lambd: float,
     lr: float,
@@ -208,6 +213,7 @@ def asgd(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        capturable=capturable,
     )
 
 
@@ -226,12 +232,8 @@ def _single_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
-    def _to_tensor(x):
-        if not isinstance(x, torch.Tensor):
-            return torch.tensor(x)
-        return x
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -286,6 +288,7 @@ def _multi_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
 
     if len(params) == 0:
@@ -340,17 +343,33 @@ def _multi_tensor_asgd(
         intermediate = torch._foreach_sub(grouped_params, grouped_axs)
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
 
-        # update grouped_mus
-        new_mus = torch._foreach_sub(grouped_state_steps, t0)
-        torch._foreach_maximum_(new_mus, 1.0)
-        torch._foreach_reciprocal_(new_mus)
-        torch._foreach_copy_(grouped_mus, new_mus)
+        if capturable:
+            # update grouped_mus
+            new_mus = torch._foreach_sub(grouped_state_steps, t0)
+            torch._foreach_maximum_(new_mus, 1.0)
+            torch._foreach_reciprocal_(new_mus)
+            torch._foreach_copy_(grouped_mus, new_mus)
 
-        # update eta = lr / (1 + lambd * lr * step^alpha)
-        new_etas = torch._foreach_pow(grouped_state_steps, alpha)
-        torch._foreach_mul_(new_etas, lambd)
-        torch._foreach_mul_(new_etas, lr)
-        torch._foreach_add_(new_etas, 1)
-        torch._foreach_reciprocal_(new_etas)
-        torch._foreach_mul_(new_etas, lr)
-        torch._foreach_copy_(grouped_etas, new_etas)
+            # update eta = lr / (1 + lambd * lr * step^alpha)
+            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
+            torch._foreach_mul_(new_etas, lambd)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_add_(new_etas, 1)
+            torch._foreach_reciprocal_(new_etas)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_copy_(grouped_etas, new_etas)
+        else:
+            step = grouped_state_steps[0].item()
+            new_etas = []
+            new_mus = []
+
+            for i in range(len(grouped_mus)):
+                new_eta = _to_tensor(
+                    lr / (1 + lambd * lr * step ** alpha), device=grouped_etas[i].device
+                )
+                new_etas.append(new_eta)
+                new_mu = _to_tensor(1 / max(1, step - t0), device=grouped_mus[i].device)
+                new_mus.append(new_mu)
+
+            torch._foreach_copy_(grouped_etas, new_etas)
+            torch._foreach_copy_(grouped_mus, new_mus)

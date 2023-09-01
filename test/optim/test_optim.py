@@ -807,7 +807,7 @@ class TestOptim(TestCase):
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
             if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
-                    optimizer_constructor.__name__ == "Adadelta"):
+                    optimizer_constructor.__name__ in ["Adadelta", "ASGD"]):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
@@ -815,6 +815,10 @@ class TestOptim(TestCase):
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
+                elif optimizer_constructor.__name__ == "ASGD":
+                    # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
+                    nintermediates = 4
+
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
@@ -896,6 +900,10 @@ class TestOptim(TestCase):
             (optim.ASGD, dict(weight_decay=1)),
             (optim.ASGD, dict(weight_decay=0, maximize=True)),
             (optim.ASGD, dict(weight_decay=1, maximize=True)),
+            (optim.ASGD, dict(weight_decay=0, capturable=True)),
+            (optim.ASGD, dict(weight_decay=1, capturable=True)),
+            (optim.ASGD, dict(weight_decay=0, maximize=True, capturable=True)),
+            (optim.ASGD, dict(weight_decay=1, maximize=True, capturable=True)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
             (optim.Adamax, dict(weight_decay=0, maximize=True)),
