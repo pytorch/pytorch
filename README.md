@@ -1,5 +1,7 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
+This is a sample change in the README file
+
 --------------------------------------------------------------------------------
 
 PyTorch is a Python package that provides two high-level features:
