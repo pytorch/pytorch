@@ -2030,6 +2030,30 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: nt1.reshape(2, -1, -1, 2, 2)
         )
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_narrow(self, device, dtype):
+        nt = random_nt_from_dims([5, None, None, None], device=device, dtype=dtype)
+
+        # narrow on dim=0 from start to end
+        bounds = [(0, 5), (0, 3), (1, 2), (1, 5), (2, 4)]
+        for start, end in bounds:
+            length = end - start
+            narrowed = nt.narrow(dim=0, start=start, length=length)
+            # ensure output is a view
+            self.assertTrue(narrowed._base is nt)
+            for nc, c in zip(narrowed.unbind(), nt.unbind()[start:end]):
+                self.assertEqual(nc, c)
+
+        # dim != 0 is not supported
+        for dim in range(1, nt.dim()):
+            with self.assertRaisesRegex(RuntimeError, "only dim=0 supported for nested tensors"):
+                nt.narrow(dim=dim, start=0, length=1)
+
+        # error case: non-contiguous NT
+        _, nt_noncont = random_nt_noncontiguous_pair((2, 3, 4))
+        with self.assertRaisesRegex(RuntimeError, "only contiguous nested tensors supported"):
+            nt_noncont.narrow(dim=0, start=0, length=1)
+
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
 

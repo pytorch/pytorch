@@ -4090,6 +4090,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: narrow_symint
+    NestedTensorCPU, NestedTensorCUDA: narrow_nested_symint
 
 - func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
   variants: function, method
