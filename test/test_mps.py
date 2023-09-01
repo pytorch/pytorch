@@ -3565,6 +3565,8 @@ class TestMPS(TestCaseMPS):
             helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
             helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
             helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+        # Regression test for https://github.com/pytorch/pytorch/issues/107867
+        self.assertEqual(torch.tensor([[1]], device='mps').item(), 1.0)
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319

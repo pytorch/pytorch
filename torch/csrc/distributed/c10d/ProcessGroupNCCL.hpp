@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -344,6 +345,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   ~ProcessGroupNCCL() override;
+
+  // Check that all work is done (no enqueued work).
+  // We use this to avoid uwittingly having watchdogs query work during
+  // CUDA graph captures.
+  static void waitForAllPendingWorks();
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
@@ -689,6 +695,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
+  // Mutex to Guard all_nccl_process_groups
+  static std::mutex allProcessGroupsMutex_;
+
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
@@ -702,6 +711,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::condition_variable completedWorkListCV_;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
+
+  // All process groups for checking Watchdog status
+  static std::unordered_set<c10d::ProcessGroupNCCL*> all_nccl_process_groups;
 
   // Add Work Pointer to workVector
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
