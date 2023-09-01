@@ -643,6 +643,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ignored_module_meta(self):
         torch.cuda.set_device(self.rank)
+
         class CPUGPUModule(nn.Module):
             def __init__(self):
                 super().__init__()
