@@ -2101,6 +2101,11 @@ class TestNestedTensorDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only dim=0 supported for nested tensors"):
                 nt.narrow(dim=dim, start=0, length=1)
 
+        # error case: non-contiguous NT
+        _, nt_noncont = random_nt_noncontiguous_pair((2, 3, 4))
+        with self.assertRaisesRegex(RuntimeError, "only contiguous nested tensors supported"):
+            nt_noncont.narrow(dim=0, start=0, length=1)
+
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
 
