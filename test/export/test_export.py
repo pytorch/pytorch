@@ -349,6 +349,40 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+    def test_export_experimental_apis(self):
+        from torch._export import Dim, dims, dynamic_shapes, export_ as export
+        from torch.fx.tensor_type import TensorType
+
+        # pass dynamic shapes of inputs along with inputs in export call
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch = Dim("batch")
+        efoo = export(foo, inputs, dynamic_shapes=tuple({0: batch} for t in inputs))
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # decorate exported function with expected dynamic shapes of inputs
+        batch = Dim("batch")
+        size = Dim("size")
+
+        @dynamic_shapes((batch, size, size), (batch, size, size))
+        def bar(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 3, 3), torch.randn(10, 3, 3))
+        ebar = export(bar, inputs)
+        self.assertEqual(ebar(*inputs).shape, bar(*inputs).shape)
+
+        # type arguments of exported function with expected dynamic shapes
+        batch, M, K, N = dims("batch", "M", "K", "N")
+
+        def qux(x: TensorType[batch, M, K], y: TensorType[batch, K, N]):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        equx = export(qux, inputs)
+        self.assertEqual(equx(*inputs).shape, qux(*inputs).shape)
 
     def test_error_does_not_reference_eager_fallback(self):
         def fn_ddo(x):
