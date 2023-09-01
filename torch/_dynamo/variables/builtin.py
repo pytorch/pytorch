@@ -811,7 +811,7 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(obj, TupleIteratorVariable):
                     guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
                 else:
-                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    guards.add(obj.source.make_guard(GuardBuilder.LENGTH_MATCH))
             if cls is SetVariable:
                 return cls(
                     tx,
@@ -1452,6 +1452,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(a, ListVariable):
+            a.make_length_aware()
             return ConstantVariable(len(a.items) == 0).add_options(self, a)
 
         return None

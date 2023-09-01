@@ -13,7 +13,7 @@ from torch.utils import _pytree as pytree
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import make_dupe_guard
+from ..guards import GuardBuilder, make_dupe_guard
 from ..source import GetItemSource
 from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
@@ -85,6 +85,8 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
+        self.make_length_aware()
+
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -120,6 +122,7 @@ class BaseListVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
+            self.make_length_aware()
             from .tensor import TensorVariable
 
             assert not kwargs and len(args) == 1
@@ -141,6 +144,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx, op, left, right):
+        self.make_length_aware()
         from .builtin import BuiltinVariable
 
         eq_result = BaseListVariable.list_eq(tx, left, right)
@@ -153,6 +157,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_eq(tx, left, right):
+        self.make_length_aware()
         from .builtin import BuiltinVariable
 
         options = VariableTracker.propagate(left, right)
@@ -184,9 +189,11 @@ class BaseListVariable(VariableTracker):
 
     # List-like implementations for pytree
     def __len__(self):
+        self.make_length_aware()
         return len(self.items)
 
     def __getitem__(self, index):
+        self.make_length_aware()
         if isinstance(index, slice):
             index = SliceVariable(
                 [
@@ -200,6 +207,13 @@ class BaseListVariable(VariableTracker):
         else:
             raise TypeError("Invalid index type. Must be int or slice.")
         return self.getitem_const(index)
+
+    def make_length_aware(self):
+        if self.can_be_length_aware():
+            self.guards.add(self.source.make_guard(GuardBuilder.LENGTH_MATCH))
+
+    def can_be_length_aware(self):
+        return isinstance(self, ListVariable) and self.source
 
 
 class RangeVariable(BaseListVariable):
@@ -324,6 +338,7 @@ class CommonListMethodsVariable(BaseListVariable):
             and args
             and args[0].is_python_constant()
         ):
+            self.make_length_aware()
             assert not kwargs
             key, value = args
             items = list(self.items)
@@ -361,12 +376,17 @@ class ListVariable(CommonListMethodsVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "__len__":
+            # Add guard, fall through to super
+            self.make_length_aware()
+
         if (
             name == "__setitem__"
             and self.mutable_local
             and args
             and args[0].is_python_constant()
         ):
+            self.make_length_aware()
             assert not kwargs
             key, value = args
             items = list(self.items)

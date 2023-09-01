@@ -731,7 +731,11 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        if isinstance(value, list):
+            # lists defer their LENGTH_MATCH to their operations
+            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+        else:
+            guards = self.make_guards(GuardBuilder.LENGTH_MATCH)
 
         for item in value:
             if item is value:
@@ -863,7 +867,7 @@ class VariableBuilder:
                     VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
                     for i, v in enumerate(value)
                 ],
-                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+                guards=self.make_guards(GuardBuilder.LENGTH_MATCH),
             )
         elif unspec and type(value) is int:
             # unspecializing int by default, but still

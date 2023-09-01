@@ -2052,8 +2052,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         #
         # An exception here is list/dict variables. Guards related to these
         # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+        # args is not used in this frame, we will miss a LENGTH_MATCH check like
+        # len(args) == 2. Missing the LENGTH_MATCH check causes problem for the
         # next invocation when args is not a list, and args[0] is a runtime
         # error. Therefore, we recursively add guards for list/dict variable here.
         for val in self.symbolic_locals.values():
@@ -2066,7 +2066,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     for guard in local_guards
                     if guard.create_fn
                     in (
-                        GuardBuilder.LIST_LENGTH,
+                        GuardBuilder.LENGTH_MATCH,
                         GuardBuilder.DICT_KEYS,
                         GuardBuilder.ODICT_KEYS,
                         GuardBuilder.TUPLE_ITERATOR_LEN,

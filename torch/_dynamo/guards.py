@@ -402,8 +402,9 @@ class GuardBuilder(GuardBuilderBase):
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
-            # NB: LIST_LENGTH takes care of the outer __check_type_id test
-            self.LIST_LENGTH(guard)
+            self.TYPE_MATCH(guard)
+            if istype(val, tuple):
+                self.LENGTH_MATCH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
@@ -458,13 +459,16 @@ class GuardBuilder(GuardBuilderBase):
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def LIST_LENGTH(self, guard):
+    # NOTE! In the future, this guard will also take a value of the max/min length list
+    # This is useful for moving from guards like len(x) == K to len(x) > K or len(x) < K - for example
+    # for when user code accesses a list at specific indices
+    def LENGTH_MATCH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
-
+        # sizes and tuples must take on this check
+        # lists only take on this check if they are mutated!
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)

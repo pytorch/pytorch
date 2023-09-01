@@ -648,7 +648,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(v, (10, 20))[0, 0], -10)
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
         # One recompile per differing input type
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_cell_output1(self):
         out = None
@@ -6922,6 +6922,37 @@ def ___make_guard_fn():
         compiled = compiled_fn(t_list)
 
         self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_list_guards_size_aware(self):
+        def size_aware_list_operating_fn(l, x):
+            return l[-1] * l[-2]
+
+        ll = [torch.randn(2, 2), torch.randn(2, 2)]
+        counter = CompileCounter()
+        comp_fn = torch._dynamo.optimize(counter)(size_aware_list_operating_fn)
+        comp_fn(ll, torch.randn([2, 2]))
+        self.assertEqual(counter.frame_count, 1)
+        # SHOULD RECOMPILE! LIST LENGTH MATTERS!
+        ll = [torch.randn(2, 2), torch.randn(2, 2), torch.randn(2, 2)]
+        comp_fn(ll, torch.randn([2, 2]))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_list_guards_size_agnostic(self):
+        def size_angostic_list_operating_fn(l, x, y, z):
+            l.append(x * x)
+            l.append(y * y)
+            l.append(z * z)
+            return l
+
+        ll = []
+        counter = CompileCounter()
+        comp_fn = torch._dynamo.optimize(counter)(size_angostic_list_operating_fn)
+        comp_fn(ll, torch.randn([2, 2]), torch.randn([2, 2]), torch.randn([2, 2]))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(ll), 3)
+        # SHOULD NOT RECOMPILE! LIST LENGTH DOES NOT MATTER IN THIS PROGRAM!
+        comp_fn(ll, torch.randn([2, 2]), torch.randn([2, 2]), torch.randn([2, 2]))
         self.assertEqual(counter.frame_count, 1)
 
 
