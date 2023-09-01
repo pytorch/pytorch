@@ -273,10 +273,10 @@ class TestDeserialize(TestCase):
                     #     node1.meta.get("nn_module_stack", None),
                     #     node2.meta.get("nn_module_stack", None),
                     # )
-                    # Check "source_fn" metadata
+                    # Check "source_fn_stack" metadata
                     self.assertEqual(
-                        node1.meta.get("source_fn", None),
-                        node2.meta.get("source_fn", None),
+                        node1.meta.get("source_fn_stack", None),
+                        node2.meta.get("source_fn_stack", None),
                     )
 
         _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module, _check_meta)

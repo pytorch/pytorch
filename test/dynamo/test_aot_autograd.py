@@ -798,10 +798,11 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     continue
                 if min_seq_nr < 0:
                     min_seq_nr = seq_nr
-                mod_name = node.meta.get("source_fn", "")
+                source_fn_stack = node.meta.get("source_fn_stack", [])
                 orig_aten = node.meta.get("original_aten", "")
-                if isinstance(mod_name, tuple):
-                    mod_name = mod_name[0]
+                mod_name = ""
+                if len(source_fn_stack) > 0:
+                    mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
