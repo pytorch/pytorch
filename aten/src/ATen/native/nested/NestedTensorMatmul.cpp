@@ -208,7 +208,7 @@ static Tensor matmul_nested_with_broadcasted_dense(const Tensor& nt, const Tenso
     new_sizes_ptr[i * component_dim + 2] = E;
   }
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(new_buffer.view(-1)), new_sizes);
+      new_buffer.view(-1), new_sizes);
 }
 
 // Note [nested tensor matmul]
