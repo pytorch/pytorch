@@ -600,7 +600,8 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   {
     Py_RETURN_NONE;
   }
-  return current_node;
+  Py_INCREF(current_node);
+  return (PyObject*)current_node;
 }
 
 static inline PyObject* call_callback(
