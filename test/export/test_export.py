@@ -152,7 +152,7 @@ class TestExport(TestCase):
             preserve_module_call_signature=("foo.nested", "foo"),
         )
         ep._validate()
-        self.assertEqual(len(ep.module_call_graph), 2)
+        self.assertEqual(len(ep.module_call_graph), 3)
         # TODO(zhxchen17) unflattener
         # unflattened = unflatten(export_module)
         # self.compare_outputs(export_module, unflattened, inps)
