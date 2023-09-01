@@ -74,9 +74,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
-            and torch.Tag.dynamic_output_shape not in func.tags  # type: ignore[attr-defined]
-            and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
-            and torch.Tag.data_dependent_output not in func.tags  # type: ignore[attr-defined]
+            and torch.Tag.dynamic_output_shape not in func.tags
+            and torch.Tag.inplace_view not in func.tags
+            and torch.Tag.data_dependent_output not in func.tags
         ):
             try:
                 with FakeTensorMode() as fake_mode:

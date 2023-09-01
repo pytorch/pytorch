@@ -15,7 +15,7 @@ from torch.testing._internal.autograd_function_db import (
 )
 from torch import Tensor
 from torch.types import Number
-from typing import Sequence, Tuple
+from typing import *  # noqa: F403
 import torch._custom_ops as custom_ops
 
 # Note: [custom op db]
@@ -229,7 +229,9 @@ def numpy_cat_save_for_backward(inputs, output):
 @custom_ops.impl_backward('_torch_testing::numpy_cat')
 def numpy_cat_backward(ctx, saved, grad_out):
     dim_sizes, dim = saved
-    return {'xs': torch.split(grad_out, dim_sizes, dim)}
+    splits = list(np.cumsum(dim_sizes)[:-1])
+    grad_xs = torch.ops._torch_testing.numpy_split_copy(grad_out, splits, dim)
+    return {'xs': grad_xs}
 
 def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -237,6 +239,60 @@ def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     r1 = make_arg(4, 3, 4, low=0.9, high=2)
     r2 = make_arg(5, 3, 4, low=0.9, high=2)
     yield SampleInput([r0, r1, r2], args=(0,))
+
+@custom_ops.custom_op('_torch_testing::numpy_split_copy')
+def numpy_split_copy(x: Tensor, sections: Sequence[int], dim: int) -> List[Tensor]:
+    raise NotImplementedError()
+
+@custom_ops.impl('_torch_testing::numpy_split_copy')
+def numpy_split_copy_impl(x, splits, dim):
+    x_np = to_numpy(x)
+    arrs = np.split(x_np, splits, axis=dim)
+    return [torch.tensor(arr, device=x.device, dtype=x.dtype) for arr in arrs]
+
+@custom_ops.impl_abstract('_torch_testing::numpy_split_copy')
+def numpy_split_copy_abstract(x, splits, dim):
+    return [xi.clone() for xi in torch.tensor_split(x, splits, dim)]
+
+@custom_ops.impl_save_for_backward('_torch_testing::numpy_split_copy')
+def numpy_split_copy_save_for_backward(inputs, output):
+    return inputs.dim
+
+@custom_ops.impl_backward('_torch_testing::numpy_split_copy')
+def numpy_split_copy_backward(ctx, saved, grad_out):
+    dim = saved
+    return {'x': torch.ops._torch_testing.numpy_cat(grad_out, dim=dim)}
+
+def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    x = make_arg(2, 9, low=0.9, high=2)
+    yield SampleInput(x, args=([1, 3, 6], 1))
+
+@custom_ops.custom_op('_torch_testing::numpy_split_copy_with_int')
+def numpy_split_copy_with_int(x: Tensor, sections: Sequence[int], dim: int) -> Tuple[List[Tensor], int]:
+    raise NotImplementedError()
+
+@custom_ops.impl('_torch_testing::numpy_split_copy_with_int')
+def numpy_split_copy_with_int_impl(x, splits, dim):
+    x_np = to_numpy(x)
+    arrs = np.split(x_np, splits, axis=dim)
+    return [torch.tensor(arr, device=x.device, dtype=x.dtype) for arr in arrs], len(splits)
+
+@custom_ops.impl_abstract('_torch_testing::numpy_split_copy_with_int')
+def numpy_split_copy_with_int_abstract(x, splits, dim):
+    return [xi.clone() for xi in torch.tensor_split(x, splits, dim)], len(splits)
+
+@custom_ops.impl_save_for_backward(
+    '_torch_testing::numpy_split_copy_with_int')
+def numpy_split_copy_with_int_save_for_backward(inputs, output):
+    return inputs.dim
+
+@custom_ops.impl_backward(
+    '_torch_testing::numpy_split_copy_with_int',
+    output_differentiability=[True, False])
+def numpy_split_copy_with_int_backward(ctx, saved, grad_out, _):
+    dim = saved
+    return {'x': torch.ops._torch_testing.numpy_cat(grad_out, dim=dim)}
 
 @custom_ops.custom_op('_torch_testing::numpy_nms')
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
@@ -371,6 +427,29 @@ custom_op_db = [
         sample_inputs_func=sample_inputs_numpy_cat,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=True,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_out=False,
+    ),
+    OpInfo(
+        'NumpySplitCopyCustomOp',
+        op=torch.ops._torch_testing.numpy_split_copy,
+        sample_inputs_func=sample_inputs_numpy_split_copy,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_autograd=True,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        supports_out=False,
+    ),
+    OpInfo(
+        'NumpySplitCopyWithIntCustomOp',
+        op=torch.ops._torch_testing.numpy_split_copy_with_int,
+        sample_inputs_func=sample_inputs_numpy_split_copy,
+        dtypes=all_types_and(torch.bool, torch.half),
+        gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs)[0],
+        supports_autograd=True,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
         supports_out=False,
     ),
 ]

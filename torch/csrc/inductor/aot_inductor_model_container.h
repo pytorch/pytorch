@@ -34,17 +34,21 @@ class AOTInductorModelContainer {
     auto* model = available_models_[0];
     size_t num_inputs = model->num_inputs();
     input_names_.reserve(num_inputs);
+    input_dtypes_.reserve(num_inputs);
     max_input_shapes_.reserve(num_inputs);
     for (size_t i = 0; i < num_inputs; i++) {
       input_names_.push_back(model->input_name(i));
+      input_dtypes_.push_back(model->get_input_dtype(i));
       max_input_shapes_.emplace_back(model->max_input_shape(i));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
+    output_dtypes_.reserve(num_outputs);
     max_output_shapes_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.push_back(model->output_name(i));
+      output_dtypes_.push_back(model->get_output_dtype(i));
       max_output_shapes_.emplace_back(model->max_output_shape(i));
     }
   }
@@ -87,6 +91,14 @@ class AOTInductorModelContainer {
     return output_names_.at(idx).c_str();
   }
 
+  const char* get_input_dtype(size_t idx) const {
+    return input_dtypes_.at(idx).c_str();
+  }
+
+  const char* get_output_dtype(size_t idx) const {
+    return output_dtypes_.at(idx).c_str();
+  }
+
   size_t num_models() const {
     return models_.size();
   }
@@ -102,7 +114,8 @@ class AOTInductorModelContainer {
  private:
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
-
+  std::vector<std::string> input_dtypes_;
+  std::vector<std::string> output_dtypes_;
   // Holds the upper-bound value for each dimension of any input shape.
   std::vector<std::vector<int64_t>> max_input_shapes_;
 

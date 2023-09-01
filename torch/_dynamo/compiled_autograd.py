@@ -166,7 +166,8 @@ def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    yield
+    with torch.autograd.set_multithreading_enabled(False):
+        yield
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import torch
+import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
@@ -269,6 +270,75 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, count=1)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_issue106555(self):
+        DEVICE = torch.device("cuda:0")
+        NUM_FEATURES = 256
+
+        def bias_sigmoid_mul(x1, x2, bias):
+            x2 = torch.sigmoid(x2 + bias)
+            y = x1 * x2
+            return y
+
+        bias_sigmoid_mul_jit = torch.compile(bias_sigmoid_mul)
+
+        class ModuleWithJit(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_1 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=True)
+                self.linear_2 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=False)
+                self.linear_2_bias = nn.Parameter(torch.zeros(NUM_FEATURES))
+
+            def forward(self, input_tensor):
+                x1 = self.linear_1(input_tensor)
+                x2 = self.linear_2(input_tensor)
+                output = bias_sigmoid_mul_jit(x1, x2, self.linear_2_bias)
+                return output
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_with_jit_1 = ModuleWithJit()
+                self.module_with_jit_2 = ModuleWithJit()
+
+            def forward(self, x, gradient_checkpointing: bool):
+                if gradient_checkpointing:
+                    y = torch.utils.checkpoint.checkpoint(
+                        self._forward, x, use_reentrant=True
+                    )
+                else:
+                    y = self._forward(x)
+                return y
+
+            def _forward(self, x):
+                x = x + self.module_with_jit_1(x)
+                x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
+                return x
+
+        torch.cuda.set_device(device=DEVICE)
+        torch.manual_seed(1234567890)
+        model = Model()
+        model.train()
+        model.to(device=DEVICE)
+        model_parameters = list(model.parameters())
+
+        torch.manual_seed(1234567890)
+        input_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(device=DEVICE)
+        input_tensor.requires_grad = True
+        target_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(
+            dtype=input_tensor.dtype, device=DEVICE
+        )
+
+        for iteration in range(10):
+            for param in model_parameters:
+                param.grad = None
+            output_tensor = model(
+                x=input_tensor.clone(),
+                gradient_checkpointing=True,
+            )
+            loss = torch.mean(torch.abs(target_tensor - output_tensor))
+            loss.backward()
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -316,7 +386,11 @@ not_implemented_re = re.compile(
                 "has no attribute '_compiled_autograd_key'",
                 # make_fx() tracing errors:
                 "Cannot access storage of BatchedTensorImpl",
+                "Cannot access storage of SparseTensorImpl",
                 "data dependent operator:",
+                "dynamic shape operator:",
+                # inductor errors:
+                "inductor does not support",
             ],
         )
     )
@@ -327,37 +401,17 @@ skip_re = re.compile(r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)
 
 # Bugs needing investigation:
 skips = {
-    "test_accumulate_grad_tensor_reference",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' rai
-    "test_calculate_shape_util",  # AssertionError: NYI: aten._nested_tensor_from_tensor_list.default
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
-    "test_current_node",  # RuntimeError: aten::detach() Expected a value of type 'Tensor' for argument 'self' but in
-    "test_duplicate_backward_root",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
-    "test_grad_fn_attr_bindings",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csr
-    "test_grad_unreachable_discovery",  # RuntimeError: tensor does not have a device
-    "test_grad_unreachable",  # RuntimeError: tensor does not have a device
-    "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
-    "test_graph_save_on_cpu",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csrc/dy
-    "test_hooks_cpp",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_index_backward_does_not_save_tensor",  # RuntimeError: expected int but got i0
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-    "test_integer_outputs",  # TypeError: unsupported operand type(s) for +: 'OpOverload' and 'str'
-    "test_lobpcg",  # RuntimeError: tried to get Double out of SymFloat
-    "test_no_unnecessary_unwrapping",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch
-    "test_numpy_requires_grad",  # AssertionError: "Can't call numpy\(\) on Tensor that requires grad. Use tensor.det
-    "test_pickle",  # TypeError: cannot pickle 'StorageWeakRef' object: a class that defines __slots__ without defini
-    "test_reentrant_with_leaf_variable_hook",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytor
-    "test_reentrant_with_non_leaf_variable_hook",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/p
-    "test_saved_variable_packing_unpacking_saved_original_with_default_hooks",  # RuntimeError: inserted INTERNAL ASS
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # RuntimeError: inserted INTERNAL ASSERT FAIL
+    "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
+    "test_graph_save_on_cpu",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
+    "test_reentrant_with_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHandle.
+    "test_reentrant_with_non_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHan
     "test_saved_variable_saved_original_inplace_detach",  # AssertionError: RuntimeError not raised
-    "test_saving_variable_to_disk",  # AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<local
+    "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
-    "test_setting_default_saved_variable_hooks_twice_should_use_inner",  # RuntimeError: inserted INTERNAL ASSERT FAI
-    "test_sharded_grad",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csrc/dynamo/
     "test_tensor_hooks_inplace_over_view",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_tensor_hooks_inplace",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_to_sparse_backward",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_var_mean_differentiable",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
 }
 

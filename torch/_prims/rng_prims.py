@@ -143,7 +143,7 @@ def register_philox_rand():
         impl_aten=_philox_rand,
         impl_meta=_philox_rand_meta,
         doc="Philox based stateless rand operator",
-        tags=(torch.Tag.nondeterministic_seeded,),  # type: ignore[attr-defined]
+        tags=(torch.Tag.nondeterministic_seeded,),
     )
 
 
@@ -166,6 +166,8 @@ def register_run_and_save_rng_state_op():
     run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
 
     run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+    run_and_save_rng_state.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+    run_and_save_rng_state.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
     run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
     run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 
@@ -219,6 +221,8 @@ def register_run_with_rng_state_op():
     run_with_rng_state = HigherOrderOperator("run_with_rng_state")
 
     run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+    run_with_rng_state.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+    run_with_rng_state.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
     run_with_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
 

@@ -53,7 +53,7 @@ class Variant(Enum):
 DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
-BACKEND_COMPONENTS = "CPU CUDA HIP XLA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
+BACKEND_COMPONENTS = "CPU CUDA HIP XLA MTIA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
 FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 
 # This list guards dispatches that can be used in derivatives.yaml
@@ -119,6 +119,7 @@ class DispatchKey(Enum):
     CUDA = auto()
     HIP = auto()
     XLA = auto()
+    MTIA = auto()
     MPS = auto()
     IPU = auto()
     XPU = auto()
@@ -133,6 +134,7 @@ class DispatchKey(Enum):
     QuantizedCUDA = auto()
     QuantizedHIP = auto()
     QuantizedXLA = auto()
+    QuantizedMTIA = auto()
     QuantizedMPS = auto()
     QuantizedIPU = auto()
     QuantizedXPU = auto()
@@ -147,6 +149,7 @@ class DispatchKey(Enum):
     SparseCUDA = auto()
     SparseHIP = auto()
     SparseXLA = auto()
+    SparseMTIA = auto()
     SparseMPS = auto()
     SparseIPU = auto()
     SparseXPU = auto()
@@ -161,6 +164,7 @@ class DispatchKey(Enum):
     NestedTensorCUDA = auto()
     NestedTensorHIP = auto()
     NestedTensorXLA = auto()
+    NestedTensorMTIA = auto()
     NestedTensorMPS = auto()
     NestedTensorIPU = auto()
     NestedTensorXPU = auto()
@@ -175,6 +179,7 @@ class DispatchKey(Enum):
     AutogradCUDA = auto()
     AutogradHIP = auto()
     AutogradXLA = auto()
+    AutogradMTIA = auto()
     AutogradMPS = auto()
     AutogradIPU = auto()
     AutogradXPU = auto()
@@ -199,6 +204,11 @@ class DispatchKey(Enum):
             if k == value:
                 return v
         raise AssertionError(f"unknown dispatch key {value}")
+
+
+class _TorchDispatchModeKey(Enum):
+    FAKE = auto()
+    PROXY = auto()
 
 
 def codegen_per_backend_entries() -> str:
@@ -1799,6 +1809,7 @@ class BaseTy(Enum):
     bool = auto()
     Layout = auto()
     Device = auto()
+    DeviceIndex = auto()
     Scalar = auto()
     MemoryFormat = auto()
     QScheme = auto()

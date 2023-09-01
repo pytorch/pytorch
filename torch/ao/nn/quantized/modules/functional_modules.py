@@ -79,6 +79,12 @@ class FloatFunctional(torch.nn.Module):
         r = self.activation_post_process(r)
         return r
 
+    r"""Operation equivalent to ``torch.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = torch.matmul(x, y)
+        r = self.activation_post_process(r)
+        return r
+
 class FXFloatFunctional(torch.nn.Module):
     r""" module to replace FloatFunctional module before FX graph mode quantization,
     since activation_post_process will be inserted in top level module directly
@@ -124,6 +130,11 @@ class FXFloatFunctional(torch.nn.Module):
     def add_relu(self, x: Tensor, y: Tensor) -> Tensor:
         r = torch.add(x, y)
         r = torch.nn.functional.relu(r)
+        return r
+
+    r"""Operation equivalent to ``torch.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = torch.matmul(x, y)
         return r
 
 class QFunctional(torch.nn.Module):
@@ -218,6 +229,13 @@ class QFunctional(torch.nn.Module):
     def add_relu(self, x: Tensor, y: Tensor) -> Tensor:
         r = ops.quantized.add_relu(x, y, scale=self.scale, zero_point=self.zero_point)
         r = self.activation_post_process(r)
+        return r
+
+    r"""Operation equivalent to ``torch.ops.quantized.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = ops.quantized.matmul(x, y, scale=self.scale, zero_point=self.zero_point)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     @classmethod
