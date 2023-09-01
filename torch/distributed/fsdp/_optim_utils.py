@@ -1,5 +1,6 @@
 import copy
 import functools
+import logging
 import warnings
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -47,6 +48,9 @@ from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 from torch.utils._pytree import tree_map_only
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -1316,10 +1320,58 @@ def _allgather_state_info(
     return gathered_state_info
 
 
+def _unflatten_orig_param_states(
+    fsdp_param_info: FSDPParamInfo,
+    output_states: Dict[str, Dict[str, Any]],
+    shard_state: bool,
+    state_name: str,
+) -> None:
+    """
+    Given a output state dict, ``output_states``, which the keys are FQNs to the
+    original parameters (not FlatParameters nor parmeter ID), and the values
+    are gathered states, unflatten the states to the original dimensions.
+
+    This function performs the unflattening process in-place.
+    """
+    logger.warning(
+        "CUDA Memory Summary before calling to _unflatten_orig_param_states %s",
+        torch.cuda.memory_summary(),
+    )
+    flat_param = fsdp_param_info.handle.flat_param
+    fsdp_state = fsdp_param_info.state
+    for fqn, gathered_state in output_states.items():
+        value = gathered_state[state_name]
+
+        param_idx = fsdp_param_info.param_indices[fqn]
+        value = value[: flat_param._numels[param_idx]].reshape(
+            flat_param._shapes[param_idx]
+        )
+        if shard_state:
+            if not fsdp_state._optim_state_dict_config.use_dtensor:
+                assert fsdp_state.process_group is not None
+                value = _ext_chunk_tensor(
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                    fsdp_state._device_handle.device_count(),
+                    fsdp_state.process_group,
+                )
+            else:
+                assert fsdp_state._device_mesh is not None
+                value = _ext_chunk_dtensor(
+                    value, fsdp_state.rank, fsdp_state._device_mesh
+                )
+        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+            value = value.cpu()
+        gathered_state[state_name] = value
+
+
 def _allgather_orig_param_states(
     fsdp_param_info: FSDPParamInfo,
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
+    shard_state: bool,
+    to_save: bool,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API allgather
@@ -1390,6 +1442,9 @@ def _allgather_orig_param_states(
     empty_func = functools.partial(
         torch.empty, dtype=dtype, device=fsdp_state.compute_device
     )
+    gathered_tensor = empty_func(flat_param._padded_unsharded_size)
+    # Synchronize can be slow but this will be easier for us to debug.
+    torch.cuda.synchronize()
     for state_name, buffers in state_buffers.items():
         begin_idx = end_idx = -1
         for idx, buffer in enumerate(buffers):
@@ -1410,11 +1465,13 @@ def _allgather_orig_param_states(
             local_buffers.append(empty_func(shard_numel_padded))
         assert local_buffers
         local_shard = torch.cat(local_buffers)
-        gathered_tensor = empty_func(flat_param._padded_unsharded_size)
         assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel()
-        dist.all_gather_into_tensor(
-            gathered_tensor, local_shard, group=fsdp_state.process_group
-        )
+        with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+            dist.all_gather_into_tensor(
+                gathered_tensor, local_shard, group=fsdp_state.process_group
+            )
+            # Synchronize can be slow but this will be easier for us to debug.
+            torch.cuda.synchronize()
         gathered_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         start = 0
         paddings = zip(flat_param._is_padding_mask, flat_param._numels_with_padding)
@@ -1430,50 +1487,15 @@ def _allgather_orig_param_states(
             gathered_state[state_name] = gathered_tensor[start : start + numel]
             start += numel
 
-    return output_states
-
-
-def _unflatten_orig_param_states(
-    fsdp_param_info: FSDPParamInfo,
-    output_states: Dict[str, Dict[str, Any]],
-    shard_state: bool,
-) -> Dict[str, Dict[str, Any]]:
-    """
-    Given a output state dict, ``output_states``, which the keys are FQNs to the
-    original parameters (not FlatParameters nor parmeter ID), and the values
-    are gathered states, unflatten the states to the original dimensions.
-
-    This function performs the unflattening process in-place.
-    """
-
-    flat_param = fsdp_param_info.handle.flat_param
-    fsdp_state = fsdp_param_info.state
-    for fqn, gathered_state in output_states.items():
-        for state_name, value in list(gathered_state.items()):
-            if not torch.is_tensor(value) or value.dim() == 0:
-                continue
-
-            param_idx = fsdp_param_info.param_indices[fqn]
-            value = value[: flat_param._numels[param_idx]].reshape(
-                flat_param._shapes[param_idx]
+        if to_save:
+            _unflatten_orig_param_states(
+                fsdp_param_info,
+                output_states,
+                shard_state,
+                state_name,
             )
-            if shard_state:
-                if not fsdp_state._optim_state_dict_config.use_dtensor:
-                    assert fsdp_state.process_group is not None
-                    value = _ext_chunk_tensor(
-                        value,
-                        fsdp_state.rank,
-                        fsdp_state.world_size,
-                        fsdp_state._device_handle.device_count(),
-                        fsdp_state.process_group,
-                    )
-                else:
-                    assert fsdp_state._device_mesh is not None
-                    value = _ext_chunk_dtensor(
-                        value, fsdp_state.rank, fsdp_state._device_mesh
-                    )
-            value = value.cpu()
-            gathered_state[state_name] = value
+    del gathered_tensor
+
     return output_states
 
 
@@ -1499,19 +1521,10 @@ def _gather_all_orig_param_state(
     with SimpleProfiler.profile(SimpleProfiler.Type.RESHARDING):
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER_OBJ):
             gathered_state_info = _allgather_state_info(fsdp_state, input_states)
-        with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-            output_states = _allgather_orig_param_states(
-                fsdp_param_info,
-                gathered_state_info,
-                input_states,
-            )
+        output_states = _allgather_orig_param_states(
+            fsdp_param_info, gathered_state_info, input_states, shard_state, to_save
+        )
     if to_save:
-        with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
-            _unflatten_orig_param_states(
-                fsdp_param_info,
-                output_states,
-                shard_state,
-            )
         assert set(output_states.keys()) == set(fsdp_param_info.param_indices.keys())
         return output_states
     else:
@@ -1629,6 +1642,7 @@ def _convert_state_with_flat_params(
     return fsdp_osd_state
 
 
+@torch.no_grad()
 def _optim_state_dict(
     model: nn.Module,
     optim: torch.optim.Optimizer,
