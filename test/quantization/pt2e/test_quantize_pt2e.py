@@ -1288,7 +1288,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 int16_qspec = QuantizationSpec(
                     dtype=torch.int32,
                     quant_min=-2**15,
-                    quant_max=2**15-1,
+                    quant_max=2**15 - 1,
                     qscheme=torch.per_tensor_affine,
                     is_dynamic=False,
                     observer_or_fake_quant_ctr=observer.default_observer,

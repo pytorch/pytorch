@@ -47,7 +47,6 @@ from torch.ao.quantization import (
 from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
-    to_underlying_dtype,
 )
 
 from ._equalize import (
@@ -131,7 +130,16 @@ __all__ = [
 
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
-_OBS_DTYPE_LIST = [torch.quint8, torch.qint8, torch.qint32, torch.float16, torch.uint8, torch.int8, torch.int16, torch.int32]
+_OBS_DTYPE_LIST = [
+    torch.quint8,
+    torch.qint8,
+    torch.qint32,
+    torch.float16,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32
+]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
 
