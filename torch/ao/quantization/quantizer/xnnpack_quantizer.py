@@ -26,6 +26,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
+    propagate_annotation,
     QuantizationConfig,
 )
 
@@ -311,6 +312,7 @@ class XNNPACKQuantizer(Quantizer):
             model = self._annotate_for_dynamic_quantization_config(model)
         else:
             model = self._annotate_for_static_quantization_config(model)
+        propagate_annotation(model)
         return model
 
     def _annotate_all_patterns(
