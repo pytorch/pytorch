@@ -83,7 +83,29 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     gm.graph.lint()
     gm.recompile()
 
+    # Check if there is still unbacked SymInts after dyn_rewritten_pass.
+    # Trigger RestartAnalysis to graph break since Inductor can't handle them.
+    if has_unbacked_symint(gm, example_inputs):
+        raise RuntimeError("There is unbacked SymInt in the graph")
+
     return gm
+
+
+def has_unbacked_symint(gm, example_inputs):
+    fake_mode = detect_fake_mode(example_inputs)
+    for node in gm.graph.nodes:
+        if (
+            isinstance(node, torch.fx.node.Node)
+            and "example_value" in node.meta
+            and isinstance(node.meta["example_value"], FakeTensor)
+        ):
+            for x in node.meta["example_value"].shape:
+                if str(x).startswith("i"):
+                    for i in fake_mode.shape_env.runtime_var_to_range.keys():
+                        if str(i) == str(x):
+                            return True
+
+    return False
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
@@ -526,7 +548,14 @@ def boolean_mask_rewritten(match: Match, tensor1, index1, tensor2, index2, const
             )
         node.replace_all_uses_with(where)
         where.meta.update(node.meta)
+
+        pointwise_node = node.args[2]
+        getitem_node = node.args[2].args[0]
         graph.erase_node(node)
+        graph.erase_node(pointwise_node)
+        graph.erase_node(getitem_node)
 
         counters["inductor"]["boolean_mask_rewritten"] += 1
-        log.info("Replaced tensor[index] = pointwise_op(tensor[index]) with where op.")
+        log.info(
+            "Replaced tensor[index] = pointwise_op(tensor[index]) with torch.where."
+        )

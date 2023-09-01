@@ -39,11 +39,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    GuardOnDataDependentSymNode,
-    ShapeEnv,
-)
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1071,14 +1067,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
-            from torch._inductor.exc import LoweringException
-
             if (
-                isinstance(e, TypeError)
-                and e.args[0] == "Cannot convert symbols to int"
-                or isinstance(e, LoweringException)
-                and e.args[0].startswith("TypeError: Cannot convert symbols to int")
-                or isinstance(e, GuardOnDataDependentSymNode)
+                isinstance(e, RuntimeError)
+                and e.args[0] == "There is unbacked SymInt in the graph"
             ) and torch._guards.CompileContext.get_capture_dynamic_output_shape_ops():
                 torch._guards.CompileContext.set_capture_dynamic_output_shape_ops(False)
                 raise RestartAnalysis() from None
