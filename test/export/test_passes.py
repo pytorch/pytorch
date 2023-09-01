@@ -71,7 +71,7 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        ep = export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(f, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
 
         count_after = 0
         for node in ep.graph.nodes:
@@ -200,7 +200,7 @@ class TestPasses(TestCase):
         ep = export(M(), (x,))
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        ep = ep.transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = ep._transform(ReplaceViewOpsWithViewCopyOpsPass())
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
@@ -212,7 +212,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(foo, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -357,9 +357,9 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram.transform() forbids changes to number
+        # TODO(ycao): ExportedProgram._transform() forbids changes to number
         # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram.transform()
+        # back to using ExportedProgram._transform()
         gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(

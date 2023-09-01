@@ -697,8 +697,14 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-    // We shouldn't need storage
-    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
+    Storage storage{
+        Storage::use_byte_size_t{},
+        0,
+        at::DataPtr{nullptr, r.device(7)},
+        /*allocator=*/c10::GetAllocator(c10::kMeta),
+        /*resizeable=*/true};
 
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), options.computeDispatchKey(), options.dtype());
@@ -714,9 +720,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      TORCH_CHECK(
-          false,
-          "Setting sizes_strides_policy isn't supported for this overload")
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
     }
   }
 

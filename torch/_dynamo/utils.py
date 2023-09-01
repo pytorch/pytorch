@@ -505,6 +505,7 @@ class CompilationMetrics:
     co_filename: str
     co_firstlineno: int
     cache_size: int
+    accumulated_cache_size: int
     guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
@@ -556,7 +557,7 @@ def clone_tensor(x):
 def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
-    if isinstance(x, torch._subclasses.FakeTensor):
+    if is_fake(x):
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
@@ -1363,7 +1364,14 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            unimplemented("guard on data-dependent symbolic int/float")
+            raise UserError(
+                UserErrorType.CONSTRAIN_VIOLATION,
+                "Tried to use data-dependent value in the subsequent computation. "
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "You will need to explicitly give hint to the compiler. Please take a look at "
+                "constrain_as_value OR constrain_as_size APIs",
+                case_name="constrain_as_size_example",
+            )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None

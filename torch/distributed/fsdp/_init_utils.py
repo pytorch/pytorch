@@ -24,7 +24,6 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch import Tensor
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -854,7 +853,7 @@ def _get_modules_to_materialize(
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
-    ignored_buffers: Set[Tensor],
+    ignored_buffers: Set[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
@@ -895,9 +894,6 @@ def _move_module_to_device(
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
                     queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we
-        # decide to change the semantics in the future, simply filter based
-        # on the ignored parameters (and buffers).
         params_to_move = [p for p in params if p not in ignored_params]
         bufs_to_move = [p for p in buffers if p not in ignored_buffers]
         _move_states_to_device(params_to_move, bufs_to_move, device_from_device_id)
